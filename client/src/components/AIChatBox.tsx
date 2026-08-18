@@ -1,9 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { InlineMarkdown } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
 import { Loader2, Send, User, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Streamdown } from "streamdown";
 
 export type Message = {
   id?: string;
@@ -61,7 +61,7 @@ export function AIChatBox({
           <div className="flex min-h-[420px] flex-col items-center justify-center px-6 text-center">
             <div className="kairema-orb mb-6"><Sparkles className="size-7" /></div>
             <h2 className="text-2xl font-semibold tracking-tight text-white">{emptyStateMessage}</h2>
-            <p className="mt-3 max-w-md text-sm leading-6 text-slate-400">Выберите модель слева или оставьте «Авто». Kairema покажет реальный статус провайдера до отправки запроса.</p>
+            <p className="mt-3 max-w-md text-sm leading-6 text-slate-400">Выберите одну из пяти моделей. Kairema покажет её подтверждённый статус до отправки запроса.</p>
             <div className="mt-8 flex max-w-2xl flex-wrap justify-center gap-2">
               {suggestedPrompts.map((prompt) => (
                 <button key={prompt} onClick={() => onSendMessage(prompt)} disabled={isLoading} className="kairema-prompt">
@@ -77,7 +77,7 @@ export function AIChatBox({
                 {message.role === "assistant" && <div className="kairema-avatar kairema-avatar-ai"><Sparkles className="size-4" /></div>}
                 <div className={cn("max-w-[86%] sm:max-w-[76%]", message.role === "user" && "flex flex-col items-end")}>
                   <div className={cn("kairema-message", message.role === "user" ? "kairema-message-user" : "kairema-message-ai", message.isError && "kairema-message-error")}>
-                    {message.role === "assistant" && !message.isError ? <div className="prose prose-sm prose-invert max-w-none"><Streamdown>{message.content}</Streamdown></div> : <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>}
+                    {message.role === "assistant" && !message.isError ? <div className="kairema-markdown whitespace-pre-wrap text-sm leading-6"><InlineMarkdown text={message.content} /></div> : <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>}
                   </div>
                   {message.role === "assistant" && message.providerLabel && (
                     <p className="mt-2 px-1 text-xs text-slate-500">{message.providerLabel} · {message.model} · {message.status}</p>
@@ -96,7 +96,7 @@ export function AIChatBox({
           {isLoading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
         </Button>
       </form>
-      <p className="px-5 pb-4 text-center text-[11px] text-slate-600">Ответы генерируются выбранным провайдером. Проверяйте важные сведения.</p>
+      <p className="px-5 pb-4 text-center text-[11px] text-slate-600">Ответы генерируются выбранной моделью. Проверяйте важные сведения.</p>
     </section>
   );
 }

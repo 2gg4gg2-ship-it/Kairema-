@@ -1,84 +1,85 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { PROVIDER_REGISTRY, buildGoogleContents, buildUpstreamMessages, classifyProviderFailure, extractGeminiText, providerRequestUrl, toPublicProviderView } from "./providers";
+import { MODEL_CONFIG, MODEL_IDS, buildOpenRouterMessages, classifyOpenRouterFailure, modelById, publicChatError, selectAutoModel, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView } from "./providers";
 
-describe("Kairema provider registry", () => {
-  it("contains exactly six permanently declared providers", () => {
-    expect(PROVIDER_REGISTRY.map((provider) => provider.id)).toEqual(["deepseek", "gemma", "gemini", "openai", "kimi", "grok"]);
-    expect(PROVIDER_REGISTRY).toHaveLength(6);
-    expect(PROVIDER_REGISTRY.find((provider) => provider.id === "grok")?.model).toBe("grok-4.6");
-    expect(PROVIDER_REGISTRY.find((provider) => provider.id === "kimi")?.model).toBe("kimi-k2.6");
-  });
-
-  it("keeps all provider credentials server-side and binds every registry entry to its own endpoint convention", () => {
-    expect(PROVIDER_REGISTRY.map(({ id, env, kind }) => ({ id, env, kind }))).toEqual([
-      { id: "deepseek", env: "DEEPSEEK_API_KEY", kind: "openai" },
-      { id: "gemma", env: "GEMINI_API_KEY", kind: "google" },
-      { id: "gemini", env: "GEMINI_API_KEY", kind: "google" },
-      { id: "openai", env: "OPENAI_API_KEY", kind: "openai" },
-      { id: "kimi", env: "KIMI_API_KEY", kind: "openai" },
-      { id: "grok", env: "GROK_API_KEY", kind: "openai" },
+describe("OpenRouter model registry", () => {
+  it("declares exactly five static cards independently of API responses", () => {
+    expect(MODEL_CONFIG).toHaveLength(5);
+    expect(MODEL_CONFIG.map((model) => model.modelId)).toEqual(MODEL_IDS);
+    expect(MODEL_CONFIG.map((model) => model.label)).toEqual([
+      "Kairema Ultra (Gemma 4)",
+      "Kairema Code (North)",
+      "Kairema Long-Context (Dots3)",
+      "Kairema Express (GPT-OSS)",
+      "Kairema Auto-Router",
     ]);
-    expect(PROVIDER_REGISTRY.every((provider) => provider.baseUrl.startsWith("https://"))).toBe(true);
+    expect(modelById("not-in-registry")).toBeUndefined();
   });
 
-  it("builds the documented catalog and completion endpoints for each provider", () => {
-    const expectedCatalog = [
-      "https://api.deepseek.com/models",
-      "https://generativelanguage.googleapis.com/v1beta/models",
-      "https://generativelanguage.googleapis.com/v1beta/models",
-      "https://api.openai.com/v1/models",
-      "https://api.moonshot.ai/v1/models",
-      "https://api.x.ai/v1/models",
-    ];
-    const expectedChat = [
-      "https://api.deepseek.com/chat/completions",
-      "https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent",
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
-      "https://api.openai.com/v1/chat/completions",
-      "https://api.moonshot.ai/v1/chat/completions",
-      "https://api.x.ai/v1/chat/completions",
-    ];
-    expect(PROVIDER_REGISTRY.map((provider) => providerRequestUrl(provider, "catalog"))).toEqual(expectedCatalog);
-    expect(PROVIDER_REGISTRY.map((provider) => providerRequestUrl(provider, "chat"))).toEqual(expectedChat);
+  it("uses catalog-confirmed live IDs for the corrected Gemma and North variants", () => {
+    expect(MODEL_CONFIG[0]?.modelId).toBe("google/gemma-4-26b-a4b-it:free");
+    expect(MODEL_CONFIG[1]?.modelId).toBe("cohere/north-mini-code:free");
   });
 
-  it("excludes credentials and endpoint details from public provider data and never logs them", () => {
-    const preview = toPublicProviderView(PROVIDER_REGISTRY[0], {
-      kind: "ready",
-      badge: "Готов",
-      category: null,
-      checkedAt: "2026-08-18T00:00:00.000Z",
-    });
-    expect(Object.keys(preview).sort()).toEqual(["id", "label", "model", "status"]);
-    expect(JSON.stringify(preview)).not.toMatch(/API_KEY|Authorization|x-goog-api-key/i);
-    const source = readFileSync(new URL("./providers.ts", import.meta.url), "utf8");
-    expect(source).not.toMatch(/console\.(log|warn|error)\s*\(/);
+  it("maps every required status category to a human Russian status", () => {
+    expect(statusLabel(null, "ready")).toBe("Готов");
+    expect(statusLabel(null, "loading")).toBe("Проверка…");
+    expect(statusLabel("QUOTA", "error")).toBe("Нет квоты (биллинг)");
+    expect(statusLabel("RATE_LIMIT", "error")).toBe("Лимит запросов — восстановится");
+    expect(statusLabel("AUTH", "error")).toBe("Ключ отклонён");
+    expect(statusLabel("PROVIDER_UNAVAILABLE", "unavailable")).toBe("Временно недоступен");
+    expect(statusLabel("MODEL", "error")).toBe("Неверная конфигурация провайдера");
   });
 
-  it("injects the Kairema identity into every upstream request", () => {
-    const messages = [{ role: "user" as const, content: "Тест" }];
-    for (const provider of PROVIDER_REGISTRY) {
-      const payload = provider.kind === "google"
-        ? buildGoogleContents(provider, messages)
-        : buildUpstreamMessages(provider, messages);
-      const text = JSON.stringify(payload);
-      expect(text).toContain("Ты Kairema, AI-ассистент.");
-      expect(text).toContain(provider.label);
-      expect(text).toContain("Тест");
+  it("classifies upstream evidence without guessing a reason", () => {
+    expect(classifyOpenRouterFailure(401, { error: { message: "invalid api key" } }).category).toBe("AUTH");
+    expect(classifyOpenRouterFailure(402, { error: { message: "no balance" } }).category).toBe("QUOTA");
+    expect(classifyOpenRouterFailure(429, {}).category).toBe("RATE_LIMIT");
+    expect(classifyOpenRouterFailure(429, { error: { message: "quota temporarily limited" } }).category).toBe("RATE_LIMIT");
+    expect(classifyOpenRouterFailure(503, { error: { message: "high load" } }).category).toBe("PROVIDER_UNAVAILABLE");
+    expect(classifyOpenRouterFailure(500, {}).confirmed).toBe("Причина пока не установлена.");
+  });
+
+  it("removes reasoning blocks before returning content to the browser", () => {
+    expect(stripReasoningBlocks("<think>скрытая цепочка</think>Итог <reasoning>скрыто</reasoning>")).toBe("Итог");
+  });
+
+  it("marks a model ready only after a parsable non-empty chat response", () => {
+    expect(statusFromChatPayload({ choices: [{ message: { content: "Готово" } }] }).state).toBe("ready");
+    const broken = statusFromChatPayload({ choices: [{ message: { content: "<think>hidden</think>" } }] });
+    expect(broken.category).toBe("PARSE");
+    expect(broken.badge).toContain("Ошибка");
+  });
+
+  it("injects Kairema identity into every OpenRouter request", () => {
+    for (const model of MODEL_CONFIG) {
+      const payload = JSON.stringify(buildOpenRouterMessages(model, [{ role: "user", content: "Тест" }], { style: "steps" }));
+      expect(payload).toContain("Ты Kairema, AI-ассистент.");
+      expect(payload).toContain(model.label);
+      expect(payload).toContain("Тест");
     }
   });
 
-  it("classifies quota, auth, rate-limit and temporary failures without exposing upstream details", () => {
-    expect(classifyProviderFailure(402, { error: { message: "Insufficient Balance" } })).toBe("QUOTA");
-    expect(classifyProviderFailure(401, { error: { code: "invalid_api_key" } })).toBe("AUTH");
-    expect(classifyProviderFailure(429, { error: { message: "retry in 10 seconds" } })).toBe("RATE_LIMIT");
-    expect(classifyProviderFailure(503, { error: { message: "high demand" } })).toBe("PROVIDER_UNAVAILABLE");
+  it("makes Auto-Router choose the first ready direct model on the server", () => {
+    const views = MODEL_CONFIG.map((model, index) => toPublicModelView(model, {
+      state: index === 1 || index === 3 ? "ready" : "error",
+      badge: index === 1 || index === 3 ? "Готов" : "Ошибка: UNKNOWN",
+      category: index === 1 || index === 3 ? null : "UNKNOWN",
+      http: 200,
+      checkedAt: "2026-08-18T00:00:00.000Z",
+      confirmed: "Тест",
+    }));
+    expect(selectAutoModel(views)?.modelId).toBe("cohere/north-mini-code:free");
   });
 
-  it("removes Google AI Studio thought parts and returns only the final answer", () => {
-    expect(extractGeminiText({
-      candidates: [{ content: { parts: [{ text: "internal reasoning", thought: true }, { text: "Финальный ответ" }] } }],
-    })).toBe("Финальный ответ");
+  it("does not expose any environment or transport fields through public model views", () => {
+    const view = toPublicModelView(MODEL_CONFIG[0]!, { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-18T00:00:00.000Z", confirmed: "Проверено" });
+    expect(Object.keys(view).sort()).toEqual(["key", "label", "modelId", "role", "status"]);
+    expect(JSON.stringify(view)).not.toMatch(/OPENROUTER_API_KEY|Authorization|Bearer/i);
+  });
+
+  it("returns a human-safe structured message without upstream JSON", () => {
+    const message = publicChatError(MODEL_CONFIG[0]!.modelId, new Error("raw upstream json"));
+    expect(message).toContain("Провайдер: OpenRouter");
+    expect(message).not.toContain("raw upstream json");
   });
 });

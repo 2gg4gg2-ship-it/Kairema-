@@ -1,0 +1,23 @@
+[WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.patchedDependencies", "pnpm.overrides". See https://pnpm.io/settings for the new home of each setting.
+
+> kairema@1.0.0 build /home/ubuntu/kairema
+> vite build && esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist
+
+vite v7.1.9 building for production...
+transforming...
+✓ 1758 modules transformed.
+rendering chunks...
+computing gzip size...
+../dist/public/index.html                 367.85 kB │ gzip: 105.64 kB
+../dist/public/assets/index-CG-PUBEx.css  124.90 kB │ gzip:  20.44 kB
+../dist/public/assets/index-BbWieKOu.js   692.14 kB │ gzip: 205.19 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 2.05s
+
+  dist/index.js  52.4kb
+
+⚡ Done in 5ms

@@ -1,296 +1,173 @@
-export const PROVIDER_IDS = ["deepseek", "gemma", "gemini", "openai", "kimi", "grok"] as const;
-
-export type ProviderId = (typeof PROVIDER_IDS)[number];
-export type ProviderMessage = { role: "user" | "assistant"; content: string };
-type StatusKind = "ready" | "quota" | "unavailable" | "auth" | "not_configured";
-type ErrorCategory = "AUTH" | "QUOTA" | "RATE_LIMIT" | "ENDPOINT" | "MODEL" | "NETWORK" | "TIMEOUT" | "PROVIDER_UNAVAILABLE" | "PARSE" | "UNKNOWN";
-
-export type ProviderDefinition = {
-  id: ProviderId;
-  label: string;
-  model: string;
-  env: "DEEPSEEK_API_KEY" | "GEMINI_API_KEY" | "OPENAI_API_KEY" | "KIMI_API_KEY" | "GROK_API_KEY";
-  baseUrl: string;
-  kind: "openai" | "google";
-};
-
-export const PROVIDER_REGISTRY: readonly ProviderDefinition[] = [
-  { id: "deepseek", label: "DeepSeek", model: "deepseek-v4-flash", env: "DEEPSEEK_API_KEY", baseUrl: "https://api.deepseek.com", kind: "openai" },
-  { id: "gemma", label: "Gemma 4 31B", model: "gemma-4-31b-it", env: "GEMINI_API_KEY", baseUrl: "https://generativelanguage.googleapis.com/v1beta", kind: "google" },
-  { id: "gemini", label: "Gemini", model: "gemini-3.6-flash", env: "GEMINI_API_KEY", baseUrl: "https://generativelanguage.googleapis.com/v1beta", kind: "google" },
-  { id: "openai", label: "ChatGPT / OpenAI", model: "gpt-4o-mini", env: "OPENAI_API_KEY", baseUrl: "https://api.openai.com/v1", kind: "openai" },
-  { id: "kimi", label: "Kimi", model: "kimi-k2.6", env: "KIMI_API_KEY", baseUrl: "https://api.moonshot.ai/v1", kind: "openai" },
-  { id: "grok", label: "Grok", model: "grok-4.6", env: "GROK_API_KEY", baseUrl: "https://api.x.ai/v1", kind: "openai" },
+export const MODEL_IDS = [
+  "google/gemma-4-26b-a4b-it:free",
+  "cohere/north-mini-code:free",
+  "dots-studio/dots-3-note-preview:free",
+  "openai/gpt-oss-20b:free",
+  "openrouter/free",
 ] as const;
 
-const KAIREMA_SYSTEM_PROMPT = [
-  "Ты Kairema, AI-ассистент. Не притворяйся человеком.",
-  "Отвечай по-русски, если пользователь не просит другой язык.",
-  "Тон дружелюбный, спокойный и точный; простые вопросы объясняй кратко, сложные — структурированно.",
-  "Не используй шаблонные приветствия и не начинай с «Чем могу помочь?».",
-  "Если спрашивают, кто ты или на какой модели работаешь, отвечай: «Я Kairema, AI-ассистент. Сейчас работаю на {модель}.».",
-  "Не выдумывай факты и прямо обозначай, когда информации недостаточно.",
-].join(" ");
+export type ModelId = (typeof MODEL_IDS)[number];
+export type ModelKey = "ultra" | "code" | "long_context" | "express" | "auto_router";
+export type ModelConfig = { key: ModelKey; modelId: ModelId; label: string; role: string };
+export type StatusCategory = "AUTH" | "QUOTA" | "RATE_LIMIT" | "PROVIDER_UNAVAILABLE" | "ENDPOINT" | "MODEL" | "NETWORK" | "TIMEOUT" | "PARSE" | "CONFIG" | "UNKNOWN";
+export type ModelStatus = { state: "ready" | "loading" | "error" | "unavailable" | "not_configured"; badge: string; category: StatusCategory | null; http: number | null; checkedAt: string; confirmed: string };
+export type ModelView = ModelConfig & { status: ModelStatus };
+export type ChatMessage = { role: "user" | "assistant"; content: string };
+export type ChatSettings = { style?: "default" | "professional" | "friendly" | "concise" | "steps" };
+export type ChatResult = { content: string; modelUsed: string; label: string; status: ModelStatus };
 
-const STATUS_TEXT: Record<StatusKind, "Готов" | "Нет квоты" | "Временно недоступен" | "Ключ отклонён" | "Не настроено"> = {
-  ready: "Готов",
-  quota: "Нет квоты",
-  unavailable: "Временно недоступен",
-  auth: "Ключ отклонён",
-  not_configured: "Не настроено",
-};
+/** Static by design: these five cards are never built from environment variables or API responses. */
+export const MODEL_CONFIG: readonly ModelConfig[] = [
+  { key: "ultra", modelId: "google/gemma-4-26b-a4b-it:free", label: "Kairema Ultra (Gemma 4)", role: "Основной универсальный чат для сложных текстов, логики и общения." },
+  { key: "code", modelId: "cohere/north-mini-code:free", label: "Kairema Code (North)", role: "Специализированный ИИ для генерации, разбора, рефакторинга и отладки кода." },
+  { key: "long_context", modelId: "dots-studio/dots-3-note-preview:free", label: "Kairema Long-Context (Dots3)", role: "Анализ сверхбольших текстов, контекстных документов и тяжёлых файлов." },
+  { key: "express", modelId: "openai/gpt-oss-20b:free", label: "Kairema Express (GPT-OSS)", role: "Молниеносные лаконичные ответы на простые повседневные вопросы без воды." },
+  { key: "auto_router", modelId: "openrouter/free", label: "Kairema Auto-Router", role: "Автоматический выбор стабильной и свободной бесплатной модели на стороне OpenRouter." },
+] as const;
 
-export type ProviderHealth = {
-  kind: StatusKind;
-  badge: (typeof STATUS_TEXT)[StatusKind];
-  category: ErrorCategory | null;
-  checkedAt: string;
-};
+const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+const HEALTH_TTL_MS = 60_000;
+let healthCache: { checkedAt: number; statuses: Map<ModelId, ModelStatus> } | null = null;
+const now = () => new Date().toISOString();
+const configured = () => Boolean(process.env.OPENROUTER_API_KEY?.trim());
 
-export type ProviderView = Omit<ProviderDefinition, "env" | "baseUrl" | "kind"> & { status: ProviderHealth };
+export const KAIREMA_SYSTEM_PROMPT = `Ты Kairema, AI-ассистент. Не притворяйся человеком. Не указывай пол; если грамматически нужен род, используй мужской. Не начинай каждый ответ шаблонным приветствием. Отвечай по-русски, если пользователь не попросил иначе. На простой вопрос отвечай просто, на сложный — подробно и структурированно. На вопрос «кто ты» отвечай кратко: «Я Kairema, AI-ассистент. Сейчас работаю на {модель}». Не выдумывай факты и прямо признавай нехватку информации.`;
 
-const healthCache = new Map<ProviderId, ProviderHealth>();
-let lastRegistryProbeAt = 0;
-const HEALTH_CACHE_MS = 60_000;
-const REQUEST_TIMEOUT_MS = 28_000;
+export function statusLabel(category: StatusCategory | null, state: ModelStatus["state"]) {
+  if (state === "ready") return "Готов";
+  if (state === "loading") return "Проверка…";
+  if (state === "not_configured") return "Не настроено";
+  if (state === "unavailable") return "Временно недоступен";
+  if (category === "QUOTA") return "Нет квоты (биллинг)";
+  if (category === "RATE_LIMIT") return "Лимит запросов — восстановится";
+  if (category === "AUTH") return "Ключ отклонён";
+  if (category === "PROVIDER_UNAVAILABLE") return "Временно недоступен";
+  if (category === "ENDPOINT" || category === "MODEL") return "Неверная конфигурация провайдера";
+  return `Ошибка: ${category ?? "UNKNOWN"}`;
+}
 
-class ProviderRequestError extends Error {
-  constructor(
-    public readonly category: ErrorCategory,
-    public readonly httpStatus: number,
-  ) {
-    super(category);
+export function classifyOpenRouterFailure(http: number | null, upstream: unknown): { category: StatusCategory; confirmed: string; state: ModelStatus["state"] } {
+  const body = JSON.stringify(upstream ?? {}).toLowerCase();
+  if (http === 401 || http === 403 || /invalid_api_key|api_key_invalid|invalid api key|incorrect api key/.test(body)) return { category: "AUTH", confirmed: "Ключ отклонён OpenRouter.", state: "error" };
+  if (http === 429) return { category: "RATE_LIMIT", confirmed: "Подтверждено ограничение частоты запросов.", state: "error" };
+  if (http === 402 || /insufficient_quota|credits|no balance|insufficient balance|quota/.test(body)) return { category: "QUOTA", confirmed: "Подтверждена нехватка квоты или биллинга.", state: "error" };
+  if (http === 503 && /load|capacity|overload|unavailable|busy/.test(body)) return { category: "PROVIDER_UNAVAILABLE", confirmed: "Провайдер временно недоступен из-за нагрузки.", state: "unavailable" };
+  if (http === 400 || http === 404) return { category: /model/.test(body) ? "MODEL" : "ENDPOINT", confirmed: "Провайдер отклонил модель или endpoint.", state: "error" };
+  return { category: "UNKNOWN", confirmed: "Причина пока не установлена.", state: "error" };
+}
+
+export function stripReasoningBlocks(value: string) {
+  return value.replace(/<think(?:\s[^>]*)?>[\s\S]*?<\/think>/gi, "").replace(/<reasoning(?:\s[^>]*)?>[\s\S]*?<\/reasoning>/gi, "").replace(/<thought(?:\s[^>]*)?>[\s\S]*?<\/thought>/gi, "").trim();
+}
+
+export function modelById(modelId: string): ModelConfig | undefined { return MODEL_CONFIG.find((model) => model.modelId === modelId); }
+export function toPublicModelView(config: ModelConfig, status: ModelStatus): ModelView { return { key: config.key, modelId: config.modelId, label: config.label, role: config.role, status }; }
+export function selectAutoModel(views: readonly ModelView[]): ModelConfig | undefined {
+  const firstReady = views.find((view) => view.key !== "auto_router" && view.status.state === "ready");
+  return firstReady ? modelById(firstReady.modelId) : undefined;
+}
+
+function statusFromFailure(http: number | null, upstream: unknown): ModelStatus {
+  const failure = classifyOpenRouterFailure(http, upstream);
+  return { state: failure.state, badge: statusLabel(failure.category, failure.state), category: failure.category, http, checkedAt: now(), confirmed: failure.confirmed };
+}
+function readyStatus(): ModelStatus { return { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: now(), confirmed: "Модель ответила на краткий тест через OpenRouter." }; }
+function notConfiguredStatus(): ModelStatus { return { state: "not_configured", badge: "Не настроено", category: "CONFIG", http: null, checkedAt: now(), confirmed: "OPENROUTER_API_KEY не задан в секретах проекта." }; }
+
+export class OpenRouterError extends Error {
+  constructor(public readonly status: ModelStatus) { super(status.confirmed); this.name = "OpenRouterError"; }
+}
+
+async function fetchJson(path: string, init: RequestInit) {
+  const key = process.env.OPENROUTER_API_KEY?.trim();
+  if (!key) throw new OpenRouterError(notConfiguredStatus());
+  let response: Response;
+  try {
+    response = await fetch(`${OPENROUTER_BASE}${path}`, { ...init, headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "https://kairema.manus.space", "X-Title": "Kairema", ...init.headers }, signal: AbortSignal.timeout(25_000) });
+  } catch (error) {
+    const category: StatusCategory = error instanceof DOMException && error.name === "TimeoutError" ? "TIMEOUT" : "NETWORK";
+    throw new OpenRouterError({ state: "error", badge: statusLabel(category, "error"), category, http: null, checkedAt: now(), confirmed: category === "TIMEOUT" ? "Превышено время ожидания OpenRouter." : "Сетевая ошибка при обращении к OpenRouter." });
+  }
+  let data: unknown = null;
+  try { data = await response.json(); } catch { data = { message: "Не удалось разобрать ответ OpenRouter." }; }
+  if (!response.ok) throw new OpenRouterError(statusFromFailure(response.status, data));
+  return { response, data };
+}
+
+export function statusFromChatPayload(payload: unknown): ModelStatus {
+  const raw = (payload as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content;
+  if (typeof raw !== "string" || !stripReasoningBlocks(raw)) return { state: "error", badge: statusLabel("PARSE", "error"), category: "PARSE", http: 200, checkedAt: now(), confirmed: "OpenRouter вернул ответ без финального текста во время проверки модели." };
+  return readyStatus();
+}
+
+async function checkModelHealth(model: ModelConfig): Promise<ModelStatus> {
+  try {
+    const { data } = await fetchJson("/chat/completions", { method: "POST", body: JSON.stringify({ model: model.modelId, stream: false, messages: [{ role: "user", content: "Ответь ровно одним словом: Готово" }] }) });
+    return statusFromChatPayload(data);
+  } catch (error) {
+    return error instanceof OpenRouterError ? error.status : statusFromFailure(null, error);
   }
 }
 
-function getProvider(id: ProviderId) {
-  const provider = PROVIDER_REGISTRY.find((entry) => entry.id === id);
-  if (!provider) throw new ProviderRequestError("UNKNOWN", 0);
-  return provider;
+async function freshStatuses() {
+  if (!configured()) return new Map(MODEL_IDS.map((id) => [id, notConfiguredStatus()]));
+  try {
+    const { data } = await fetchJson("/models", { method: "GET" });
+    const available = new Set(((data as { data?: Array<{ id?: string }> }).data ?? []).map((item) => item.id));
+    const checked: Array<readonly [ModelId, ModelStatus]> = [];
+    for (let index = 0; index < MODEL_CONFIG.length; index += 1) {
+      const model = MODEL_CONFIG[index]!;
+      if (!available.has(model.modelId)) {
+        checked.push([model.modelId, { state: "error", badge: statusLabel("MODEL", "error"), category: "MODEL", http: 200, checkedAt: now(), confirmed: "ID модели не найден в живом каталоге OpenRouter." }]);
+      } else {
+        checked.push([model.modelId, await checkModelHealth(model)]);
+      }
+      if (index < MODEL_CONFIG.length - 1) await pause(1_100);
+    }
+    return new Map<ModelId, ModelStatus>(checked);
+  } catch (error) {
+    const status = error instanceof OpenRouterError ? error.status : statusFromFailure(null, error);
+    return new Map(MODEL_IDS.map((id) => [id, status]));
+  }
 }
 
-function apiKeyFor(provider: ProviderDefinition) {
-  return process.env[provider.env]?.trim() ?? "";
+export async function getModelViews() {
+  if (!healthCache || Date.now() - healthCache.checkedAt > HEALTH_TTL_MS) healthCache = { checkedAt: Date.now(), statuses: await freshStatuses() };
+  return MODEL_CONFIG.map((model) => toPublicModelView(model, healthCache?.statuses.get(model.modelId) ?? notConfiguredStatus()));
 }
 
-export function providerRequestUrl(provider: ProviderDefinition, operation: "catalog" | "chat") {
-  if (operation === "catalog") return `${provider.baseUrl}/models`;
-  return provider.kind === "google"
-    ? `${provider.baseUrl}/models/${provider.model}:generateContent`
-    : `${provider.baseUrl}/chat/completions`;
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const shouldRetry = (status: ModelStatus) => status.category === "RATE_LIMIT" || status.category === "PROVIDER_UNAVAILABLE" || status.category === "NETWORK" || status.category === "TIMEOUT";
+function promptFor(model: ModelConfig, settings?: ChatSettings) {
+  const style = settings?.style === "concise" ? "Отвечай особенно кратко." : settings?.style === "steps" ? "Разбивай решение на понятные шаги." : settings?.style === "professional" ? "Сохраняй профессиональный, ясный тон." : settings?.style === "friendly" ? "Сохраняй доброжелательный естественный тон." : "";
+  return `${KAIREMA_SYSTEM_PROMPT.replace("{модель}", model.label)} ${style}`.trim();
 }
+export function buildOpenRouterMessages(model: ModelConfig, history: ChatMessage[], settings?: ChatSettings) { return [{ role: "system" as const, content: promptFor(model, settings) }, ...history.map((message) => ({ role: message.role, content: message.content }))]; }
 
-export function toPublicProviderView(provider: ProviderDefinition, status: ProviderHealth): ProviderView {
-  return { id: provider.id, label: provider.label, model: provider.model, status };
-}
-
-function nowHealth(kind: StatusKind, category: ErrorCategory | null): ProviderHealth {
-  return { kind, badge: STATUS_TEXT[kind], category, checkedAt: new Date().toISOString() };
-}
-
-function setHealth(id: ProviderId, kind: StatusKind, category: ErrorCategory | null) {
-  const health = nowHealth(kind, category);
-  healthCache.set(id, health);
-  return health;
-}
-
-function lowerText(value: unknown) {
-  return JSON.stringify(value ?? "").toLowerCase();
-}
-
-export function classifyProviderFailure(httpStatus: number, body: unknown): ErrorCategory {
-  const text = lowerText(body);
-  const quotaTerms = ["insufficient_quota", "exceeded_current_quota", "no credits", "no credits or licenses", "insufficient balance", "billing", "credits", "balance"];
-  if (httpStatus === 402 || quotaTerms.some((term) => text.includes(term))) return "QUOTA";
-  if (httpStatus === 401 || text.includes("api_key_invalid") || text.includes("incorrect api key") || text.includes("invalid api key")) return "AUTH";
-  if (httpStatus === 403) return quotaTerms.some((term) => text.includes(term)) ? "QUOTA" : "AUTH";
-  if (httpStatus === 429) return "RATE_LIMIT";
-  if (httpStatus === 503 || text.includes("high demand") || text.includes("temporarily unavailable")) return "PROVIDER_UNAVAILABLE";
-  if (httpStatus === 404) return "MODEL";
-  if (httpStatus === 400) return "ENDPOINT";
-  if (httpStatus === 408 || httpStatus === 504) return "TIMEOUT";
-  if (httpStatus >= 500) return "PROVIDER_UNAVAILABLE";
-  return "UNKNOWN";
-}
-
-function statusFromCategory(category: ErrorCategory): StatusKind {
-  if (category === "AUTH") return "auth";
-  if (category === "QUOTA") return "quota";
-  return "unavailable";
-}
-
-function toProviderError(error: unknown) {
-  if (error instanceof ProviderRequestError) return error;
-  if (error instanceof Error && error.name === "AbortError") return new ProviderRequestError("TIMEOUT", 408);
-  return new ProviderRequestError("NETWORK", 0);
-}
-
-const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-
-async function requestJson(url: string, init: RequestInit): Promise<{ status: number; data: unknown }> {
+export async function chatWithOpenRouter(modelId: string, history: ChatMessage[], settings?: ChatSettings): Promise<ChatResult> {
+  const requestedModel = modelById(modelId);
+  if (!requestedModel) throw new OpenRouterError({ state: "error", badge: statusLabel("MODEL", "error"), category: "MODEL", http: null, checkedAt: now(), confirmed: "Выбрана модель вне статического реестра Kairema." });
+  const model = requestedModel.key === "auto_router" ? (selectAutoModel(await getModelViews()) ?? requestedModel) : requestedModel;
+  let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      const response = await fetch(url, { ...init, signal: controller.signal });
-      const raw = await response.text();
-      let data: unknown = {};
-      try {
-        data = raw ? JSON.parse(raw) : {};
-      } catch {
-        data = { message: raw.slice(0, 500) };
-      }
-      if (response.ok || (attempt === 1 || (response.status !== 429 && response.status !== 503))) {
-        if (!response.ok) throw new ProviderRequestError(classifyProviderFailure(response.status, data), response.status);
-        return { status: response.status, data };
-      }
+      const { data } = await fetchJson("/chat/completions", { method: "POST", body: JSON.stringify({ model: model.modelId, messages: buildOpenRouterMessages(model, history, settings), stream: false }) });
+      const payload = data as { choices?: Array<{ message?: { content?: string } }>; model?: string };
+      const raw = payload.choices?.[0]?.message?.content;
+      const content = typeof raw === "string" ? stripReasoningBlocks(raw) : "";
+      if (!content) throw new OpenRouterError({ state: "error", badge: statusLabel("PARSE", "error"), category: "PARSE", http: 200, checkedAt: now(), confirmed: "После удаления reasoning-блоков не осталось финального ответа." });
+      return { content, modelUsed: payload.model ?? model.modelId, label: model.label, status: readyStatus() };
     } catch (error) {
-      const normalized = toProviderError(error);
-      const retryable = normalized.category === "RATE_LIMIT" || normalized.category === "PROVIDER_UNAVAILABLE" || normalized.category === "TIMEOUT";
-      if (attempt === 1 || !retryable) throw normalized;
-    } finally {
-      clearTimeout(timer);
+      lastError = error;
+      if (!(error instanceof OpenRouterError) || !shouldRetry(error.status) || attempt === 1) break;
+      await pause(350 * (attempt + 1));
     }
-    await wait(700);
   }
-  throw new ProviderRequestError("UNKNOWN", 0);
+  throw lastError instanceof OpenRouterError ? lastError : new OpenRouterError(statusFromFailure(null, lastError));
 }
 
-function assertModelInCatalog(provider: ProviderDefinition, catalog: unknown) {
-  const records = (catalog as { data?: Array<{ id?: string }>; models?: Array<{ name?: string }> }).data
-    ?? (catalog as { models?: Array<{ name?: string }> }).models
-    ?? [];
-  const expectedNames = new Set([provider.model, `models/${provider.model}`]);
-  const matched = records.some((record) => {
-    const candidate = record as { id?: string; name?: string };
-    const name = candidate.id ?? candidate.name;
-    return expectedNames.has(name ?? "");
-  });
-  if (!matched) throw new ProviderRequestError("MODEL", 404);
-}
-
-export function buildUpstreamMessages(provider: ProviderDefinition, messages: ProviderMessage[]) {
-  return [
-    { role: "system", content: KAIREMA_SYSTEM_PROMPT.replace("{модель}", provider.label) },
-    ...messages.map((message) => ({ role: message.role, content: message.content })),
-  ];
-}
-
-function stripHiddenReasoning(content: string) {
-  return content
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")
-    .replace(/<thought>[\s\S]*?<\/thought>/gi, "")
-    .trim();
-}
-
-export function extractGeminiText(payload: unknown) {
-  const parts = (payload as { candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }> }).candidates?.[0]?.content?.parts ?? [];
-  const text = parts
-    .filter((part) => part.thought !== true)
-    .map((part) => part.text ?? "")
-    .join("\n");
-  const cleaned = stripHiddenReasoning(text);
-  if (!cleaned) throw new ProviderRequestError("PARSE", 200);
-  return cleaned;
-}
-
-async function sendOpenAiStyle(provider: ProviderDefinition, messages: ProviderMessage[], maxTokens = 1_024) {
-  const key = apiKeyFor(provider);
-  const { data } = await requestJson(providerRequestUrl(provider, "chat"), {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: provider.model, messages: buildUpstreamMessages(provider, messages), max_tokens: maxTokens, stream: false }),
-  });
-  const content = (data as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message?.content;
-  const cleaned = stripHiddenReasoning(content ?? "");
-  if (!cleaned) throw new ProviderRequestError("PARSE", 200);
-  return cleaned;
-}
-
-export function buildGoogleContents(provider: ProviderDefinition, messages: ProviderMessage[]) {
-  return [
-    { role: "user", parts: [{ text: KAIREMA_SYSTEM_PROMPT.replace("{модель}", provider.label) }] },
-    ...messages.map((message) => ({ role: message.role === "assistant" ? "model" : "user", parts: [{ text: message.content }] })),
-  ];
-}
-
-async function generateGoogleContent(provider: ProviderDefinition, messages: ProviderMessage[], maxTokens = 1_024) {
-  const key = apiKeyFor(provider);
-  const contents = buildGoogleContents(provider, messages);
-  return requestJson(providerRequestUrl(provider, "chat"), {
-    method: "POST",
-    headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
-    body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 } }),
-  });
-}
-
-async function checkProvider(provider: ProviderDefinition): Promise<ProviderHealth> {
-  if (!apiKeyFor(provider)) return setHealth(provider.id, "not_configured", null);
-  try {
-    const catalog = await requestJson(providerRequestUrl(provider, "catalog"), {
-      headers: provider.kind === "google" ? { "x-goog-api-key": apiKeyFor(provider) } : { Authorization: `Bearer ${apiKeyFor(provider)}` },
-    });
-    assertModelInCatalog(provider, catalog.data);
-    if (provider.kind === "google") {
-      await generateGoogleContent(provider, [{ role: "user", content: "Ответь одним словом: готово" }], 192);
-    } else {
-      await sendOpenAiStyle(provider, [{ role: "user", content: "Ответь одним словом: готово" }], 16);
-    }
-    return setHealth(provider.id, "ready", null);
-  } catch (error) {
-    const normalized = toProviderError(error);
-    return setHealth(provider.id, statusFromCategory(normalized.category), normalized.category);
-  }
-}
-
-export async function getProviderViews(force = false): Promise<ProviderView[]> {
-  const stale = Date.now() - lastRegistryProbeAt > HEALTH_CACHE_MS;
-  if (force || stale || PROVIDER_REGISTRY.some((provider) => !healthCache.has(provider.id))) {
-    await Promise.all(PROVIDER_REGISTRY.map((provider) => checkProvider(provider)));
-    lastRegistryProbeAt = Date.now();
-  }
-  return PROVIDER_REGISTRY.map((provider) => toPublicProviderView(
-    provider,
-    healthCache.get(provider.id) ?? nowHealth("not_configured", null),
-  ));
-}
-
-function publicProviderError(provider: ProviderDefinition, error: ProviderRequestError) {
-  const current = healthCache.get(provider.id) ?? setHealth(provider.id, statusFromCategory(error.category), error.category);
-  if (current.kind === "not_configured") return `${provider.label} | Ключ не настроен | Серверный секрет отсутствует | Добавьте ключ в защищённые настройки.`;
-  if (current.kind === "quota") return `${provider.label} | Нет квоты | Провайдер подтвердил отсутствие доступного баланса | Пополните баланс или выберите другую модель.`;
-  if (current.kind === "auth") return `${provider.label} | Ключ отклонён | Провайдер не принял ключ | Проверьте ключ в защищённых настройках.`;
-  return `${provider.label} | Временно недоступен | Причина пока не установлена | Повторите попытку позже или выберите другую модель.`;
-}
-
-export async function chatWithProvider(providerInput: ProviderId | "auto", messages: ProviderMessage[]) {
-  const views = await getProviderViews();
-  const selectedId: ProviderId | undefined = providerInput === "auto"
-    ? views.find((provider) => provider.status.kind === "ready")?.id
-    : providerInput;
-  if (!selectedId) throw new ProviderRequestError("PROVIDER_UNAVAILABLE", 503);
-  const provider = getProvider(selectedId);
-  const current = healthCache.get(selectedId);
-  if (current?.kind !== "ready") {
-    const category = current?.category ?? "UNKNOWN";
-    throw new ProviderRequestError(category, 503);
-  }
-  try {
-    const content = provider.kind === "google"
-      ? extractGeminiText((await generateGoogleContent(provider, messages)).data)
-      : await sendOpenAiStyle(provider, messages);
-    setHealth(provider.id, "ready", null);
-    return { content, providerId: provider.id, providerLabel: provider.label, model: provider.model, status: STATUS_TEXT.ready };
-  } catch (error) {
-    const normalized = toProviderError(error);
-    setHealth(provider.id, statusFromCategory(normalized.category), normalized.category);
-    throw new ProviderRequestError(normalized.category, normalized.httpStatus);
-  }
-}
-
-export function getPublicProviderError(providerInput: ProviderId | "auto", error: unknown) {
-  const target = providerInput === "auto"
-    ? PROVIDER_REGISTRY.find((provider) => healthCache.get(provider.id)?.kind === "ready") ?? PROVIDER_REGISTRY[0]
-    : getProvider(providerInput);
-  return publicProviderError(target, toProviderError(error));
+export function publicChatError(modelId: string, error: unknown) {
+  const status = error instanceof OpenRouterError ? error.status : statusFromFailure(null, error);
+  const action = status.category === "AUTH" ? "Проверьте защищённое поле OPENROUTER_API_KEY." : status.category === "QUOTA" ? "Проверьте баланс или лимиты OpenRouter." : status.category === "RATE_LIMIT" ? "Подождите и повторите запрос." : status.category === "MODEL" ? "Выберите другую карточку из статического реестра." : "Повторите попытку позже.";
+  return `Провайдер: OpenRouter | Что произошло: ${status.badge} | Почему (подтверждено): ${status.confirmed} | Что делать: ${action}`;
 }

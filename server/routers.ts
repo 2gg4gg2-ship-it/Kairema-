@@ -1,15 +1,23 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
+import { appendChatMessage, createChatSession, getOwnedChatSession, listChatSessions, listSessionMessages, updateChatTitle } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, router } from "./_core/trpc";
-import { PROVIDER_IDS, chatWithProvider, getProviderViews, getPublicProviderError } from "./providers";
+import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { MODEL_IDS, chatWithOpenRouter, getModelViews, publicChatError } from "./providers";
 
-const messageSchema = z.object({
-  role: z.enum(["user", "assistant"]),
-  content: z.string().trim().min(1).max(16_000),
-});
+const settingsSchema = z.object({
+  style: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional(),
+}).optional();
+
+const modelIdSchema = z.enum(MODEL_IDS);
+
+function storageError(error: unknown) {
+  return error instanceof Error && /чат|хранилище/i.test(error.message)
+    ? error.message
+    : "История чата временно недоступна. Повторите попытку позже.";
+}
 
 export const appRouter = router({
   system: systemRouter,
@@ -21,18 +29,58 @@ export const appRouter = router({
       return { success: true } as const;
     }),
   }),
-  providers: router({
-    list: publicProcedure.query(() => getProviderViews()),
+  models: router({
+    list: publicProcedure.query(() => getModelViews()),
   }),
-  chat: publicProcedure
-    .input(z.object({ provider: z.union([z.enum(PROVIDER_IDS), z.literal("auto")]), messages: z.array(messageSchema).min(1).max(80) }))
-    .mutation(async ({ input }) => {
-      try {
-        return await chatWithProvider(input.provider, input.messages);
-      } catch (error) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: getPublicProviderError(input.provider, error) });
-      }
-    }),
+  chats: router({
+    list: protectedProcedure.query(({ ctx }) => listChatSessions(ctx.user.id)),
+    create: protectedProcedure
+      .input(z.object({ modelId: modelIdSchema }))
+      .mutation(({ ctx, input }) => createChatSession(ctx.user.id, input.modelId)),
+    messages: protectedProcedure
+      .input(z.object({ sessionId: z.string().uuid() }))
+      .query(async ({ ctx, input }) => {
+        try {
+          return await listSessionMessages(ctx.user.id, input.sessionId);
+        } catch (error) {
+          throw new TRPCError({ code: "NOT_FOUND", message: storageError(error) });
+        }
+      }),
+    rename: protectedProcedure
+      .input(z.object({ sessionId: z.string().uuid(), title: z.string().trim().min(1).max(255) }))
+      .mutation(async ({ ctx, input }) => {
+        try {
+          await updateChatTitle(ctx.user.id, input.sessionId, input.title);
+          return { success: true } as const;
+        } catch (error) {
+          throw new TRPCError({ code: "NOT_FOUND", message: storageError(error) });
+        }
+      }),
+    send: protectedProcedure
+      .input(z.object({
+        sessionId: z.string().uuid(),
+        modelId: modelIdSchema,
+        content: z.string().trim().min(1).max(16_000),
+        settings: settingsSchema,
+      }))
+      .mutation(async ({ ctx, input }) => {
+        try {
+          const session = await getOwnedChatSession(ctx.user.id, input.sessionId);
+          if (!session) throw new Error("Чат не найден или недоступен.");
+          await appendChatMessage(ctx.user.id, input.sessionId, "user", input.content, input.modelId);
+          if (session.title === "Новый разговор") await updateChatTitle(ctx.user.id, input.sessionId, input.content.slice(0, 72));
+          const history = await listSessionMessages(ctx.user.id, input.sessionId);
+          const result = await chatWithOpenRouter(input.modelId, history.map((message) => ({ role: message.role, content: message.content })), input.settings);
+          await appendChatMessage(ctx.user.id, input.sessionId, "assistant", result.content, result.modelUsed);
+          return result;
+        } catch (error) {
+          if (error instanceof Error && /чат|хранилище/i.test(error.message)) {
+            throw new TRPCError({ code: "NOT_FOUND", message: storageError(error) });
+          }
+          throw new TRPCError({ code: "BAD_REQUEST", message: publicChatError(input.modelId, error) });
+        }
+      }),
+  }),
 });
 
 export type AppRouter = typeof appRouter;
