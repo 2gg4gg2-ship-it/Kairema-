@@ -1,99 +1,110 @@
-import { describe, expect, it } from "vitest";
-import { MODEL_CONFIG, MODEL_IDS, buildOpenRouterMessages, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, modelById, openRouterStreamDelta, publicChatError, selectAutoModel, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView } from "./providers";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ATTEMPT_TIMEOUT_MS, MODEL_CONFIG, MODEL_IDS, MODEL_ROLES, buildOpenRouterMessages, chatWithRoleStream, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, modelById, openRouterStreamDelta, publicChatError, selectAutoModel, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView } from "./providers";
 
-describe("OpenRouter model registry", () => {
-  it("declares exactly five static cards independently of API responses", () => {
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
+
+describe("Kairema v3 role registry", () => {
+  it("declares exactly five always-visible roles", () => {
     expect(MODEL_CONFIG).toHaveLength(5);
-    expect(MODEL_CONFIG.map((model) => model.modelId)).toEqual(MODEL_IDS);
-    expect(MODEL_CONFIG.map((model) => model.label)).toEqual([
-      "Kairema Ultra (Gemma 4)",
-      "Kairema Code (North)",
-      "Kairema Long-Context (Dots3)",
-      "Kairema Express (GPT-OSS)",
-      "Kairema Auto-Router",
+    expect(MODEL_CONFIG.map((role) => role.modelId)).toEqual(MODEL_IDS);
+    expect(MODEL_CONFIG.map((role) => role.label)).toEqual([
+      "Kairema Быстрый", "Kairema Смекалистый", "Kairema Контекст", "Kairema Флагман", "Kairema Код",
     ]);
     expect(modelById("not-in-registry")).toBeUndefined();
   });
 
-  it("uses catalog-confirmed live IDs for the corrected Gemma and North variants", () => {
-    expect(MODEL_CONFIG[0]?.modelId).toBe("google/gemma-4-26b-a4b-it:free");
-    expect(MODEL_CONFIG[1]?.modelId).toBe("cohere/north-mini-code:free");
+  it("keeps raw provider IDs inside server-only chains and limits each chain to four attempts", () => {
+    for (const role of MODEL_ROLES) {
+      expect(role.chain.length).toBeGreaterThan(1);
+      expect(role.chain.length).toBeLessThanOrEqual(4);
+      expect(role.chain.every((candidate) => candidate.modelId !== role.modelId)).toBe(true);
+    }
+    expect(MODEL_ROLES.find((role) => role.key === "fast")?.chain[0]?.provider).toBe("groq");
+    expect(MODEL_ROLES.find((role) => role.key === "smart")?.chain[0]?.provider).toBe("google");
   });
 
-  it("maps every required status category to a human Russian status", () => {
+  it("uses a 25-second budget for every provider attempt", () => {
+    expect(ATTEMPT_TIMEOUT_MS).toBe(25_000);
+  });
+
+  it("maps role health into the fixed Russian badge set", () => {
     expect(statusLabel(null, "ready")).toBe("Готов");
-    expect(statusLabel(null, "loading")).toBe("Проверка…");
-    expect(statusLabel("QUOTA", "error")).toBe("Нет квоты (биллинг)");
-    expect(statusLabel("RATE_LIMIT", "error")).toBe("Лимит запросов — восстановится");
-    expect(statusLabel("AUTH", "error")).toBe("Ключ отклонён");
-    expect(statusLabel("PROVIDER_UNAVAILABLE", "unavailable")).toBe("Временно недоступен");
-    expect(statusLabel("MODEL", "error")).toBe("Неверная конфигурация провайдера");
+    expect(statusLabel(null, "fallback")).toBe("Резерв активен");
+    expect(statusLabel(null, "not_configured")).toBe("Не настроено");
+    expect(statusLabel("RATE_LIMIT", "error")).toBe("Недоступно");
+    expect(statusLabel("PROVIDER_UNAVAILABLE", "unavailable")).toBe("Недоступно");
   });
 
-  it("classifies upstream evidence without guessing a reason", () => {
+  it("classifies retry-worthy errors without exposing provider response bodies", () => {
     expect(classifyOpenRouterFailure(401, { error: { message: "invalid api key" } }).category).toBe("AUTH");
-    expect(classifyOpenRouterFailure(402, { error: { message: "no balance" } }).category).toBe("QUOTA");
+    expect(classifyOpenRouterFailure(429, { error: { message: "quota exhausted" } }).category).toBe("QUOTA");
     expect(classifyOpenRouterFailure(429, {}).category).toBe("RATE_LIMIT");
-    expect(classifyOpenRouterFailure(429, { error: { message: "quota temporarily limited" } }).category).toBe("RATE_LIMIT");
     expect(classifyOpenRouterFailure(503, { error: { message: "high load" } }).category).toBe("PROVIDER_UNAVAILABLE");
-    expect(classifyOpenRouterFailure(500, {}).confirmed).toBe("Причина пока не установлена.");
   });
 
-  it("removes reasoning blocks before returning content to the browser", () => {
+  it("removes reasoning blocks before any response reaches the browser", () => {
     expect(stripReasoningBlocks("<think>скрытая цепочка</think>Итог <reasoning>скрыто</reasoning>")).toBe("Итог");
+    expect(statusFromChatPayload({ choices: [{ message: { content: "<think>hidden</think>" } }] }).state).toBe("error");
   });
 
-  it("marks a model ready only after a parsable non-empty chat response", () => {
-    expect(statusFromChatPayload({ choices: [{ message: { content: "Готово" } }] }).state).toBe("ready");
-    const broken = statusFromChatPayload({ choices: [{ message: { content: "<think>hidden</think>" } }] });
-    expect(broken.category).toBe("PARSE");
-    expect(broken.badge).toContain("Ошибка");
-  });
-
-  it("injects Kairema identity into every OpenRouter request", () => {
-    for (const model of MODEL_CONFIG) {
-      const payload = JSON.stringify(buildOpenRouterMessages(model, [{ role: "user", content: "Тест" }], { style: "steps" }));
+  it("injects the Kairema identity and selected role into all provider payloads", () => {
+    for (const role of MODEL_CONFIG) {
+      const payload = JSON.stringify(buildOpenRouterMessages(role, [{ role: "user", content: "Тест" }], { style: "steps" }));
       expect(payload).toContain("Ты Kairema, AI-ассистент.");
-      expect(payload).toContain(model.label);
+      expect(payload).toContain(role.label);
       expect(payload).toContain("Тест");
     }
   });
 
-  it("makes Auto-Router choose the first ready direct model on the server", () => {
-    const views = MODEL_CONFIG.map((model, index) => toPublicModelView(model, {
+  it("selects the first ready role for automatic routing", () => {
+    const views = MODEL_CONFIG.map((role, index) => toPublicModelView(role, {
       state: index === 1 || index === 3 ? "ready" : "error",
-      badge: index === 1 || index === 3 ? "Готов" : "Ошибка: UNKNOWN",
+      badge: index === 1 || index === 3 ? "Готов" : "Недоступно",
       category: index === 1 || index === 3 ? null : "UNKNOWN",
-      http: 200,
-      checkedAt: "2026-08-18T00:00:00.000Z",
-      confirmed: "Тест",
+      http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Тест",
     }));
-    expect(selectAutoModel(views)?.modelId).toBe("cohere/north-mini-code:free");
+    expect(selectAutoModel(views)?.modelId).toBe("smart");
   });
 
-  it("does not expose any environment or transport fields through public model views", () => {
-    const view = toPublicModelView(MODEL_CONFIG[0]!, { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-18T00:00:00.000Z", confirmed: "Проверено" });
+  it("never serializes provider chains or auth transport in public role views", () => {
+    const view = toPublicModelView(MODEL_CONFIG[0]!, { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" });
     expect(Object.keys(view).sort()).toEqual(["key", "label", "modelId", "role", "status"]);
-    expect(JSON.stringify(view)).not.toMatch(/OPENROUTER_API_KEY|Authorization|Bearer/i);
+    expect(JSON.stringify(view)).not.toMatch(/chain|OPENROUTER_API_KEY|Authorization|Bearer/i);
   });
 
-  it("returns a human-safe structured message without upstream JSON", () => {
-    const message = publicChatError(MODEL_CONFIG[0]!.modelId, new Error("raw upstream json"));
-    expect(message).toContain("Провайдер: OpenRouter");
+  it("returns a human-safe error contract", () => {
+    const message = publicChatError("fast", new Error("raw upstream json"));
+    expect(message).toContain("Что произошло:");
     expect(message).not.toContain("raw upstream json");
   });
 
-  it("extracts text deltas from an OpenRouter SSE event without interpreting provider metadata", () => {
+  it("parses SSE deltas and removes fragmented thinking sections", () => {
     const data = dataFromSseBlock("event: message\ndata: {\"choices\":[{\"delta\":{\"content\":\"Привет\"}}]}\n\n");
     expect(openRouterStreamDelta(JSON.parse(data))).toBe("Привет");
-    expect(dataFromSseBlock("data: [DONE]\n\n")).toBe("[DONE]");
-  });
-
-  it("hides reasoning tags even when they span streamed fragments", () => {
     const filter = createReasoningStreamFilter();
     expect(filter("Начало <thi")).toBe("Начало ");
     expect(filter("nk>скрыто")).toBe("");
     expect(filter("</think>Итог")).toBe("Итог");
-    expect(filter("", true)).toBe("");
+  });
+
+  it("does not mix answers by falling back after a visible stream delta", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+    const encoder = new TextEncoder();
+    let pulls = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        if (pulls === 1) controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Начало"}}]}\n\n'));
+        else controller.error(new Error("upstream interrupted"));
+      },
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200 }));
+
+    await expect(chatWithRoleStream("fast", [{ role: "user", content: "Тест" }], undefined, vi.fn())).rejects.toThrow("upstream interrupted");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 });

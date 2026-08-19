@@ -1,7 +1,7 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
-import { ChatMessageRecord, ChatSession, InsertUser, chatSessions, messages, users } from "../drizzle/schema";
+import { ChatExport, ChatMessageRecord, ChatSession, InsertUser, chatExports, chatSessions, messages, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -91,4 +91,35 @@ export async function appendChatMessage(userId: number, sessionId: string, role:
 export async function updateChatTitle(userId: number, sessionId: string, title: string): Promise<void> {
   const db = requireDatabase(await getDb());
   await db.update(chatSessions).set({ title, updatedAt: new Date() }).where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)));
+}
+
+export async function createChatExportRecord(userId: number, input: Omit<ChatExport, "userId" | "createdAt">): Promise<ChatExport> {
+  const db = requireDatabase(await getDb());
+  requireOwnedSession(userId, await getOwnedChatSession(userId, input.sessionId));
+  const record: ChatExport = { ...input, userId, createdAt: new Date() };
+  await db.insert(chatExports).values(record);
+  return record;
+}
+
+export async function listChatExports(userId: number): Promise<ChatExport[]> {
+  const db = requireDatabase(await getDb());
+  return db.select().from(chatExports).where(eq(chatExports.userId, userId)).orderBy(desc(chatExports.createdAt));
+}
+
+export async function getOwnedChatExport(userId: number, exportId: string): Promise<ChatExport | undefined> {
+  const db = requireDatabase(await getDb());
+  const result = await db.select().from(chatExports).where(and(eq(chatExports.id, exportId), eq(chatExports.userId, userId))).limit(1);
+  return result[0];
+}
+
+export function isOwnedChatExport(userId: number, record: Pick<ChatExport, "userId"> | undefined): boolean {
+  return Boolean(record && record.userId === userId);
+}
+
+export async function deleteOwnedChatExport(userId: number, exportId: string): Promise<boolean> {
+  const db = requireDatabase(await getDb());
+  const owned = await getOwnedChatExport(userId, exportId);
+  if (!isOwnedChatExport(userId, owned)) return false;
+  await db.delete(chatExports).where(and(eq(chatExports.id, exportId), eq(chatExports.userId, userId)));
+  return true;
 }

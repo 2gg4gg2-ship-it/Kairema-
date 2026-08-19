@@ -23,15 +23,15 @@ describe("chat stream happy-path", () => {
       }),
       updateChatTitle: vi.fn(),
       listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
-      chatWithOpenRouterStream: vi.fn(async (_modelId, _history, _settings, onDelta) => {
+      chatWithRoleStream: vi.fn(async (_modelId, _history, _settings, onDelta) => {
         onDelta("При");
         onDelta("вет");
-        return { content: "Привет", modelUsed: "google/gemma-4-26b-a4b-it:free" };
+        return { content: "Привет", modelUsed: "llama-3.1-8b-instant", label: "Llama 3.1 8B Instant" };
       }),
     });
 
     await handler(
-      { body: { sessionId: "550e8400-e29b-41d4-a716-446655440000", modelId: "google/gemma-4-26b-a4b-it:free", content: "Привет" } } as Request,
+      { body: { sessionId: "550e8400-e29b-41d4-a716-446655440000", modelId: "fast", content: "Привет" } } as Request,
       response,
       vi.fn(),
     );

@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { InlineMarkdown } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
-import { Download, FileText, Loader2, Send, User, Sparkles } from "lucide-react";
+import { Copy, Download, FileText, Loader2, RotateCcw, Send, Square, User, Sparkles } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 
 export type Message = {
@@ -30,6 +30,9 @@ type AIChatBoxProps = {
   canExport?: boolean;
   exportBusy?: "markdown" | "pdf" | null;
   exportError?: string;
+  onCopyAssistant?: (message: Message) => void;
+  onRegenerate?: (message: Message) => void;
+  onCancelStream?: () => void;
 };
 
 export function AIChatBox({
@@ -46,6 +49,9 @@ export function AIChatBox({
   canExport = false,
   exportBusy = null,
   exportError = "",
+  onCopyAssistant,
+  onRegenerate,
+  onCancelStream,
 }: AIChatBoxProps) {
   const [input, setInput] = useState("");
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -95,6 +101,10 @@ export function AIChatBox({
                   {message.role === "assistant" && message.providerLabel && (
                     <p className="mt-2 px-1 text-xs text-slate-500">{message.providerLabel} · {message.model} · {message.status}</p>
                   )}
+                  {message.role === "assistant" && !message.isError && <div className="kairema-message-actions" aria-label="Действия с ответом">
+                    <button type="button" onClick={() => onCopyAssistant?.(message)} className="kairema-message-action" aria-label="Копировать ответ"><Copy className="size-3.5" />Копировать</button>
+                    <button type="button" onClick={() => onRegenerate?.(message)} disabled={isLoading} className="kairema-message-action" aria-label="Перегенерировать ответ"><RotateCcw className="size-3.5" />Ещё вариант</button>
+                  </div>}
                 </div>
                 {message.role === "user" && <div className="kairema-avatar"><User className="size-4" /></div>}
               </article>
@@ -105,6 +115,7 @@ export function AIChatBox({
       </div>
       <form onSubmit={submit} className="kairema-composer">
         <Textarea ref={textareaRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={placeholder} className="kairema-textarea" rows={1} />
+        {isLoading && <Button type="button" size="icon" onClick={onCancelStream} className="kairema-cancel" aria-label="Отменить генерацию"><Square className="size-3.5 fill-current" /></Button>}
         <Button type="submit" size="icon" disabled={!input.trim() || isLoading} className="kairema-send" aria-label="Отправить сообщение">
           {isLoading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
         </Button>

@@ -15,6 +15,13 @@
       "when": 1787083428876,
       "tag": "0001_lame_zarek",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1787128050210,
+      "tag": "0002_green_silver_sable",
+      "breakpoints": true
     }
   ]
 }

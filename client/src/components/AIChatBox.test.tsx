@@ -1,12 +1,14 @@
 /* @vitest-environment jsdom */
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React, { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { consumeChatStream } from "@/lib/chat-stream";
 import { AIChatBox, type Message } from "./AIChatBox";
 
 const encoder = new TextEncoder();
+
+afterEach(() => cleanup());
 
 function StreamingHarness() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -52,6 +54,25 @@ describe("AIChatBox user flows", () => {
 
     expect(onExportMarkdown).toHaveBeenCalledOnce();
     expect(onExportPdf).toHaveBeenCalledOnce();
+  });
+
+  it("invokes copy, regenerate and cancel controls for an assistant reply", async () => {
+    const user = userEvent.setup();
+    const reply: Message = { id: "assistant-1", role: "assistant", content: "Текст ответа", providerLabel: "Kairema Быстрый", model: "test-model", status: "полный ответ" };
+    const onCopyAssistant = vi.fn();
+    const onRegenerate = vi.fn();
+    const onCancelStream = vi.fn();
+    const { rerender } = render(<AIChatBox messages={[reply]} onSendMessage={vi.fn()} onCopyAssistant={onCopyAssistant} onRegenerate={onRegenerate} onCancelStream={onCancelStream} />);
+
+    await user.click(screen.getByRole("button", { name: "Копировать ответ" }));
+    await user.click(screen.getByRole("button", { name: "Перегенерировать ответ" }));
+
+    expect(onCopyAssistant).toHaveBeenCalledWith(reply);
+    expect(onRegenerate).toHaveBeenCalledWith(reply);
+
+    rerender(<AIChatBox messages={[reply]} onSendMessage={vi.fn()} isLoading onCopyAssistant={onCopyAssistant} onRegenerate={onRegenerate} onCancelStream={onCancelStream} />);
+    await user.click(screen.getByRole("button", { name: "Отменить генерацию" }));
+    expect(onCancelStream).toHaveBeenCalledOnce();
   });
 
   it("renders a delta before the stream completes and replaces it with the persisted final answer", async () => {

@@ -1,11 +1,13 @@
 import { TRPCError } from "@trpc/server";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, createChatSession, getOwnedChatSession, listChatSessions, listSessionMessages, updateChatTitle } from "./db";
+import { appendChatMessage, createChatExportRecord, createChatSession, deleteOwnedChatExport, getOwnedChatExport, getOwnedChatSession, listChatExports, listChatSessions, listSessionMessages, updateChatTitle } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { MODEL_IDS, chatWithOpenRouter, getModelViews, publicChatError } from "./providers";
+import { MODEL_IDS, chatWithRole, getModelViews, publicChatError } from "./providers";
+import { storageGetSignedUrl, storagePut } from "./storage";
 
 const settingsSchema = z.object({
   style: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional(),
@@ -70,7 +72,7 @@ export const appRouter = router({
           await appendChatMessage(ctx.user.id, input.sessionId, "user", input.content, input.modelId);
           if (session.title === "Новый разговор") await updateChatTitle(ctx.user.id, input.sessionId, input.content.slice(0, 72));
           const history = await listSessionMessages(ctx.user.id, input.sessionId);
-          const result = await chatWithOpenRouter(input.modelId, history.map((message) => ({ role: message.role, content: message.content })), input.settings);
+          const result = await chatWithRole(input.modelId, history.map((message) => ({ role: message.role, content: message.content })), input.settings);
           await appendChatMessage(ctx.user.id, input.sessionId, "assistant", result.content, result.modelUsed);
           return result;
         } catch (error) {
@@ -80,6 +82,37 @@ export const appRouter = router({
           throw new TRPCError({ code: "BAD_REQUEST", message: publicChatError(input.modelId, error) });
         }
       }),
+  }),
+  exports: router({
+    list: protectedProcedure.query(({ ctx }) => listChatExports(ctx.user.id)),
+    create: protectedProcedure.input(z.object({
+      sessionId: z.string().uuid(),
+      format: z.enum(["markdown", "pdf"]),
+      fileName: z.string().trim().min(1).max(255),
+      contentType: z.string().trim().min(1).max(128),
+      contentBase64: z.string().min(1).max(4_300_000),
+    })).mutation(async ({ ctx, input }) => {
+      try {
+        const extension = input.format === "pdf" ? "pdf" : "md";
+        const bytes = Buffer.from(input.contentBase64, "base64");
+        if (!bytes.length || bytes.length > 3_000_000) throw new Error("Размер экспортируемого файла превышает допустимый предел.");
+        const id = randomUUID();
+        const { key } = await storagePut(`exports/${ctx.user.id}/${id}.${extension}`, bytes, input.contentType);
+        return await createChatExportRecord(ctx.user.id, { id, sessionId: input.sessionId, fileKey: key, fileName: input.fileName, format: input.format, contentType: input.contentType, byteSize: bytes.length });
+      } catch (error) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error && /размер/i.test(error.message) ? error.message : "Не удалось сохранить экспорт. Повторите попытку позже." });
+      }
+    }),
+    download: protectedProcedure.input(z.object({ exportId: z.string().uuid() })).query(async ({ ctx, input }) => {
+      const record = await getOwnedChatExport(ctx.user.id, input.exportId);
+      if (!record) throw new TRPCError({ code: "NOT_FOUND", message: "Экспорт не найден или недоступен." });
+      return { fileName: record.fileName, url: await storageGetSignedUrl(record.fileKey) };
+    }),
+    delete: protectedProcedure.input(z.object({ exportId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+      const deleted = await deleteOwnedChatExport(ctx.user.id, input.exportId);
+      if (!deleted) throw new TRPCError({ code: "NOT_FOUND", message: "Экспорт не найден или недоступен." });
+      return { success: true } as const;
+    }),
   }),
 });
 

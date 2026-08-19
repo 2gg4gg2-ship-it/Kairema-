@@ -2,12 +2,13 @@ import type { Express, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import { appendChatMessage, getOwnedChatSession, listSessionMessages, updateChatTitle } from "./db";
 import { sdk } from "./_core/sdk";
-import { MODEL_IDS, chatWithOpenRouterStream, publicChatError } from "./providers";
+import { MODEL_IDS, chatWithRoleStream, publicChatError } from "./providers";
 
 const streamInputSchema = z.object({
   sessionId: z.string().uuid(),
   modelId: z.enum(MODEL_IDS),
   content: z.string().trim().min(1).max(16_000),
+  regenerateMessageId: z.number().int().positive().optional(),
   settings: z.object({ style: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional() }).optional(),
 });
 
@@ -27,7 +28,7 @@ type StreamDependencies = {
   appendChatMessage: typeof appendChatMessage;
   updateChatTitle: typeof updateChatTitle;
   listSessionMessages: typeof listSessionMessages;
-  chatWithOpenRouterStream: typeof chatWithOpenRouterStream;
+  chatWithRoleStream: typeof chatWithRoleStream;
 };
 
 const defaultDependencies: StreamDependencies = {
@@ -36,7 +37,7 @@ const defaultDependencies: StreamDependencies = {
   appendChatMessage,
   updateChatTitle,
   listSessionMessages,
-  chatWithOpenRouterStream,
+  chatWithRoleStream,
 };
 
 export function createChatStreamHandler(overrides: Partial<StreamDependencies> = {}): RequestHandler {
@@ -58,9 +59,18 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
     try {
       const session = await dependencies.getOwnedChatSession(user.id, input.sessionId);
       if (!session) throw new Error("Чат не найден или недоступен.");
-      await dependencies.appendChatMessage(user.id, input.sessionId, "user", input.content, input.modelId);
-      if (session.title === "Новый разговор") await dependencies.updateChatTitle(user.id, input.sessionId, input.content.slice(0, 72));
-      const history = await dependencies.listSessionMessages(user.id, input.sessionId);
+      let history;
+      if (input.regenerateMessageId) {
+        const currentHistory = await dependencies.listSessionMessages(user.id, input.sessionId);
+        const targetIndex = currentHistory.findIndex((message) => message.id === input.regenerateMessageId && message.role === "assistant");
+        const promptIndex = targetIndex < 0 ? -1 : currentHistory.slice(0, targetIndex).map((message) => message.role).lastIndexOf("user");
+        if (promptIndex < 0) throw new Error("Исходный запрос для регенерации не найден.");
+        history = currentHistory.slice(0, targetIndex);
+      } else {
+        await dependencies.appendChatMessage(user.id, input.sessionId, "user", input.content, input.modelId);
+        if (session.title === "Новый разговор") await dependencies.updateChatTitle(user.id, input.sessionId, input.content.slice(0, 72));
+        history = await dependencies.listSessionMessages(user.id, input.sessionId);
+      }
 
       res.status(200);
       res.set({
@@ -80,10 +90,10 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
           controller.abort();
         }
       });
-      writeEvent(res, "start", { sessionId: input.sessionId });
+      writeEvent(res, "start", { sessionId: input.sessionId, regenerated: Boolean(input.regenerateMessageId) });
 
       try {
-        const result = await dependencies.chatWithOpenRouterStream(
+        const result = await dependencies.chatWithRoleStream(
           input.modelId,
           history.map((message) => ({ role: message.role, content: message.content })),
           input.settings,

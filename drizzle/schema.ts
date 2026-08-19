@@ -30,7 +30,23 @@ export const messages = mysqlTable("messages", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => [index("messages_session_created_idx").on(table.sessionId, table.createdAt)]);
 
+export const chatExports = mysqlTable("chat_exports", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  sessionId: varchar("sessionId", { length: 36 }).notNull().references(() => chatSessions.id, { onDelete: "cascade" }),
+  fileKey: varchar("fileKey", { length: 512 }).notNull(),
+  fileName: varchar("fileName", { length: 255 }).notNull(),
+  format: mysqlEnum("format", ["markdown", "pdf"]).notNull(),
+  contentType: varchar("contentType", { length: 128 }).notNull(),
+  byteSize: int("byteSize").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [
+  index("chat_exports_user_created_idx").on(table.userId, table.createdAt),
+  index("chat_exports_session_created_idx").on(table.sessionId, table.createdAt),
+]);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type ChatSession = typeof chatSessions.$inferSelect;
 export type ChatMessageRecord = typeof messages.$inferSelect;
+export type ChatExport = typeof chatExports.$inferSelect;

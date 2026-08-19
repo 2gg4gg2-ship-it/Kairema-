@@ -13,6 +13,16 @@ function saveBlob(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+export type PreparedChatExport = {
+  blob: Blob;
+  fileName: string;
+  contentType: string;
+};
+
+export function downloadPreparedChatExport(file: PreparedChatExport) {
+  saveBlob(file.blob, file.fileName);
+}
+
 function binaryFromArrayBuffer(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer);
   const chunkSize = 0x8000;
@@ -24,6 +34,10 @@ function binaryFromArrayBuffer(buffer: ArrayBuffer) {
   return binary;
 }
 
+export async function blobToBase64(blob: Blob) {
+  return globalThis.btoa(binaryFromArrayBuffer(await blob.arrayBuffer()));
+}
+
 async function addRussianFont(document: import("jspdf").jsPDF) {
   const response = await fetch(PDF_FONT_URL);
   if (!response.ok) throw new Error("Шрифт для PDF временно недоступен.");
@@ -32,12 +46,12 @@ async function addRussianFont(document: import("jspdf").jsPDF) {
   document.setFont("KairemaExport", "normal");
 }
 
-export function downloadChatMarkdown(input: ChatExportInput) {
+export async function prepareChatMarkdown(input: ChatExportInput): Promise<PreparedChatExport> {
   const markdown = buildChatMarkdown(input);
-  saveBlob(new Blob([markdown], { type: "text/markdown;charset=utf-8" }), `${exportFileStem(input.title)}.md`);
+  return { blob: new Blob([markdown], { type: "text/markdown;charset=utf-8" }), fileName: `${exportFileStem(input.title)}.md`, contentType: "text/markdown;charset=utf-8" };
 }
 
-export async function downloadChatPdf(input: ChatExportInput) {
+export async function prepareChatPdf(input: ChatExportInput): Promise<PreparedChatExport> {
   const { jsPDF } = await import("jspdf");
   const document = new jsPDF({ unit: "mm", format: "a4", compress: true });
   await addRussianFont(document);
@@ -81,5 +95,17 @@ export async function downloadChatPdf(input: ChatExportInput) {
     y += 3;
   });
 
-  document.save(`${exportFileStem(input.title)}.pdf`);
+  return { blob: document.output("blob"), fileName: `${exportFileStem(input.title)}.pdf`, contentType: "application/pdf" };
+}
+
+export async function downloadChatMarkdown(input: ChatExportInput) {
+  const file = await prepareChatMarkdown(input);
+  downloadPreparedChatExport(file);
+  return file;
+}
+
+export async function downloadChatPdf(input: ChatExportInput) {
+  const file = await prepareChatPdf(input);
+  downloadPreparedChatExport(file);
+  return file;
 }

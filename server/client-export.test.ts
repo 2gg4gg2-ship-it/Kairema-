@@ -21,7 +21,7 @@ describe("browser chat exports", () => {
     vi.stubGlobal("window", { setTimeout: (callback: () => void) => { callback(); return 1; } });
     vi.stubGlobal("URL", { createObjectURL, revokeObjectURL: vi.fn() });
 
-    downloadChatMarkdown(input);
+    await downloadChatMarkdown(input);
 
     expect(link.download).toBe("План август.md");
     expect(click).toHaveBeenCalledOnce();
@@ -32,7 +32,7 @@ describe("browser chat exports", () => {
   });
 
   it("generates a Russian PDF document containing the selected chat and saves it", async () => {
-    const state = { savedAs: "", written: [] as string[] };
+    const state = { written: [] as string[] };
     class FakePdf {
       internal = { pageSize: { getWidth: () => 210, getHeight: () => 297 } };
       addFileToVFS() {}
@@ -44,14 +44,18 @@ describe("browser chat exports", () => {
       splitTextToSize(value: string) { return [value]; }
       addPage() {}
       text(value: string) { state.written.push(value); }
-      save(filename: string) { state.savedAs = filename; }
+      output() { return new Blob([state.written.join("\n")], { type: "application/pdf" }); }
     }
     vi.doMock("jspdf", () => ({ jsPDF: FakePdf }));
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2, 3]), { status: 200 })));
+    const click = vi.fn();
+    vi.stubGlobal("document", { createElement: vi.fn(() => ({ href: "", download: "", click, remove: vi.fn() })), body: { appendChild: vi.fn() } });
+    vi.stubGlobal("window", { setTimeout: (callback: () => void) => { callback(); return 1; } });
+    vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:kairema-pdf"), revokeObjectURL: vi.fn() });
 
     await downloadChatPdf(input);
 
-    expect(state.savedAs).toBe("План август.pdf");
+    expect(click).toHaveBeenCalledOnce();
     expect(state.written.join("\n")).toContain("Составь план");
     expect(state.written.join("\n")).toContain("1. Проверить экспорт");
   });

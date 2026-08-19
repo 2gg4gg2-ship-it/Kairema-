@@ -1,0 +1,4284 @@
+[
+  {
+    "provider": "openrouter",
+    "models": [
+      {
+        "id": "z-ai/glm-5.3",
+        "name": "Z.ai: GLM 5.3",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.8-27b",
+        "name": "Qwen: Qwen3.8 27B",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "dots-studio/dots-3-note-preview:free",
+        "name": "Dots Studio: Dots3-Note Preview (free)",
+        "contextLength": 512000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "google/gemini-3.7-flash",
+        "name": "Google: Gemini 3.7 Flash",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "video",
+          "file",
+          "audio"
+        ]
+      },
+      {
+        "id": "google/gemini-3.7-flash:batch",
+        "name": "Google: Gemini 3.7 Flash (batch)",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "video",
+          "file",
+          "audio"
+        ]
+      },
+      {
+        "id": "bytedance-seed/seed-2-1-turbo",
+        "name": "ByteDance Seed: Seed 2.1 Turbo",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.8-2.4t-a95b",
+        "name": "Qwen: Qwen3.8 2.4T A95B",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "bytedance-seed/seed-2.0-code",
+        "name": "ByteDance Seed: Seed-2.0-Code",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "deepseek/deepseek-v4-pro-0813",
+        "name": "DeepSeek: DeepSeek V4 Pro 0813",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "x-ai/grok-4.6",
+        "name": "SpaceXAI: Grok 4.6",
+        "contextLength": 500000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "liquid/lfm-2.5-2.6b:free",
+        "name": "LiquidAI: LFM2.5-2.6B (free)",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "nvidia/nemotron-3.5-lightning",
+        "name": "NVIDIA: Nemotron 3.5 Lightning",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "nvidia/nemotron-3.5-lightning:free",
+        "name": "NVIDIA: Nemotron 3.5 Lightning (free)",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "sakana/sakana-namazu",
+        "name": "Sakana: Sakana Namazu",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "upstage/solar-pro4",
+        "name": "Upstage: Solar Pro 4",
+        "contextLength": 524288,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "meta/muse-glimmer-30b",
+        "name": "Meta: Muse Glimmer 30B",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "meta/muse-spark-1.2",
+        "name": "Meta: Muse Spark 1.2",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "video",
+          "file",
+          "audio"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.8-max",
+        "name": "Qwen: Qwen3.8 Max",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "~deepseek/deepseek-v4-flash-latest",
+        "name": "DeepSeek V4 Flash Latest",
+        "contextLength": 1310720,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "deepseek/deepseek-v4-flash-0731",
+        "name": "DeepSeek: DeepSeek V4 Flash 0731",
+        "contextLength": 1310720,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "thinkingmachines/inkling-small",
+        "name": "Thinking Machines: Inkling Small",
+        "contextLength": 524288,
+        "inputModalities": [
+          "text",
+          "image",
+          "audio"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.7-flash",
+        "name": "Qwen: Qwen3.7 Flash",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "anthropic/claude-opus-5-fast",
+        "name": "Claude Opus 5 (Fast)",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "anthropic/claude-opus-5",
+        "name": "Claude Opus 5",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "anthropic/claude-opus-5:batch",
+        "name": "Claude Opus 5 (batch)",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "inclusionai/ling-3.0-flash",
+        "name": "Ling-3.0-flash",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "poolside/laguna-s-2.1",
+        "name": "Poolside: Laguna S 2.1",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "poolside/laguna-s-2.1:free",
+        "name": "Poolside: Laguna S 2.1 (free)",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "google/gemini-3.6-flash",
+        "name": "Google: Gemini 3.6 Flash",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "video",
+          "file",
+          "audio"
+        ]
+      },
+      {
+        "id": "google/gemini-3.6-flash:batch",
+        "name": "Google: Gemini 3.6 Flash (batch)",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "video",
+          "file",
+          "audio"
+        ]
+      },
+      {
+        "id": "google/gemini-3.5-flash-lite",
+        "name": "Google: Gemini 3.5 Flash Lite",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "video",
+          "file",
+          "audio"
+        ]
+      },
+      {
+        "id": "google/gemini-3.5-flash-lite:batch",
+        "name": "Google: Gemini 3.5 Flash Lite (batch)",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "video",
+          "file",
+          "audio"
+        ]
+      },
+      {
+        "id": "meituan/longcat-2.0",
+        "name": "Meituan: LongCat 2.0",
+        "contextLength": 1048756,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "thinkingmachines/inkling",
+        "name": "Thinking Machines: Inkling",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "audio"
+        ]
+      },
+      {
+        "id": "thinkingmachines/inkling:batch",
+        "name": "Thinking Machines: Inkling (batch)",
+        "contextLength": 524288,
+        "inputModalities": [
+          "text",
+          "image",
+          "audio"
+        ]
+      },
+      {
+        "id": "openrouter/auto-beta",
+        "name": "Auto Router (Beta)",
+        "contextLength": 2000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "audio",
+          "file",
+          "video"
+        ]
+      },
+      {
+        "id": "moonshotai/kimi-k3",
+        "name": "MoonshotAI: Kimi K3",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "meta/muse-spark-1.1",
+        "name": "Meta: Muse Spark 1.1",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "video",
+          "file",
+          "audio"
+        ]
+      },
+      {
+        "id": "kwaipilot/kat-coder-air-v2.5",
+        "name": "Kwaipilot: KAT-Coder-Air V2.5",
+        "contextLength": 256000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "kwaipilot/kat-coder-pro-v2.5",
+        "name": "Kwaipilot: KAT-Coder-Pro V2.5",
+        "contextLength": 256000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.6-luna-pro",
+        "name": "OpenAI: GPT-5.6 Luna Pro",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.6-luna-pro:batch",
+        "name": "OpenAI: GPT-5.6 Luna Pro (batch)",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.6-luna",
+        "name": "OpenAI: GPT-5.6 Luna",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.6-luna:batch",
+        "name": "OpenAI: GPT-5.6 Luna (batch)",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.6-terra-pro",
+        "name": "OpenAI: GPT-5.6 Terra Pro",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.6-terra-pro:batch",
+        "name": "OpenAI: GPT-5.6 Terra Pro (batch)",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.6-terra",
+        "name": "OpenAI: GPT-5.6 Terra",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.6-terra:batch",
+        "name": "OpenAI: GPT-5.6 Terra (batch)",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.6-sol-pro",
+        "name": "OpenAI: GPT-5.6 Sol Pro",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.6-sol-pro:batch",
+        "name": "OpenAI: GPT-5.6 Sol Pro (batch)",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.6-sol",
+        "name": "OpenAI: GPT-5.6 Sol",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.6-sol:batch",
+        "name": "OpenAI: GPT-5.6 Sol (batch)",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "x-ai/grok-4.5",
+        "name": "SpaceXAI: Grok 4.5",
+        "contextLength": 500000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "~x-ai/grok-latest",
+        "name": "xAI: Grok Latest",
+        "contextLength": 500000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "aion-labs/aion-3.0-mini",
+        "name": "AionLabs: Aion-3.0-Mini",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "aion-labs/aion-3.0",
+        "name": "AionLabs: Aion-3.0",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "tencent/hy3",
+        "name": "Tencent: Hy3",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "poolside/laguna-xs-2.1",
+        "name": "Poolside: Laguna XS 2.1",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "poolside/laguna-xs-2.1:free",
+        "name": "Poolside: Laguna XS 2.1 (free)",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "anthropic/claude-sonnet-5",
+        "name": "Anthropic: Claude Sonnet 5",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "anthropic/claude-sonnet-5:batch",
+        "name": "Anthropic: Claude Sonnet 5 (batch)",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "google/gemini-3.1-flash-lite-image",
+        "name": "Google: Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)",
+        "contextLength": 65536,
+        "inputModalities": [
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "nex-agi/nex-n2-mini",
+        "name": "Nex AGI: Nex-N2-Mini",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "sakana/fugu-ultra",
+        "name": "Sakana: Fugu Ultra",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "google/gemini-3.1-flash-image",
+        "name": "Google: Nano Banana 2 (Gemini 3.1 Flash Image)",
+        "contextLength": 131072,
+        "inputModalities": [
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "google/gemini-3-pro-image",
+        "name": "Google: Nano Banana Pro (Gemini 3 Pro Image)",
+        "contextLength": 131072,
+        "inputModalities": [
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "cohere/north-mini-code:free",
+        "name": "Cohere: North Mini Code (free)",
+        "contextLength": 256000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "z-ai/glm-5.2",
+        "name": "Z.ai: GLM 5.2",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "z-ai/glm-5.2:batch",
+        "name": "Z.ai: GLM 5.2 (batch)",
+        "contextLength": 512000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "z-ai/glm-5.2:free",
+        "name": "Z.ai: GLM 5.2 (free)",
+        "contextLength": 256000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openrouter/fusion",
+        "name": "OpenRouter: Fusion",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "moonshotai/kimi-k2.7-code",
+        "name": "MoonshotAI: Kimi K2.7 Code",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "moonshotai/kimi-k2.7-code:batch",
+        "name": "MoonshotAI: Kimi K2.7 Code (batch)",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "~anthropic/claude-fable-latest",
+        "name": "Anthropic: Claude Fable Latest",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "anthropic/claude-fable-5",
+        "name": "Anthropic: Claude Fable 5",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "anthropic/claude-fable-5:batch",
+        "name": "Anthropic: Claude Fable 5 (batch)",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "nex-agi/nex-n2-pro",
+        "name": "Nex AGI: Nex-N2-Pro",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "nvidia/nemotron-3.5-content-safety:free",
+        "name": "NVIDIA: Nemotron 3.5 Content Safety (free)",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "nvidia/nemotron-3-ultra-550b-a55b",
+        "name": "NVIDIA: Nemotron 3 Ultra",
+        "contextLength": 512288,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "nvidia/nemotron-3-ultra-550b-a55b:batch",
+        "name": "NVIDIA: Nemotron 3 Ultra (batch)",
+        "contextLength": 512288,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "name": "NVIDIA: Nemotron 3 Ultra (free)",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.7-plus",
+        "name": "Qwen: Qwen3.7 Plus",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "minimax/minimax-m3",
+        "name": "MiniMax: MiniMax M3",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "minimax/minimax-m3:batch",
+        "name": "MiniMax: MiniMax M3 (batch)",
+        "contextLength": 524288,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "stepfun/step-3.7-flash",
+        "name": "StepFun: Step 3.7 Flash",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "anthropic/claude-opus-4.8-fast",
+        "name": "Anthropic: Claude Opus 4.8 (Fast)",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "anthropic/claude-opus-4.8",
+        "name": "Anthropic: Claude Opus 4.8",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "anthropic/claude-opus-4.8:batch",
+        "name": "Anthropic: Claude Opus 4.8 (batch)",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.7-max",
+        "name": "Qwen: Qwen3.7 Max",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "x-ai/grok-build-0.1",
+        "name": "SpaceXAI: Grok Build 0.1",
+        "contextLength": 256000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "google/gemini-3.5-flash",
+        "name": "Google: Gemini 3.5 Flash",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "video",
+          "file",
+          "audio"
+        ]
+      },
+      {
+        "id": "google/gemini-3.5-flash:batch",
+        "name": "Google: Gemini 3.5 Flash (batch)",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "video",
+          "file",
+          "audio"
+        ]
+      },
+      {
+        "id": "anthropic/claude-opus-4.7-fast",
+        "name": "Anthropic: Claude Opus 4.7 (Fast)",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "perceptron/perceptron-mk1",
+        "name": "Perceptron: Perceptron Mk1",
+        "contextLength": 32768,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "inclusionai/ring-2.6-1t",
+        "name": "inclusionAI: Ring-2.6-1T",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "google/gemini-3.1-flash-lite",
+        "name": "Google: Gemini 3.1 Flash Lite",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "video",
+          "file",
+          "audio"
+        ]
+      },
+      {
+        "id": "google/gemini-3.1-flash-lite:batch",
+        "name": "Google: Gemini 3.1 Flash Lite (batch)",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "video",
+          "file",
+          "audio"
+        ]
+      },
+      {
+        "id": "openai/gpt-chat-latest",
+        "name": "OpenAI: GPT Chat Latest",
+        "contextLength": 400000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "x-ai/grok-4.3",
+        "name": "SpaceXAI: Grok 4.3",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "ibm-granite/granite-4.1-8b",
+        "name": "IBM: Granite 4.1 8B",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "mistralai/mistral-medium-3-5",
+        "name": "Mistral: Mistral Medium 3.5",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "name": "NVIDIA: Nemotron 3 Nano Omni (free)",
+        "contextLength": 256000,
+        "inputModalities": [
+          "text",
+          "audio",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "~anthropic/claude-haiku-latest",
+        "name": "Anthropic Claude Haiku Latest",
+        "contextLength": 200000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "~openai/gpt-mini-latest",
+        "name": "OpenAI GPT Mini Latest",
+        "contextLength": 400000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "~google/gemini-pro-latest",
+        "name": "Google Gemini Pro Latest",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "audio",
+          "file",
+          "image",
+          "text",
+          "video"
+        ]
+      },
+      {
+        "id": "~moonshotai/kimi-latest",
+        "name": "MoonshotAI Kimi Latest",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "~google/gemini-flash-latest",
+        "name": "Google Gemini Flash Latest",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "video",
+          "file",
+          "audio"
+        ]
+      },
+      {
+        "id": "~anthropic/claude-sonnet-latest",
+        "name": "Anthropic Claude Sonnet Latest",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "~openai/gpt-latest",
+        "name": "OpenAI GPT Latest",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.5-plus-20260420",
+        "name": "Qwen: Qwen3.5 Plus 2026-04-20",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.6-flash",
+        "name": "Qwen: Qwen3.6 Flash",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.6-35b-a3b",
+        "name": "Qwen: Qwen3.6 35B A3B",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.6-max-preview",
+        "name": "Qwen: Qwen3.6 Max Preview",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.6-27b",
+        "name": "Qwen: Qwen3.6 27B",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.5-pro",
+        "name": "OpenAI: GPT-5.5 Pro",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.5-pro:batch",
+        "name": "OpenAI: GPT-5.5 Pro (batch)",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.5",
+        "name": "OpenAI: GPT-5.5",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.5:batch",
+        "name": "OpenAI: GPT-5.5 (batch)",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "deepseek/deepseek-v4-pro",
+        "name": "DeepSeek: DeepSeek V4 Pro 0423",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "deepseek/deepseek-v4-flash",
+        "name": "DeepSeek: DeepSeek V4 Flash 0423",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "inclusionai/ling-2.6-1t",
+        "name": "inclusionAI: Ling-2.6-1T",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "tencent/hy3-preview",
+        "name": "Tencent: Hy3 preview",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "xiaomi/mimo-v2.5-pro",
+        "name": "Xiaomi: MiMo-V2.5-Pro",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "xiaomi/mimo-v2.5",
+        "name": "Xiaomi: MiMo-V2.5",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "text",
+          "audio",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.4-image-2",
+        "name": "OpenAI: GPT-5.4 Image 2",
+        "contextLength": 272000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "inclusionai/ling-2.6-flash",
+        "name": "inclusionAI: Ling-2.6-flash",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "~anthropic/claude-opus-latest",
+        "name": "Anthropic: Claude Opus Latest",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "openrouter/pareto-code",
+        "name": "Pareto Code Router",
+        "contextLength": 2000000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "moonshotai/kimi-k2.6",
+        "name": "MoonshotAI: Kimi K2.6",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "anthropic/claude-opus-4.7",
+        "name": "Anthropic: Claude Opus 4.7",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "anthropic/claude-opus-4.7:batch",
+        "name": "Anthropic: Claude Opus 4.7 (batch)",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "z-ai/glm-5.1",
+        "name": "Z.ai: GLM 5.1",
+        "contextLength": 204800,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "google/gemma-4-26b-a4b-it",
+        "name": "Google: Gemma 4 26B A4B ",
+        "contextLength": 262144,
+        "inputModalities": [
+          "image",
+          "text",
+          "video"
+        ]
+      },
+      {
+        "id": "google/gemma-4-26b-a4b-it:free",
+        "name": "Google: Gemma 4 26B A4B  (free)",
+        "contextLength": 262144,
+        "inputModalities": [
+          "image",
+          "text",
+          "video"
+        ]
+      },
+      {
+        "id": "google/gemma-4-31b-it",
+        "name": "Google: Gemma 4 31B",
+        "contextLength": 262144,
+        "inputModalities": [
+          "image",
+          "text",
+          "video"
+        ]
+      },
+      {
+        "id": "google/gemma-4-31b-it:free",
+        "name": "Google: Gemma 4 31B (free)",
+        "contextLength": 262144,
+        "inputModalities": [
+          "image",
+          "text",
+          "video"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.6-plus",
+        "name": "Qwen: Qwen3.6 Plus",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "z-ai/glm-5v-turbo",
+        "name": "Z.ai: GLM 5V Turbo",
+        "contextLength": 202752,
+        "inputModalities": [
+          "image",
+          "text",
+          "video"
+        ]
+      },
+      {
+        "id": "arcee-ai/trinity-large-thinking",
+        "name": "Arcee AI: Trinity Large Thinking",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "x-ai/grok-4.20-multi-agent",
+        "name": "SpaceXAI: Grok 4.20 Multi-Agent",
+        "contextLength": 2000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "x-ai/grok-4.20",
+        "name": "SpaceXAI: Grok 4.20",
+        "contextLength": 2000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "google/lyria-3-pro-preview",
+        "name": "Google: Lyria 3 Pro Preview",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "google/lyria-3-clip-preview",
+        "name": "Google: Lyria 3 Clip Preview",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "kwaipilot/kat-coder-pro-v2",
+        "name": "Kwaipilot: KAT-Coder-Pro V2",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "rekaai/reka-edge",
+        "name": "Reka Edge",
+        "contextLength": 16384,
+        "inputModalities": [
+          "image",
+          "text",
+          "video"
+        ]
+      },
+      {
+        "id": "minimax/minimax-m2.7",
+        "name": "MiniMax: MiniMax M2.7",
+        "contextLength": 204800,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.4-nano",
+        "name": "OpenAI: GPT-5.4 Nano",
+        "contextLength": 400000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.4-nano:batch",
+        "name": "OpenAI: GPT-5.4 Nano (batch)",
+        "contextLength": 400000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.4-mini",
+        "name": "OpenAI: GPT-5.4 Mini",
+        "contextLength": 400000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.4-mini:batch",
+        "name": "OpenAI: GPT-5.4 Mini (batch)",
+        "contextLength": 400000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "mistralai/mistral-small-2603",
+        "name": "Mistral: Mistral Small 4",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "z-ai/glm-5-turbo",
+        "name": "Z.ai: GLM 5 Turbo",
+        "contextLength": 202752,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "nvidia/nemotron-3-super-120b-a12b",
+        "name": "NVIDIA: Nemotron 3 Super",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "nvidia/nemotron-3-super-120b-a12b:free",
+        "name": "NVIDIA: Nemotron 3 Super (free)",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "bytedance-seed/seed-2.0-lite",
+        "name": "ByteDance Seed: Seed-2.0-Lite",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.5-9b",
+        "name": "Qwen: Qwen3.5-9B",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.4-pro",
+        "name": "OpenAI: GPT-5.4 Pro",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.4-pro:batch",
+        "name": "OpenAI: GPT-5.4 Pro (batch)",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.4",
+        "name": "OpenAI: GPT-5.4",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.4:batch",
+        "name": "OpenAI: GPT-5.4 (batch)",
+        "contextLength": 1050000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "inception/mercury-2",
+        "name": "Inception: Mercury 2",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "google/gemini-3.1-flash-lite-preview",
+        "name": "Google: Gemini 3.1 Flash Lite Preview",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "video",
+          "file",
+          "audio"
+        ]
+      },
+      {
+        "id": "bytedance-seed/seed-2.0-mini",
+        "name": "ByteDance Seed: Seed-2.0-Mini",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "google/gemini-3.1-flash-image-preview",
+        "name": "Google: Nano Banana 2 (Gemini 3.1 Flash Image Preview)",
+        "contextLength": 65536,
+        "inputModalities": [
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.5-35b-a3b",
+        "name": "Qwen: Qwen3.5-35B-A3B",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.5-27b",
+        "name": "Qwen: Qwen3.5-27B",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.5-122b-a10b",
+        "name": "Qwen: Qwen3.5-122B-A10B",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.5-flash-02-23",
+        "name": "Qwen: Qwen3.5-Flash",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "google/gemini-3.1-pro-preview-customtools",
+        "name": "Google: Gemini 3.1 Pro Preview Custom Tools",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "audio",
+          "image",
+          "video",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.3-codex",
+        "name": "OpenAI: GPT-5.3-Codex",
+        "contextLength": 400000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "aion-labs/aion-2.0",
+        "name": "AionLabs: Aion-2.0",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "google/gemini-3.1-pro-preview",
+        "name": "Google: Gemini 3.1 Pro Preview",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "audio",
+          "file",
+          "image",
+          "text",
+          "video"
+        ]
+      },
+      {
+        "id": "google/gemini-3.1-pro-preview:batch",
+        "name": "Google: Gemini 3.1 Pro Preview (batch)",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "audio",
+          "file",
+          "image",
+          "text",
+          "video"
+        ]
+      },
+      {
+        "id": "anthropic/claude-sonnet-4.6",
+        "name": "Anthropic: Claude Sonnet 4.6",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "anthropic/claude-sonnet-4.6:batch",
+        "name": "Anthropic: Claude Sonnet 4.6 (batch)",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.5-plus-02-15",
+        "name": "Qwen: Qwen3.5 Plus 2026-02-15",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "qwen/qwen3.5-397b-a17b",
+        "name": "Qwen: Qwen3.5 397B A17B",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      {
+        "id": "minimax/minimax-m2.5",
+        "name": "MiniMax: MiniMax M2.5",
+        "contextLength": 204800,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "z-ai/glm-5",
+        "name": "Z.ai: GLM 5",
+        "contextLength": 204800,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-max-thinking",
+        "name": "Qwen: Qwen3 Max Thinking",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "anthropic/claude-opus-4.6",
+        "name": "Anthropic: Claude Opus 4.6",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "anthropic/claude-opus-4.6:batch",
+        "name": "Anthropic: Claude Opus 4.6 (batch)",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-coder-next",
+        "name": "Qwen: Qwen3 Coder Next",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openrouter/free",
+        "name": "Free Models Router",
+        "contextLength": 200000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "stepfun/step-3.5-flash",
+        "name": "StepFun: Step 3.5 Flash",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "moonshotai/kimi-k2.5",
+        "name": "MoonshotAI: Kimi K2.5",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "upstage/solar-pro-3",
+        "name": "Upstage: Solar Pro 3",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "minimax/minimax-m2-her",
+        "name": "MiniMax: MiniMax M2-her",
+        "contextLength": 65536,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "writer/palmyra-x5",
+        "name": "Writer: Palmyra X5",
+        "contextLength": 1040000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-audio",
+        "name": "OpenAI: GPT Audio",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text",
+          "audio"
+        ]
+      },
+      {
+        "id": "openai/gpt-audio-mini",
+        "name": "OpenAI: GPT Audio Mini",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text",
+          "audio"
+        ]
+      },
+      {
+        "id": "z-ai/glm-4.7-flash",
+        "name": "Z.ai: GLM 4.7 Flash",
+        "contextLength": 202752,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.2-codex",
+        "name": "OpenAI: GPT-5.2-Codex",
+        "contextLength": 400000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "bytedance-seed/seed-1.6-flash",
+        "name": "ByteDance Seed: Seed 1.6 Flash",
+        "contextLength": 262144,
+        "inputModalities": [
+          "image",
+          "text",
+          "video"
+        ]
+      },
+      {
+        "id": "bytedance-seed/seed-1.6",
+        "name": "ByteDance Seed: Seed 1.6",
+        "contextLength": 262144,
+        "inputModalities": [
+          "image",
+          "text",
+          "video"
+        ]
+      },
+      {
+        "id": "minimax/minimax-m2.1",
+        "name": "MiniMax: MiniMax M2.1",
+        "contextLength": 204800,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "z-ai/glm-4.7",
+        "name": "Z.ai: GLM 4.7",
+        "contextLength": 204800,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "google/gemini-3-flash-preview",
+        "name": "Google: Gemini 3 Flash Preview",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "file",
+          "audio",
+          "video"
+        ]
+      },
+      {
+        "id": "google/gemini-3-flash-preview:batch",
+        "name": "Google: Gemini 3 Flash Preview (batch)",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "file",
+          "audio",
+          "video"
+        ]
+      },
+      {
+        "id": "nvidia/nemotron-3-nano-30b-a3b",
+        "name": "NVIDIA: Nemotron 3 Nano 30B A3B",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "nvidia/nemotron-3-nano-30b-a3b:free",
+        "name": "NVIDIA: Nemotron 3 Nano 30B A3B (free)",
+        "contextLength": 256000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.2-chat",
+        "name": "OpenAI: GPT-5.2 Chat",
+        "contextLength": 128000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.2-pro",
+        "name": "OpenAI: GPT-5.2 Pro",
+        "contextLength": 400000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.2-pro:batch",
+        "name": "OpenAI: GPT-5.2 Pro (batch)",
+        "contextLength": 400000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.2",
+        "name": "OpenAI: GPT-5.2",
+        "contextLength": 400000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.2:batch",
+        "name": "OpenAI: GPT-5.2 (batch)",
+        "contextLength": 400000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "relace/relace-search",
+        "name": "Relace: Relace Search",
+        "contextLength": 256000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "z-ai/glm-4.6v",
+        "name": "Z.ai: GLM 4.6V",
+        "contextLength": 131072,
+        "inputModalities": [
+          "image",
+          "text",
+          "video"
+        ]
+      },
+      {
+        "id": "openrouter/bodybuilder",
+        "name": "Body Builder (beta)",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.1-codex-max",
+        "name": "OpenAI: GPT-5.1-Codex-Max",
+        "contextLength": 400000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "amazon/nova-2-lite-v1",
+        "name": "Amazon: Nova 2 Lite",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "video",
+          "file"
+        ]
+      },
+      {
+        "id": "mistralai/ministral-14b-2512",
+        "name": "Mistral: Ministral 3 14B 2512",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "mistralai/ministral-8b-2512",
+        "name": "Mistral: Ministral 3 8B 2512",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "mistralai/ministral-3b-2512",
+        "name": "Mistral: Ministral 3 3B 2512",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "mistralai/mistral-large-2512",
+        "name": "Mistral: Mistral Large 3 2512",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "deepseek/deepseek-v3.2",
+        "name": "DeepSeek: DeepSeek V3.2",
+        "contextLength": 163840,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "anthropic/claude-opus-4.5",
+        "name": "Anthropic: Claude Opus 4.5",
+        "contextLength": 200000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "anthropic/claude-opus-4.5:batch",
+        "name": "Anthropic: Claude Opus 4.5 (batch)",
+        "contextLength": 200000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "allenai/olmo-3-32b-think",
+        "name": "AllenAI: Olmo 3 32B Think",
+        "contextLength": 65536,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "google/gemini-3-pro-image-preview",
+        "name": "Google: Nano Banana Pro (Gemini 3 Pro Image Preview)",
+        "contextLength": 65536,
+        "inputModalities": [
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "deepcogito/cogito-v2.1-671b",
+        "name": "Deep Cogito: Cogito v2.1 671B",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.1",
+        "name": "OpenAI: GPT-5.1",
+        "contextLength": 400000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.1:batch",
+        "name": "OpenAI: GPT-5.1 (batch)",
+        "contextLength": 400000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.1-codex",
+        "name": "OpenAI: GPT-5.1-Codex",
+        "contextLength": 400000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "openai/gpt-5.1-codex-mini",
+        "name": "OpenAI: GPT-5.1-Codex-Mini",
+        "contextLength": 400000,
+        "inputModalities": [
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "moonshotai/kimi-k2-thinking",
+        "name": "MoonshotAI: Kimi K2 Thinking",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "amazon/nova-premier-v1",
+        "name": "Amazon: Nova Premier 1.0",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "perplexity/sonar-pro-search",
+        "name": "Perplexity: Sonar Pro Search",
+        "contextLength": 200000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "mistralai/voxtral-small-24b-2507",
+        "name": "Mistral: Voxtral Small 24B 2507",
+        "contextLength": 32000,
+        "inputModalities": [
+          "text",
+          "audio",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-oss-safeguard-20b",
+        "name": "OpenAI: gpt-oss-safeguard-20b",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "nvidia/nemotron-nano-12b-v2-vl:free",
+        "name": "NVIDIA: Nemotron Nano 12B 2 VL (free)",
+        "contextLength": 128000,
+        "inputModalities": [
+          "image",
+          "text",
+          "video"
+        ]
+      },
+      {
+        "id": "minimax/minimax-m2",
+        "name": "MiniMax: MiniMax M2",
+        "contextLength": 204800,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-vl-32b-instruct",
+        "name": "Qwen: Qwen3 VL 32B Instruct",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "ibm-granite/granite-4.0-h-micro",
+        "name": "IBM: Granite 4.0 Micro",
+        "contextLength": 131000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5-image-mini",
+        "name": "OpenAI: GPT-5 Image Mini",
+        "contextLength": 400000,
+        "inputModalities": [
+          "file",
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "anthropic/claude-haiku-4.5",
+        "name": "Anthropic: Claude Haiku 4.5",
+        "contextLength": 200000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "anthropic/claude-haiku-4.5:batch",
+        "name": "Anthropic: Claude Haiku 4.5 (batch)",
+        "contextLength": 200000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-vl-8b-thinking",
+        "name": "Qwen: Qwen3 VL 8B Thinking",
+        "contextLength": 131072,
+        "inputModalities": [
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-vl-8b-instruct",
+        "name": "Qwen: Qwen3 VL 8B Instruct",
+        "contextLength": 262144,
+        "inputModalities": [
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5-image",
+        "name": "OpenAI: GPT-5 Image",
+        "contextLength": 400000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "google/gemini-2.5-flash-image",
+        "name": "Google: Nano Banana (Gemini 2.5 Flash Image)",
+        "contextLength": 32768,
+        "inputModalities": [
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-vl-30b-a3b-thinking",
+        "name": "Qwen: Qwen3 VL 30B A3B Thinking",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-vl-30b-a3b-instruct",
+        "name": "Qwen: Qwen3 VL 30B A3B Instruct",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "openai/gpt-5-pro",
+        "name": "OpenAI: GPT-5 Pro",
+        "contextLength": 400000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-5-pro:batch",
+        "name": "OpenAI: GPT-5 Pro (batch)",
+        "contextLength": 400000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "z-ai/glm-4.6",
+        "name": "Z.ai: GLM 4.6",
+        "contextLength": 204800,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "anthropic/claude-sonnet-4.5",
+        "name": "Anthropic: Claude Sonnet 4.5",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "anthropic/claude-sonnet-4.5:batch",
+        "name": "Anthropic: Claude Sonnet 4.5 (batch)",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "deepseek/deepseek-v3.2-exp",
+        "name": "DeepSeek: DeepSeek V3.2 Exp",
+        "contextLength": 163840,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "thedrummer/cydonia-24b-v4.1",
+        "name": "TheDrummer: Cydonia 24B V4.1",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "relace/relace-apply-3",
+        "name": "Relace: Relace Apply 3",
+        "contextLength": 256000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-vl-235b-a22b-thinking",
+        "name": "Qwen: Qwen3 VL 235B A22B Thinking",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-vl-235b-a22b-instruct",
+        "name": "Qwen: Qwen3 VL 235B A22B Instruct",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-max",
+        "name": "Qwen: Qwen3 Max",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-coder-plus",
+        "name": "Qwen: Qwen3 Coder Plus",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5-codex:batch",
+        "name": "OpenAI: GPT-5 Codex (batch)",
+        "contextLength": 400000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "deepseek/deepseek-v3.1-terminus",
+        "name": "DeepSeek: DeepSeek V3.1 Terminus",
+        "contextLength": 163840,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-coder-flash",
+        "name": "Qwen: Qwen3 Coder Flash",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-next-80b-a3b-thinking",
+        "name": "Qwen: Qwen3 Next 80B A3B Thinking",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-next-80b-a3b-instruct",
+        "name": "Qwen: Qwen3 Next 80B A3B Instruct",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen-plus-2025-07-28",
+        "name": "Qwen: Qwen Plus 0728",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen-plus-2025-07-28:thinking",
+        "name": "Qwen: Qwen Plus 0728 (thinking)",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "nvidia/nemotron-nano-9b-v2:free",
+        "name": "NVIDIA: Nemotron Nano 9B V2 (free)",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "moonshotai/kimi-k2-0905",
+        "name": "MoonshotAI: Kimi K2 0905",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-30b-a3b-thinking-2507",
+        "name": "Qwen: Qwen3 30B A3B Thinking 2507",
+        "contextLength": 81920,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "nousresearch/hermes-4-70b",
+        "name": "Nous: Hermes 4 70B",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "nousresearch/hermes-4-405b",
+        "name": "Nous: Hermes 4 405B",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "deepseek/deepseek-chat-v3.1",
+        "name": "DeepSeek: DeepSeek V3.1",
+        "contextLength": 163840,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "mistralai/mistral-medium-3.1",
+        "name": "Mistral: Mistral Medium 3.1",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "z-ai/glm-4.5v",
+        "name": "Z.ai: GLM 4.5V",
+        "contextLength": 65536,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "ai21/jamba-large-1.7",
+        "name": "AI21: Jamba Large 1.7",
+        "contextLength": 256000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-5",
+        "name": "OpenAI: GPT-5",
+        "contextLength": 400000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-5:batch",
+        "name": "OpenAI: GPT-5 (batch)",
+        "contextLength": 400000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-5-mini",
+        "name": "OpenAI: GPT-5 Mini",
+        "contextLength": 400000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-5-mini:batch",
+        "name": "OpenAI: GPT-5 Mini (batch)",
+        "contextLength": 400000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-5-nano",
+        "name": "OpenAI: GPT-5 Nano",
+        "contextLength": 400000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-5-nano:batch",
+        "name": "OpenAI: GPT-5 Nano (batch)",
+        "contextLength": 400000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-oss-120b",
+        "name": "OpenAI: gpt-oss-120b",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-oss-20b",
+        "name": "OpenAI: gpt-oss-20b",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-oss-20b:free",
+        "name": "OpenAI: gpt-oss-20b (free)",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "anthropic/claude-opus-4.1",
+        "name": "Anthropic: Claude Opus 4.1",
+        "contextLength": 200000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "anthropic/claude-opus-4.1:batch",
+        "name": "Anthropic: Claude Opus 4.1 (batch)",
+        "contextLength": 200000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "mistralai/codestral-2508",
+        "name": "Mistral: Codestral 2508",
+        "contextLength": 256000,
+        "inputModalities": [
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-coder-30b-a3b-instruct",
+        "name": "Qwen: Qwen3 Coder 30B A3B Instruct",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-30b-a3b-instruct-2507",
+        "name": "Qwen: Qwen3 30B A3B Instruct 2507",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "z-ai/glm-4.5",
+        "name": "Z.ai: GLM 4.5",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "z-ai/glm-4.5-air",
+        "name": "Z.ai: GLM 4.5 Air",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-235b-a22b-thinking-2507",
+        "name": "Qwen: Qwen3 235B A22B Thinking 2507",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-coder",
+        "name": "Qwen: Qwen3 Coder 480B A35B",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "bytedance/ui-tars-1.5-7b",
+        "name": "ByteDance: UI-TARS 7B ",
+        "contextLength": 128000,
+        "inputModalities": [
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "google/gemini-2.5-flash-lite",
+        "name": "Google: Gemini 2.5 Flash Lite",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "file",
+          "audio",
+          "video"
+        ]
+      },
+      {
+        "id": "google/gemini-2.5-flash-lite:batch",
+        "name": "Google: Gemini 2.5 Flash Lite (batch)",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "file",
+          "audio",
+          "video"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-235b-a22b-2507",
+        "name": "Qwen: Qwen3 235B A22B Instruct 2507",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "moonshotai/kimi-k2",
+        "name": "MoonshotAI: Kimi K2 0711",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
+        "name": "Venice: Uncensored",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "tencent/hunyuan-a13b-instruct",
+        "name": "Tencent: Hunyuan A13B Instruct",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "morph/morph-v3-large",
+        "name": "Morph: Morph V3 Large",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "morph/morph-v3-fast",
+        "name": "Morph: Morph V3 Fast",
+        "contextLength": 81920,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "baidu/ernie-4.5-vl-424b-a47b",
+        "name": "Baidu: ERNIE 4.5 VL 424B A47B ",
+        "contextLength": 123000,
+        "inputModalities": [
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "mistralai/mistral-small-3.2-24b-instruct",
+        "name": "Mistral: Mistral Small 3.2 24B",
+        "contextLength": 256000,
+        "inputModalities": [
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "minimax/minimax-m1",
+        "name": "MiniMax: MiniMax M1",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "google/gemini-2.5-flash",
+        "name": "Google: Gemini 2.5 Flash",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "file",
+          "image",
+          "text",
+          "audio",
+          "video"
+        ]
+      },
+      {
+        "id": "google/gemini-2.5-flash:batch",
+        "name": "Google: Gemini 2.5 Flash (batch)",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "file",
+          "image",
+          "text",
+          "audio",
+          "video"
+        ]
+      },
+      {
+        "id": "google/gemini-2.5-pro",
+        "name": "Google: Gemini 2.5 Pro",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "file",
+          "audio",
+          "video"
+        ]
+      },
+      {
+        "id": "google/gemini-2.5-pro:batch",
+        "name": "Google: Gemini 2.5 Pro (batch)",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "file",
+          "audio",
+          "video"
+        ]
+      },
+      {
+        "id": "openai/o3-pro",
+        "name": "OpenAI: o3 Pro",
+        "contextLength": 200000,
+        "inputModalities": [
+          "text",
+          "file",
+          "image"
+        ]
+      },
+      {
+        "id": "openai/o3-pro:batch",
+        "name": "OpenAI: o3 Pro (batch)",
+        "contextLength": 200000,
+        "inputModalities": [
+          "text",
+          "file",
+          "image"
+        ]
+      },
+      {
+        "id": "google/gemini-2.5-pro-preview",
+        "name": "Google: Gemini 2.5 Pro Preview 06-05",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "file",
+          "image",
+          "text",
+          "audio"
+        ]
+      },
+      {
+        "id": "deepseek/deepseek-r1-0528",
+        "name": "DeepSeek: R1 0528",
+        "contextLength": 163840,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "anthropic/claude-opus-4",
+        "name": "Anthropic: Claude Opus 4",
+        "contextLength": 200000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "anthropic/claude-sonnet-4",
+        "name": "Anthropic: Claude Sonnet 4",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "google/gemma-3n-e4b-it",
+        "name": "Google: Gemma 3n 4B",
+        "contextLength": 32768,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "mistralai/mistral-medium-3",
+        "name": "Mistral: Mistral Medium 3",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "google/gemini-2.5-pro-preview-05-06",
+        "name": "Google: Gemini 2.5 Pro Preview 05-06",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image",
+          "file",
+          "audio",
+          "video"
+        ]
+      },
+      {
+        "id": "arcee-ai/virtuoso-large",
+        "name": "Arcee AI: Virtuoso Large",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "meta-llama/llama-guard-4-12b",
+        "name": "Meta: Llama Guard 4 12B",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "image",
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-30b-a3b",
+        "name": "Qwen: Qwen3 30B A3B",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-8b",
+        "name": "Qwen: Qwen3 8B",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-14b",
+        "name": "Qwen: Qwen3 14B",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-32b",
+        "name": "Qwen: Qwen3 32B",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen3-235b-a22b",
+        "name": "Qwen: Qwen3 235B A22B",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/o4-mini-high",
+        "name": "OpenAI: o4 Mini High",
+        "contextLength": 200000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/o4-mini-high:batch",
+        "name": "OpenAI: o4 Mini High (batch)",
+        "contextLength": 200000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/o3",
+        "name": "OpenAI: o3",
+        "contextLength": 200000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/o3:batch",
+        "name": "OpenAI: o3 (batch)",
+        "contextLength": 200000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/o4-mini",
+        "name": "OpenAI: o4 Mini",
+        "contextLength": 200000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/o4-mini:batch",
+        "name": "OpenAI: o4 Mini (batch)",
+        "contextLength": 200000,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-4.1",
+        "name": "OpenAI: GPT-4.1",
+        "contextLength": 1047576,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-4.1:batch",
+        "name": "OpenAI: GPT-4.1 (batch)",
+        "contextLength": 1047576,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-4.1-mini",
+        "name": "OpenAI: GPT-4.1 Mini",
+        "contextLength": 1047576,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-4.1-mini:batch",
+        "name": "OpenAI: GPT-4.1 Mini (batch)",
+        "contextLength": 1047576,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-4.1-nano",
+        "name": "OpenAI: GPT-4.1 Nano",
+        "contextLength": 1047576,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-4.1-nano:batch",
+        "name": "OpenAI: GPT-4.1 Nano (batch)",
+        "contextLength": 1047576,
+        "inputModalities": [
+          "image",
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "meta-llama/llama-4-maverick",
+        "name": "Meta: Llama 4 Maverick",
+        "contextLength": 1048576,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "meta-llama/llama-4-scout",
+        "name": "Meta: Llama 4 Scout",
+        "contextLength": 1310720,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "deepseek/deepseek-chat-v3-0324",
+        "name": "DeepSeek: DeepSeek V3 0324",
+        "contextLength": 163840,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/o1-pro",
+        "name": "OpenAI: o1-pro",
+        "contextLength": 200000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/o1-pro:batch",
+        "name": "OpenAI: o1-pro (batch)",
+        "contextLength": 200000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "mistralai/mistral-small-3.1-24b-instruct",
+        "name": "Mistral: Mistral Small 3.1 24B",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "google/gemma-3-4b-it",
+        "name": "Google: Gemma 3 4B",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "google/gemma-3-12b-it",
+        "name": "Google: Gemma 3 12B",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "cohere/command-a",
+        "name": "Cohere: Command A",
+        "contextLength": 256000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "rekaai/reka-flash-3",
+        "name": "Reka Flash 3",
+        "contextLength": 65536,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "google/gemma-3-27b-it",
+        "name": "Google: Gemma 3 27B",
+        "contextLength": 262144,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "thedrummer/skyfall-36b-v2",
+        "name": "TheDrummer: Skyfall 36B V2",
+        "contextLength": 32768,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "perplexity/sonar-reasoning-pro",
+        "name": "Perplexity: Sonar Reasoning Pro",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "perplexity/sonar-pro",
+        "name": "Perplexity: Sonar Pro",
+        "contextLength": 200000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "perplexity/sonar-deep-research",
+        "name": "Perplexity: Sonar Deep Research",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "mistralai/mistral-saba",
+        "name": "Mistral: Saba",
+        "contextLength": 32768,
+        "inputModalities": [
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/o3-mini-high",
+        "name": "OpenAI: o3 Mini High",
+        "contextLength": 200000,
+        "inputModalities": [
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/o3-mini-high:batch",
+        "name": "OpenAI: o3 Mini High (batch)",
+        "contextLength": 200000,
+        "inputModalities": [
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "aion-labs/aion-rp-llama-3.1-8b",
+        "name": "AionLabs: Aion-RP 1.0 (8B)",
+        "contextLength": 32768,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen2.5-vl-72b-instruct",
+        "name": "Qwen: Qwen2.5 VL 72B Instruct",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "qwen/qwen-plus",
+        "name": "Qwen: Qwen-Plus",
+        "contextLength": 1000000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/o3-mini",
+        "name": "OpenAI: o3 Mini",
+        "contextLength": 200000,
+        "inputModalities": [
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/o3-mini:batch",
+        "name": "OpenAI: o3 Mini (batch)",
+        "contextLength": 200000,
+        "inputModalities": [
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "mistralai/mistral-small-24b-instruct-2501",
+        "name": "Mistral: Mistral Small 3",
+        "contextLength": 32768,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "perplexity/sonar",
+        "name": "Perplexity: Sonar",
+        "contextLength": 127072,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "deepseek/deepseek-r1-distill-llama-70b",
+        "name": "DeepSeek: R1 Distill Llama 70B",
+        "contextLength": 8192,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "deepseek/deepseek-r1",
+        "name": "DeepSeek: R1",
+        "contextLength": 64000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "minimax/minimax-01",
+        "name": "MiniMax: MiniMax-01",
+        "contextLength": 1000192,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "microsoft/phi-4",
+        "name": "Microsoft: Phi 4",
+        "contextLength": 16384,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "deepseek/deepseek-chat",
+        "name": "DeepSeek: DeepSeek V3",
+        "contextLength": 163840,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "sao10k/l3.3-euryale-70b",
+        "name": "Sao10K: Llama 3.3 Euryale 70B",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/o1",
+        "name": "OpenAI: o1",
+        "contextLength": 200000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/o1:batch",
+        "name": "OpenAI: o1 (batch)",
+        "contextLength": 200000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "cohere/command-r7b-12-2024",
+        "name": "Cohere: Command R7B (12-2024)",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "meta-llama/llama-3.3-70b-instruct",
+        "name": "Meta: Llama 3.3 70B Instruct",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "amazon/nova-lite-v1",
+        "name": "Amazon: Nova Lite 1.0",
+        "contextLength": 300000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "amazon/nova-micro-v1",
+        "name": "Amazon: Nova Micro 1.0",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "amazon/nova-pro-v1",
+        "name": "Amazon: Nova Pro 1.0",
+        "contextLength": 300000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "openai/gpt-4o-2024-11-20",
+        "name": "OpenAI: GPT-4o (2024-11-20)",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "mistralai/mistral-large-2407",
+        "name": "Mistral Large 2407",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "qwen/qwen-2.5-coder-32b-instruct",
+        "name": "Qwen2.5 Coder 32B Instruct",
+        "contextLength": 32768,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "thedrummer/unslopnemo-12b",
+        "name": "TheDrummer: UnslopNemo 12B",
+        "contextLength": 1024000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "anthracite-org/magnum-v4-72b",
+        "name": "Magnum v4 72B",
+        "contextLength": 32768,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen-2.5-7b-instruct",
+        "name": "Qwen: Qwen2.5 7B Instruct",
+        "contextLength": 32768,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "thedrummer/rocinante-12b",
+        "name": "TheDrummer: Rocinante 12B",
+        "contextLength": 65536,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "meta-llama/llama-3.2-1b-instruct",
+        "name": "Meta: Llama 3.2 1B Instruct",
+        "contextLength": 60000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "meta-llama/llama-3.2-3b-instruct",
+        "name": "Meta: Llama 3.2 3B Instruct",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "qwen/qwen-2.5-72b-instruct",
+        "name": "Qwen2.5 72B Instruct",
+        "contextLength": 32768,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "cohere/command-r-08-2024",
+        "name": "Cohere: Command R (08-2024)",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "cohere/command-r-plus-08-2024",
+        "name": "Cohere: Command R+ (08-2024)",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "sao10k/l3.1-euryale-70b",
+        "name": "Sao10K: Llama 3.1 Euryale 70B v2.2",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "nousresearch/hermes-3-llama-3.1-70b",
+        "name": "Nous: Hermes 3 70B Instruct",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "nousresearch/hermes-3-llama-3.1-405b",
+        "name": "Nous: Hermes 3 405B Instruct",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "sao10k/l3-lunaris-8b",
+        "name": "Sao10K: Llama 3 8B Lunaris",
+        "contextLength": 8192,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-4o-2024-08-06",
+        "name": "OpenAI: GPT-4o (2024-08-06)",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "meta-llama/llama-3.1-70b-instruct",
+        "name": "Meta: Llama 3.1 70B Instruct",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "meta-llama/llama-3.1-8b-instruct",
+        "name": "Meta: Llama 3.1 8B Instruct",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "mistralai/mistral-nemo",
+        "name": "Mistral: Mistral Nemo",
+        "contextLength": 131072,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-4o-mini",
+        "name": "OpenAI: GPT-4o-mini",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-4o-mini-2024-07-18",
+        "name": "OpenAI: GPT-4o-mini (2024-07-18)",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-4o-mini:batch",
+        "name": "OpenAI: GPT-4o-mini (batch)",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "google/gemma-2-27b-it",
+        "name": "Google: Gemma 2 27B",
+        "contextLength": 8192,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-4o",
+        "name": "OpenAI: GPT-4o",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-4o-2024-05-13",
+        "name": "OpenAI: GPT-4o (2024-05-13)",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-4o:batch",
+        "name": "OpenAI: GPT-4o (batch)",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text",
+          "image",
+          "file"
+        ]
+      },
+      {
+        "id": "mistralai/mixtral-8x22b-instruct",
+        "name": "Mistral: Mixtral 8x22B Instruct",
+        "contextLength": 65536,
+        "inputModalities": [
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "microsoft/wizardlm-2-8x22b",
+        "name": "WizardLM-2 8x22B",
+        "contextLength": 65535,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-4-turbo",
+        "name": "OpenAI: GPT-4 Turbo",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "openai/gpt-4-turbo:batch",
+        "name": "OpenAI: GPT-4 Turbo (batch)",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "anthropic/claude-3-haiku",
+        "name": "Anthropic: Claude 3 Haiku",
+        "contextLength": 200000,
+        "inputModalities": [
+          "text",
+          "image"
+        ]
+      },
+      {
+        "id": "mistralai/mistral-large",
+        "name": "Mistral Large",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text",
+          "file"
+        ]
+      },
+      {
+        "id": "openai/gpt-3.5-turbo-0613",
+        "name": "OpenAI: GPT-3.5 Turbo (older v0613)",
+        "contextLength": 4095,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-4-turbo-preview",
+        "name": "OpenAI: GPT-4 Turbo Preview",
+        "contextLength": 128000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openrouter/auto",
+        "name": "Auto Router",
+        "contextLength": 2000000,
+        "inputModalities": [
+          "text",
+          "image",
+          "audio",
+          "file",
+          "video"
+        ]
+      },
+      {
+        "id": "openai/gpt-3.5-turbo-instruct",
+        "name": "OpenAI: GPT-3.5 Turbo Instruct",
+        "contextLength": 4095,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-3.5-turbo-16k",
+        "name": "OpenAI: GPT-3.5 Turbo 16k",
+        "contextLength": 16385,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "mancer/weaver",
+        "name": "Mancer: Weaver (alpha)",
+        "contextLength": 8000,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "undi95/remm-slerp-l2-13b",
+        "name": "ReMM SLERP 13B",
+        "contextLength": 6144,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "gryphe/mythomax-l2-13b",
+        "name": "MythoMax 13B",
+        "contextLength": 8192,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-3.5-turbo",
+        "name": "OpenAI: GPT-3.5 Turbo",
+        "contextLength": 16385,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-3.5-turbo:batch",
+        "name": "OpenAI: GPT-3.5 Turbo (batch)",
+        "contextLength": 16385,
+        "inputModalities": [
+          "text"
+        ]
+      },
+      {
+        "id": "openai/gpt-4",
+        "name": "OpenAI: GPT-4",
+        "contextLength": 8191,
+        "inputModalities": [
+          "text"
+        ]
+      }
+    ]
+  },
+  {
+    "provider": "google",
+    "models": [
+      {
+        "id": "gemini-2.5-flash",
+        "name": "Gemini 2.5 Flash",
+        "contextLength": 1048576,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "createCachedContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-2.5-pro",
+        "name": "Gemini 2.5 Pro",
+        "contextLength": 1048576,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "createCachedContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-2.5-flash-preview-tts",
+        "name": "Gemini 2.5 Flash Preview TTS",
+        "contextLength": 8192,
+        "methods": [
+          "countTokens",
+          "generateContent"
+        ]
+      },
+      {
+        "id": "gemini-2.5-pro-preview-tts",
+        "name": "Gemini 2.5 Pro Preview TTS",
+        "contextLength": 8192,
+        "methods": [
+          "countTokens",
+          "generateContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemma-4-26b-a4b-it",
+        "name": "Gemma 4 26B A4B IT",
+        "contextLength": 262144,
+        "methods": [
+          "generateContent",
+          "countTokens"
+        ]
+      },
+      {
+        "id": "gemma-4-31b-it",
+        "name": "Gemma 4 31B IT",
+        "contextLength": 262144,
+        "methods": [
+          "generateContent",
+          "countTokens"
+        ]
+      },
+      {
+        "id": "gemini-flash-latest",
+        "name": "Gemini Flash Latest",
+        "contextLength": 1048576,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "createCachedContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-flash-lite-latest",
+        "name": "Gemini Flash-Lite Latest",
+        "contextLength": 1048576,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "createCachedContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-pro-latest",
+        "name": "Gemini Pro Latest",
+        "contextLength": 1048576,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "createCachedContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-2.5-flash-lite",
+        "name": "Gemini 2.5 Flash-Lite",
+        "contextLength": 1048576,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "createCachedContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-2.5-flash-image",
+        "name": "Nano Banana",
+        "contextLength": 32768,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-3-flash-preview",
+        "name": "Gemini 3 Flash Preview",
+        "contextLength": 1048576,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "createCachedContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-3.1-pro-preview",
+        "name": "Gemini 3.1 Pro Preview",
+        "contextLength": 1048576,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "createCachedContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-3.1-pro-preview-customtools",
+        "name": "Gemini 3.1 Pro Preview Custom Tools",
+        "contextLength": 1048576,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "createCachedContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-3.1-flash-lite-preview",
+        "name": "Gemini 3.1 Flash Lite Preview",
+        "contextLength": 1048576,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "createCachedContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-3.1-flash-lite",
+        "name": "Gemini 3.1 Flash Lite",
+        "contextLength": 1048576,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "createCachedContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-3-pro-image-preview",
+        "name": "Nano Banana Pro",
+        "contextLength": 131072,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-3-pro-image",
+        "name": "Nano Banana Pro",
+        "contextLength": 131072,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "nano-banana-pro-preview",
+        "name": "Nano Banana Pro",
+        "contextLength": 131072,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-3.1-flash-image-preview",
+        "name": "Nano Banana 2",
+        "contextLength": 65536,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-3.1-flash-image",
+        "name": "Nano Banana 2",
+        "contextLength": 65536,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-3.1-flash-lite-image",
+        "name": "Nano Banana 2 Lite",
+        "contextLength": 65536,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-3.5-flash",
+        "name": "Gemini 3.5 Flash",
+        "contextLength": 1048576,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "createCachedContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-3.5-flash-lite",
+        "name": "Gemini 3.5 Flash Lite",
+        "contextLength": 1048576,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "createCachedContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-omni-flash-preview",
+        "name": "Gemini Omni Flash Preview",
+        "contextLength": 131072,
+        "methods": [
+          "generateContent",
+          "countTokens"
+        ]
+      },
+      {
+        "id": "gemini-3.6-flash",
+        "name": "Gemini 3.6 Flash",
+        "contextLength": 1048576,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "createCachedContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-3.7-flash",
+        "name": "Gemini 3.7 Flash",
+        "contextLength": 1048576,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "createCachedContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "lyria-3-clip-preview",
+        "name": "Lyria 3 Clip Preview",
+        "contextLength": 1048576,
+        "methods": [
+          "generateContent",
+          "countTokens"
+        ]
+      },
+      {
+        "id": "lyria-3-pro-preview",
+        "name": "Lyria 3 Pro Preview",
+        "contextLength": 1048576,
+        "methods": [
+          "generateContent",
+          "countTokens"
+        ]
+      },
+      {
+        "id": "gemini-3.1-flash-tts-preview",
+        "name": "Gemini 3.1 Flash TTS Preview",
+        "contextLength": 8192,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-robotics-er-1.6-preview",
+        "name": "Gemini Robotics-ER 1.6 Preview",
+        "contextLength": 131072,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "createCachedContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-robotics-er-2-preview",
+        "name": "Gemini Robotics-ER 2 Preview",
+        "contextLength": 131072,
+        "methods": [
+          "generateContent",
+          "countTokens",
+          "createCachedContent",
+          "batchGenerateContent"
+        ]
+      },
+      {
+        "id": "gemini-2.5-computer-use-preview-10-2025",
+        "name": "Gemini 2.5 Computer Use Preview 10-2025",
+        "contextLength": 131072,
+        "methods": [
+          "generateContent",
+          "countTokens"
+        ]
+      },
+      {
+        "id": "antigravity-preview-05-2026",
+        "name": "Antigravity Agent Preview",
+        "contextLength": 131072,
+        "methods": [
+          "generateContent",
+          "countTokens"
+        ]
+      },
+      {
+        "id": "deep-research-max-preview-04-2026",
+        "name": "Deep Research Max Preview (Apr-21-2026)",
+        "contextLength": 131072,
+        "methods": [
+          "generateContent",
+          "countTokens"
+        ]
+      },
+      {
+        "id": "deep-research-preview-04-2026",
+        "name": "Deep Research Preview (Apr-21-2026)",
+        "contextLength": 131072,
+        "methods": [
+          "generateContent",
+          "countTokens"
+        ]
+      },
+      {
+        "id": "deep-research-pro-preview-12-2025",
+        "name": "Deep Research Pro Preview (Dec-12-2025)",
+        "contextLength": 131072,
+        "methods": [
+          "generateContent",
+          "countTokens"
+        ]
+      }
+    ]
+  },
+  {
+    "provider": "groq",
+    "models": [
+      {
+        "id": "meta-llama/llama-prompt-guard-2-86m",
+        "name": "meta-llama/llama-prompt-guard-2-86m",
+        "contextLength": 512
+      },
+      {
+        "id": "canopylabs/orpheus-arabic-saudi",
+        "name": "canopylabs/orpheus-arabic-saudi",
+        "contextLength": 4000
+      },
+      {
+        "id": "groq/compound-mini",
+        "name": "groq/compound-mini",
+        "contextLength": 131072
+      },
+      {
+        "id": "whisper-large-v3",
+        "name": "whisper-large-v3",
+        "contextLength": 448
+      },
+      {
+        "id": "openai/gpt-oss-120b",
+        "name": "openai/gpt-oss-120b",
+        "contextLength": 131072
+      },
+      {
+        "id": "qwen/qwen3.6-27b",
+        "name": "qwen/qwen3.6-27b",
+        "contextLength": 131072
+      },
+      {
+        "id": "openai/gpt-oss-safeguard-20b",
+        "name": "openai/gpt-oss-safeguard-20b",
+        "contextLength": 131072
+      },
+      {
+        "id": "canopylabs/orpheus-v1-english",
+        "name": "canopylabs/orpheus-v1-english",
+        "contextLength": 4000
+      },
+      {
+        "id": "meta-llama/llama-prompt-guard-2-22m",
+        "name": "meta-llama/llama-prompt-guard-2-22m",
+        "contextLength": 512
+      },
+      {
+        "id": "groq/compound",
+        "name": "groq/compound",
+        "contextLength": 131072
+      },
+      {
+        "id": "allam-2-7b",
+        "name": "allam-2-7b",
+        "contextLength": 4096
+      },
+      {
+        "id": "openai/gpt-oss-20b",
+        "name": "openai/gpt-oss-20b",
+        "contextLength": 131072
+      },
+      {
+        "id": "whisper-large-v3-turbo",
+        "name": "whisper-large-v3-turbo",
+        "contextLength": 448
+      }
+    ]
+  }
+]

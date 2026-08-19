@@ -1,0 +1,34 @@
+{
+  "verifiedAt": "2026-08-19T08:40:20.555Z",
+  "role": "smart",
+  "fallbackUsed": true,
+  "attempts": [
+    {
+      "provider": "google",
+      "status": "failed",
+      "category": "MODEL",
+      "http": 404
+    },
+    {
+      "provider": "openrouter",
+      "status": "failed",
+      "category": "QUOTA",
+      "http": 429
+    },
+    {
+      "provider": "openrouter",
+      "status": "failed",
+      "category": "QUOTA",
+      "http": 429
+    },
+    {
+      "provider": "groq",
+      "status": "ready",
+      "category": null,
+      "http": null
+    }
+  ],
+  "answeredByProvider": "groq",
+  "modelUsed": "GPT-OSS 120B",
+  "responseReceived": true
+}
