@@ -64,8 +64,8 @@ describe("AIChatBox user flows", () => {
     const onCancelStream = vi.fn();
     const { rerender } = render(<AIChatBox messages={[reply]} onSendMessage={vi.fn()} onCopyAssistant={onCopyAssistant} onRegenerate={onRegenerate} onCancelStream={onCancelStream} />);
 
-    await user.click(screen.getByRole("button", { name: "Копировать ответ" }));
-    await user.click(screen.getByRole("button", { name: "Перегенерировать ответ" }));
+    await user.click(screen.getByRole("button", { name: "Копировать" }));
+    await user.click(screen.getByRole("button", { name: "Ещё вариант" }));
 
     expect(onCopyAssistant).toHaveBeenCalledWith(reply);
     expect(onRegenerate).toHaveBeenCalledWith(reply);

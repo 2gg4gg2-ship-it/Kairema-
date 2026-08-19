@@ -22,6 +22,7 @@ const fixtures = vi.hoisted(() => ({
 vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ isAuthenticated: true, loading: false }) }));
 vi.mock("@/const", () => ({ startLogin: vi.fn() }));
 vi.mock("@/lib/runtime-auth", () => ({ runtimeAuthHeaders: () => ({ Authorization: "Bearer test-session" }) }));
+vi.mock("@/contexts/ThemeContext", () => ({ useTheme: () => ({ theme: "dark", toggleTheme: vi.fn() }) }));
 vi.mock("@/lib/chat-export", () => ({
   prepareChatMarkdown: fixtures.prepareMarkdown,
   prepareChatPdf: fixtures.preparePdf,
@@ -36,6 +37,11 @@ vi.mock("@/lib/trpc", () => ({
       { key: "context", modelId: "context", label: "Kairema Контекст", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" } },
       { key: "flagship", modelId: "flagship", label: "Kairema Флагман", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" } },
     ] }) } },
+    settings: { get: { useQuery: () => ({ data: { language: "ru", theme: "dark", responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, defaultRole: "fast", webSearch: 0 } }) }, update: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
+    memory: { get: { useQuery: () => ({ data: { profile: "", enabled: 1, autoExtract: 1, facts: [] } }) }, update: { useMutation: () => ({ mutateAsync: vi.fn() }) }, addFact: { useMutation: () => ({ mutateAsync: vi.fn() }) }, deleteFact: { useMutation: () => ({ mutateAsync: vi.fn() }) }, clear: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
+    webSearch: { status: { useQuery: () => ({ data: { available: false, reason: "Поиск сейчас недоступен" } }) } },
+    search: { query: { useQuery: () => ({ data: [] }) } },
+    attachments: { list: { useQuery: () => ({ data: [] }) }, upload: { useMutation: () => ({ mutateAsync: vi.fn() }) }, delete: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
     chats: {
       list: { useQuery: () => ({ data: fixtures.sessions, isLoading: false }) },
       messages: { useQuery: () => ({ data: fixtures.messages }) },
@@ -46,7 +52,7 @@ vi.mock("@/lib/trpc", () => ({
       create: { useMutation: () => ({ mutateAsync: fixtures.createExport }) },
       delete: { useMutation: () => ({ mutateAsync: fixtures.deleteExport }) },
     },
-    useUtils: () => ({ chats: { messages: { invalidate: fixtures.invalidateMessages }, list: { invalidate: fixtures.invalidateSessions } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: vi.fn() } } }),
+    useUtils: () => ({ settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, list: { invalidate: fixtures.invalidateSessions } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: vi.fn() } } }),
   },
 }));
 vi.mock("@/components/ui/dialog", () => ({
@@ -154,11 +160,11 @@ describe("Home integration flows", () => {
     vi.stubGlobal("fetch", fetchSpy);
     render(<Home />);
 
-    await user.click(screen.getByRole("button", { name: "Копировать ответ" }));
+    await user.click(screen.getByRole("button", { name: "Копировать" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("Старый ответ Kairema"));
     expect(screen.getByRole("status").textContent).toContain("Ответ скопирован");
 
-    await user.click(screen.getByRole("button", { name: "Перегенерировать ответ" }));
+    await user.click(screen.getByRole("button", { name: "Ещё вариант" }));
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
     const payload = JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined)?.body));
     expect(payload).toMatchObject({ content: "Старое сообщение пользователя", regenerateMessageId: 2, sessionId: fixtures.sessionId });

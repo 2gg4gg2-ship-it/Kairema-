@@ -1,4 +1,5 @@
-export type StreamDonePayload = { content?: string; modelUsed?: string; label?: string };
+export type StreamSource = { title: string; url: string };
+export type StreamDonePayload = { content?: string; modelUsed?: string; label?: string; sources?: StreamSource[] };
 
 export function sseEventFromBlock(block: string) {
   const event = block.split(/\r?\n/).find((line) => line.startsWith("event:"))?.slice(6).trim() ?? "message";

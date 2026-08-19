@@ -3,6 +3,7 @@ import { z } from "zod";
 import { appendChatMessage, getOwnedChatSession, listSessionMessages, updateChatTitle } from "./db";
 import { sdk } from "./_core/sdk";
 import { MODEL_IDS, chatWithRoleStream, publicChatError } from "./providers";
+import { buildChatContext, extractMemoryFacts } from "./chat-context";
 
 const streamInputSchema = z.object({
   sessionId: z.string().uuid(),
@@ -10,6 +11,8 @@ const streamInputSchema = z.object({
   content: z.string().trim().min(1).max(16_000),
   regenerateMessageId: z.number().int().positive().optional(),
   settings: z.object({ style: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional() }).optional(),
+  attachmentIds: z.array(z.string().uuid()).max(4).optional(),
+  webSearch: z.boolean().optional(),
 });
 
 export function writeEvent(res: Response, event: string, payload: unknown) {
@@ -29,6 +32,8 @@ type StreamDependencies = {
   updateChatTitle: typeof updateChatTitle;
   listSessionMessages: typeof listSessionMessages;
   chatWithRoleStream: typeof chatWithRoleStream;
+  buildChatContext: typeof buildChatContext;
+  extractMemoryFacts: typeof extractMemoryFacts;
 };
 
 const defaultDependencies: StreamDependencies = {
@@ -38,6 +43,8 @@ const defaultDependencies: StreamDependencies = {
   updateChatTitle,
   listSessionMessages,
   chatWithRoleStream,
+  buildChatContext,
+  extractMemoryFacts,
 };
 
 export function createChatStreamHandler(overrides: Partial<StreamDependencies> = {}): RequestHandler {
@@ -59,6 +66,8 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
     try {
       const session = await dependencies.getOwnedChatSession(user.id, input.sessionId);
       if (!session) throw new Error("Чат не найден или недоступен.");
+      const storedSettings = await dependencies.buildChatContext(user.id, input.sessionId, { attachmentIds: input.attachmentIds, webSearch: input.webSearch, query: input.content });
+      const effectiveSettings = { ...storedSettings, ...(input.settings?.style ? { style: input.settings.style } : {}) };
       let history;
       if (input.regenerateMessageId) {
         const currentHistory = await dependencies.listSessionMessages(user.id, input.sessionId);
@@ -96,14 +105,15 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
         const result = await dependencies.chatWithRoleStream(
           input.modelId,
           history.map((message) => ({ role: message.role, content: message.content })),
-          input.settings,
+          effectiveSettings,
           (delta: string) => {
             if (!closed) writeEvent(res, "delta", { content: delta });
           },
           controller.signal,
         );
         if (!closed) {
-          await dependencies.appendChatMessage(user.id, input.sessionId, "assistant", result.content, result.modelUsed);
+          await dependencies.appendChatMessage(user.id, input.sessionId, "assistant", result.content, result.modelUsed, result.sources?.length ? JSON.stringify({ sources: result.sources }) : undefined);
+          if (!input.regenerateMessageId) await dependencies.extractMemoryFacts(user.id, input.content).catch(() => undefined);
           writeEvent(res, "done", result);
           finished = true;
           res.end();

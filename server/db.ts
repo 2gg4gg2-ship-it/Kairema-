@@ -1,7 +1,7 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
-import { ChatExport, ChatMessageRecord, ChatSession, InsertUser, ProviderHealthRecord, chatExports, chatSessions, messages, providerHealth, users } from "../drizzle/schema";
+import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, InsertUser, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, chatAttachments, chatExports, chatSessions, memoryFacts, memoryProfiles, messages, providerHealth, userSettings, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -81,10 +81,10 @@ export async function listSessionMessages(userId: number, sessionId: string): Pr
   return db.select().from(messages).where(eq(messages.sessionId, sessionId)).orderBy(asc(messages.createdAt), asc(messages.id));
 }
 
-export async function appendChatMessage(userId: number, sessionId: string, role: "user" | "assistant", content: string, modelId?: string): Promise<void> {
+export async function appendChatMessage(userId: number, sessionId: string, role: "user" | "assistant", content: string, modelId?: string, metadata?: string): Promise<void> {
   const db = requireDatabase(await getDb());
   requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
-  await db.insert(messages).values({ sessionId, role, content, modelId: modelId ?? null });
+  await db.insert(messages).values({ sessionId, role, content, modelId: modelId ?? null, metadata: metadata ?? null });
   await db.update(chatSessions).set({ updatedAt: new Date(), ...(modelId ? { modelId } : {}) }).where(eq(chatSessions.id, sessionId));
 }
 
@@ -143,4 +143,136 @@ export async function upsertProviderHealth(input: Omit<ProviderHealthRecord, "up
       blockedUntil: input.blockedUntil,
     },
   });
+}
+
+export type UserSettingsPatch = Partial<Pick<UserSettings, "language" | "theme" | "responseStyle" | "responseLength" | "quickReplies" | "effort" | "thinking" | "defaultRole" | "webSearch">>;
+export type MemoryProfilePatch = Partial<Pick<MemoryProfile, "enabled" | "autoExtract" | "profile" | "summary">>;
+
+async function ensureUserSettings(userId: number): Promise<void> {
+  const db = requireDatabase(await getDb());
+  await db.insert(userSettings).values({ userId }).onDuplicateKeyUpdate({ set: { userId } });
+}
+
+export async function getUserSettings(userId: number): Promise<UserSettings> {
+  const db = requireDatabase(await getDb());
+  await ensureUserSettings(userId);
+  const record = await db.select().from(userSettings).where(eq(userSettings.userId, userId)).limit(1);
+  if (!record[0]) throw new Error("Не удалось подготовить настройки пользователя.");
+  return record[0];
+}
+
+export async function updateUserSettings(userId: number, patch: UserSettingsPatch): Promise<UserSettings> {
+  const db = requireDatabase(await getDb());
+  await ensureUserSettings(userId);
+  if (Object.keys(patch).length) await db.update(userSettings).set(patch).where(eq(userSettings.userId, userId));
+  return getUserSettings(userId);
+}
+
+async function ensureMemoryProfile(userId: number): Promise<void> {
+  const db = requireDatabase(await getDb());
+  await db.insert(memoryProfiles).values({ userId, profile: "", summary: "" }).onDuplicateKeyUpdate({ set: { userId } });
+}
+
+export async function getMemoryProfile(userId: number): Promise<MemoryProfile> {
+  const db = requireDatabase(await getDb());
+  await ensureMemoryProfile(userId);
+  const record = await db.select().from(memoryProfiles).where(eq(memoryProfiles.userId, userId)).limit(1);
+  if (!record[0]) throw new Error("Не удалось подготовить память пользователя.");
+  return record[0];
+}
+
+export async function updateMemoryProfile(userId: number, patch: MemoryProfilePatch): Promise<MemoryProfile> {
+  const db = requireDatabase(await getDb());
+  await ensureMemoryProfile(userId);
+  if (Object.keys(patch).length) await db.update(memoryProfiles).set(patch).where(eq(memoryProfiles.userId, userId));
+  return getMemoryProfile(userId);
+}
+
+export async function listMemoryFacts(userId: number): Promise<MemoryFact[]> {
+  const db = requireDatabase(await getDb());
+  return db.select().from(memoryFacts).where(eq(memoryFacts.userId, userId)).orderBy(desc(memoryFacts.updatedAt), desc(memoryFacts.createdAt));
+}
+
+export async function createMemoryFact(userId: number, fact: string, sourceMessageId?: number | null): Promise<MemoryFact | null> {
+  const db = requireDatabase(await getDb());
+  const normalized = fact.trim().replace(/\s+/g, " ").slice(0, 280);
+  if (normalized.length < 3) return null;
+  const existing = await listMemoryFacts(userId);
+  if (existing.some((item) => item.fact.toLocaleLowerCase("ru-RU") === normalized.toLocaleLowerCase("ru-RU"))) return null;
+  const record: MemoryFact = { id: randomUUID(), userId, fact: normalized, sourceMessageId: sourceMessageId ?? null, createdAt: new Date(), updatedAt: new Date() };
+  await db.insert(memoryFacts).values(record);
+  return record;
+}
+
+export async function deleteMemoryFact(userId: number, factId: string): Promise<boolean> {
+  const db = requireDatabase(await getDb());
+  const result = await db.delete(memoryFacts).where(and(eq(memoryFacts.id, factId), eq(memoryFacts.userId, userId)));
+  return Number(result[0]?.affectedRows ?? 0) > 0;
+}
+
+export async function clearMemory(userId: number): Promise<void> {
+  const db = requireDatabase(await getDb());
+  await db.delete(memoryFacts).where(eq(memoryFacts.userId, userId));
+  await updateMemoryProfile(userId, { profile: "", summary: "" });
+}
+
+export async function createChatAttachment(userId: number, input: Omit<ChatAttachment, "id" | "userId" | "createdAt">): Promise<ChatAttachment> {
+  const db = requireDatabase(await getDb());
+  requireOwnedSession(userId, await getOwnedChatSession(userId, input.sessionId));
+  const record: ChatAttachment = { ...input, id: randomUUID(), userId, createdAt: new Date() };
+  await db.insert(chatAttachments).values(record);
+  return record;
+}
+
+export async function listSessionAttachments(userId: number, sessionId: string): Promise<ChatAttachment[]> {
+  const db = requireDatabase(await getDb());
+  requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
+  return db.select().from(chatAttachments).where(and(eq(chatAttachments.userId, userId), eq(chatAttachments.sessionId, sessionId))).orderBy(asc(chatAttachments.createdAt));
+}
+
+export async function getOwnedChatAttachments(userId: number, sessionId: string, attachmentIds: string[]): Promise<ChatAttachment[]> {
+  const owned = await listSessionAttachments(userId, sessionId);
+  const wanted = new Set(attachmentIds);
+  const result = owned.filter((attachment) => wanted.has(attachment.id));
+  if (result.length !== wanted.size) throw new Error("Одно или несколько вложений не найдены или недоступны.");
+  return result;
+}
+
+export async function getOwnedChatAttachment(userId: number, attachmentId: string): Promise<ChatAttachment | undefined> {
+  const db = requireDatabase(await getDb());
+  const result = await db.select().from(chatAttachments).where(and(eq(chatAttachments.id, attachmentId), eq(chatAttachments.userId, userId))).limit(1);
+  return result[0];
+}
+
+export async function deleteOwnedChatAttachment(userId: number, attachmentId: string): Promise<boolean> {
+  const db = requireDatabase(await getDb());
+  const result = await db.delete(chatAttachments).where(and(eq(chatAttachments.id, attachmentId), eq(chatAttachments.userId, userId)));
+  return Number(result[0]?.affectedRows ?? 0) > 0;
+}
+
+function searchSnippet(content: string, query: string, maximum = 220) {
+  const lower = content.toLocaleLowerCase("ru-RU");
+  const at = lower.indexOf(query.toLocaleLowerCase("ru-RU"));
+  const start = Math.max(0, at - Math.floor(maximum / 3));
+  const raw = content.slice(start, start + maximum).replace(/\s+/g, " ").trim();
+  return `${start > 0 ? "…" : ""}${raw}${start + maximum < content.length ? "…" : ""}`;
+}
+
+export type SearchResult = { type: "chat" | "message" | "export"; id: string; sessionId?: string; title: string; snippet: string; createdAt: Date };
+
+export async function searchUserContent(userId: number, query: string): Promise<SearchResult[]> {
+  const db = requireDatabase(await getDb());
+  const term = query.trim().slice(0, 120);
+  if (term.length < 2) return [];
+  const pattern = `%${term}%`;
+  const [sessionRows, messageRows, exportRows] = await Promise.all([
+    db.select({ id: chatSessions.id, title: chatSessions.title, createdAt: chatSessions.updatedAt }).from(chatSessions).where(and(eq(chatSessions.userId, userId), like(chatSessions.title, pattern))).orderBy(desc(chatSessions.updatedAt)).limit(8),
+    db.select({ id: messages.id, sessionId: messages.sessionId, title: chatSessions.title, content: messages.content, createdAt: messages.createdAt }).from(messages).innerJoin(chatSessions, eq(messages.sessionId, chatSessions.id)).where(and(eq(chatSessions.userId, userId), like(messages.content, pattern))).orderBy(desc(messages.createdAt)).limit(12),
+    db.select({ id: chatExports.id, sessionId: chatExports.sessionId, fileName: chatExports.fileName, createdAt: chatExports.createdAt }).from(chatExports).where(and(eq(chatExports.userId, userId), like(chatExports.fileName, pattern))).orderBy(desc(chatExports.createdAt)).limit(8),
+  ]);
+  return [
+    ...sessionRows.map((row) => ({ type: "chat" as const, id: row.id, sessionId: row.id, title: row.title, snippet: row.title, createdAt: row.createdAt })),
+    ...messageRows.map((row) => ({ type: "message" as const, id: String(row.id), sessionId: row.sessionId, title: row.title, snippet: searchSnippet(row.content, term), createdAt: row.createdAt })),
+    ...exportRows.map((row) => ({ type: "export" as const, id: row.id, sessionId: row.sessionId, title: row.fileName, snippet: row.fileName, createdAt: row.createdAt })),
+  ];
 }

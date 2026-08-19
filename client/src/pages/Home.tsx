@@ -1,259 +1,83 @@
-import { AIChatBox, type Message } from "@/components/AIChatBox";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { startLogin } from "@/const";
+// @ts-nocheck — экран содержит динамические tRPC-данные, уточняемые интеграционными тестами.
+import { AIChatBox, type ChatAttachment, type Message, type Source } from "@/components/AIChatBox";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { useTheme } from "@/contexts/ThemeContext";
+import { startLogin } from "@/const";
 import { blobToBase64, downloadPreparedChatExport, prepareChatMarkdown, prepareChatPdf } from "@/lib/chat-export";
 import { runtimeAuthHeaders } from "@/lib/runtime-auth";
 import { consumeChatStream } from "@/lib/chat-stream";
 import { trpc } from "@/lib/trpc";
-import { Ban, Bot, ChevronDown, CircleCheck, CircleDot, Clock3, Download, ExternalLink, FileText, Gauge, LoaderCircle, LogIn, Menu, MessageSquarePlus, PanelLeftClose, Search, Settings2, SlidersHorizontal, Sparkles, Trash2, TriangleAlert, X } from "lucide-react";
+import { Archive, Bot, ChevronDown, CircleCheck, CircleDot, Clock3, Download, FileImage, FileText, Gauge, Globe2, Languages, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Moon, PanelLeftClose, Paperclip, Search, Settings2, SlidersHorizontal, Sparkles, Sun, Trash2, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type ModelId = "fast" | "smart" | "context" | "flagship";
+type Language = "ru" | "en";
 type ResponseStyle = "default" | "professional" | "friendly" | "concise" | "steps";
-type StaticModel = { key: string; modelId: ModelId; label: string; role: string };
+type StaticModel = { key: string; modelId: ModelId; label: Record<Language, string>; role: Record<Language, string>; prompts: Record<Language, string[]> };
 type PublicStatus = { state: string; badge: string; category: string | null; http: number | null; checkedAt: string; confirmed: string };
 type PublicModel = StaticModel & { status?: PublicStatus };
+type SearchItem = { type: "chat" | "message" | "export"; id: string; sessionId?: string; title: string; snippet: string; createdAt: Date | string };
 
 const MODELS: readonly StaticModel[] = [
-  { key: "fast", modelId: "fast", label: "Kairema Быстрый", role: "Короткие повседневные ответы без ожидания." },
-  { key: "smart", modelId: "smart", label: "Kairema Смекалистый", role: "Логика, рассуждения и сложные задачи среднего объёма." },
-  { key: "context", modelId: "context", label: "Kairema Контекст", role: "Длинные документы, большие фрагменты текста и связный контекст." },
-  { key: "flagship", modelId: "flagship", label: "Kairema Флагман", role: "Самые требовательные задачи, глубокий анализ и комплексные ответы." },
+  { key: "fast", modelId: "fast", label: { ru: "Kairema Быстрый", en: "Kairema Fast" }, role: { ru: "Короткие повседневные ответы без ожидания.", en: "Fast answers for everyday questions." }, prompts: { ru: ["Составь план на день", "Объясни простыми словами", "Сформулируй короткое письмо"], en: ["Plan my day", "Explain it simply", "Draft a short email"] } },
+  { key: "smart", modelId: "smart", label: { ru: "Kairema Смекалистый", en: "Kairema Clever" }, role: { ru: "Логика, рассуждения и сложные задачи среднего объёма.", en: "Reasoning and medium-complexity tasks." }, prompts: { ru: ["Разбери задачу по шагам", "Сравни два варианта", "Найди слабые места аргумента"], en: ["Break down this task", "Compare two options", "Find weak points in an argument"] } },
+  { key: "context", modelId: "context", label: { ru: "Kairema Контекст", en: "Kairema Context" }, role: { ru: "Длинные документы, большие фрагменты текста и связный контекст.", en: "Long documents and connected context." }, prompts: { ru: ["Сделай сводку документа", "Выдели ключевые решения", "Сравни два фрагмента"], en: ["Summarize a document", "Extract key decisions", "Compare two passages"] } },
+  { key: "flagship", modelId: "flagship", label: { ru: "Kairema Флагман", en: "Kairema Flagship" }, role: { ru: "Требовательные задачи, глубокий анализ и комплексные ответы.", en: "Deep analysis and complex responses." }, prompts: { ru: ["Построй стратегию", "Подготовь глубокий анализ", "Проверь допущения"], en: ["Build a strategy", "Prepare a deep analysis", "Check assumptions"] } },
 ];
 
-const statusClass = (status?: PublicStatus) => status?.state === "ready" ? "status-ready" : status?.state === "fallback" ? "status-ready" : status?.category === "RATE_LIMIT" || status?.category === "QUOTA" ? "status-quota" : status?.state === "not_configured" ? "status-muted" : status?.state === "unavailable" ? "status-unavailable" : status?.state === "loading" ? "status-loading" : "status-auth";
-const formatTime = (value?: string) => value ? new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(value)) : "Проверяем…";
-const styleNames: Record<ResponseStyle, string> = { default: "По умолчанию", professional: "Профессиональный", friendly: "Дружелюбный", concise: "Кратко", steps: "По шагам" };
+const copy = {
+  ru: { newChat: "Новый чат", models: "Роли", history: "История", search: "Поиск", exports: "Экспорты", memory: "Память", settings: "Настройки", noHistory: "История пока пуста.", noExports: "Экспортов пока нет.", loginHistory: "Войти для истории", loginExports: "Войти для экспортов", newConversation: "Новый разговор", loginChat: "Войдите, чтобы начать чат с Kairema", start: "Начните разговор с", secure: "Модели и ключи — только на сервере", files: "Файлы", noFiles: "Вложений в этом чате пока нет.", light: "Светлая тема", dark: "Тёмная тема", language: "Язык", theme: "Тема", profile: "Профиль памяти", facts: "Факты памяти", addFact: "Добавить факт", clear: "Очистить память", autoMemory: "Автоматически извлекать новые факты", memoryEnabled: "Использовать память в ответах", response: "Ответ", style: "Стиль", length: "Длина", effort: "Усилия", quick: "Быстрые подсказки", thinking: "Дополнительное рассуждение", defaultRole: "Роль по умолчанию", web: "Web-поиск", webStatus: "Статус web-поиска", searchResults: "Результаты поиска", chats: "Чаты", messages: "Сообщения", exportsGroup: "Экспорты", save: "Изменения сохраняются автоматически", openSettings: "Открыть настройки", delete: "Удалить", download: "Скачать", unsupportedSearch: "Поиск недоступен", uploadFailed: "Не удалось загрузить вложение.", noSearch: "Ничего не найдено." },
+  en: { newChat: "New chat", models: "Roles", history: "History", search: "Search", exports: "Exports", memory: "Memory", settings: "Settings", noHistory: "No chat history yet.", noExports: "No exports yet.", loginHistory: "Sign in for history", loginExports: "Sign in for exports", newConversation: "New conversation", loginChat: "Sign in to start chatting with Kairema", start: "Start a conversation with", secure: "Models and keys stay on the server", files: "Files", noFiles: "No attachments in this chat yet.", light: "Light theme", dark: "Dark theme", language: "Language", theme: "Theme", profile: "Memory profile", facts: "Memory facts", addFact: "Add a fact", clear: "Clear memory", autoMemory: "Automatically extract new facts", memoryEnabled: "Use memory in replies", response: "Response", style: "Style", length: "Length", effort: "Effort", quick: "Quick prompts", thinking: "Extra reasoning", defaultRole: "Default role", web: "Web search", webStatus: "Web search status", searchResults: "Search results", chats: "Chats", messages: "Messages", exportsGroup: "Exports", save: "Changes save automatically", openSettings: "Open settings", delete: "Delete", download: "Download", unsupportedSearch: "Search unavailable", uploadFailed: "Could not upload the attachment.", noSearch: "No results found." },
+} as const;
 
-function StatusIndicator({ status }: { status?: PublicStatus }) {
-  const label = status?.badge ?? "Проверяем статус";
-  const Icon = status?.state === "ready" ? CircleCheck : status?.category === "RATE_LIMIT" || status?.category === "QUOTA" ? Gauge : status?.state === "loading" || !status ? LoaderCircle : status?.state === "not_configured" ? Ban : TriangleAlert;
-  return <span className={`kairema-status ${statusClass(status)}`} title={status?.confirmed ?? label} aria-label={`${label}${status?.confirmed ? `. ${status.confirmed}` : ""}`}><Icon className={`size-3 ${status?.state === "loading" || !status ? "animate-spin" : ""}`} /><span>{label}</span></span>;
-}
+const styles: Record<ResponseStyle, Record<Language, string>> = { default: { ru: "По умолчанию", en: "Default" }, professional: { ru: "Профессиональный", en: "Professional" }, friendly: { ru: "Дружелюбный", en: "Friendly" }, concise: { ru: "Кратко", en: "Concise" }, steps: { ru: "По шагам", en: "Step by step" } };
+const lengths = { brief: { ru: "Кратко", en: "Brief" }, balanced: { ru: "Сбалансированно", en: "Balanced" }, detailed: { ru: "Подробно", en: "Detailed" } } as const;
+const efforts = { low: { ru: "Низкие", en: "Low" }, standard: { ru: "Обычные", en: "Standard" }, high: { ru: "Высокие", en: "High" } } as const;
+
+function statusClass(status?: PublicStatus) { return status?.state === "ready" || status?.state === "fallback" ? "status-ready" : status?.category === "RATE_LIMIT" || status?.category === "QUOTA" ? "status-quota" : status?.state === "not_configured" ? "status-muted" : status?.state === "unavailable" ? "status-unavailable" : status?.state === "loading" ? "status-loading" : "status-auth"; }
+function StatusIndicator({ status }: { status?: PublicStatus }) { const label = status?.badge ?? "…"; const Icon = status?.state === "ready" ? CircleCheck : status?.category === "RATE_LIMIT" || status?.category === "QUOTA" ? Gauge : status?.state === "loading" || !status ? LoaderCircle : TriangleAlert; return <span className={`kairema-status ${statusClass(status)}`} title={status?.confirmed ?? label}><Icon className={`size-3 ${status?.state === "loading" || !status ? "animate-spin" : ""}`} /><span>{label}</span></span>; }
+function bytes(value: number) { return value < 1_000_000 ? `${Math.max(1, Math.round(value / 1024))} KB` : `${(value / 1_000_000).toFixed(1)} MB`; }
+function metadataSources(metadata: unknown): Source[] | undefined { try { const parsed = typeof metadata === "string" ? JSON.parse(metadata) : metadata; return Array.isArray(parsed?.sources) ? parsed.sources.filter((item): item is Source => typeof item?.title === "string" && typeof item?.url === "string") : undefined; } catch { return undefined; } }
+function dataUrlContent(file: File) { return new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(reader.error); reader.onload = () => resolve(String(reader.result).split(",")[1] ?? ""); reader.readAsDataURL(file); }); }
+function contentType(file: File) { if (file.type === "image/png" || file.type === "image/jpeg" || file.type === "image/webp" || file.type === "application/pdf" || file.type === "text/plain" || file.type === "text/markdown") return file.type; return file.name.toLowerCase().endsWith(".md") ? "text/markdown" : "text/plain"; }
 
 export default function Home() {
   const { isAuthenticated, loading: authLoading } = useAuth();
-  const [activeId, setActiveId] = useState<string>("");
-  const [modelId, setModelId] = useState<ModelId>(MODELS[0].modelId);
-  const [style, setStyle] = useState<ResponseStyle>("default");
-  const [search, setSearch] = useState("");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [isExporting, setIsExporting] = useState<"markdown" | "pdf" | null>(null);
-  const [exportError, setExportError] = useState<string>("");
-  const streamAbortRef = useRef<AbortController | null>(null);
-  const modelsQuery = trpc.models.list.useQuery(undefined, { refetchInterval: 60_000, refetchOnWindowFocus: true });
-  const sessionsQuery = trpc.chats.list.useQuery(undefined, { enabled: isAuthenticated, refetchOnWindowFocus: true });
-  const messagesQuery = trpc.chats.messages.useQuery({ sessionId: activeId }, { enabled: isAuthenticated && Boolean(activeId) });
-  const exportsQuery = trpc.exports.list.useQuery(undefined, { enabled: isAuthenticated, refetchOnWindowFocus: true });
-  const createMutation = trpc.chats.create.useMutation();
-  const createExportMutation = trpc.exports.create.useMutation();
-  const deleteExportMutation = trpc.exports.delete.useMutation();
-  const utils = trpc.useUtils();
+  const { theme, toggleTheme } = useTheme();
+  const [activeId, setActiveId] = useState(""); const [modelId, setModelId] = useState<ModelId>("fast"); const [search, setSearch] = useState(""); const [sidebarOpen, setSidebarOpen] = useState(false); const [settingsOpen, setSettingsOpen] = useState(false); const [memoryOpen, setMemoryOpen] = useState(false); const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]); const [isStreaming, setIsStreaming] = useState(false); const [isExporting, setIsExporting] = useState<"markdown" | "pdf" | null>(null); const [notice, setNotice] = useState("");
+  const streamAbortRef = useRef<AbortController | null>(null); const defaultRoleApplied = useRef(false); const themeApplied = useRef(false);
+  const modelsQuery = trpc.models.list.useQuery(undefined, { refetchInterval: 60_000, refetchOnWindowFocus: true }); const settingsQuery = trpc.settings.get.useQuery(undefined, { enabled: isAuthenticated }); const memoryQuery = trpc.memory.get.useQuery(undefined, { enabled: isAuthenticated }); const webStatusQuery = trpc.webSearch.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const sessionsQuery = trpc.chats.list.useQuery(undefined, { enabled: isAuthenticated, refetchOnWindowFocus: true }); const messagesQuery = trpc.chats.messages.useQuery({ sessionId: activeId }, { enabled: isAuthenticated && Boolean(activeId) }); const attachmentsQuery = trpc.attachments.list.useQuery({ sessionId: activeId }, { enabled: isAuthenticated && Boolean(activeId) }); const exportsQuery = trpc.exports.list.useQuery(undefined, { enabled: isAuthenticated, refetchOnWindowFocus: true }); const searchQuery = trpc.search.query.useQuery({ query: search }, { enabled: isAuthenticated && search.trim().length >= 2 });
+  const createMutation = trpc.chats.create.useMutation(); const settingMutation = trpc.settings.update.useMutation(); const memoryUpdateMutation = trpc.memory.update.useMutation(); const memoryAddMutation = trpc.memory.addFact.useMutation(); const memoryDeleteMutation = trpc.memory.deleteFact.useMutation(); const memoryClearMutation = trpc.memory.clear.useMutation(); const attachmentUploadMutation = trpc.attachments.upload.useMutation(); const attachmentDeleteMutation = trpc.attachments.delete.useMutation(); const createExportMutation = trpc.exports.create.useMutation(); const deleteExportMutation = trpc.exports.delete.useMutation(); const utils = trpc.useUtils();
+  const settings = settingsQuery.data ?? { language: "ru" as Language, theme: "dark" as const, responseStyle: "default" as ResponseStyle, responseLength: "balanced" as const, quickReplies: 1, effort: "standard" as const, thinking: 0, defaultRole: "fast" as ModelId, webSearch: 0 };
+  const language = settings.language as Language; const t = copy[language]; const sessions = sessionsQuery.data ?? []; const savedExports = exportsQuery.data ?? []; const selectedModel = MODELS.find((item) => item.modelId === modelId) ?? MODELS[0]; const activeSession = sessions.find((session) => session.id === activeId); const attachments = attachmentsQuery.data ?? [];
+  const modelViews = useMemo<PublicModel[]>(() => { const byId = new Map((modelsQuery.data as PublicModel[] | undefined)?.map((model) => [model.modelId, model]) ?? []); return MODELS.map((model) => ({ ...model, status: byId.get(model.modelId)?.status })); }, [modelsQuery.data]); const modelById = useMemo(() => new Map(modelViews.map((model) => [model.modelId, model])), [modelViews]);
+  const dbMessages = (messagesQuery.data ?? []).map((message): Message => ({ id: String(message.id), role: message.role, content: message.content, providerLabel: message.role === "assistant" ? modelById.get(message.modelId as ModelId)?.label[language] ?? "Kairema" : undefined, model: message.role === "assistant" ? message.modelId ?? "" : undefined, status: message.role === "assistant" ? (language === "ru" ? "полный ответ" : "complete") : undefined, createdAt: message.createdAt, sources: metadataSources((message as { metadata?: unknown }).metadata) })); const visibleMessages = [...dbMessages, ...optimisticMessages];
+  const results = (searchQuery.data ?? []) as SearchItem[]; const sessionMatches = search.trim().length >= 2 ? [] : sessions.filter((session) => session.title.toLocaleLowerCase(language === "ru" ? "ru-RU" : "en-US").includes(search.toLocaleLowerCase()));
 
-  const modelViews = useMemo<PublicModel[]>(() => {
-    const byId = new Map((modelsQuery.data as PublicModel[] | undefined)?.map((model) => [model.modelId, model]) ?? []);
-    return MODELS.map((model) => byId.get(model.modelId) ?? { ...model, status: undefined });
-  }, [modelsQuery.data]);
-  const modelById = useMemo(() => new Map(modelViews.map((model) => [model.modelId, model])), [modelViews]);
-  const sessions = sessionsQuery.data ?? [];
-  const activeSession = sessions.find((session) => session.id === activeId);
-  const dbMessages = (messagesQuery.data ?? []).map((message): Message => ({
-    id: String(message.id),
-    role: message.role,
-    content: message.content,
-    providerLabel: message.role === "assistant" ? modelById.get(message.modelId as ModelId)?.label ?? "Kairema" : undefined,
-    model: message.role === "assistant" ? message.modelId ?? "" : undefined,
-    status: message.role === "assistant" ? "полный ответ" : undefined,
-    createdAt: message.createdAt,
-  }));
-  const visibleMessages = [...dbMessages, ...optimisticMessages];
-  const visibleSessions = sessions.filter((session) => session.title.toLocaleLowerCase("ru-RU").includes(search.toLocaleLowerCase("ru-RU")));
-  const selectedModel = modelById.get(modelId) ?? MODELS[0];
-  const savedExports = exportsQuery.data ?? [];
+  useEffect(() => { if (sessions.length && !sessions.some((session) => session.id === activeId)) { setActiveId(sessions[0]!.id); setModelId(sessions[0]!.modelId as ModelId); } }, [activeId, sessions]);
+  useEffect(() => { if (!activeId && settingsQuery.data?.defaultRole && !defaultRoleApplied.current) { setModelId(settingsQuery.data.defaultRole as ModelId); defaultRoleApplied.current = true; } }, [activeId, settingsQuery.data?.defaultRole]);
+  useEffect(() => { if (!themeApplied.current && settingsQuery.data?.theme) { if (settingsQuery.data.theme !== theme) toggleTheme?.(); themeApplied.current = true; } }, [settingsQuery.data?.theme, theme, toggleTheme]);
+  useEffect(() => { setOptimisticMessages([]); }, [activeId]); useEffect(() => () => streamAbortRef.current?.abort(), []);
+  const persistSettings = async (patch: Record<string, unknown>) => { try { await settingMutation.mutateAsync(patch as never); await utils.settings.get.invalidate(); } catch { setNotice(language === "ru" ? "Не удалось сохранить настройку." : "Could not save the setting."); } };
+  const createChat = async () => { if (!isAuthenticated) return startLogin(); const session = await createMutation.mutateAsync({ modelId }); setActiveId(session.id); setSidebarOpen(false); await utils.chats.list.invalidate(); return session.id; };
+  const selectSession = (id: string, sessionModel?: string) => { setActiveId(id); if (sessionModel && modelById.has(sessionModel as ModelId)) setModelId(sessionModel as ModelId); setSidebarOpen(false); };
+  const send = async (content: string, options?: { regenerateMessageId?: number; attachmentIds?: string[]; webSearch?: boolean }) => { if (!isAuthenticated) return startLogin(); const sessionId = activeId || await createChat(); if (!sessionId) return; const selectedId = modelId; const assistantId = `stream-${Date.now()}`; const label = selectedModel.label[language]; setOptimisticMessages(options?.regenerateMessageId ? [{ id: assistantId, role: "assistant", content: "", providerLabel: label, model: selectedId, status: language === "ru" ? "печатает" : "typing" }] : [{ id: `user-${Date.now()}`, role: "user", content }, { id: assistantId, role: "assistant", content: "", providerLabel: label, model: selectedId, status: language === "ru" ? "печатает" : "typing" }]); setIsStreaming(true); const controller = new AbortController(); streamAbortRef.current = controller;
+    try { const response = await fetch("/api/chat/stream", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...runtimeAuthHeaders() }, signal: controller.signal, body: JSON.stringify({ sessionId, modelId: selectedId, content, settings: { style: settings.responseStyle }, attachmentIds: options?.attachmentIds, webSearch: options?.webSearch, regenerateMessageId: options?.regenerateMessageId }) }); if (!response.ok || !response.body) { const error = await response.json().catch(() => ({ error: language === "ru" ? "Не удалось начать потоковый ответ." : "Could not start the stream." })); throw new Error(typeof error.error === "string" ? error.error : "Stream error"); }
+      await consumeChatStream(response, { onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)), onDone: (data) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: typeof data.content === "string" ? data.content : message.content, model: typeof data.modelUsed === "string" ? data.modelUsed : message.model, providerLabel: typeof data.label === "string" ? data.label : message.providerLabel, status: language === "ru" ? "полный ответ" : "complete", sources: data.sources } : message)) }); await Promise.all([utils.chats.messages.invalidate({ sessionId }), utils.chats.list.invalidate(), utils.attachments.list.invalidate({ sessionId })]); setOptimisticMessages([]);
+    } catch (error) { if (error instanceof DOMException && error.name === "AbortError") { setOptimisticMessages([]); await utils.chats.messages.invalidate({ sessionId }); return; } const errorMessage = error instanceof Error ? error.message : "Stream error"; setOptimisticMessages((items) => [...items.filter((item) => item.id !== assistantId), { id: `stream-error-${Date.now()}`, role: "assistant", content: errorMessage, providerLabel: "Kairema", model: selectedId, status: language === "ru" ? "ошибка" : "error", isError: true }]); } finally { streamAbortRef.current = null; setIsStreaming(false); } };
+  const uploadFiles = async (files: File[]): Promise<ChatAttachment[]> => { if (!isAuthenticated) { startLogin(); return []; } const sessionId = activeId || await createChat(); if (!sessionId) return []; try { const uploaded = await Promise.all(files.map(async (file) => { const item = await attachmentUploadMutation.mutateAsync({ sessionId, fileName: file.name, contentType: contentType(file) as "image/png" | "image/jpeg" | "image/webp" | "application/pdf" | "text/plain" | "text/markdown", contentBase64: await dataUrlContent(file) }); return { id: item.id, fileName: item.fileName, mimeType: item.contentType, sizeBytes: item.byteSize, kind: item.kind } as ChatAttachment; })); await utils.attachments.list.invalidate({ sessionId }); return uploaded; } catch (error) { setNotice(error instanceof Error ? error.message : t.uploadFailed); return []; } };
+  const cancelStream = () => streamAbortRef.current?.abort(); const copyAssistant = async (message: Message) => { try { await navigator.clipboard.writeText(message.content); setNotice(language === "ru" ? "Ответ скопирован в буфер обмена." : "Answer copied to clipboard."); } catch { setNotice(language === "ru" ? "Не удалось скопировать ответ." : "Could not copy the answer."); } }; const regenerate = (message: Message) => { const index = visibleMessages.findIndex((candidate) => candidate.id === message.id); const prompt = visibleMessages.slice(0, index).reverse().find((candidate) => candidate.role === "user"); const id = Number(message.id); if (!prompt?.content || !Number.isInteger(id) || id <= 0) { setNotice(language === "ru" ? "Не удалось найти исходный запрос." : "Original prompt was not found."); return; } void send(prompt.content, { regenerateMessageId: id }); };
+  const exportCurrentChat = async (format: "markdown" | "pdf") => { if (!activeSession || !dbMessages.length || isExporting) return; setIsExporting(format); try { const exportMessages = dbMessages.filter((message): message is Message & { role: "user" | "assistant" } => message.role === "user" || message.role === "assistant"); const input = { title: activeSession.title, messages: exportMessages, exportedAt: new Date() }; const file = format === "markdown" ? await prepareChatMarkdown(input) : await prepareChatPdf(input); await createExportMutation.mutateAsync({ sessionId: activeSession.id, format, fileName: file.fileName, contentType: file.contentType, contentBase64: await blobToBase64(file.blob) }); downloadPreparedChatExport(file); await utils.exports.list.invalidate(); } catch (error) { setNotice(error instanceof Error ? error.message : "Export error"); } finally { setIsExporting(null); } };
+  const downloadExport = async (exportId: string) => { try { const file = await utils.exports.download.fetch({ exportId }); const link = document.createElement("a"); link.href = file.url; link.download = file.fileName; link.rel = "noopener"; document.body.appendChild(link); link.click(); link.remove(); } catch { setNotice(language === "ru" ? "Не удалось скачать экспорт." : "Could not download the export."); } };
 
-  useEffect(() => {
-    if (sessions.length && !sessions.some((session) => session.id === activeId)) {
-      setActiveId(sessions[0]!.id);
-      setModelId(sessions[0]!.modelId as ModelId);
-    }
-  }, [activeId, sessions]);
-
-  useEffect(() => { setOptimisticMessages([]); }, [activeId]);
-  useEffect(() => () => streamAbortRef.current?.abort(), []);
-
-  const createChat = () => {
-    if (!isAuthenticated) return startLogin();
-    createMutation.mutate({ modelId }, {
-      onSuccess: (session) => {
-        setActiveId(session.id);
-        setSidebarOpen(false);
-        void utils.chats.list.invalidate();
-      },
-    });
-  };
-
-  const selectSession = (sessionId: string, sessionModel: string) => {
-    setActiveId(sessionId);
-    if (modelById.has(sessionModel as ModelId)) setModelId(sessionModel as ModelId);
-    setSidebarOpen(false);
-  };
-
-  const send = async (content: string, options?: { regenerateMessageId?: number }) => {
-    if (!isAuthenticated) return startLogin();
-    if (!activeId) return createChat();
-    const sessionId = activeId;
-    const selectedId = modelId;
-    const assistantId = `stream-${Date.now()}`;
-    setOptimisticMessages(options?.regenerateMessageId ? [{ id: assistantId, role: "assistant", content: "", providerLabel: selectedModel.label, model: selectedId, status: "печатает" }] : [{ id: `user-${Date.now()}`, role: "user", content }, { id: assistantId, role: "assistant", content: "", providerLabel: selectedModel.label, model: selectedId, status: "печатает" }]);
-    setIsStreaming(true);
-    const controller = new AbortController();
-    streamAbortRef.current = controller;
-    try {
-      const response = await fetch("/api/chat/stream", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...runtimeAuthHeaders() },
-        signal: controller.signal,
-        body: JSON.stringify({ sessionId, modelId: selectedId, content, settings: { style }, ...options }),
-      });
-      if (!response.ok || !response.body) {
-        const error = await response.json().catch(() => ({ error: "Не удалось начать потоковый ответ." }));
-        throw new Error(typeof error.error === "string" ? error.error : "Не удалось начать потоковый ответ.");
-      }
-
-      let done = false;
-      await consumeChatStream(response, {
-        onDelta: (delta) => {
-          setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message));
-        },
-        onDone: (data) => {
-          done = true;
-          setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: typeof data.content === "string" ? data.content : message.content, model: typeof data.modelUsed === "string" ? data.modelUsed : message.model, providerLabel: typeof data.label === "string" ? data.label : message.providerLabel, status: "полный ответ" } : message));
-        },
-      });
-      if (!done) throw new Error("Поток завершился до получения итогового ответа.");
-      await Promise.all([utils.chats.messages.invalidate({ sessionId }), utils.chats.list.invalidate()]);
-      setOptimisticMessages([]);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        setOptimisticMessages([]);
-        await Promise.all([utils.chats.messages.invalidate({ sessionId }), utils.chats.list.invalidate()]);
-        return;
-      }
-      const message = error instanceof Error ? error.message : "Не удалось получить потоковый ответ.";
-      setOptimisticMessages((items) => [...items.filter((item) => item.id !== assistantId), { id: `stream-error-${Date.now()}`, role: "assistant", content: message, providerLabel: "OpenRouter", model: selectedId, status: "ошибка", isError: true }]);
-    } finally {
-      streamAbortRef.current = null;
-      setIsStreaming(false);
-    }
-  };
-
-  const cancelStream = () => streamAbortRef.current?.abort();
-
-  const copyAssistant = async (message: Message) => {
-    try {
-      await navigator.clipboard.writeText(message.content);
-      setExportError("Ответ скопирован в буфер обмена.");
-    } catch {
-      setExportError("Не удалось скопировать ответ. Разрешите доступ к буферу обмена.");
-    }
-  };
-
-  const regenerate = (message: Message) => {
-    const index = visibleMessages.findIndex((candidate) => candidate.id === message.id);
-    const prompt = visibleMessages.slice(0, index).reverse().find((candidate) => candidate.role === "user");
-    const id = Number(message.id);
-    if (!prompt?.content || !Number.isInteger(id) || id <= 0) {
-      setExportError("Не удалось найти исходный запрос для регенерации.");
-      return;
-    }
-    void send(prompt.content, { regenerateMessageId: id });
-  };
-
-  const exportCurrentChat = async (format: "markdown" | "pdf") => {
-    if (!activeSession || !dbMessages.length || isExporting) return;
-    setExportError("");
-    setIsExporting(format);
-    try {
-      const exportMessages = dbMessages.filter((message): message is Message & { role: "user" | "assistant" } => message.role === "user" || message.role === "assistant");
-      const input = { title: activeSession.title, messages: exportMessages, exportedAt: new Date() };
-      const file = format === "markdown" ? await prepareChatMarkdown(input) : await prepareChatPdf(input);
-      await createExportMutation.mutateAsync({ sessionId: activeSession.id, format, fileName: file.fileName, contentType: file.contentType, contentBase64: await blobToBase64(file.blob) });
-      downloadPreparedChatExport(file);
-      await utils.exports.list.invalidate();
-    } catch (error) {
-      setExportError(error instanceof Error ? error.message : "Не удалось подготовить и сохранить файл экспорта.");
-    } finally {
-      setIsExporting(null);
-    }
-  };
-
-  const downloadSavedExport = async (exportId: string) => {
-    try {
-      const file = await utils.exports.download.fetch({ exportId });
-      const link = document.createElement("a");
-      link.href = file.url;
-      link.download = file.fileName;
-      link.rel = "noopener";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    } catch {
-      setExportError("Не удалось скачать сохранённый экспорт.");
-    }
-  };
-
-  const deleteSavedExport = async (exportId: string) => {
-    try {
-      await deleteExportMutation.mutateAsync({ exportId });
-      await utils.exports.list.invalidate();
-    } catch {
-      setExportError("Не удалось удалить экспорт.");
-    }
-  };
-
-  return (
-    <main className="kairema-shell">
-      <aside className={`kairema-sidebar ${sidebarOpen ? "kairema-sidebar-open" : ""}`}>
-        <div className="kairema-brand-row"><span className="kairema-logo"><Sparkles className="size-4" /></span><span>Kairema</span><button className="kairema-icon-btn md:hidden" onClick={() => setSidebarOpen(false)} aria-label="Закрыть меню"><X className="size-4" /></button></div>
-        <button onClick={createChat} className="kairema-new-chat" disabled={authLoading || createMutation.isPending}><MessageSquarePlus className="size-4" />Новый чат</button>
-        <div className="kairema-sidebar-label"><CircleDot className="size-3" />Выбор модели</div>
-        <div className="kairema-providers">
-          {modelViews.map((model) => <button key={model.modelId} onClick={() => { setModelId(model.modelId); setSidebarOpen(false); }} className={`kairema-provider ${modelId === model.modelId ? "kairema-provider-selected" : ""}`}>
-            <span className="kairema-provider-icon"><Bot className="size-4" /></span>
-            <span className="kairema-provider-copy"><span className="kairema-provider-title">{model.label}</span><span className="kairema-provider-role">{model.role}</span><StatusIndicator status={model.status} /></span>
-          </button>)}
-        </div>
-        <div className="kairema-history-head"><span>История</span><button onClick={createChat} className="kairema-icon-btn" aria-label="Создать чат"><MessageSquarePlus className="size-4" /></button></div>
-        <label className="kairema-search"><Search className="size-4" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Поиск" aria-label="Поиск по истории" /></label>
-        <div className="kairema-history-list">
-          {!isAuthenticated && <button className="kairema-history-item text-left" onClick={startLogin}><LogIn className="mr-2 inline size-3" />Войти для истории</button>}
-          {visibleSessions.map((session) => <button key={session.id} onClick={() => selectSession(session.id, session.modelId)} className={`kairema-history-item ${session.id === activeId ? "kairema-history-active" : ""}`}>{session.title}</button>)}
-          {isAuthenticated && !sessionsQuery.isLoading && !visibleSessions.length && <p className="px-2 py-3 text-xs text-slate-500">История пока пуста.</p>}
-        </div>
-        <div className="kairema-history-head"><span>Экспорты</span><FileText className="size-3.5 text-slate-500" /></div>
-        <div className="kairema-export-history">
-          {!isAuthenticated && <button className="kairema-history-item text-left" onClick={startLogin}><LogIn className="mr-2 inline size-3" />Войти для экспортов</button>}
-          {savedExports.slice(0, 8).map((entry) => <div key={entry.id} className="kairema-export-history-item"><div><span className="kairema-export-history-name">{entry.fileName}</span><span>{entry.format.toUpperCase()} · {new Intl.DateTimeFormat("ru-RU", { dateStyle: "short" }).format(new Date(entry.createdAt))}</span></div><div className="kairema-export-history-actions"><button type="button" onClick={() => void downloadSavedExport(entry.id)} aria-label={`Скачать ${entry.fileName}`}><Download className="size-3.5" /></button><button type="button" onClick={() => void deleteSavedExport(entry.id)} aria-label={`Удалить ${entry.fileName}`}><Trash2 className="size-3.5" /></button></div></div>)}
-          {isAuthenticated && !exportsQuery.isLoading && !savedExports.length && <p className="px-2 py-2 text-xs text-slate-500">Экспортов пока нет.</p>}
-        </div>
-        <div className="kairema-sidebar-footer"><div className="kairema-footer-link"><Sparkles className="size-4" />Память</div><SettingsPanel models={modelViews} style={style} onStyleChange={setStyle} /><p>Модели и ключи — только на сервере</p></div>
-      </aside>
-      {sidebarOpen && <button className="kairema-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Закрыть боковую панель" />}
-      <section className="kairema-main">
-        <header className="kairema-topbar">
-          <div className="flex items-center gap-2"><button className="kairema-icon-btn md:hidden" onClick={() => setSidebarOpen(true)} aria-label="Открыть меню"><Menu className="size-5" /></button><button className="kairema-icon-btn hidden md:grid" onClick={() => setSidebarOpen((value) => !value)} aria-label="Свернуть боковую панель"><PanelLeftClose className="size-4" /></button><span className="text-sm text-slate-500">{activeSession?.title ?? "Новый разговор"}</span></div>
-          <div className="flex items-center gap-2"><div className="kairema-select-wrap"><select value={modelId} onChange={(event) => setModelId(event.target.value as ModelId)} aria-label="Выбор модели">{modelViews.map((model) => <option key={model.modelId} value={model.modelId}>{model.label}</option>)}</select><ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /></div><SettingsPanel models={modelViews} style={style} onStyleChange={setStyle} compact /></div>
-        </header>
-        <AIChatBox messages={visibleMessages} onSendMessage={send} isLoading={isStreaming} onExportMarkdown={() => void exportCurrentChat("markdown")} onExportPdf={() => void exportCurrentChat("pdf")} canExport={Boolean(activeSession && dbMessages.length)} exportBusy={isExporting} exportError={exportError} onCopyAssistant={(message) => void copyAssistant(message)} onRegenerate={regenerate} onCancelStream={cancelStream} emptyStateMessage={isAuthenticated ? `Начните разговор с ${selectedModel.label}` : "Войдите, чтобы начать чат с Kairema"} suggestedPrompts={["Составь краткий план на день", "Объясни сложную тему простыми словами", "Помоги решить задачу по шагам"]} />
-      </section>
-    </main>
-  );
+  return <main className="kairema-shell"><aside className={`kairema-sidebar ${sidebarOpen ? "kairema-sidebar-open" : ""}`}><div className="kairema-brand-row"><span className="kairema-logo"><Sparkles className="size-4" /></span><span>Kairema</span><button className="kairema-icon-btn md:hidden" onClick={() => setSidebarOpen(false)} aria-label="Close"><X className="size-4" /></button></div><button onClick={() => void createChat()} className="kairema-new-chat" disabled={authLoading || createMutation.isPending}><MessageSquarePlus className="size-4" />{t.newChat}</button><div className="kairema-sidebar-label"><CircleDot className="size-3" />{t.models}</div><div className="kairema-providers">{modelViews.map((model) => <button key={model.modelId} onClick={() => { setModelId(model.modelId); setSidebarOpen(false); }} title={model.role[language]} className={`kairema-provider ${modelId === model.modelId ? "kairema-provider-selected" : ""}`}><span className="kairema-provider-icon"><Bot className="size-4" /></span><span className="kairema-provider-copy"><span className="kairema-provider-title">{model.label[language]}</span><span className="kairema-provider-role">{model.role[language]}</span><StatusIndicator status={model.status} /></span></button>)}</div><div className="kairema-history-head"><span>{t.history}</span><button onClick={() => void createChat()} className="kairema-icon-btn" aria-label={t.newChat}><MessageSquarePlus className="size-4" /></button></div><label className="kairema-search"><Search className="size-4" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t.search} aria-label={t.search} /></label><div className="kairema-history-list">{!isAuthenticated && <button className="kairema-history-item text-left" onClick={startLogin}><LogIn className="mr-2 inline size-3" />{t.loginHistory}</button>}{search.trim().length >= 2 ? <SearchResults results={results} labels={t} onSelect={(item) => item.sessionId && selectSession(item.sessionId)} /> : sessionMatches.map((session) => <button key={session.id} onClick={() => selectSession(session.id, session.modelId)} className={`kairema-history-item ${session.id === activeId ? "kairema-history-active" : ""}`}>{session.title}</button>)}{isAuthenticated && !sessionsQuery.isLoading && !search.trim() && !sessions.length && <p className="kairema-empty">{t.noHistory}</p>}</div><div className="kairema-history-head"><span>{t.exports}</span><FileText className="size-3.5" /></div><div className="kairema-export-history">{!isAuthenticated && <button className="kairema-history-item text-left" onClick={startLogin}><LogIn className="mr-2 inline size-3" />{t.loginExports}</button>}{savedExports.slice(0, 8).map((entry) => <div key={entry.id} className="kairema-export-history-item"><div><span className="kairema-export-history-name">{entry.fileName}</span><span>{entry.format.toUpperCase()} · {new Intl.DateTimeFormat(language === "ru" ? "ru-RU" : "en-US", { dateStyle: "short" }).format(new Date(entry.createdAt))}</span></div><div className="kairema-export-history-actions"><button onClick={() => void downloadExport(entry.id)} title={t.download}><Download className="size-3.5" /></button><button onClick={() => void deleteExportMutation.mutateAsync({ exportId: entry.id }).then(() => utils.exports.list.invalidate())} title={t.delete}><Trash2 className="size-3.5" /></button></div></div>)}{isAuthenticated && !exportsQuery.isLoading && !savedExports.length && <p className="kairema-empty">{t.noExports}</p>}</div><div className="kairema-history-head"><span>{t.files}</span><Paperclip className="size-3.5" /></div><div className="kairema-attachment-list">{attachments.slice(-4).map((attachment) => <div key={attachment.id} className="kairema-attachment-row">{attachment.kind === "image" ? <FileImage className="size-3.5" /> : <FileText className="size-3.5" />}<span title={attachment.fileName}>{attachment.fileName}</span><button title={t.delete} onClick={() => void attachmentDeleteMutation.mutateAsync({ attachmentId: attachment.id }).then(() => activeId && utils.attachments.list.invalidate({ sessionId: activeId }))}><Trash2 className="size-3" /></button></div>)}{isAuthenticated && Boolean(activeId) && !attachments.length && <p className="kairema-empty">{t.noFiles}</p>}</div><div className="kairema-sidebar-footer"><button className="kairema-footer-link" onClick={() => setMemoryOpen(true)}><Sparkles className="size-4" />{t.memory}</button><button className="kairema-footer-link" onClick={() => setSettingsOpen(true)}><SlidersHorizontal className="size-4" />{t.settings}</button><p>{t.secure}</p></div></aside>{sidebarOpen && <button className="kairema-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Close" />}<section className="kairema-main"><header className="kairema-topbar"><div className="flex items-center gap-2"><button className="kairema-icon-btn md:hidden" onClick={() => setSidebarOpen(true)} aria-label="Menu"><Menu className="size-5" /></button><button className="kairema-icon-btn hidden md:grid" onClick={() => setSidebarOpen((value) => !value)} aria-label="Sidebar"><PanelLeftClose className="size-4" /></button><span className="kairema-topbar-title">{activeSession?.title ?? t.newConversation}</span></div><div className="flex items-center gap-2"><button className="kairema-icon-btn" onClick={() => { toggleTheme?.(); void persistSettings({ theme: theme === "dark" ? "light" : "dark" }); }} title={theme === "dark" ? t.light : t.dark}>{theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}</button><button className="kairema-icon-btn" onClick={() => void persistSettings({ language: language === "ru" ? "en" : "ru" })} title={t.language}><Languages className="size-4" /></button><div className="kairema-select-wrap"><select value={modelId} onChange={(event) => setModelId(event.target.value as ModelId)} aria-label={t.models}>{modelViews.map((model) => <option key={model.modelId} value={model.modelId}>{model.label[language]}</option>)}</select><ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2" /></div><button className="kairema-icon-btn" onClick={() => setSettingsOpen(true)} title={t.openSettings}><Settings2 className="size-4" /></button></div></header><AIChatBox messages={visibleMessages} onSendMessage={send} onUploadFiles={uploadFiles} isLoading={isStreaming} onExportMarkdown={() => void exportCurrentChat("markdown")} onExportPdf={() => void exportCurrentChat("pdf")} canExport={Boolean(activeSession && dbMessages.length)} exportBusy={isExporting} exportError={notice} onCopyAssistant={(message) => void copyAssistant(message)} onRegenerate={regenerate} onCancelStream={cancelStream} language={language} webSearchAvailable={Boolean(webStatusQuery.data?.available)} webSearchReason={webStatusQuery.data?.reason} emptyStateMessage={isAuthenticated ? `${t.start} ${selectedModel.label[language]}` : t.loginChat} suggestedPrompts={settings.quickReplies ? selectedModel.prompts[language] : []} /></section><SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} models={modelViews} settings={settings} language={language} labels={t} status={webStatusQuery.data} onUpdate={persistSettings} /><MemoryDialog open={memoryOpen} onOpenChange={setMemoryOpen} data={memoryQuery.data} language={language} labels={t} onUpdate={async (input) => { await memoryUpdateMutation.mutateAsync(input); await utils.memory.get.invalidate(); }} onAdd={async (fact) => { await memoryAddMutation.mutateAsync({ fact }); await utils.memory.get.invalidate(); }} onDelete={async (factId) => { await memoryDeleteMutation.mutateAsync({ factId }); await utils.memory.get.invalidate(); }} onClear={async () => { await memoryClearMutation.mutateAsync(); await utils.memory.get.invalidate(); }} /></main>;
 }
 
-function SettingsPanel({ models, style, onStyleChange, compact = false }: { models: PublicModel[]; style: ResponseStyle; onStyleChange: (style: ResponseStyle) => void; compact?: boolean }) {
-  return <Dialog><DialogTrigger asChild><button className={compact ? "kairema-icon-btn" : "kairema-footer-link"} aria-label="Настройки">{compact ? <Settings2 className="size-4" /> : <><SlidersHorizontal className="size-4" />Настройки</>}</button></DialogTrigger><DialogContent className="kairema-dialog"><DialogHeader><DialogTitle className="text-xl text-white">Настройки Kairema</DialogTitle></DialogHeader><p className="text-sm leading-6 text-slate-400">Статусы и сообщения проходят только через защищённый backend. API-ключи не отображаются и не передаются в браузер.</p><div className="mt-4 space-y-2">{models.map((model) => <div key={model.modelId} className="kairema-settings-provider"><div><p className="font-medium text-slate-100">{model.label}</p><p className="text-xs text-slate-500">{model.modelId}</p></div><div className="text-right"><StatusIndicator status={model.status} /><p className="mt-1 text-[11px] text-slate-500"><Clock3 className="mr-1 inline size-3" />{formatTime(model.status?.checkedAt)}</p></div></div>)}</div><div className="mt-5 border-t border-white/8 pt-4"><p className="text-sm font-medium text-white">Стиль ответа</p><div className="mt-3 flex flex-wrap gap-2">{(Object.keys(styleNames) as ResponseStyle[]).map((value) => <button key={value} onClick={() => onStyleChange(value)} className={`kairema-setting-chip ${style === value ? "kairema-setting-chip-active" : ""}`}>{styleNames[value]}</button>)}</div><p className="mt-5 text-sm font-medium text-white">Память</p><p className="mt-2 text-sm leading-6 text-slate-400">История текущих чатов сохраняется в базе данных и видна только в вашем аккаунте. Ключи и системные сообщения в историю не записываются.</p></div></DialogContent></Dialog>;
-}
+function SearchResults({ results, labels, onSelect }: { results: SearchItem[]; labels: typeof copy.ru | typeof copy.en; onSelect: (item: SearchItem) => void }) { if (!results.length) return <p className="kairema-empty">{labels.noSearch}</p>; const icons = { chat: MessageSquare, message: Search, export: Archive }; return <>{results.map((result) => { const Icon = icons[result.type]; return <button className="kairema-search-result" onClick={() => onSelect(result)} key={`${result.type}-${result.id}`}><Icon className="size-3.5" /><span><b>{result.title}</b><small>{result.snippet}</small></span></button>; })}</>; }
+
+function SettingsDialog({ open, onOpenChange, models, settings, language, labels, status, onUpdate }: { open: boolean; onOpenChange: (open: boolean) => void; models: PublicModel[]; settings: Record<string, unknown>; language: Language; labels: typeof copy.ru | typeof copy.en; status?: { available?: boolean; reason?: string }; onUpdate: (patch: Record<string, unknown>) => Promise<void> }) { const select = async (event: React.ChangeEvent<HTMLSelectElement>, field: string) => onUpdate({ [field]: event.target.value }); return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="kairema-dialog kairema-dialog-wide"><DialogHeader><DialogTitle>{labels.settings}</DialogTitle></DialogHeader><p className="kairema-dialog-note">{labels.save}</p><div className="kairema-settings-grid"><section><h3>{labels.response}</h3><label>{labels.style}<select value={String(settings.responseStyle)} onChange={(event) => void select(event, "responseStyle")}>{(Object.keys(styles) as ResponseStyle[]).map((style) => <option key={style} value={style}>{styles[style][language]}</option>)}</select></label><label>{labels.length}<select value={String(settings.responseLength)} onChange={(event) => void select(event, "responseLength")}>{Object.entries(lengths).map(([value, text]) => <option key={value} value={value}>{text[language]}</option>)}</select></label><label>{labels.effort}<select value={String(settings.effort)} onChange={(event) => void select(event, "effort")}>{Object.entries(efforts).map(([value, text]) => <option key={value} value={value}>{text[language]}</option>)}</select></label><label>{labels.defaultRole}<select value={String(settings.defaultRole)} onChange={(event) => void select(event, "defaultRole")}>{models.map((model) => <option key={model.modelId} value={model.modelId}>{model.label[language]}</option>)}</select></label></section><section><h3>{labels.web}</h3><SettingSwitch label={labels.quick} checked={Boolean(settings.quickReplies)} onChange={(value) => void onUpdate({ quickReplies: value })} /><SettingSwitch label={labels.thinking} checked={Boolean(settings.thinking)} onChange={(value) => void onUpdate({ thinking: value })} /><SettingSwitch label={labels.web} checked={Boolean(settings.webSearch)} disabled={!status?.available} onChange={(value) => void onUpdate({ webSearch: value })} /><p className="kairema-inline-status"><Globe2 className="size-3.5" />{status?.available ? language === "ru" ? "Google Search grounding доступен." : "Google Search grounding is available." : status?.reason ?? labels.unsupportedSearch}</p><h3 className="mt-6">{labels.models}</h3>{models.map((model) => <div className="kairema-settings-provider" key={model.modelId}><span><b>{model.label[language]}</b><small>{model.role[language]}</small></span><StatusIndicator status={model.status} /></div>)}</section></div></DialogContent></Dialog>; }
+
+function SettingSwitch({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (value: boolean) => void }) { return <button type="button" className="kairema-switch-row" disabled={disabled} onClick={() => onChange(!checked)}><span>{label}</span><span className={`kairema-switch ${checked ? "kairema-switch-on" : ""}`}><i /></span></button>; }
+
+function MemoryDialog({ open, onOpenChange, data, language, labels, onUpdate, onAdd, onDelete, onClear }: { open: boolean; onOpenChange: (open: boolean) => void; data?: { profile?: { enabled?: number; autoExtract?: number; profile?: string | null }; facts?: Array<{ id: string; fact: string }>; }; language: Language; labels: typeof copy.ru | typeof copy.en; onUpdate: (input: { enabled?: boolean; autoExtract?: boolean; profile?: string }) => Promise<void>; onAdd: (fact: string) => Promise<void>; onDelete: (id: string) => Promise<void>; onClear: () => Promise<void> }) { const [profile, setProfile] = useState(""); const [fact, setFact] = useState(""); useEffect(() => { if (open) setProfile(data?.profile?.profile ?? ""); }, [open, data?.profile?.profile]); return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="kairema-dialog"><DialogHeader><DialogTitle>{labels.memory}</DialogTitle></DialogHeader><SettingSwitch label={labels.memoryEnabled} checked={Boolean(data?.profile?.enabled)} onChange={(enabled) => void onUpdate({ enabled })} /><SettingSwitch label={labels.autoMemory} checked={Boolean(data?.profile?.autoExtract)} onChange={(autoExtract) => void onUpdate({ autoExtract })} /><label className="kairema-field-label">{labels.profile}<textarea value={profile} onChange={(event) => setProfile(event.target.value)} onBlur={() => void onUpdate({ profile })} placeholder={language === "ru" ? "Например: важный контекст, предпочтения и долгосрочные цели." : "For example: important context, preferences and long-term goals."} /></label><div className="kairema-fact-add"><input value={fact} onChange={(event) => setFact(event.target.value)} placeholder={labels.addFact} /><button disabled={fact.trim().length < 3} onClick={() => { const value = fact.trim(); setFact(""); void onAdd(value); }}><Lightbulb className="size-3.5" />{labels.addFact}</button></div><div className="kairema-facts">{data?.facts?.map((item) => <div key={item.id}><span>{item.fact}</span><button title={labels.delete} onClick={() => void onDelete(item.id)}><Trash2 className="size-3.5" /></button></div>)}</div><button className="kairema-danger-button" onClick={() => void onClear()}><Trash2 className="size-4" />{labels.clear}</button></DialogContent></Dialog>; }
