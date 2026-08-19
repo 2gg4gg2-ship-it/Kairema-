@@ -209,7 +209,7 @@ body { margin: 0; min-width: 320px; background: #070912; color: #e8edf8; }
 
 /* Kairema v5 — monochrome product system. Status colors stay reserved for factual availability. */
 :root { color-scheme: light; --k-bg:#f7f7f5; --k-panel:#ffffff; --k-panel-2:#f0f0ed; --k-text:#121212; --k-muted:#4e4e49; --k-line:#bdbdb7; --k-strong:#181818; --k-invert:#fff; --foreground:#121212; --card-foreground:#121212; --popover-foreground:#121212; --secondary-foreground:#242422; --muted-foreground:#4e4e49; --accent-foreground:#121212; --sidebar-foreground:#121212; --sidebar-accent-foreground:#121212; }
-.dark { color-scheme: dark; --k-bg:#0c0c0c; --k-panel:#131313; --k-panel-2:#1a1a1a; --k-text:#f4f4f1; --k-muted:#c4c4bc; --k-line:#5b5b55; --k-strong:#242422; --k-invert:#0d0d0d; --foreground:#f4f4f1; --card-foreground:#f4f4f1; --popover-foreground:#f4f4f1; --secondary-foreground:#e4e4dd; --muted-foreground:#c4c4bc; --accent-foreground:#f4f4f1; --sidebar-foreground:#f4f4f1; --sidebar-accent-foreground:#f4f4f1; }
+.dark { color-scheme: dark; --k-bg:#0c0c0c; --k-panel:#131313; --k-panel-2:#1a1a1a; --k-text:#f4f4f1; --k-muted:#c4c4bc; --k-line:#5b5b55; --k-strong:#242422; --k-invert:#f4f4f1; --foreground:#f4f4f1; --card-foreground:#f4f4f1; --popover-foreground:#f4f4f1; --secondary-foreground:#e4e4dd; --muted-foreground:#c4c4bc; --accent-foreground:#f4f4f1; --sidebar-foreground:#f4f4f1; --sidebar-accent-foreground:#f4f4f1; }
 body { background:var(--k-bg); color:var(--k-text); }
 .kairema-shell { background:var(--k-bg); color:var(--k-text); }
 .kairema-sidebar { background:var(--k-panel); border-color:var(--k-line); }
@@ -226,6 +226,7 @@ body { background:var(--k-bg); color:var(--k-text); }
 .kairema-topbar { border-color:var(--k-line); background:var(--k-panel); backdrop-filter:none; }.kairema-icon-btn { color:var(--k-muted); }.kairema-icon-btn:hover { color:var(--k-text); background:var(--k-panel-2); }
 .kairema-select-wrap select { border-color:var(--k-line); color:var(--k-text); background:var(--k-panel); }.kairema-select-wrap select:focus { border-color:var(--k-text); }
 .kairema-message-user { background:var(--k-strong); color:var(--k-invert); box-shadow:none; }.kairema-message-ai,.kairema-typing { border-color:var(--k-line); color:var(--k-text); background:var(--k-panel); }
+.kairema-runtime-meta { display:block; margin-top:3px; color:var(--k-muted); font-size:10px; line-height:1.35; }
 .kairema-prompt { border-color:var(--k-line); color:var(--k-text); background:var(--k-panel); }.kairema-prompt:hover { border-color:var(--k-text); color:var(--k-text); background:var(--k-panel-2); }
 .kairema-textarea { border-color:var(--k-line); color:var(--k-text); background:var(--k-panel); box-shadow:none; }.kairema-textarea::placeholder { color:var(--k-muted); }.kairema-textarea:focus { border-color:var(--k-text); box-shadow:0 0 0 3px color-mix(in srgb,var(--k-text) 9%,transparent); }
 .kairema-send { background:var(--k-text); color:var(--k-invert); }.kairema-send:hover { background:var(--k-strong); }

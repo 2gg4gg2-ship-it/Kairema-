@@ -1,7 +1,7 @@
 import { getAttachmentPromptText, getOwnedAttachmentDownload } from "./attachments";
 import { createMemoryFact, getMemoryProfile, getOwnedChatAttachments, getUserSettings, listMemoryFacts } from "./db";
 import type { ChatSettings } from "./providers";
-import { searchWeb } from "./web-search";
+import { WebSearchUnavailableError, searchWeb } from "./web-search";
 
 function memoryContext(profile: { profile: string; summary: string }, facts: Array<{ fact: string }>) {
   const rows = [profile.profile.trim(), profile.summary.trim(), ...facts.slice(0, 16).map((fact) => `• ${fact.fact}`)].filter(Boolean);
@@ -26,9 +26,14 @@ export async function buildChatContext(userId: number, sessionId: string, input:
   };
 
   if (preferences.webSearch && input.webSearch) {
-    const search = await searchWeb("Собери только релевантные актуальные факты и источники для запроса пользователя:\n" + (input.query?.slice(0, 8_000) ?? ""));
-    context.webResearch = search.summary;
-    context.webSources = search.sources;
+    try {
+      const search = await searchWeb("Собери только релевантные актуальные факты и источники для запроса пользователя:\n" + (input.query?.slice(0, 8_000) ?? ""));
+      context.webResearch = search.summary;
+      context.webSources = search.sources;
+    } catch (error) {
+      if (!(error instanceof WebSearchUnavailableError)) throw error;
+      // Search has already persisted a final honest status. The chat remains usable without invented sources.
+    }
   }
   return context;
 }

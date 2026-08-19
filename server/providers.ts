@@ -1,4 +1,4 @@
-import { listProviderHealth, upsertProviderHealth } from "./db";
+import { listProviderHealth, listRoleRuntimeStatus, upsertProviderHealth, upsertRoleRuntimeStatus } from "./db";
 
 export const ROLE_IDS = ["fast", "smart", "context", "flagship"] as const;
 /** Compatibility alias: clients select a role, never a raw upstream model. */
@@ -27,7 +27,8 @@ export type ChatResult = { content: string; modelUsed: string; provider: Provide
 
 type Candidate = { provider: Provider; modelId: string; displayName: string; vision?: boolean };
 export type ModelConfig = { key: RoleId; modelId: RoleId; label: string; role: string; chain: readonly Candidate[] };
-export type ModelView = Pick<ModelConfig, "key" | "modelId" | "label" | "role"> & { status: ModelStatus };
+export type RoleRuntimeView = { state: "ready" | "backup" | "unavailable"; provider: string | null; modelUsed: string | null; checkedAt: string };
+export type ModelView = Pick<ModelConfig, "key" | "modelId" | "label" | "role"> & { status: ModelStatus; runtime: RoleRuntimeView | null };
 type ProviderHealthState = "ready" | "cooldown" | "auth_failed" | "unavailable" | "not_configured";
 type ProviderHealthSnapshot = { provider: Provider; state: ProviderHealthState; category: StatusCategory | null; http: number | null; confirmed: string; checkedAt: Date; blockedUntil: Date | null };
 type ChainAttempt = { provider: Provider; modelId: string; status: "ready" | "skipped" | "failed"; category?: StatusCategory; http?: number | null };
@@ -283,7 +284,7 @@ export function roleById(roleId: string): ModelConfig | undefined { return MODEL
 export function modelById(modelId: string): ModelConfig | undefined { return roleById(modelId); }
 export function isAllowedModelId(modelId: string): modelId is RoleId { return ROLE_IDS.includes(modelId as RoleId); }
 export function assertAllowedModelId(modelId: string): asserts modelId is RoleId { if (!isAllowedModelId(modelId)) throw new InvalidModelSelectionError(); }
-export function toPublicModelView(config: ModelConfig, status: ModelStatus): ModelView { return { key: config.key, modelId: config.modelId, label: config.label, role: config.role, status }; }
+export function toPublicModelView(config: ModelConfig, status: ModelStatus): ModelView { return { key: config.key, modelId: config.modelId, label: config.label, role: config.role, status, runtime: null }; }
 export function selectAutoModel(views: readonly ModelView[]): ModelConfig | undefined { const view = views.find((item) => item.status.state === "ready" || item.status.state === "fallback"); return view ? roleById(view.key) : undefined; }
 
 function contentFrom(data: unknown) {
@@ -328,9 +329,32 @@ function statusForRole(role: ModelConfig) {
   return hasConfiguredCandidate ? unavailable() : unconfigured();
 }
 
+function providerLabel(provider: Provider | null) {
+  return provider === "openrouter" ? "OpenRouter" : provider === "google" ? "Google AI Studio" : provider === "groq" ? "Groq" : null;
+}
+
+export function toRoleRuntimeView(state: RoleRuntimeView["state"], provider: string | null, modelUsed: string | null, checkedAt: Date): RoleRuntimeView {
+  return { state, provider: providerLabel(provider as Provider | null), modelUsed, checkedAt: checkedAt.toISOString() };
+}
+
+function modelStatusFromRuntime(runtime: RoleRuntimeView): ModelStatus {
+  if (runtime.state === "ready") return ready(runtime.modelUsed ? `Последний ответ этой роли: ${runtime.modelUsed}.` : "Последний ответ роли получен от основного кандидата.");
+  if (runtime.state === "backup") return backup(runtime.modelUsed ? `Последний ответ этой роли дал резерв: ${runtime.modelUsed}.` : "Последний ответ роли получен от резервного кандидата.");
+  return unavailable("Последняя попытка исчерпала доступную цепь этой роли.");
+}
+
+async function saveRoleRuntime(roleId: RoleId, state: RoleRuntimeView["state"], provider: Provider | null, modelUsed: string | null) {
+  await upsertRoleRuntimeStatus({ roleId, state, provider, modelUsed, checkedAt: new Date() }).catch(() => undefined);
+}
+
 export async function getModelViews() {
   await refreshProviderHealth();
-  return MODEL_ROLES.map((role) => toPublicModelView(role, statusForRole(role)));
+  const runtimeRows = await listRoleRuntimeStatus();
+  const runtimeByRole = new Map(runtimeRows.map((item) => [item.roleId, toRoleRuntimeView(item.state, item.provider, item.modelUsed, item.checkedAt)]));
+  return MODEL_ROLES.map((role) => {
+    const runtime = runtimeByRole.get(role.key) ?? null;
+    return { ...toPublicModelView(role, runtime ? modelStatusFromRuntime(runtime) : statusForRole(role)), runtime };
+  });
 }
 
 export async function getProviderHealthForTesting() {
@@ -381,7 +405,9 @@ export async function chatWithRole(roleId: string, history: ChatMessage[], setti
       const response = await invoke(candidate, role, history, settings, false);
       const content = contentFrom(await response.json());
       attempts.push(attempt(candidate, "ready"));
-      return { content, modelUsed: candidate.displayName, provider: candidate.provider, fallbackUsed: index > 0, label: role.label, status: index > 0 ? backup(`Ответил резерв ${candidate.displayName}.`) : ready(), ...(settings?.webSources?.length ? { sources: settings.webSources } : {}) };
+      const fallbackUsed = index > 0;
+      await saveRoleRuntime(role.key, fallbackUsed ? "backup" : "ready", candidate.provider, candidate.displayName);
+      return { content, modelUsed: candidate.displayName, provider: candidate.provider, fallbackUsed, label: role.label, status: fallbackUsed ? backup(`Ответил резерв ${candidate.displayName}.`) : ready(), ...(settings?.webSources?.length ? { sources: settings.webSources } : {}) };
     } catch (error) {
       const status = error instanceof OpenRouterError ? error.status : network(error);
       last = error instanceof OpenRouterError ? error : new OpenRouterError(status);
@@ -390,7 +416,9 @@ export async function chatWithRole(roleId: string, history: ChatMessage[], setti
       if (!retryable(status)) break;
     }
   }
-  throw last ?? new OpenRouterError(unconfigured());
+  const finalError = last ?? new OpenRouterError(unconfigured());
+  await saveRoleRuntime(role.key, "unavailable", null, null);
+  throw finalError;
 }
 
 export async function chatWithRoleStream(roleId: string, history: ChatMessage[], settings: ChatSettings | undefined, onDelta: (delta: string) => void, signal?: AbortSignal): Promise<ChatResult> {
@@ -423,7 +451,9 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
       const content = stripReasoningBlocks(parts.join(""));
       if (!content) throw new OpenRouterError({ state: "error", badge: "Недоступно", category: "PARSE", http: 200, checkedAt: now(), confirmed: "После удаления reasoning-блоков не осталось финального ответа." });
       attempts.push(attempt(candidate, "ready"));
-      return { content, modelUsed: candidate.displayName, provider: candidate.provider, fallbackUsed: index > 0, label: role.label, status: index > 0 ? backup(`Ответил резерв ${candidate.displayName}.`) : ready(), ...(settings?.webSources?.length ? { sources: settings.webSources } : {}) };
+      const fallbackUsed = index > 0;
+      await saveRoleRuntime(role.key, fallbackUsed ? "backup" : "ready", candidate.provider, candidate.displayName);
+      return { content, modelUsed: candidate.displayName, provider: candidate.provider, fallbackUsed, label: role.label, status: fallbackUsed ? backup(`Ответил резерв ${candidate.displayName}.`) : ready(), ...(settings?.webSources?.length ? { sources: settings.webSources } : {}) };
     } catch (error) {
       if (signal?.aborted || visibleDeltaDelivered) throw error;
       const status = error instanceof OpenRouterError ? error.status : network(error);
@@ -433,7 +463,9 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
       if (!retryable(status)) break;
     }
   }
-  throw last ?? new OpenRouterError(unconfigured());
+  const finalError = last ?? new OpenRouterError(unconfigured());
+  await saveRoleRuntime(role.key, "unavailable", null, null);
+  throw finalError;
 }
 
 export const chatWithOpenRouter = chatWithRole;

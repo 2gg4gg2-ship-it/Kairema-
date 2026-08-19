@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
-import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, InsertUser, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, memoryFacts, memoryProfiles, messages, providerHealth, userSettings, users, webSearchStatus } from "../drizzle/schema";
+import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, InsertUser, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, memoryFacts, memoryProfiles, messages, providerHealth, roleRuntimeStatus, userSettings, users, webSearchStatus } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -141,6 +141,33 @@ export async function upsertProviderHealth(input: Omit<ProviderHealthRecord, "up
       confirmed: input.confirmed,
       checkedAt: input.checkedAt,
       blockedUntil: input.blockedUntil,
+    },
+  });
+}
+
+export type RoleRuntimeStatusRecord = {
+  roleId: "fast" | "smart" | "context" | "flagship";
+  state: "ready" | "backup" | "unavailable";
+  provider: string | null;
+  modelUsed: string | null;
+  checkedAt: Date;
+};
+
+export async function listRoleRuntimeStatus(): Promise<RoleRuntimeStatusRecord[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(roleRuntimeStatus) as Promise<RoleRuntimeStatusRecord[]>;
+}
+
+export async function upsertRoleRuntimeStatus(input: RoleRuntimeStatusRecord): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(roleRuntimeStatus).values(input).onDuplicateKeyUpdate({
+    set: {
+      state: input.state,
+      provider: input.provider,
+      modelUsed: input.modelUsed,
+      checkedAt: input.checkedAt,
     },
   });
 }

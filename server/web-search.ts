@@ -98,6 +98,43 @@ async function probeOpenRouterOnline(): Promise<number | null> {
   }
 }
 
+function openRouterSources(payload: unknown): WebSource[] {
+  const citations = (payload as { citations?: unknown })?.citations;
+  if (!Array.isArray(citations)) return [];
+  const seen = new Set<string>();
+  return citations.flatMap((value) => {
+    const url = typeof value === "string" ? value : "";
+    if (!/^https?:\/\//i.test(url) || seen.has(url)) return [];
+    seen.add(url);
+    return [{ title: url, url }];
+  });
+}
+
+function openRouterAnswer(payload: unknown) {
+  const content = (payload as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content;
+  return typeof content === "string" ? content.trim() : "";
+}
+
+async function searchOpenRouterOnline(query: string): Promise<{ summary: string; sources: WebSource[] } | null> {
+  const key = process.env.OPENROUTER_API_KEY?.trim();
+  if (!key) return null;
+  try {
+    const response = await fetch(OPENROUTER_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model: "openrouter/free:online", messages: [{ role: "user", content: query.slice(0, 8_000) }], max_tokens: 1_200 }),
+      signal: AbortSignal.timeout(25_000),
+    });
+    let payload: unknown = null;
+    try { payload = await response.json(); } catch { /* no usable sources */ }
+    const summary = openRouterAnswer(payload);
+    const sources = openRouterSources(payload);
+    return response.ok && summary && sources.length ? { summary, sources } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Saves one final status; it never returns an indeterminate spinner state to the client. */
 export async function probeWebSearchStatus(): Promise<WebSearchStatus> {
   const key = process.env.GEMINI_API_KEY?.trim();
@@ -166,6 +203,15 @@ export async function searchWeb(query: string): Promise<{ summary: string; sourc
   let payload: unknown = null;
   try { payload = await response.json(); } catch { /* response is classified below */ }
   if (!response.ok) {
+    if (response.status === 429) {
+      const fallback = await searchOpenRouterOnline(query);
+      if (fallback) {
+        await saveStatus({ available: true, reason: "Google недоступен по квоте; используется OpenRouter online с проверяемыми источниками.", checkedAt, googleHttp: response.status, openrouterHttp: 200 });
+        return fallback;
+      }
+      const status = await saveStatus({ available: false, reason: "Поиск временно недоступен: квота Google; OpenRouter online не вернул проверяемые источники.", checkedAt, googleHttp: response.status, openrouterHttp: previous.openrouterHttp });
+      throw new WebSearchUnavailableError(status.reason);
+    }
     const status = await saveStatus({ available: false, reason: statusFromHttp(response.status, payload), checkedAt, googleHttp: response.status, openrouterHttp: previous.openrouterHttp });
     throw new WebSearchUnavailableError(status.reason);
   }

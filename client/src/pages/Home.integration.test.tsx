@@ -34,7 +34,7 @@ vi.mock("@/lib/chat-export", () => ({
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     models: { list: { useQuery: () => ({ data: [
-      { key: "fast", modelId: "fast", label: "Kairema Быстрый", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" } },
+      { key: "fast", modelId: "fast", label: "Kairema Быстрый", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, runtime: { state: "ready", provider: "OpenRouter", modelUsed: "Llama Fast", checkedAt: "2026-08-19T00:00:00.000Z" } },
       { key: "smart", modelId: "smart", label: "Kairema Смекалистый", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" } },
       { key: "context", modelId: "context", label: "Kairema Контекст", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" } },
       { key: "flagship", modelId: "flagship", label: "Kairema Флагман", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" } },
@@ -54,7 +54,7 @@ vi.mock("@/lib/trpc", () => ({
       create: { useMutation: () => ({ mutateAsync: fixtures.createExport }) },
       delete: { useMutation: () => ({ mutateAsync: fixtures.deleteExport }) },
     },
-    useUtils: () => ({ settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, list: { invalidate: fixtures.invalidateSessions } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: vi.fn() } } }),
+    useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, list: { invalidate: fixtures.invalidateSessions } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: vi.fn() } } }),
   },
 }));
 vi.mock("@/components/ui/dialog", () => ({
@@ -140,19 +140,23 @@ describe("Home integration flows", () => {
   it("shows a streaming delta, then replaces optimistic content with the persisted final answer", async () => {
     const user = userEvent.setup();
     const release = new Promise<void>((resolve) => { fixtures.releaseSecondDelta = resolve; });
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(new ReadableStream<Uint8Array>({
       async start(controller) {
         controller.enqueue(encoder.encode('event: delta\ndata: {"content":"Первый фрагмент"}\n\n'));
         await release;
         controller.enqueue(encoder.encode('event: delta\ndata: {"content":" ответа"}\n\nevent: done\ndata: {"content":"Первый фрагмент ответа","modelUsed":"google/gemma-4-26b-a4b-it:free","label":"Kairema Ultra (Gemma 4)"}\n\n'));
         controller.close();
       },
-    }))));
+    })));
+    vi.stubGlobal("fetch", fetchSpy);
     render(<Home />);
 
     const composer = await screen.findByPlaceholderText("Напишите сообщение…");
     await user.type(composer, "Новый вопрос");
     await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    expect(JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body))).toMatchObject({ sessionId: fixtures.sessionId, modelId: "fast", content: "Новый вопрос", attachmentIds: [], webSearch: false });
 
     await waitFor(() => expect(screen.getByText("Первый фрагмент")).toBeTruthy());
     expect(screen.queryByText("Первый фрагмент ответа")).toBeNull();
@@ -219,5 +223,12 @@ describe("Home integration flows", () => {
 
     expect(indicator?.className).toContain("kairema-switch-on");
     expect(fixtures.updateSettings).toHaveBeenCalledWith({ thinking: true });
+  });
+
+  it("shows only safe last-provider metadata for a role in settings", () => {
+    render(<Home />);
+
+    expect(screen.getByText(/Готов · OpenRouter · Llama Fast/)).toBeTruthy();
+    expect(screen.queryByText(/Authorization|Bearer|chain/i)).toBeNull();
   });
 });

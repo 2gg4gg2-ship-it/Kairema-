@@ -57,6 +57,14 @@ export const providerHealth = mysqlTable("provider_health", {
 	updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const roleRuntimeStatus = mysqlTable("role_runtime_status", {
+	roleId: mysqlEnum("roleId", ["fast", "smart", "context", "flagship"]).primaryKey(),
+	state: mysqlEnum("state", ["ready", "backup", "unavailable"]).notNull(),
+	provider: varchar("provider", { length: 32 }),
+	modelUsed: varchar("modelUsed", { length: 160 }),
+	checkedAt: timestamp("checkedAt").defaultNow().notNull(),
+});
+
 export const webSearchStatus = mysqlTable("web_search_status", {
   key: varchar("key", { length: 32 }).primaryKey(),
   state: mysqlEnum("state", ["ready", "unavailable", "unknown"]).notNull(),

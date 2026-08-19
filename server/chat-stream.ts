@@ -20,9 +20,11 @@ export function writeEvent(res: Response, event: string, payload: unknown) {
 }
 
 function historyError(error: unknown) {
-  return error instanceof Error && /чат|хранилище/i.test(error.message)
-    ? "История чата временно недоступна. Повторите попытку позже."
-    : "Не удалось подготовить потоковый ответ. Повторите попытку позже.";
+  const message = error instanceof Error ? error.message : "";
+  if (/чат|хранилище/i.test(message)) return "Этап «история чата»: данные временно недоступны. Повторите попытку позже.";
+  if (/вложен|файл|документ/i.test(message)) return "Этап «вложения»: не удалось подготовить выбранные файлы. Уберите вложение и повторите попытку.";
+  if (/поиск|google|grounding/i.test(message)) return "Этап «web-поиск»: поиск недоступен; обычный чат будет отправлен без источников.";
+  return "Этап «подготовка сообщения»: не удалось собрать приватный контекст. Повторите попытку позже.";
 }
 
 type StreamDependencies = {

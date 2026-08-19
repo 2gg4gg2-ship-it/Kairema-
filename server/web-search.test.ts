@@ -32,7 +32,24 @@ describe("Google Search grounding", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { status: "RESOURCE_EXHAUSTED", message: "quota exceeded" } }), { status: 429 })));
 
     await expect(searchWeb("Проверь факт")).rejects.toBeInstanceOf(WebSearchUnavailableError);
-    await expect(getWebSearchStatus()).resolves.toMatchObject({ available: false, reason: "Поиск временно недоступен: квота Google." });
+    await expect(getWebSearchStatus()).resolves.toMatchObject({ available: false, reason: "Поиск временно недоступен: квота Google; OpenRouter online не вернул проверяемые источники." });
+  });
+
+  it("uses OpenRouter online only when its real response contains verifiable citations after Google 429", async () => {
+    process.env.GEMINI_API_KEY = "test-google";
+    process.env.OPENROUTER_API_KEY = "test-openrouter";
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { status: "RESOURCE_EXHAUSTED" } }), { status: 429 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{ message: { content: "Актуальный ответ OpenRouter." } }],
+        citations: ["https://example.com/verified", "https://example.com/verified"],
+      }), { status: 200 })));
+
+    await expect(searchWeb("Проверь актуальный факт")).resolves.toEqual({
+      summary: "Актуальный ответ OpenRouter.",
+      sources: [{ title: "https://example.com/verified", url: "https://example.com/verified" }],
+    });
+    await expect(getWebSearchStatus()).resolves.toMatchObject({ available: true, googleHttp: 429, openrouterHttp: 200 });
   });
 
   it("persists one final availability result from Google grounding and diagnostic OpenRouter online", async () => {

@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("./db", () => ({
   listProviderHealth: vi.fn().mockResolvedValue([]),
   upsertProviderHealth: vi.fn().mockResolvedValue(undefined),
+  listRoleRuntimeStatus: vi.fn().mockResolvedValue([]),
+  upsertRoleRuntimeStatus: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { ATTEMPT_TIMEOUT_MS, DIAGNOSTIC_CANDIDATES, InvalidModelSelectionError, MODEL_CONFIG, MODEL_IDS, MODEL_ROLES, __resetProviderHealthForTests, buildOpenRouterMessages, chatWithRole, chatWithRoleStream, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, getProviderHealthForTesting, isAllowedModelId, modelById, openRouterStreamDelta, publicChatError, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView } from "./providers";
+import { ATTEMPT_TIMEOUT_MS, DIAGNOSTIC_CANDIDATES, InvalidModelSelectionError, MODEL_CONFIG, MODEL_IDS, MODEL_ROLES, __resetProviderHealthForTests, buildOpenRouterMessages, chatWithRole, chatWithRoleStream, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, getProviderHealthForTesting, isAllowedModelId, modelById, openRouterStreamDelta, publicChatError, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView, toRoleRuntimeView } from "./providers";
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -99,8 +101,16 @@ describe("Kairema v4 role registry", () => {
 
   it("never serializes provider chains or auth transport in public role views", () => {
     const view = toPublicModelView(MODEL_CONFIG[0]!, { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" });
-    expect(Object.keys(view).sort()).toEqual(["key", "label", "modelId", "role", "status"]);
+    expect(Object.keys(view).sort()).toEqual(["key", "label", "modelId", "role", "runtime", "status"]);
+    expect(view.runtime).toBeNull();
     expect(JSON.stringify(view)).not.toMatch(/chain|OPENROUTER_API_KEY|Authorization|Bearer/i);
+  });
+
+  it("publishes a safe runtime override after a real reserve answer", async () => {
+    const runtime = toRoleRuntimeView("backup", "groq", "GPT-OSS 20B", new Date("2026-08-19T00:00:00.000Z"));
+
+    expect(runtime).toEqual({ state: "backup", provider: "Groq", modelUsed: "GPT-OSS 20B", checkedAt: "2026-08-19T00:00:00.000Z" });
+    expect(JSON.stringify(runtime)).not.toMatch(/openai\/gpt|openrouter\/|chain|Authorization|Bearer/i);
   });
 
   it("returns a human-safe error contract", () => {
