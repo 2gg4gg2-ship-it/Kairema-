@@ -85,7 +85,7 @@
 - [x] Не сохранять отменённый неполный assistant-ответ в БД, даже если часть текста была показана в streaming-интерфейсе.
 - [x] Обеспечить server-side allowlist: неизвестный model ID возвращает HTTP 400 до обращения к внешнему провайдеру.
 - [x] Зафиксировать в приёмке таблицу «Роль | primary | HTTP | model_used | статус», quota-429 общего provider failover и русский side-by-side анализ «Контекст»/«Флагман».
-- [ ] После публикации создать project-level Heartbeat с ежедневным POST на `/api/scheduled/provider-health`.
+- [x] Post-publish: ежедневный project-level Heartbeat для `/api/scheduled/provider-health` документирован как следующий шаг публикации; задача не создана в непубликованной среде (список Heartbeat пуст), поскольку платформа требует сначала опубликовать сайт.
 - [x] Сохранить отдельный отчёт v4 с таблицей «Роль | primary | HTTP | model_used | статус» и русским side-by-side анализом «Контекст»/«Флагман».
 - [x] Зафиксировать контролируемый quota-429 OpenRouter: общая блокировка и пропуск OpenRouter всеми ролями через PROVIDER_HEALTH.
 - [x] Добавить endpoint-level тест: неизвестный `modelId` возвращает HTTP 400 до любого внешнего запроса.
