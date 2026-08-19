@@ -93,6 +93,12 @@ export async function updateChatTitle(userId: number, sessionId: string, title: 
   await db.update(chatSessions).set({ title, updatedAt: new Date() }).where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)));
 }
 
+export async function deleteOwnedChatSession(userId: number, sessionId: string): Promise<boolean> {
+  const db = requireDatabase(await getDb());
+  const result = await db.delete(chatSessions).where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)));
+  return result[0].affectedRows > 0;
+}
+
 export async function createChatExportRecord(userId: number, input: Omit<ChatExport, "userId" | "createdAt">): Promise<ChatExport> {
   const db = requireDatabase(await getDb());
   requireOwnedSession(userId, await getOwnedChatSession(userId, input.sessionId));
@@ -122,6 +128,12 @@ export async function deleteOwnedChatExport(userId: number, exportId: string): P
   if (!isOwnedChatExport(userId, owned)) return false;
   await db.delete(chatExports).where(and(eq(chatExports.id, exportId), eq(chatExports.userId, userId)));
   return true;
+}
+
+export async function deleteAllOwnedChatExports(userId: number): Promise<number> {
+  const db = requireDatabase(await getDb());
+  const result = await db.delete(chatExports).where(eq(chatExports.userId, userId));
+  return result[0].affectedRows;
 }
 
 export async function listProviderHealth(): Promise<ProviderHealthRecord[]> {

@@ -10,7 +10,12 @@ const streamInputSchema = z.object({
   modelId: z.enum(MODEL_IDS),
   content: z.string().trim().min(1).max(16_000),
   regenerateMessageId: z.number().int().positive().optional(),
-  settings: z.object({ style: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional() }).optional(),
+  settings: z.object({
+    style: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional(),
+    responseLength: z.enum(["brief", "balanced", "detailed"]).optional(),
+    effort: z.enum(["low", "standard", "high"]).optional(),
+    thinking: z.boolean().optional(),
+  }).optional(),
   attachmentIds: z.array(z.string().uuid()).max(4).optional(),
   webSearch: z.boolean().optional(),
 });
@@ -69,7 +74,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
       const session = await dependencies.getOwnedChatSession(user.id, input.sessionId);
       if (!session) throw new Error("Чат не найден или недоступен.");
       const storedSettings = await dependencies.buildChatContext(user.id, input.sessionId, { attachmentIds: input.attachmentIds, webSearch: input.webSearch, query: input.content, role: input.modelId });
-      const effectiveSettings = { ...storedSettings, ...(input.settings?.style ? { style: input.settings.style } : {}) };
+      const effectiveSettings = { ...storedSettings, ...input.settings };
       let history;
       if (input.regenerateMessageId) {
         const currentHistory = await dependencies.listSessionMessages(user.id, input.sessionId);

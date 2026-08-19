@@ -14,9 +14,17 @@ const db = vi.hoisted(() => ({
 
 vi.mock("./db", () => db);
 
-import { parseOfficialFeed, refreshKnowledgeBase, retrieveRagContext } from "./knowledge";
+import { OFFICIAL_RSS_SOURCES, parseOfficialFeed, refreshKnowledgeBase, retrieveRagContext } from "./knowledge";
 
 describe("Kairema RAG", () => {
+  it("содержит только проверенные официальные RSS-источники", () => {
+    expect(OFFICIAL_RSS_SOURCES).toEqual([
+      { id: "openai-news", displayName: "OpenAI News", feedUrl: "https://openai.com/news/rss.xml" },
+      { id: "google-ai-blog", displayName: "Google AI Blog", feedUrl: "https://blog.google/technology/ai/rss/" },
+      { id: "microsoft-research", displayName: "Microsoft Research", feedUrl: "https://www.microsoft.com/en-us/research/feed/" },
+    ]);
+  });
+
   it("извлекает из RSS только проверяемые HTTPS-поля без HTML", () => {
     const entries = parseOfficialFeed(`<?xml version="1.0"?><rss><channel><item><title><![CDATA[<b>Новый релиз</b>]]></title><link>https://openai.com/news/release</link><description><![CDATA[<p>Проверяемый <strong>фрагмент</strong>.</p>]]></description><pubDate>Tue, 19 Aug 2026 12:00:00 GMT</pubDate></item><item><title>Непригодный</title><link>javascript:alert(1)</link></item></channel></rss>`);
     expect(entries).toEqual([{ title: "Новый релиз", sourceUrl: "https://openai.com/news/release", excerpt: "Проверяемый фрагмент.", publishedAt: new Date("2026-08-19T12:00:00.000Z") }]);

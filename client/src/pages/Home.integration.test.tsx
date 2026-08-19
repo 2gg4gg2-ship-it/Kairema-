@@ -13,10 +13,13 @@ const fixtures = vi.hoisted(() => ({
   downloadPrepared: vi.fn(),
   createExport: vi.fn(),
   deleteExport: vi.fn(),
+  deleteAllExports: vi.fn(),
+  exports: [] as Array<{ id: string; fileName: string; format: "markdown" | "pdf"; createdAt: Date }>,
   invalidateExports: vi.fn(),
   invalidateMessages: vi.fn(),
   invalidateSessions: vi.fn(),
   createChat: vi.fn(),
+  deleteChat: vi.fn(),
   updateSettings: vi.fn(),
   releaseSecondDelta: null as (() => void) | null,
 }));
@@ -49,11 +52,13 @@ vi.mock("@/lib/trpc", () => ({
       list: { useQuery: () => ({ data: fixtures.sessions, isLoading: false }) },
       messages: { useQuery: () => ({ data: fixtures.messages }) },
       create: { useMutation: () => ({ mutateAsync: fixtures.createChat, isPending: false }) },
+      delete: { useMutation: () => ({ mutateAsync: fixtures.deleteChat, isPending: false }) },
     },
     exports: {
-      list: { useQuery: () => ({ data: [], isLoading: false }) },
+      list: { useQuery: () => ({ data: fixtures.exports, isLoading: false }) },
       create: { useMutation: () => ({ mutateAsync: fixtures.createExport }) },
       delete: { useMutation: () => ({ mutateAsync: fixtures.deleteExport }) },
+      deleteAll: { useMutation: () => ({ mutateAsync: fixtures.deleteAllExports }) },
     },
     useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, list: { invalidate: fixtures.invalidateSessions } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: vi.fn() } } }),
   },
@@ -84,9 +89,12 @@ function resetFixtures() {
   fixtures.downloadPrepared.mockReset();
   fixtures.createExport.mockReset().mockResolvedValue({ id: "export-1" });
   fixtures.deleteExport.mockReset().mockResolvedValue(undefined);
+  fixtures.deleteAllExports.mockReset().mockResolvedValue({ success: true, deletedCount: 1 });
+  fixtures.exports = [];
   fixtures.invalidateExports.mockReset().mockResolvedValue(undefined);
   fixtures.invalidateSessions.mockReset().mockResolvedValue(undefined);
   fixtures.createChat.mockReset().mockResolvedValue({ id: "22222222-2222-4222-8222-222222222222", modelId: "fast", title: "Новый разговор" });
+  fixtures.deleteChat.mockReset().mockResolvedValue({ success: true });
   fixtures.updateSettings.mockReset().mockResolvedValue(undefined);
   fixtures.invalidateMessages.mockReset().mockImplementation(async () => {
     fixtures.messages = [
@@ -124,6 +132,18 @@ describe("Home integration flows", () => {
     expect(screen.queryByText(/Invalid option/)).toBeNull();
   });
 
+  it("deletes the active owned chat and clears the active-message query", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Удалить: Активная история" }));
+
+    await waitFor(() => expect(fixtures.deleteChat).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
+    await waitFor(() => expect(fixtures.invalidateSessions).toHaveBeenCalled());
+    expect(fixtures.invalidateMessages).toHaveBeenCalledWith();
+  });
+
   it("exports only the active persisted history through both user-facing controls", async () => {
     const user = userEvent.setup();
     render(<Home />);
@@ -136,6 +156,20 @@ describe("Home integration flows", () => {
     await waitFor(() => expect(fixtures.preparePdf).toHaveBeenCalledOnce());
     expect(fixtures.createExport).toHaveBeenCalledTimes(2);
     expect(fixtures.downloadPrepared).toHaveBeenCalledTimes(2);
+  });
+
+  it("confirms before deleting all exports and refreshes the export history after the owned operation succeeds", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.fn().mockReturnValue(true);
+    vi.stubGlobal("confirm", confirm);
+    fixtures.exports = [{ id: "33333333-3333-4333-8333-333333333333", fileName: "Активная история.md", format: "markdown", createdAt: new Date("2026-08-19T00:00:00.000Z") }];
+    render(<Home />);
+
+    await user.click(await screen.findByRole("button", { name: "Удалить все экспорты" }));
+
+    expect(confirm).toHaveBeenCalledOnce();
+    await waitFor(() => expect(fixtures.deleteAllExports).toHaveBeenCalledOnce());
+    await waitFor(() => expect(fixtures.invalidateExports).toHaveBeenCalledOnce());
   });
 
   it("shows a streaming delta, then replaces optimistic content with the persisted final answer", async () => {
@@ -157,7 +191,7 @@ describe("Home integration flows", () => {
     await user.keyboard("{Enter}");
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
-    expect(JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body))).toMatchObject({ sessionId: fixtures.sessionId, modelId: "fast", content: "Новый вопрос", attachmentIds: [], webSearch: false });
+    expect(JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body))).toMatchObject({ sessionId: fixtures.sessionId, modelId: "fast", content: "Новый вопрос", attachmentIds: [], webSearch: false, settings: { style: "default", responseLength: "balanced", effort: "standard", thinking: false } });
 
     await waitFor(() => expect(screen.getByText("Первый фрагмент")).toBeTruthy());
     expect(screen.queryByText("Первый фрагмент ответа")).toBeNull();
@@ -181,9 +215,9 @@ describe("Home integration flows", () => {
     vi.stubGlobal("fetch", fetchSpy);
     render(<Home />);
 
-    await user.click(screen.getByRole("button", { name: "Копировать" }));
+    await user.click(screen.getAllByRole("button", { name: "Копировать" })[1]!);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("Старый ответ Kairema"));
-    expect(screen.getByRole("status").textContent).toContain("Ответ скопирован");
+    expect(screen.getByRole("status").textContent).toContain("Сообщение скопировано");
 
     await user.click(screen.getByRole("button", { name: "Ещё вариант" }));
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());

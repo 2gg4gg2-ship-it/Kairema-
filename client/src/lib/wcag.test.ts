@@ -9,6 +9,7 @@ describe("Kairema v5.2 WCAG AA tokens", () => {
     ["dark primary", "#f4f4f1", "#0c0c0c"],
     ["dark muted", "#c4c4bc", "#0c0c0c"],
     ["dark user bubble", "#f4f4f1", "#242422"],
+    ["dark new-chat button", "#f4f4f1", "#242422"],
   ] as const;
 
   it.each(pairs)("keeps %s at WCAG AA normal-text contrast", (_name, foreground, background) => {

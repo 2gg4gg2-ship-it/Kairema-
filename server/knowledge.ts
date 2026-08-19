@@ -4,6 +4,7 @@ import { createKnowledgeRun, ensureKnowledgeSource, finishKnowledgeRun, listKnow
 export const OFFICIAL_RSS_SOURCES = [
   { id: "openai-news", displayName: "OpenAI News", feedUrl: "https://openai.com/news/rss.xml" },
   { id: "google-ai-blog", displayName: "Google AI Blog", feedUrl: "https://blog.google/technology/ai/rss/" },
+  { id: "microsoft-research", displayName: "Microsoft Research", feedUrl: "https://www.microsoft.com/en-us/research/feed/" },
 ] as const;
 
 const MAX_FEED_BYTES = 2_000_000;

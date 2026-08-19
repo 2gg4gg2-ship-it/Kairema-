@@ -6,7 +6,7 @@ export const MODEL_IDS = ROLE_IDS;
 export type RoleId = (typeof ROLE_IDS)[number];
 export type ModelId = RoleId;
 export type ModelKey = RoleId;
-export type Provider = "openrouter" | "google" | "groq" | "sambanova" | "mistral";
+export type Provider = "openrouter" | "google" | "groq" | "sambanova" | "mistral" | "cerebras";
 export type StatusCategory = "AUTH" | "QUOTA" | "RATE_LIMIT" | "PROVIDER_UNAVAILABLE" | "ENDPOINT" | "MODEL" | "NETWORK" | "TIMEOUT" | "PARSE" | "CONFIG" | "UNKNOWN";
 export type ModelStatus = { state: "ready" | "fallback" | "loading" | "error" | "unavailable" | "not_configured"; badge: string; category: StatusCategory | null; http: number | null; checkedAt: string; confirmed: string };
 export type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -42,7 +42,7 @@ export const MODEL_ROLES: readonly ModelConfig[] = [
     { provider: "openrouter", modelId: "openai/gpt-oss-20b:free", displayName: "GPT-OSS 20B" },
     { provider: "groq", modelId: "openai/gpt-oss-20b", displayName: "GPT-OSS 20B" },
     { provider: "google", modelId: "gemini-flash-lite-latest", displayName: "Gemini Flash Lite", vision: true, requiresWebResearch: true },
-    { provider: "sambanova", modelId: "Meta-Llama-3.3-70B-Instruct", displayName: "Llama 3.3 70B" },
+    { provider: "cerebras", modelId: "gpt-oss-120b", displayName: "GPT-OSS 120B" },
   ] },
   { key: "smart", modelId: "smart", label: "Kairema Смекалистый", role: "Математика, логика и последовательные рассуждения.", chain: [
     { provider: "openrouter", modelId: "google/gemma-4-26b-a4b-it:free", displayName: "Gemma 4 26B" },
@@ -74,8 +74,9 @@ const ENDPOINTS: Record<Provider, string> = {
   groq: "https://api.groq.com/openai/v1/chat/completions",
   sambanova: "https://api.sambanova.ai/v1/chat/completions",
   mistral: "https://api.mistral.ai/v1/chat/completions",
+  cerebras: "https://api.cerebras.ai/v1/chat/completions",
 };
-const PROVIDERS: readonly Provider[] = ["openrouter", "google", "groq", "sambanova", "mistral"];
+const PROVIDERS: readonly Provider[] = ["openrouter", "google", "groq", "sambanova", "mistral", "cerebras"];
 const MAX_ATTEMPTS = 4;
 /** Every provider attempt has the same bounded latency budget, including SSE. */
 export const ATTEMPT_TIMEOUT_MS = 25_000;
@@ -101,7 +102,9 @@ function secretFor(provider: Provider) {
         ? "GROQ_API_KEY"
         : provider === "sambanova"
           ? "SAMBANOVA_API_KEY"
-          : "MISTRAL_API_KEY";
+          : provider === "mistral"
+            ? "MISTRAL_API_KEY"
+            : "CEREBRAS_API_KEY";
   return process.env[envName]?.trim();
 }
 function configured(provider: Provider) { return Boolean(secretFor(provider)); }
@@ -260,7 +263,8 @@ function probeCandidate(provider: Provider): Candidate {
   if (provider === "google") return { provider, modelId: "gemini-flash-lite-latest", displayName: "health probe" };
   if (provider === "groq") return { provider, modelId: "openai/gpt-oss-20b", displayName: "health probe" };
   if (provider === "sambanova") return { provider, modelId: "Meta-Llama-3.3-70B-Instruct", displayName: "health probe" };
-  return { provider, modelId: "codestral-2508", displayName: "health probe" };
+  if (provider === "mistral") return { provider, modelId: "codestral-2508", displayName: "health probe" };
+  return { provider, modelId: "gpt-oss-120b", displayName: "health probe" };
 }
 
 async function invoke(candidate: Candidate, role: ModelConfig, history: ChatMessage[], settings: ChatSettings | undefined, stream: boolean, signal?: AbortSignal) {
@@ -326,12 +330,14 @@ async function pingProvider(provider: Provider) {
 /** Runs entirely on the server. A blocked provider becomes ready only after this ping succeeds. */
 export async function refreshProviderHealth(options: { force?: boolean; knownOnly?: boolean } = {}) {
   await hydrateProviderHealth();
+  const providersToRefresh = PROVIDERS.filter((provider) => (!options.knownOnly || providerHealth.has(provider)) && providerNeedsPing(provider, Boolean(options.force)));
   if (!providerHealthRefresh) {
     providerHealthRefresh = (async () => {
-      await Promise.all(PROVIDERS.filter((provider) => (!options.knownOnly || providerHealth.has(provider)) && providerNeedsPing(provider, Boolean(options.force))).map((provider) => pingProvider(provider)));
+      await Promise.all(providersToRefresh.map((provider) => pingProvider(provider)));
     })().finally(() => { providerHealthRefresh = null; });
   }
   await providerHealthRefresh;
+  return providersToRefresh.length;
 }
 
 function statusForRole(role: ModelConfig) {
@@ -347,7 +353,7 @@ function statusForRole(role: ModelConfig) {
 }
 
 function providerLabel(provider: Provider | null) {
-  return provider === "openrouter" ? "OpenRouter" : provider === "google" ? "Google AI Studio" : provider === "groq" ? "Groq" : provider === "sambanova" ? "SambaNova" : provider === "mistral" ? "Mistral" : null;
+  return provider === "openrouter" ? "OpenRouter" : provider === "google" ? "Google AI Studio" : provider === "groq" ? "Groq" : provider === "sambanova" ? "SambaNova" : provider === "mistral" ? "Mistral" : provider === "cerebras" ? "Cerebras" : null;
 }
 
 export function toRoleRuntimeView(state: RoleRuntimeView["state"], provider: string | null, modelUsed: string | null, checkedAt: Date): RoleRuntimeView {

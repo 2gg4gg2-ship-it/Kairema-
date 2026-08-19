@@ -25,13 +25,13 @@ function response() {
 describe("provider health schedule", () => {
   it("runs the forced server-side recheck only for an authenticated cron identity", async () => {
     authenticateRequest.mockResolvedValue({ id: -1, isCron: true, taskUid: "task_health" });
-    refreshProviderHealth.mockResolvedValue(undefined);
+    refreshProviderHealth.mockResolvedValue(6);
     const res = response();
 
     await createProviderHealthScheduleHandler()({} as Request, res, vi.fn());
 
     expect(refreshProviderHealth).toHaveBeenCalledWith({ force: true });
-    expect(res.json).toHaveBeenCalledWith({ ok: true, refreshed: 3 });
+    expect(res.json).toHaveBeenCalledWith({ ok: true, refreshed: 6 });
   });
 
   it("rejects non-cron requests before a provider ping can run", async () => {

@@ -8,11 +8,11 @@ describe("v5.5 server-side role safety", () => {
     expect(MODEL_ROLES.every((role) => role.chain.length === 4)).toBe(true);
   });
 
-  it("uses Google candidates only behind web-research policy and keeps SambaNova server-side", () => {
+  it("uses Google candidates only behind web-research policy and keeps optional reserves server-side", () => {
     for (const role of MODEL_ROLES) {
       const googleCandidate = role.chain.find((candidate) => candidate.provider === "google");
       expect(googleCandidate?.requiresWebResearch).toBe(true);
-      expect(role.chain.some((candidate) => candidate.provider === "sambanova")).toBe(true);
+      expect(role.chain.some((candidate) => candidate.provider === "sambanova" || candidate.provider === "cerebras")).toBe(true);
     }
   });
 });

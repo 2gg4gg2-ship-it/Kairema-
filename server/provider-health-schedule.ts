@@ -11,8 +11,8 @@ export function createProviderHealthScheduleHandler(): RequestHandler {
         res.status(403).json({ error: "cron-only" });
         return;
       }
-      await refreshProviderHealth({ force: true });
-      res.json({ ok: true, refreshed: 3 });
+      const refreshed = await refreshProviderHealth({ force: true });
+      res.json({ ok: true, refreshed });
     } catch (error) {
       res.status(500).json({
         error: "provider-health-refresh-failed",
