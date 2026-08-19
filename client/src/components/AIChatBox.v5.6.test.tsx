@@ -20,9 +20,12 @@ describe("AIChatBox v5.6", () => {
     expect(onCopyUser).toHaveBeenCalledWith(expect.objectContaining({ id: "user-1", role: "user", content: "Проверочный текст" }));
   });
 
-  it("shows transparent web and RAG source labels without inventing a missing publication date", () => {
+  it("shows transparent source title, domain and publication date only after an explicit expansion", () => {
     render(<AIChatBox messages={[{ id: "assistant-1", role: "assistant", content: "Ответ", sources: [{ title: "Свежий материал", url: "https://example.com/web" }, { title: "Официальный RSS", url: "https://example.com/rss", kind: "rag", publishedAt: "2026-08-19T00:00:00.000Z" }] }]} onSendMessage={vi.fn()} emptyStateMessage="Kairema" />);
-    expect(screen.getByText(/Веб · Свежий материал · дата не указана/)).toBeTruthy();
-    expect(screen.getByText(/RAG · Официальный RSS · 19\.08\.2026/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Источники (2)" }).getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: "Источники (2)" }));
+    expect(screen.getByRole("link", { name: /Свежий материал/ }).getAttribute("href")).toBe("https://example.com/web");
+    expect(screen.getByRole("link", { name: /Официальный RSS/ }).getAttribute("href")).toBe("https://example.com/rss");
+    expect(screen.getByText(/example\.com · 19\.08\.2026/)).toBeTruthy();
   });
 });

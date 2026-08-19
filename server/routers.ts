@@ -6,12 +6,12 @@ import { appendChatMessage, clearMemory, createChatExportRecord, createChatSessi
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { MODEL_IDS, chatWithRole, getModelViews, publicChatError } from "./providers";
+import { MODEL_IDS, chatWithRole, getModelViews, getPublicProviderDashboard, publicChatError } from "./providers";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { getOwnedAttachmentDownload, uploadOwnedChatAttachment } from "./attachments";
 import { buildChatContext, extractMemoryFacts } from "./chat-context";
 import { getWebSearchStatus, probeWebSearchStatus } from "./web-search";
-import { getKnowledgeStatus, refreshKnowledgeBase } from "./knowledge";
+import { getKnowledgeAudit, getKnowledgeStatus, refreshKnowledgeBase } from "./knowledge";
 
 const settingsSchema = z.object({
   style: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional(),
@@ -60,6 +60,9 @@ export const appRouter = router({
   models: router({
     list: publicProcedure.query(() => getModelViews()),
   }),
+  providers: router({
+    dashboard: protectedProcedure.query(() => getPublicProviderDashboard()),
+  }),
   settings: router({
     get: protectedProcedure.query(({ ctx }) => getUserSettings(ctx.user.id)),
     update: protectedProcedure.input(userSettingsSchema).mutation(async ({ ctx, input }) => {
@@ -105,6 +108,7 @@ export const appRouter = router({
   }),
   knowledge: router({
     status: protectedProcedure.query(async () => getKnowledgeStatus()),
+    audit: protectedProcedure.query(async () => getKnowledgeAudit()),
     refresh: protectedProcedure.mutation(async () => {
       const current = await getKnowledgeStatus();
       const latest = current.runs[0];

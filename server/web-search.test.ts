@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getWebSearchStatus, probeWebSearchStatus, searchWeb, WebSearchUnavailableError } from "./web-search";
+import { buildGlobalDiscoveryQuery, getWebSearchStatus, probeWebSearchStatus, searchWeb, WebSearchUnavailableError } from "./web-search";
 
 const originalKey = process.env.GEMINI_API_KEY;
 const originalOpenRouterKey = process.env.OPENROUTER_API_KEY;
@@ -13,6 +13,30 @@ afterEach(() => {
 });
 
 describe("Google Search grounding", () => {
+  it("retains the original request while explicitly broadening discovery to authoritative global sources", () => {
+    const query = buildGlobalDiscoveryQuery("Проверь международный стандарт");
+    expect(query).toContain("Проверь международный стандарт");
+    expect(query).toMatch(/authoritative global information/i);
+    expect(query).toMatch(/English-language source discovery/i);
+  });
+
+  it("ranks official global domains above otherwise valid commercial sources without inventing links", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: "Проверенный краткий ответ." }] }, groundingMetadata: { groundingChunks: [
+        { web: { title: "Коммерческий материал", uri: "https://example.com/source" } },
+        { web: { title: "Официальный материал", uri: "https://agency.gov/source" } },
+      ] } }],
+    }), { status: 200 })));
+
+    await expect(searchWeb("Проверь актуальный стандарт")).resolves.toMatchObject({
+      sources: [
+        { title: "Официальный материал", url: "https://agency.gov/source" },
+        { title: "Коммерческий материал", url: "https://example.com/source" },
+      ],
+    });
+  });
+
   it("returns only verifiable grounded sources from a successful server-side response", async () => {
     process.env.GEMINI_API_KEY = "test-key";
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
@@ -24,7 +48,7 @@ describe("Google Search grounding", () => {
 
     await expect(searchWeb("Проверь факт")).resolves.toEqual({
       summary: "Проверенный краткий ответ.",
-      sources: [{ title: "Официальный источник", url: "https://example.com/source" }],
+      sources: [{ title: "Официальный источник", url: "https://example.com/source", domain: "example.com" }],
     });
     expect((await getWebSearchStatus()).available).toBe(true);
   }, 10_000);
@@ -60,7 +84,7 @@ describe("Google Search grounding", () => {
 
     await expect(searchWeb("Проверь актуальный факт")).resolves.toEqual({
       summary: "Актуальный ответ OpenRouter.",
-      sources: [{ title: "https://example.com/verified", url: "https://example.com/verified" }],
+      sources: [{ title: "https://example.com/verified", url: "https://example.com/verified", domain: "example.com" }],
     });
     await expect(getWebSearchStatus()).resolves.toMatchObject({ available: true, googleHttp: 429, openrouterHttp: 200 });
   });

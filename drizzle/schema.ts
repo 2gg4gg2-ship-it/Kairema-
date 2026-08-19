@@ -119,6 +119,23 @@ export const knowledgeIngestionRuns = mysqlTable("knowledge_ingestion_runs", {
   finishedAt: timestamp("finishedAt"),
 }, (table) => [index("knowledge_ingestion_runs_started_idx").on(table.startedAt)]);
 
+/** Per-user fixed-minute quota state for the isolated admin-only Dev API. */
+export const devApiRateWindows = mysqlTable("dev_api_rate_windows", {
+  userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  windowStarted: timestamp("windowStarted").defaultNow().notNull(),
+  requestCount: int("requestCount").notNull().default(0),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+/** Metadata-only audit trail: never stores request prompts, response bodies, headers, IPs, or credentials. */
+export const devApiAuditRecords = mysqlTable("dev_api_audit_records", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  userId: int("userId").references(() => users.id, { onDelete: "set null" }),
+  outcome: mysqlEnum("outcome", ["allowed", "denied", "invalid", "rate_limited", "provider_error"]).notNull(),
+  status: int("status").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("dev_api_audit_user_created_idx").on(table.userId, table.createdAt)]);
+
 export const userSettings = mysqlTable("user_settings", {
   userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   language: mysqlEnum("language", ["ru", "en"]).notNull().default("ru"),
@@ -177,6 +194,7 @@ export type WebSearchStatusRecord = typeof webSearchStatus.$inferSelect;
 export type KnowledgeSource = typeof knowledgeSources.$inferSelect;
 export type KnowledgeDocument = typeof knowledgeDocuments.$inferSelect;
 export type KnowledgeIngestionRun = typeof knowledgeIngestionRuns.$inferSelect;
+export type DevApiAuditRecord = typeof devApiAuditRecords.$inferSelect;
 export type UserSettings = typeof userSettings.$inferSelect;
 export type MemoryProfile = typeof memoryProfiles.$inferSelect;
 export type MemoryFact = typeof memoryFacts.$inferSelect;

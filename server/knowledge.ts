@@ -154,3 +154,28 @@ export async function retrieveRagContext(query: string, role: RagRole = "flagshi
 export async function getKnowledgeStatus() {
   return { sources: await listKnowledgeSources(), runs: await listKnowledgeRuns() };
 }
+
+/** Read-only audit DTO: only official feed metadata and aggregate indexing outcomes reach the client. */
+export async function getKnowledgeAudit() {
+  const { sources, runs } = await getKnowledgeStatus();
+  const latest = runs[0] ?? null;
+  return {
+    sources: sources.map((source) => ({
+      name: source.displayName,
+      url: source.feedUrl,
+      state: source.state,
+      indexedCount: source.indexedCount,
+      lastFetchedAt: source.lastFetchedAt?.toISOString() ?? null,
+      lastSuccessAt: source.lastSuccessAt?.toISOString() ?? null,
+    })),
+    latestRun: latest ? {
+      trigger: latest.trigger,
+      state: latest.state,
+      fetchedCount: latest.fetchedCount,
+      indexedCount: latest.indexedCount,
+      updatedCount: latest.updatedCount,
+      startedAt: latest.startedAt.toISOString(),
+      finishedAt: latest.finishedAt?.toISOString() ?? null,
+    } : null,
+  };
+}

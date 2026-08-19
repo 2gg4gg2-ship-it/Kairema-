@@ -1,7 +1,7 @@
-import { and, asc, desc, eq, inArray, like } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, like, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
-import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryFacts, memoryProfiles, messages, providerHealth, roleRuntimeStatus, userSettings, users, webSearchStatus } from "../drizzle/schema";
+import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, devApiAuditRecords, devApiRateWindows, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryFacts, memoryProfiles, messages, providerHealth, roleRuntimeStatus, userSettings, users, webSearchStatus } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -286,6 +286,30 @@ export async function finishKnowledgeRun(id: string, patch: Pick<KnowledgeIngest
 export async function listKnowledgeRuns(limit = 8): Promise<KnowledgeIngestionRun[]> {
   const db = requireDatabase(await getDb());
   return db.select().from(knowledgeIngestionRuns).orderBy(desc(knowledgeIngestionRuns.startedAt)).limit(Math.min(Math.max(limit, 1), 20));
+}
+
+export type DevApiAuditInput = Pick<DevApiAuditRecord, "outcome" | "status"> & { userId?: number };
+
+/** Atomically increments a user's current fixed-minute bucket and returns whether it remains within the quota. */
+export async function consumeDevApiRequestQuota(userId: number, limit = 30, windowMs = 60_000): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+  const db = requireDatabase(await getDb());
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - windowMs);
+  await db.insert(devApiRateWindows).values({ userId, windowStarted: now, requestCount: 1 }).onDuplicateKeyUpdate({ set: {
+    requestCount: sql`if(${devApiRateWindows.windowStarted} <= ${cutoff}, 1, ${devApiRateWindows.requestCount} + 1)`,
+    windowStarted: sql`if(${devApiRateWindows.windowStarted} <= ${cutoff}, ${now}, ${devApiRateWindows.windowStarted})`,
+  } });
+  const rows = await db.select().from(devApiRateWindows).where(eq(devApiRateWindows.userId, userId)).limit(1);
+  const current = rows[0];
+  if (!current) throw new Error("Не удалось проверить лимит Dev API.");
+  const elapsed = Math.max(0, now.getTime() - current.windowStarted.getTime());
+  return { allowed: current.requestCount <= limit, retryAfterSeconds: Math.max(1, Math.ceil((windowMs - elapsed) / 1_000)) };
+}
+
+/** Writes only outcome metadata; prompts, responses, credentials, headers and IP addresses are never persisted. */
+export async function recordDevApiAudit(input: DevApiAuditInput): Promise<void> {
+  const db = requireDatabase(await getDb());
+  await db.insert(devApiAuditRecords).values({ id: randomUUID(), userId: input.userId ?? null, outcome: input.outcome, status: input.status });
 }
 
 export type MemoryProfilePatch = Partial<Pick<MemoryProfile, "enabled" | "autoExtract" | "profile" | "summary">>;

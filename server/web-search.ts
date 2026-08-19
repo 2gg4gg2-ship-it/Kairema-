@@ -19,6 +19,7 @@ const STATUS_KEY = "google_grounding";
 const QUERY_LIMIT = 8_000;
 const SOURCE_LIMIT = 5;
 const SNIPPET_LIMIT = 550;
+const PREFERRED_GLOBAL_DOMAINS = [".gov", ".edu", ".int", ".org", "openai.com", "google.com", "microsoft.com", "who.int", "un.org", "europa.eu"];
 
 let lastStatus: WebSearchStatus = {
   available: false,
@@ -45,12 +46,24 @@ function statusFromHttp(http: number, payload: unknown) {
 
 function webSource(title: unknown, url: unknown): WebSource | null {
   if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return null;
-  return { title: typeof title === "string" && title.trim() ? title.trim().slice(0, 240) : url, url };
+  let domain: string | undefined;
+  try { domain = new URL(url).hostname.replace(/^www\./i, ""); } catch { /* URL is already guarded above */ }
+  return { title: typeof title === "string" && title.trim() ? title.trim().slice(0, 240) : domain ?? url, url, ...(domain ? { domain } : {}) };
+}
+
+function sourcePriority(source: WebSource) {
+  const domain = source.domain?.toLowerCase() ?? "";
+  return PREFERRED_GLOBAL_DOMAINS.some((preferred) => domain === preferred || domain.endsWith(preferred)) ? 0 : 1;
 }
 
 function uniqueSources(items: Array<WebSource | null>): WebSource[] {
   const seen = new Set<string>();
-  return items.flatMap((item) => !item || seen.has(item.url) ? [] : (seen.add(item.url), [item])).slice(0, SOURCE_LIMIT);
+  return items.flatMap((item) => !item || seen.has(item.url) ? [] : (seen.add(item.url), [item])).sort((a, b) => sourcePriority(a) - sourcePriority(b) || a.title.localeCompare(b.title)).slice(0, SOURCE_LIMIT);
+}
+
+/** Keeps the original request as data while explicitly broadening discovery to authoritative English-language global sources. */
+export function buildGlobalDiscoveryQuery(query: string) {
+  return `Find current, authoritative global information. Prefer official international primary sources and English-language source discovery when useful. Original user request: ${query.slice(0, QUERY_LIMIT)}`;
 }
 
 function googleSources(payload: unknown): WebSource[] {
@@ -207,12 +220,13 @@ export async function searchWeb(query: string): Promise<SearchResult> {
     const status = await saveStatus({ available: false, reason: "Поиск недоступен: server-side ключ Google не настроен.", checkedAt, googleHttp: null, openrouterHttp: previous.openrouterHttp });
     throw new WebSearchUnavailableError(status.reason);
   }
+  const globalQuery = buildGlobalDiscoveryQuery(query);
   let response: Response;
   try {
     response = await fetch(GOOGLE_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: query.slice(0, QUERY_LIMIT) }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0.2, maxOutputTokens: 1_200 } }),
+      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: globalQuery }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0.2, maxOutputTokens: 1_200 } }),
       signal: AbortSignal.timeout(25_000),
     });
   } catch {
@@ -222,7 +236,7 @@ export async function searchWeb(query: string): Promise<SearchResult> {
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
     if (response.status === 429) {
-      const fallback = await fallbackAfterGoogleQuota(query, checkedAt, response.status, previous.openrouterHttp);
+      const fallback = await fallbackAfterGoogleQuota(globalQuery, checkedAt, response.status, previous.openrouterHttp);
       if (fallback) return fallback;
       const status = await saveStatus({ available: false, reason: "Поиск временно недоступен: квота Google; Tavily и OpenRouter online не вернули проверяемые источники. RAG может использоваться отдельно, если релевантен.", checkedAt, googleHttp: response.status, openrouterHttp: previous.openrouterHttp });
       throw new WebSearchUnavailableError(status.reason);

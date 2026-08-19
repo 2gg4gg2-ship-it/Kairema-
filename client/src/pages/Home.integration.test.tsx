@@ -45,7 +45,8 @@ vi.mock("@/lib/trpc", () => ({
     settings: { get: { useQuery: () => ({ data: { language: "ru", theme: "dark", responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, defaultRole: "fast", webSearch: 0 } }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateSettings }) } },
     memory: { get: { useQuery: () => ({ data: { profile: "", enabled: 1, autoExtract: 1, facts: [] } }) }, update: { useMutation: () => ({ mutateAsync: vi.fn() }) }, addFact: { useMutation: () => ({ mutateAsync: vi.fn() }) }, deleteFact: { useMutation: () => ({ mutateAsync: vi.fn() }) }, clear: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
     webSearch: { status: { useQuery: () => ({ data: { available: false, reason: "Поиск сейчас недоступен" } }) } },
-    knowledge: { status: { useQuery: () => ({ data: { documents: 0, sources: [], lastRun: null } }) }, refresh: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) } },
+    knowledge: { status: { useQuery: () => ({ data: { documents: 0, sources: [], lastRun: null } }) }, audit: { useQuery: () => ({ data: { sources: [{ name: "OpenAI News", url: "https://openai.com/news/rss.xml", indexedCount: 12, lastSuccessAt: "2026-08-19T00:00:00.000Z" }], latestRun: { state: "completed", startedAt: "2026-08-19T00:00:00.000Z", finishedAt: "2026-08-19T00:01:00.000Z" } } }) }, refresh: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) } },
+    providers: { dashboard: { useQuery: () => ({ data: [{ id: "openrouter", label: "OpenRouter", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }, { id: "google", label: "Google AI Studio", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }, { id: "groq", label: "Groq", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }] }) } },
     search: { query: { useQuery: () => ({ data: [] }) } },
     attachments: { list: { useQuery: () => ({ data: [] }) }, upload: { useMutation: () => ({ mutateAsync: vi.fn() }) }, delete: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
     chats: {
@@ -161,14 +162,19 @@ describe("Home integration flows", () => {
   it("confirms before deleting all exports and refreshes the export history after the owned operation succeeds", async () => {
     const user = userEvent.setup();
     const confirm = vi.fn().mockReturnValue(true);
+    let finishDeletion: ((value: { success: true; deletedCount: number }) => void) | undefined;
     vi.stubGlobal("confirm", confirm);
     fixtures.exports = [{ id: "33333333-3333-4333-8333-333333333333", fileName: "Активная история.md", format: "markdown", createdAt: new Date("2026-08-19T00:00:00.000Z") }];
+    fixtures.deleteAllExports.mockImplementation(() => new Promise((resolve) => { finishDeletion = resolve; }));
     render(<Home />);
 
     await user.click(await screen.findByRole("button", { name: "Удалить все экспорты" }));
 
     expect(confirm).toHaveBeenCalledOnce();
     await waitFor(() => expect(fixtures.deleteAllExports).toHaveBeenCalledOnce());
+    await screen.findByRole("button", { name: "Удаляем…" });
+    expect(screen.getByRole("button", { name: "Удаляем…" })).toHaveProperty("disabled", true);
+    finishDeletion?.({ success: true, deletedCount: 1 });
     await waitFor(() => expect(fixtures.invalidateExports).toHaveBeenCalledOnce());
   });
 
@@ -265,5 +271,19 @@ describe("Home integration flows", () => {
 
     expect(screen.getByText(/Готов · OpenRouter · Llama Fast/)).toBeTruthy();
     expect(screen.queryByText(/Authorization|Bearer|chain/i)).toBeNull();
+  });
+
+  it("opens public provider and RAG audit panels without exposing server-only reserves or routing chains", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.click(await screen.findByRole("button", { name: "Провайдеры" }));
+    expect((await screen.findByRole("dialog")).textContent).toContain("OpenRouter");
+    expect(screen.getByRole("dialog").textContent).toContain("Google AI Studio");
+    expect(screen.getByRole("dialog").textContent).not.toMatch(/SambaNova|Cerebras|Mistral|chain|Bearer/i);
+
+    await user.click(screen.getByRole("button", { name: "Аудит RAG" }));
+    expect((await screen.findByRole("dialog")).textContent).toContain("OpenAI News");
+    expect(screen.getByRole("dialog").textContent).toContain("Фрагментов");
   });
 });
