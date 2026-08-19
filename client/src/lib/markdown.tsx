@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from "react";
+import React, { Fragment, type ReactNode } from "react";
 
 /**
  * Lightweight Markdown rendering for AI messages. It deliberately renders text

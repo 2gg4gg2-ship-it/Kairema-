@@ -3,7 +3,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { InlineMarkdown } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
 import { Download, FileText, Loader2, Send, User, Sparkles } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 export type Message = {
   id?: string;
@@ -53,7 +53,7 @@ export function AIChatBox({
   const displayMessages = messages.filter((message) => message.role !== "system");
 
   useEffect(() => {
-    viewportRef.current?.scrollTo({ top: viewportRef.current.scrollHeight, behavior: "smooth" });
+    viewportRef.current?.scrollTo?.({ top: viewportRef.current.scrollHeight, behavior: "smooth" });
   }, [displayMessages.length, isLoading]);
 
   const submit = (event?: React.FormEvent) => {

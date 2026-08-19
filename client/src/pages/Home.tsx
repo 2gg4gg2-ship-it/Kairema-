@@ -4,6 +4,7 @@ import { startLogin } from "@/const";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { downloadChatMarkdown, downloadChatPdf } from "@/lib/chat-export";
 import { runtimeAuthHeaders } from "@/lib/runtime-auth";
+import { consumeChatStream } from "@/lib/chat-stream";
 import { trpc } from "@/lib/trpc";
 import { Ban, Bot, ChevronDown, CircleCheck, CircleDot, Clock3, Gauge, LoaderCircle, LogIn, Menu, MessageSquarePlus, PanelLeftClose, Search, Settings2, SlidersHorizontal, Sparkles, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -30,12 +31,6 @@ function StatusIndicator({ status }: { status?: PublicStatus }) {
   const label = status?.badge ?? "Проверяем статус";
   const Icon = status?.state === "ready" ? CircleCheck : status?.category === "RATE_LIMIT" || status?.category === "QUOTA" ? Gauge : status?.state === "loading" || !status ? LoaderCircle : status?.state === "not_configured" ? Ban : TriangleAlert;
   return <span className={`kairema-status ${statusClass(status)}`} title={status?.confirmed ?? label} aria-label={`${label}${status?.confirmed ? `. ${status.confirmed}` : ""}`}><Icon className={`size-3 ${status?.state === "loading" || !status ? "animate-spin" : ""}`} /><span>{label}</span></span>;
-}
-
-function sseEventFromBlock(block: string) {
-  const event = block.split(/\r?\n/).find((line) => line.startsWith("event:"))?.slice(6).trim() ?? "message";
-  const data = block.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
-  return { event, data: data ? JSON.parse(data) as Record<string, unknown> : {} };
 }
 
 export default function Home() {
@@ -121,31 +116,16 @@ export default function Home() {
         throw new Error(typeof error.error === "string" ? error.error : "Не удалось начать потоковый ответ.");
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
       let done = false;
-      const consumeBlock = (block: string) => {
-        const { event, data } = sseEventFromBlock(block);
-        if (event === "delta" && typeof data.content === "string") {
-          setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + data.content } : message));
-        }
-        if (event === "error") throw new Error(typeof data.message === "string" ? data.message : "Потоковый ответ завершился с ошибкой.");
-        if (event === "done") {
+      await consumeChatStream(response, {
+        onDelta: (delta) => {
+          setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message));
+        },
+        onDone: (data) => {
           done = true;
           setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: typeof data.content === "string" ? data.content : message.content, model: typeof data.modelUsed === "string" ? data.modelUsed : message.model, providerLabel: typeof data.label === "string" ? data.label : message.providerLabel, status: "полный ответ" } : message));
-        }
-      };
-      while (true) {
-        const { done: streamDone, value } = await reader.read();
-        if (streamDone) break;
-        buffer += decoder.decode(value, { stream: true });
-        const blocks = buffer.split(/\r?\n\r?\n/);
-        buffer = blocks.pop() ?? "";
-        blocks.forEach(consumeBlock);
-      }
-      buffer += decoder.decode();
-      if (buffer.trim()) consumeBlock(buffer);
+        },
+      });
       if (!done) throw new Error("Поток завершился до получения итогового ответа.");
       await Promise.all([utils.chats.messages.invalidate({ sessionId }), utils.chats.list.invalidate()]);
       setOptimisticMessages([]);

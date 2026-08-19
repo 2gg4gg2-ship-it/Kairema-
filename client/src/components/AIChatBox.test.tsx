@@ -1,0 +1,71 @@
+/* @vitest-environment jsdom */
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import React, { useState } from "react";
+import { describe, expect, it, vi } from "vitest";
+import { consumeChatStream } from "@/lib/chat-stream";
+import { AIChatBox, type Message } from "./AIChatBox";
+
+const encoder = new TextEncoder();
+
+function StreamingHarness() {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const send = (content: string) => {
+    const assistantId = "optimistic-assistant";
+    setMessages([
+      { id: "user-message", role: "user", content },
+      { id: assistantId, role: "assistant", content: "", providerLabel: "Kairema", model: "openrouter/free", status: "печатает" },
+    ]);
+    setIsLoading(true);
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: delta\ndata: {"content":"Первый фрагмент"}\n\n'));
+        window.setTimeout(() => {
+          controller.enqueue(encoder.encode('event: delta\ndata: {"content":" ответа"}\n\nevent: done\ndata: {"content":"Первый фрагмент ответа","modelUsed":"openrouter/free","label":"Kairema Auto-Router"}\n\n'));
+          controller.close();
+        }, 25);
+      },
+    }));
+    void consumeChatStream(response, {
+      onDelta: (delta) => setMessages((items) => items.map((item) => item.id === assistantId ? { ...item, content: item.content + delta } : item)),
+      onDone: (result) => setMessages([
+        { id: "user-message", role: "user", content },
+        { id: "saved-assistant", role: "assistant", content: result.content ?? "", providerLabel: result.label, model: result.modelUsed, status: "полный ответ" },
+      ]),
+    }).finally(() => setIsLoading(false));
+  };
+
+  return <AIChatBox messages={messages} onSendMessage={send} isLoading={isLoading} />;
+}
+
+describe("AIChatBox user flows", () => {
+  it("invokes both export controls for the active chat", async () => {
+    const user = userEvent.setup();
+    const onExportMarkdown = vi.fn();
+    const onExportPdf = vi.fn();
+    render(<AIChatBox messages={[{ role: "user", content: "Только выбранная история" }]} onSendMessage={vi.fn()} canExport onExportMarkdown={onExportMarkdown} onExportPdf={onExportPdf} />);
+
+    await user.click(screen.getByRole("button", { name: "Markdown" }));
+    await user.click(screen.getByRole("button", { name: "PDF" }));
+
+    expect(onExportMarkdown).toHaveBeenCalledOnce();
+    expect(onExportPdf).toHaveBeenCalledOnce();
+  });
+
+  it("renders a delta before the stream completes and replaces it with the persisted final answer", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<StreamingHarness />);
+    const textarea = container.querySelector("textarea");
+    if (!textarea) throw new Error("Composer is missing");
+
+    await user.type(textarea, "Начать поток");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(screen.getByText("Первый фрагмент")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Первый фрагмент ответа")).toBeTruthy());
+    expect(screen.getByText(/полный ответ/)).toBeTruthy();
+    expect(screen.queryByText("печатает")).toBeNull();
+  });
+});
