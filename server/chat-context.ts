@@ -4,6 +4,9 @@ import type { ChatSettings } from "./providers";
 import { WebSearchUnavailableError, searchWeb } from "./web-search";
 import { retrieveRagContext, type RagRole } from "./knowledge";
 
+/** Public roles allowed to request live web data. The set is server-side so UI switches never expand policy. */
+export const WEB_RESEARCH_ROLE_POLICY: ReadonlySet<RagRole> = new Set<RagRole>(["fast", "smart", "context", "flagship"]);
+
 function memoryContext(profile: { profile: string; summary: string }, facts: Array<{ fact: string }>) {
   const rows = [profile.profile.trim(), profile.summary.trim(), ...facts.slice(0, 16).map((fact) => `• ${fact.fact}`)].filter(Boolean);
   return rows.join("\n").slice(0, 5_000);
@@ -26,7 +29,7 @@ export async function buildChatContext(userId: number, sessionId: string, input:
     ...(imageUrls.length ? { imageUrls } : {}),
   };
 
-  if (preferences.webSearch && input.webSearch) {
+  if (preferences.webSearch && input.webSearch && WEB_RESEARCH_ROLE_POLICY.has(input.role ?? "flagship")) {
     try {
       const search = await searchWeb("Собери только релевантные актуальные факты и источники для запроса пользователя:\n" + (input.query?.slice(0, 8_000) ?? ""));
       context.webResearch = search.summary;

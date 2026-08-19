@@ -9,10 +9,17 @@ export type WebSearchStatus = {
   openrouterHttp: number | null;
 };
 
+type SearchResult = { summary: string; sources: WebSource[] };
+
 const GOOGLE_SEARCH_MODEL = "gemini-3.6-flash";
-const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GOOGLE_SEARCH_MODEL}:generateContent`;
+const GOOGLE_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GOOGLE_SEARCH_MODEL}:generateContent`;
+const TAVILY_ENDPOINT = "https://api.tavily.com/search";
 const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 const STATUS_KEY = "google_grounding";
+const QUERY_LIMIT = 8_000;
+const SOURCE_LIMIT = 5;
+const SNIPPET_LIMIT = 550;
+
 let lastStatus: WebSearchStatus = {
   available: false,
   reason: "Проверка web-поиска ещё не выполнялась.",
@@ -36,21 +43,49 @@ function statusFromHttp(http: number, payload: unknown) {
   return "Поиск временно недоступен: Google Search grounding не ответил.";
 }
 
-function sourceList(payload: unknown): WebSource[] {
-  const raw = (payload as { candidates?: Array<{ groundingMetadata?: { groundingChunks?: Array<{ web?: { title?: unknown; uri?: unknown } }> } }> })?.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];
-  const seen = new Set<string>();
-  return raw.flatMap((item) => {
-    const url = typeof item.web?.uri === "string" ? item.web.uri : "";
-    const title = typeof item.web?.title === "string" ? item.web.title : url;
-    if (!/^https?:\/\//i.test(url) || seen.has(url)) return [];
-    seen.add(url);
-    return [{ title, url }];
-  });
+function webSource(title: unknown, url: unknown): WebSource | null {
+  if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return null;
+  return { title: typeof title === "string" && title.trim() ? title.trim().slice(0, 240) : url, url };
 }
 
-function answerText(payload: unknown) {
+function uniqueSources(items: Array<WebSource | null>): WebSource[] {
+  const seen = new Set<string>();
+  return items.flatMap((item) => !item || seen.has(item.url) ? [] : (seen.add(item.url), [item])).slice(0, SOURCE_LIMIT);
+}
+
+function googleSources(payload: unknown): WebSource[] {
+  const raw = (payload as { candidates?: Array<{ groundingMetadata?: { groundingChunks?: Array<{ web?: { title?: unknown; uri?: unknown } }> } }> })?.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];
+  return uniqueSources(raw.map((item) => webSource(item.web?.title, item.web?.uri)));
+}
+
+function googleAnswer(payload: unknown) {
   const parts = (payload as { candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }> })?.candidates?.[0]?.content?.parts ?? [];
   return parts.map((part) => typeof part.text === "string" ? part.text : "").join("\n").trim();
+}
+
+function tavilyResult(payload: unknown): SearchResult | null {
+  const results = (payload as { results?: Array<{ title?: unknown; url?: unknown; content?: unknown }> })?.results ?? [];
+  const entries = results.flatMap((item) => {
+    const source = webSource(item.title, item.url);
+    if (!source) return [];
+    const text = typeof item.content === "string" ? item.content.replace(/\s+/g, " ").trim().slice(0, SNIPPET_LIMIT) : "";
+    return [{ source, text }];
+  }).slice(0, SOURCE_LIMIT);
+  const sources = uniqueSources(entries.map((entry) => entry.source));
+  if (!sources.length) return null;
+  const summary = entries.map(({ source, text }) => `Источник: ${source.title}\nURL: ${source.url}${text ? `\nФрагмент: ${text}` : ""}`).join("\n\n");
+  return { summary, sources };
+}
+
+function openRouterSources(payload: unknown): WebSource[] {
+  const citations = (payload as { citations?: unknown })?.citations;
+  if (!Array.isArray(citations)) return [];
+  return uniqueSources(citations.map((value) => webSource(value, value)));
+}
+
+function openRouterAnswer(payload: unknown) {
+  const content = (payload as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content;
+  return typeof content === "string" ? content.trim() : "";
 }
 
 async function saveStatus(status: WebSearchStatus): Promise<WebSearchStatus> {
@@ -85,96 +120,86 @@ async function probeOpenRouterOnline(): Promise<number | null> {
     const response = await fetch(OPENROUTER_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model: "openrouter/free:online",
-        messages: [{ role: "user", content: "ping" }],
-        max_tokens: 1,
-      }),
+      body: JSON.stringify({ model: "openrouter/free:online", messages: [{ role: "user", content: "ping" }], max_tokens: 1 }),
       signal: AbortSignal.timeout(12_000),
     });
     return response.status;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
-function openRouterSources(payload: unknown): WebSource[] {
-  const citations = (payload as { citations?: unknown })?.citations;
-  if (!Array.isArray(citations)) return [];
-  const seen = new Set<string>();
-  return citations.flatMap((value) => {
-    const url = typeof value === "string" ? value : "";
-    if (!/^https?:\/\//i.test(url) || seen.has(url)) return [];
-    seen.add(url);
-    return [{ title: url, url }];
-  });
+async function searchTavily(query: string): Promise<SearchResult | null> {
+  const key = process.env.TAVILY_API_KEY?.trim();
+  if (!key) return null;
+  try {
+    const response = await fetch(TAVILY_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ query: query.slice(0, QUERY_LIMIT), search_depth: "basic", max_results: SOURCE_LIMIT, include_answer: false, include_raw_content: false }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) return null;
+    return tavilyResult(await response.json().catch(() => null));
+  } catch { return null; }
 }
 
-function openRouterAnswer(payload: unknown) {
-  const content = (payload as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content;
-  return typeof content === "string" ? content.trim() : "";
-}
-
-async function searchOpenRouterOnline(query: string): Promise<{ summary: string; sources: WebSource[] } | null> {
+async function searchOpenRouterOnline(query: string): Promise<SearchResult | null> {
   const key = process.env.OPENROUTER_API_KEY?.trim();
   if (!key) return null;
   try {
     const response = await fetch(OPENROUTER_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model: "openrouter/free:online", messages: [{ role: "user", content: query.slice(0, 8_000) }], max_tokens: 1_200 }),
+      body: JSON.stringify({ model: "openrouter/free:online", messages: [{ role: "user", content: query.slice(0, QUERY_LIMIT) }], max_tokens: 1_200 }),
       signal: AbortSignal.timeout(25_000),
     });
-    let payload: unknown = null;
-    try { payload = await response.json(); } catch { /* no usable sources */ }
+    const payload = await response.json().catch(() => null);
     const summary = openRouterAnswer(payload);
     const sources = openRouterSources(payload);
     return response.ok && summary && sources.length ? { summary, sources } : null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
-/** Saves one final status; it never returns an indeterminate spinner state to the client. */
+async function fallbackAfterGoogleQuota(query: string, checkedAt: string, googleHttp: number | null, openrouterHttp: number | null): Promise<SearchResult | null> {
+  const tavily = await searchTavily(query);
+  if (tavily) {
+    await saveStatus({ available: true, reason: "Google недоступен по квоте; используется Tavily с проверяемыми источниками.", checkedAt, googleHttp, openrouterHttp });
+    return tavily;
+  }
+  const openrouter = await searchOpenRouterOnline(query);
+  if (openrouter) {
+    await saveStatus({ available: true, reason: "Google недоступен по квоте; Tavily не вернул проверяемые источники, используется OpenRouter online.", checkedAt, googleHttp, openrouterHttp: 200 });
+    return openrouter;
+  }
+  return null;
+}
+
+/** Saves one final status; no indeterminate state is exposed to the client. */
 export async function probeWebSearchStatus(): Promise<WebSearchStatus> {
   const key = process.env.GEMINI_API_KEY?.trim();
   const checkedAt = new Date().toISOString();
   const openrouterHttp = await probeOpenRouterOnline();
-  if (!key) {
-    return saveStatus({ available: false, reason: "Поиск недоступен: server-side ключ Google не настроен.", checkedAt, googleHttp: null, openrouterHttp });
-  }
-
+  if (!key) return saveStatus({ available: false, reason: "Поиск недоступен: server-side ключ Google не настроен.", checkedAt, googleHttp: null, openrouterHttp });
   try {
-    const response = await fetch(ENDPOINT, {
+    const response = await fetch(GOOGLE_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: "Проверь Google Search grounding. Верни один проверяемый источник." }] }],
-        tools: [{ google_search: {} }],
-        generationConfig: { temperature: 0, maxOutputTokens: 128 },
-      }),
+      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Проверь Google Search grounding. Верни один проверяемый источник." }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0, maxOutputTokens: 128 } }),
       signal: AbortSignal.timeout(25_000),
     });
-    let payload: unknown = null;
-    try { payload = await response.json(); } catch { /* classified below */ }
+    const payload = await response.json().catch(() => null);
     if (!response.ok) {
+      if (response.status === 429 && await searchTavily("Kairema health check")) return saveStatus({ available: true, reason: "Google недоступен по квоте; Tavily с проверяемыми источниками доступен.", checkedAt, googleHttp: response.status, openrouterHttp });
       return saveStatus({ available: false, reason: statusFromHttp(response.status, payload), checkedAt, googleHttp: response.status, openrouterHttp });
     }
-    const hasSources = sourceList(payload).length > 0;
-    return saveStatus({
-      available: hasSources,
-      reason: hasSources ? "Google Search grounding доступен." : "Поиск временно недоступен: Google не вернул проверяемые источники.",
-      checkedAt,
-      googleHttp: response.status,
-      openrouterHttp,
-    });
+    const hasSources = googleSources(payload).length > 0;
+    return saveStatus({ available: hasSources, reason: hasSources ? "Google Search grounding доступен." : "Поиск временно недоступен: Google не вернул проверяемые источники.", checkedAt, googleHttp: response.status, openrouterHttp });
   } catch {
     return saveStatus({ available: false, reason: "Поиск временно недоступен: не удалось связаться с Google.", checkedAt, googleHttp: null, openrouterHttp });
   }
 }
 
-/** The raw user query goes only to Google on the server and is never interpolated as instructions. */
-export async function searchWeb(query: string): Promise<{ summary: string; sources: WebSource[] }> {
+/** Raw user text stays server-side and is passed to search providers as data, never as a system instruction. */
+export async function searchWeb(query: string): Promise<SearchResult> {
   const key = process.env.GEMINI_API_KEY?.trim();
   const previous = await getWebSearchStatus();
   const checkedAt = new Date().toISOString();
@@ -182,47 +207,35 @@ export async function searchWeb(query: string): Promise<{ summary: string; sourc
     const status = await saveStatus({ available: false, reason: "Поиск недоступен: server-side ключ Google не настроен.", checkedAt, googleHttp: null, openrouterHttp: previous.openrouterHttp });
     throw new WebSearchUnavailableError(status.reason);
   }
-
   let response: Response;
   try {
-    response = await fetch(ENDPOINT, {
+    response = await fetch(GOOGLE_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: query.slice(0, 8_000) }] }],
-        tools: [{ google_search: {} }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 1_200 },
-      }),
+      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: query.slice(0, QUERY_LIMIT) }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0.2, maxOutputTokens: 1_200 } }),
       signal: AbortSignal.timeout(25_000),
     });
   } catch {
     const status = await saveStatus({ available: false, reason: "Поиск временно недоступен: не удалось связаться с Google.", checkedAt, googleHttp: null, openrouterHttp: previous.openrouterHttp });
     throw new WebSearchUnavailableError(status.reason);
   }
-
-  let payload: unknown = null;
-  try { payload = await response.json(); } catch { /* response is classified below */ }
+  const payload = await response.json().catch(() => null);
   if (!response.ok) {
     if (response.status === 429) {
-      const fallback = await searchOpenRouterOnline(query);
-      if (fallback) {
-        await saveStatus({ available: true, reason: "Google недоступен по квоте; используется OpenRouter online с проверяемыми источниками.", checkedAt, googleHttp: response.status, openrouterHttp: 200 });
-        return fallback;
-      }
-      const status = await saveStatus({ available: false, reason: "Поиск временно недоступен: квота Google; OpenRouter online не вернул проверяемые источники.", checkedAt, googleHttp: response.status, openrouterHttp: previous.openrouterHttp });
+      const fallback = await fallbackAfterGoogleQuota(query, checkedAt, response.status, previous.openrouterHttp);
+      if (fallback) return fallback;
+      const status = await saveStatus({ available: false, reason: "Поиск временно недоступен: квота Google; Tavily и OpenRouter online не вернули проверяемые источники. RAG может использоваться отдельно, если релевантен.", checkedAt, googleHttp: response.status, openrouterHttp: previous.openrouterHttp });
       throw new WebSearchUnavailableError(status.reason);
     }
     const status = await saveStatus({ available: false, reason: statusFromHttp(response.status, payload), checkedAt, googleHttp: response.status, openrouterHttp: previous.openrouterHttp });
     throw new WebSearchUnavailableError(status.reason);
   }
-
-  const sources = sourceList(payload);
-  const summary = answerText(payload);
+  const sources = googleSources(payload);
+  const summary = googleAnswer(payload);
   if (!summary || !sources.length) {
     const status = await saveStatus({ available: false, reason: "Поиск временно недоступен: Google не вернул проверяемые источники.", checkedAt, googleHttp: response.status, openrouterHttp: previous.openrouterHttp });
     throw new WebSearchUnavailableError(status.reason);
   }
-
   await saveStatus({ available: true, reason: "Google Search grounding доступен.", checkedAt, googleHttp: response.status, openrouterHttp: previous.openrouterHttp });
   return { summary, sources };
 }

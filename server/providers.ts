@@ -6,7 +6,7 @@ export const MODEL_IDS = ROLE_IDS;
 export type RoleId = (typeof ROLE_IDS)[number];
 export type ModelId = RoleId;
 export type ModelKey = RoleId;
-export type Provider = "openrouter" | "google" | "groq";
+export type Provider = "openrouter" | "google" | "groq" | "sambanova" | "mistral";
 export type StatusCategory = "AUTH" | "QUOTA" | "RATE_LIMIT" | "PROVIDER_UNAVAILABLE" | "ENDPOINT" | "MODEL" | "NETWORK" | "TIMEOUT" | "PARSE" | "CONFIG" | "UNKNOWN";
 export type ModelStatus = { state: "ready" | "fallback" | "loading" | "error" | "unavailable" | "not_configured"; badge: string; category: StatusCategory | null; http: number | null; checkedAt: string; confirmed: string };
 export type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -28,7 +28,7 @@ export type ChatSettings = {
 };
 export type ChatResult = { content: string; modelUsed: string; provider: Provider; fallbackUsed: boolean; label: string; status: ModelStatus; sources?: WebSource[]; ragSources?: RagSource[] };
 
-type Candidate = { provider: Provider; modelId: string; displayName: string; vision?: boolean };
+type Candidate = { provider: Provider; modelId: string; displayName: string; vision?: boolean; requiresWebResearch?: boolean };
 export type ModelConfig = { key: RoleId; modelId: RoleId; label: string; role: string; chain: readonly Candidate[] };
 export type RoleRuntimeView = { state: "ready" | "backup" | "unavailable"; provider: string | null; modelUsed: string | null; checkedAt: string };
 export type ModelView = Pick<ModelConfig, "key" | "modelId" | "label" | "role"> & { status: ModelStatus; runtime: RoleRuntimeView | null };
@@ -41,26 +41,26 @@ export const MODEL_ROLES: readonly ModelConfig[] = [
   { key: "fast", modelId: "fast", label: "Kairema Быстрый", role: "Мгновенные ответы на повседневные вопросы.", chain: [
     { provider: "openrouter", modelId: "openai/gpt-oss-20b:free", displayName: "GPT-OSS 20B" },
     { provider: "groq", modelId: "openai/gpt-oss-20b", displayName: "GPT-OSS 20B" },
-    { provider: "google", modelId: "gemini-flash-lite-latest", displayName: "Gemini Flash Lite", vision: true },
-    { provider: "openrouter", modelId: "nvidia/nemotron-3.5-lightning:free", displayName: "Nemotron 3.5 Lightning" },
+    { provider: "google", modelId: "gemini-flash-lite-latest", displayName: "Gemini Flash Lite", vision: true, requiresWebResearch: true },
+    { provider: "sambanova", modelId: "Meta-Llama-3.3-70B-Instruct", displayName: "Llama 3.3 70B" },
   ] },
   { key: "smart", modelId: "smart", label: "Kairema Смекалистый", role: "Математика, логика и последовательные рассуждения.", chain: [
     { provider: "openrouter", modelId: "google/gemma-4-26b-a4b-it:free", displayName: "Gemma 4 26B" },
-    { provider: "google", modelId: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash", vision: true },
+    { provider: "google", modelId: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash", vision: true, requiresWebResearch: true },
     { provider: "groq", modelId: "openai/gpt-oss-120b", displayName: "GPT-OSS 120B" },
-    { provider: "openrouter", modelId: "nvidia/nemotron-3-super-120b-a12b:free", displayName: "Nemotron 3 Super" },
+    { provider: "sambanova", modelId: "Meta-Llama-3.3-70B-Instruct", displayName: "Llama 3.3 70B" },
   ] },
   { key: "context", modelId: "context", label: "Kairema Контекст", role: "Большие тексты, история диалога и глубокий анализ.", chain: [
     { provider: "openrouter", modelId: "nvidia/nemotron-3-ultra-550b-a55b:free", displayName: "Nemotron 3 Ultra" },
-    { provider: "openrouter", modelId: "dots-studio/dots-3-note-preview:free", displayName: "Dots 3 Note" },
-    { provider: "google", modelId: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash", vision: true },
+    { provider: "google", modelId: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash", vision: true, requiresWebResearch: true },
     { provider: "groq", modelId: "openai/gpt-oss-120b", displayName: "GPT-OSS 120B" },
+    { provider: "sambanova", modelId: "Meta-Llama-3.3-70B-Instruct", displayName: "Llama 3.3 70B" },
   ] },
   { key: "flagship", modelId: "flagship", label: "Kairema Флагман", role: "Сложнейшие задачи, переводы и максимальная мощность.", chain: [
     { provider: "openrouter", modelId: "google/gemma-4-31b-it:free", displayName: "Gemma 4 31B" },
-    { provider: "openrouter", modelId: "nvidia/nemotron-3-super-120b-a12b:free", displayName: "Nemotron 3 Super" },
-    { provider: "google", modelId: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash", vision: true },
+    { provider: "google", modelId: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash", vision: true, requiresWebResearch: true },
     { provider: "groq", modelId: "openai/gpt-oss-120b", displayName: "GPT-OSS 120B" },
+    { provider: "sambanova", modelId: "gemma-4-31B-it", displayName: "Gemma 4 31B" },
   ] },
 ] as const;
 
@@ -72,8 +72,10 @@ const ENDPOINTS: Record<Provider, string> = {
   openrouter: "https://openrouter.ai/api/v1/chat/completions",
   google: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
   groq: "https://api.groq.com/openai/v1/chat/completions",
+  sambanova: "https://api.sambanova.ai/v1/chat/completions",
+  mistral: "https://api.mistral.ai/v1/chat/completions",
 };
-const PROVIDERS: readonly Provider[] = ["openrouter", "google", "groq"];
+const PROVIDERS: readonly Provider[] = ["openrouter", "google", "groq", "sambanova", "mistral"];
 const MAX_ATTEMPTS = 4;
 /** Every provider attempt has the same bounded latency budget, including SSE. */
 export const ATTEMPT_TIMEOUT_MS = 25_000;
@@ -91,7 +93,16 @@ let providerHealthHydration: Promise<void> | null = null;
 let providerHealthRefresh: Promise<void> | null = null;
 
 function secretFor(provider: Provider) {
-  return process.env[provider === "openrouter" ? "OPENROUTER_API_KEY" : provider === "google" ? "GEMINI_API_KEY" : "GROQ_API_KEY"]?.trim();
+  const envName = provider === "openrouter"
+    ? "OPENROUTER_API_KEY"
+    : provider === "google"
+      ? "GEMINI_API_KEY"
+      : provider === "groq"
+        ? "GROQ_API_KEY"
+        : provider === "sambanova"
+          ? "SAMBANOVA_API_KEY"
+          : "MISTRAL_API_KEY";
+  return process.env[envName]?.trim();
 }
 function configured(provider: Provider) { return Boolean(secretFor(provider)); }
 function getGeneration(provider: Provider) { return providerGeneration.get(provider) ?? 0; }
@@ -247,7 +258,9 @@ function providerNeedsPing(provider: Provider, force: boolean) {
 function probeCandidate(provider: Provider): Candidate {
   if (provider === "openrouter") return { provider, modelId: "openai/gpt-oss-20b:free", displayName: "health probe" };
   if (provider === "google") return { provider, modelId: "gemini-flash-lite-latest", displayName: "health probe" };
-  return { provider, modelId: "openai/gpt-oss-20b", displayName: "health probe" };
+  if (provider === "groq") return { provider, modelId: "openai/gpt-oss-20b", displayName: "health probe" };
+  if (provider === "sambanova") return { provider, modelId: "Meta-Llama-3.3-70B-Instruct", displayName: "health probe" };
+  return { provider, modelId: "codestral-2508", displayName: "health probe" };
 }
 
 async function invoke(candidate: Candidate, role: ModelConfig, history: ChatMessage[], settings: ChatSettings | undefined, stream: boolean, signal?: AbortSignal) {
@@ -334,7 +347,7 @@ function statusForRole(role: ModelConfig) {
 }
 
 function providerLabel(provider: Provider | null) {
-  return provider === "openrouter" ? "OpenRouter" : provider === "google" ? "Google AI Studio" : provider === "groq" ? "Groq" : null;
+  return provider === "openrouter" ? "OpenRouter" : provider === "google" ? "Google AI Studio" : provider === "groq" ? "Groq" : provider === "sambanova" ? "SambaNova" : provider === "mistral" ? "Mistral" : null;
 }
 
 export function toRoleRuntimeView(state: RoleRuntimeView["state"], provider: string | null, modelUsed: string | null, checkedAt: Date): RoleRuntimeView {
@@ -474,6 +487,34 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
 
 export const chatWithOpenRouter = chatWithRole;
 export const chatWithOpenRouterStream = chatWithRoleStream;
+
+/** Hidden admin-only coding path. It is intentionally not part of MODEL_ROLES or the client model list. */
+const DEV_ROLE: ModelConfig = { ...MODEL_ROLES[0]!, label: "Kairema Dev", role: "Закрытая server-side обработка задач разработки.", chain: [] };
+const DEV_CHAIN: readonly Candidate[] = [
+  { provider: "mistral", modelId: "codestral-2508", displayName: "Codestral 2508" },
+  { provider: "openrouter", modelId: "poolside/laguna-s-2.1:free", displayName: "Poolside Laguna S" },
+  { provider: "openrouter", modelId: "cohere/north-mini-code:free", displayName: "Cohere North Mini Code" },
+  { provider: "openrouter", modelId: "nvidia/nemotron-3.5-lightning:free", displayName: "Nemotron 3.5 Lightning" },
+];
+
+export async function chatWithDev(history: ChatMessage[]) {
+  await hydrateProviderHealth();
+  await refreshProviderHealth({ knownOnly: true });
+  let last: OpenRouterError | null = null;
+  for (const candidate of DEV_CHAIN.slice(0, MAX_ATTEMPTS)) {
+    if (!providerAvailable(candidate.provider)) continue;
+    try {
+      const response = await invoke(candidate, DEV_ROLE, history.slice(-24), undefined, false);
+      return { content: contentFrom(await response.json()), modelUsed: candidate.displayName, provider: providerLabel(candidate.provider), fallbackUsed: candidate !== DEV_CHAIN[0] };
+    } catch (error) {
+      const status = error instanceof OpenRouterError ? error.status : network(error);
+      last = error instanceof OpenRouterError ? error : new OpenRouterError(status);
+      if (!retryable(status)) break;
+    }
+  }
+  throw last ?? new OpenRouterError(unconfigured());
+}
+
 export function publicChatError(_roleId: string, error: unknown) {
   const status = error instanceof OpenRouterError ? error.status : error instanceof InvalidModelSelectionError ? { ...unavailable(), category: "MODEL" as const, confirmed: error.message } : network(error);
   const action = status.category === "RATE_LIMIT" || status.category === "QUOTA" ? "Роль перейдёт к резерву; повторите запрос позже." : "Повторите попытку позже.";
