@@ -14,7 +14,7 @@ function memoryContext(profile: { profile: string; summary: string }, facts: Arr
 
 export async function buildChatContext(userId: number, sessionId: string, input: { attachmentIds?: string[]; webSearch?: boolean; query?: string; role?: RagRole }): Promise<ChatSettings> {
   const [preferences, profile, facts] = await Promise.all([getUserSettings(userId), getMemoryProfile(userId), listMemoryFacts(userId)]);
-  const attachments = input.attachmentIds?.length ? await getOwnedChatAttachments(userId, sessionId, input.attachmentIds.slice(0, 4)) : [];
+  const attachments = preferences.toolAccess && input.attachmentIds?.length ? await getOwnedChatAttachments(userId, sessionId, input.attachmentIds.slice(0, 4)) : [];
   const documentContext = getAttachmentPromptText(attachments);
   const imageUrls = await Promise.all(attachments.filter((attachment) => attachment.kind === "image").map(async (attachment) => (await getOwnedAttachmentDownload(userId, attachment.id)).url));
 
@@ -24,12 +24,13 @@ export async function buildChatContext(userId: number, sessionId: string, input:
     quickReplies: Boolean(preferences.quickReplies),
     effort: preferences.effort,
     thinking: Boolean(preferences.thinking),
+    toolAccess: Boolean(preferences.toolAccess),
     ...(profile.enabled ? { memoryContext: memoryContext(profile, facts) } : {}),
     ...(documentContext ? { documentContext } : {}),
     ...(imageUrls.length ? { imageUrls } : {}),
   };
 
-  if (preferences.webSearch && input.webSearch && WEB_RESEARCH_ROLE_POLICY.has(input.role ?? "flagship")) {
+  if (preferences.toolAccess && preferences.webSearch && input.webSearch && WEB_RESEARCH_ROLE_POLICY.has(input.role ?? "flagship")) {
     try {
       const search = await searchWeb("Собери только релевантные актуальные факты и источники для запроса пользователя:\n" + (input.query?.slice(0, 8_000) ?? ""));
       context.webResearch = search.summary;

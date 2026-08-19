@@ -17,6 +17,7 @@ export type Message = {
   isError?: boolean;
   createdAt?: Date | string;
   sources?: Source[];
+  suggestions?: string[];
 };
 
 type Language = "ru" | "en";
@@ -44,6 +45,7 @@ type AIChatBoxProps = {
   webSearchReason?: string;
   initialWebSearch?: boolean;
   onWebSearchChange?: (enabled: boolean) => void;
+  onSuggestion?: (suggestion: string) => void;
 };
 
 const copy = {
@@ -54,7 +56,7 @@ const copy = {
 export function AIChatBox({
   messages, onSendMessage, onUploadFiles, isLoading = false, placeholder, className, height, emptyStateMessage,
   suggestedPrompts = [], onExportMarkdown, onExportPdf, canExport = false, exportBusy = null, exportError = "",
-  onCopyAssistant, onCopyUser, onRegenerate, onCancelStream, language = "ru", webSearchAvailable = false, webSearchReason, initialWebSearch = false, onWebSearchChange,
+  onCopyAssistant, onCopyUser, onRegenerate, onCancelStream, language = "ru", webSearchAvailable = false, webSearchReason, initialWebSearch = false, onWebSearchChange, onSuggestion,
 }: AIChatBoxProps) {
   const t = copy[language];
   const [input, setInput] = useState("");
@@ -62,6 +64,7 @@ export function AIChatBox({
   const [isUploading, setIsUploading] = useState(false);
   const [useWebSearch, setUseWebSearch] = useState(false);
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
+  const [continuationSuggestions, setContinuationSuggestions] = useState<string[]>([]);
   const viewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -71,6 +74,7 @@ export function AIChatBox({
 
   useEffect(() => { viewportRef.current?.scrollTo?.({ top: viewportRef.current.scrollHeight, behavior: "smooth" }); }, [displayMessages.length, isLoading]);
   useEffect(() => { setUseWebSearch(Boolean(initialWebSearch) && webSearchAvailable); }, [initialWebSearch, webSearchAvailable]);
+  useEffect(() => { const last = displayMessages.at(-1); if (last?.role === "assistant" && last.suggestions?.length) setContinuationSuggestions(last.suggestions.slice(0, 3)); else if (last?.role === "user") setContinuationSuggestions([]); }, [messages]);
 
   const submit = (event?: React.FormEvent) => {
     event?.preventDefault();
@@ -98,9 +102,10 @@ export function AIChatBox({
       {exportError && <p className="kairema-export-error" role="status">{exportError}</p>}
       <div ref={viewportRef} className="min-h-0 flex-1 overflow-y-auto">
         {displayMessages.length === 0 ? <div className="flex min-h-[420px] flex-col items-center justify-center px-6 text-center"><div className="kairema-orb mb-6"><Sparkles className="size-7" /></div><h2 className="text-2xl font-semibold tracking-tight text-foreground">{emptyStateMessage}</h2><p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">{t.fourRoles}</p><div className="mt-8 flex max-w-2xl flex-wrap justify-center gap-2">{suggestedPrompts.map((prompt) => <button key={prompt} onClick={() => onSendMessage(prompt)} disabled={isLoading} className="kairema-prompt">{prompt}</button>)}</div></div> : <div className="mx-auto flex w-full max-w-4xl flex-col gap-7 px-4 py-7 sm:px-8">{displayMessages.map((message, index) => <article key={message.id ?? `${message.role}-${index}`} className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
-          {message.role === "assistant" && <div className="kairema-avatar kairema-avatar-ai"><Sparkles className="size-4" /></div>}<div className={cn("max-w-[86%] sm:max-w-[76%]", message.role === "user" && "flex flex-col items-end")}><div className={cn("kairema-message", message.role === "user" ? "kairema-message-user" : "kairema-message-ai", message.isError && "kairema-message-error")}>{message.role === "assistant" && !message.isError ? <div className="kairema-markdown whitespace-pre-wrap text-sm leading-6"><InlineMarkdown text={message.content} /></div> : <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>}</div>
+          {message.role === "assistant" && <div className="kairema-avatar kairema-avatar-ai"><Sparkles className="size-4" /></div>}<div className={cn("max-w-[86%] sm:max-w-[76%]", message.role === "user" && "flex flex-col items-end")}><div className={cn("kairema-message", message.role === "user" ? "kairema-message-user" : "kairema-message-ai", message.isError && "kairema-message-error")}>{message.role === "assistant" && !message.isError ? <div className="kairema-markdown text-sm leading-6"><InlineMarkdown text={message.content} language={language} /></div> : <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>}</div>
           {message.role === "assistant" && message.providerLabel && <p className="mt-2 px-1 text-xs text-muted-foreground">{message.providerLabel} · {message.model} · {message.status}</p>}
           {message.role === "assistant" && Boolean(message.sources?.length) && (() => { const sourceKey = String(message.id ?? index); const isExpanded = Boolean(expandedSources[sourceKey]); return <section className="kairema-sources"><button type="button" className="kairema-sources-toggle" aria-expanded={isExpanded} onClick={() => setExpandedSources((current) => ({ ...current, [sourceKey]: !isExpanded }))}><span>{t.sources} ({message.sources?.length ?? 0})</span><ChevronDown className={cn("size-3.5 transition-transform", isExpanded && "rotate-180")} /></button>{isExpanded && <ul>{message.sources?.map((source) => { let fallbackDomain = ""; try { fallbackDomain = new URL(source.url).hostname.replace(/^www\./i, ""); } catch { /* source URLs are server-validated */ } const domain = source.domain ?? fallbackDomain; return <li key={`${source.kind ?? "web"}-${source.url}`}><a href={source.url} target="_blank" rel="noreferrer" title={source.title}><span className="kairema-source-title"><ExternalLink className="size-3" />{source.title}</span><small>{domain}{source.publishedAt ? ` · ${new Intl.DateTimeFormat(language === "ru" ? "ru-RU" : "en-US", { dateStyle: "short" }).format(new Date(source.publishedAt))}` : ""}</small></a></li>; })}</ul>}</section>; })()}
+          {message.role === "assistant" && !message.isError && Boolean(message.suggestions?.length || (index === displayMessages.length - 1 && continuationSuggestions.length)) && <div className="kairema-suggestion-chips" aria-label={language === "ru" ? "Возможные продолжения" : "Suggested continuations"}>{(message.suggestions?.length ? message.suggestions : continuationSuggestions).map((suggestion) => <button key={suggestion} type="button" className="kairema-suggestion-chip" disabled={isLoading} onClick={() => (onSuggestion ?? onSendMessage)(suggestion)}>{suggestion}</button>)}</div>}
           {message.role === "assistant" && !message.isError && <div className="kairema-message-actions" aria-label="Actions"><button type="button" onClick={() => onCopyAssistant?.(message)} className="kairema-message-action"><Copy className="size-3.5" />{t.copy}</button><button type="button" onClick={() => onRegenerate?.(message)} disabled={isLoading} className="kairema-message-action"><RotateCcw className="size-3.5" />{t.retry}</button></div>}
           {message.role === "user" && <div className="kairema-message-actions" aria-label="Actions"><button type="button" onClick={() => onCopyUser?.(message)} className="kairema-message-action"><Copy className="size-3.5" />{t.copy}</button></div>}</div>{message.role === "user" && <div className="kairema-avatar"><User className="size-4" /></div>}</article>)}{isLoading && displayMessages.at(-1)?.role !== "assistant" && <div className="flex items-center gap-3"><div className="kairema-avatar kairema-avatar-ai"><Sparkles className="size-4" /></div><div className="kairema-typing"><Loader2 className="size-4 animate-spin" /> {t.typing}</div></div>}</div>}
       </div>

@@ -114,9 +114,7 @@ describe("Home integration flows", () => {
   it("always renders exactly four public role cards and never renders the removed Code role", () => {
     render(<Home />);
 
-    const visibleRoleCards = screen.getAllByRole("button").filter((element) =>
-      ["Kairema Быстрый", "Kairema Смекалистый", "Kairema Контекст", "Kairema Флагман"].some((label) => element.textContent?.includes(label)),
-    );
+    const visibleRoleCards = document.querySelectorAll(".kairema-provider");
     expect(visibleRoleCards).toHaveLength(4);
     expect(screen.queryByText("Kairema Код")).toBeNull();
   });

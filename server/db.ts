@@ -205,7 +205,7 @@ export async function upsertWebSearchStatus(input: Omit<WebSearchStatusRecord, "
   });
 }
 
-export type UserSettingsPatch = Partial<Pick<UserSettings, "language" | "theme" | "responseStyle" | "responseLength" | "quickReplies" | "effort" | "thinking" | "defaultRole" | "webSearch">>;
+export type UserSettingsPatch = Partial<Pick<UserSettings, "language" | "theme" | "responseStyle" | "responseLength" | "quickReplies" | "effort" | "thinking" | "defaultRole" | "webSearch" | "toolAccess">>;
 export type KnowledgeSourcePatch = Omit<KnowledgeSource, "updatedAt">;
 export type KnowledgeDocumentInput = Omit<KnowledgeDocument, "retrievedAt" | "updatedAt">;
 export type KnowledgeRunInput = Omit<KnowledgeIngestionRun, "startedAt" | "finishedAt">;

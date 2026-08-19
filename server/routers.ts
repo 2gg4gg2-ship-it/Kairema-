@@ -18,6 +18,7 @@ const settingsSchema = z.object({
   responseLength: z.enum(["brief", "balanced", "detailed"]).optional(),
   effort: z.enum(["low", "standard", "high"]).optional(),
   thinking: z.boolean().optional(),
+  toolAccess: z.boolean().optional(),
 }).optional();
 
 const modelIdSchema = z.enum(MODEL_IDS);
@@ -32,6 +33,7 @@ const userSettingsSchema = z.object({
   thinking: z.boolean().optional(),
   defaultRole: z.enum(MODEL_IDS).optional(),
   webSearch: z.boolean().optional(),
+  toolAccess: z.boolean().optional(),
 });
 
 const attachmentInputSchema = z.object({
@@ -66,12 +68,13 @@ export const appRouter = router({
   settings: router({
     get: protectedProcedure.query(({ ctx }) => getUserSettings(ctx.user.id)),
     update: protectedProcedure.input(userSettingsSchema).mutation(async ({ ctx, input }) => {
-      const { quickReplies, thinking, webSearch, ...rest } = input;
+      const { quickReplies, thinking, webSearch, toolAccess, ...rest } = input;
       return updateUserSettings(ctx.user.id, {
         ...rest,
         ...(quickReplies === undefined ? {} : { quickReplies: quickReplies ? 1 : 0 }),
         ...(thinking === undefined ? {} : { thinking: thinking ? 1 : 0 }),
         ...(webSearch === undefined ? {} : { webSearch: webSearch ? 1 : 0 }),
+        ...(toolAccess === undefined ? {} : { toolAccess: toolAccess ? 1 : 0 }),
       });
     }),
   }),

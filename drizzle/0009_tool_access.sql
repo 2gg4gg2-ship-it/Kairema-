@@ -1,0 +1,1 @@
+ALTER TABLE `user_settings` ADD `toolAccess` int DEFAULT 1 NOT NULL;

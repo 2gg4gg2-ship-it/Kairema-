@@ -68,6 +68,59 @@ export default function Home() {
   useEffect(() => { setOptimisticMessages([]); }, [activeId]); useEffect(() => () => streamAbortRef.current?.abort(), []);
   useEffect(() => { const onKnowledgeRefresh = (event: MouseEvent) => { const target = event.target; if (!(target instanceof Element) || !target.closest(".kairema-rag-refresh") || knowledgeRefreshMutation.isPending) return; event.preventDefault(); void knowledgeRefreshMutation.mutateAsync().then(() => utils.knowledge.status.invalidate()).catch(() => setNotice(language === "ru" ? "Не удалось обновить RAG-источники." : "Could not refresh RAG sources.")); }; document.addEventListener("click", onKnowledgeRefresh); return () => document.removeEventListener("click", onKnowledgeRefresh); }, [knowledgeRefreshMutation, language, utils.knowledge.status]);
   const persistSettings = async (patch: Record<string, unknown>) => { setSettingsOverride((current) => ({ ...current, ...patch })); try { await settingMutation.mutateAsync(patch as never); await utils.settings.get.invalidate(); } catch { setSettingsOverride({}); setNotice(language === "ru" ? "Не удалось сохранить настройку." : "Could not save the setting."); } };
+  const toolAccessEnabled = Boolean((settings as { toolAccess?: boolean | number }).toolAccess ?? true);
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const host = document.querySelector<HTMLElement>(".kairema-settings-grid > section:nth-child(2)");
+    const responseHints = language === "ru"
+      ? ["Выберите тон ответа.", "Укажите желаемую подробность.", "Настройте глубину проработки.", "Роль, используемая для новых чатов."]
+      : ["Choose the answer tone.", "Set the preferred level of detail.", "Adjust the depth of work.", "Role used for new chats."];
+    document.querySelectorAll<HTMLSelectElement>(".kairema-settings-grid > section:first-child select").forEach((control, index) => { control.title = responseHints[index] ?? ""; });
+    if (!host || host.querySelector("[data-kairema-tool-access]")) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.kairemaToolAccess = "true";
+    button.className = "kairema-switch-row";
+    button.setAttribute("aria-pressed", String(toolAccessEnabled));
+    button.title = language === "ru" ? "Разрешает только проверенные серверные инструменты: поиск и вложения." : "Allows only verified server-side tools: search and attachments.";
+    button.innerHTML = `<span>${language === "ru" ? "Разрешить инструменты" : "Allow tools"}</span><span class="kairema-switch ${toolAccessEnabled ? "kairema-switch-on" : ""}"><i></i></span>`;
+    button.addEventListener("click", () => { void persistSettings({ toolAccess: !toolAccessEnabled }); });
+    host.prepend(button);
+    return () => button.remove();
+  }, [language, settingsOpen, toolAccessEnabled]);
+  useEffect(() => {
+    const host = document.querySelector<HTMLElement>(".kairema-select-wrap");
+    const native = host?.querySelector<HTMLSelectElement>("select");
+    if (!host || !native || host.querySelector("[data-kairema-role-menu]")) return;
+    native.style.display = "none";
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "kairema-role-menu-trigger";
+    trigger.setAttribute("aria-haspopup", "menu");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.textContent = modelViews.find((model) => model.modelId === modelId)?.label[language] ?? "Kairema";
+    const menu = document.createElement("div");
+    menu.className = "kairema-role-menu";
+    menu.dataset.kairemaRoleMenu = "true";
+    menu.setAttribute("role", "menu");
+    menu.hidden = true;
+    const close = () => { menu.hidden = true; trigger.setAttribute("aria-expanded", "false"); };
+    trigger.addEventListener("click", () => { const open = menu.hidden; menu.hidden = !open; trigger.setAttribute("aria-expanded", String(open)); });
+    for (const model of modelViews) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "kairema-role-menu-item";
+      item.setAttribute("role", "menuitemradio");
+      item.setAttribute("aria-checked", String(model.modelId === modelId));
+      item.textContent = `${model.label[language]} — ${model.role[language]}`;
+      item.addEventListener("click", () => { setModelId(model.modelId); close(); });
+      menu.append(item);
+    }
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
+    document.addEventListener("keydown", onKeyDown);
+    host.append(trigger, menu);
+    return () => { document.removeEventListener("keydown", onKeyDown); trigger.remove(); menu.remove(); native.style.display = ""; };
+  }, [language, modelId, modelViews]);
   const createChat = async () => {
     if (!isAuthenticated) return startLogin();
     const safeModelId = modelById.has(modelId) ? modelId : settings.defaultRole as ModelId;
@@ -85,8 +138,8 @@ export default function Home() {
   };
   const selectSession = (id: string, sessionModel?: string) => { setActiveId(id); if (sessionModel && modelById.has(sessionModel as ModelId)) setModelId(sessionModel as ModelId); setSidebarOpen(false); };
   const send = async (content: string, options?: { regenerateMessageId?: number; attachmentIds?: string[]; webSearch?: boolean }) => { if (!isAuthenticated) return startLogin(); const sessionId = activeId || await createChat(); if (!sessionId) return; const selectedId = modelId; const assistantId = `stream-${Date.now()}`; const label = selectedModel.label[language]; setOptimisticMessages(options?.regenerateMessageId ? [{ id: assistantId, role: "assistant", content: "", providerLabel: label, model: selectedId, status: language === "ru" ? "печатает" : "typing" }] : [{ id: `user-${Date.now()}`, role: "user", content }, { id: assistantId, role: "assistant", content: "", providerLabel: label, model: selectedId, status: language === "ru" ? "печатает" : "typing" }]); setIsStreaming(true); const controller = new AbortController(); streamAbortRef.current = controller;
-    try { const response = await fetch("/api/chat/stream", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...runtimeAuthHeaders() }, signal: controller.signal, body: JSON.stringify({ sessionId, modelId: selectedId, content, settings: { style: settings.responseStyle, responseLength: settings.responseLength, effort: settings.effort, thinking: Boolean(settings.thinking) }, attachmentIds: options?.attachmentIds, webSearch: options?.webSearch, regenerateMessageId: options?.regenerateMessageId }) }); if (!response.ok || !response.body) { const error = await response.json().catch(() => ({ error: language === "ru" ? "Не удалось начать потоковый ответ." : "Could not start the stream." })); throw new Error(typeof error.error === "string" ? error.error : "Stream error"); }
-      await consumeChatStream(response, { onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)), onDone: (data) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: typeof data.content === "string" ? data.content : message.content, model: typeof data.modelUsed === "string" ? data.modelUsed : message.model, providerLabel: typeof data.label === "string" ? data.label : message.providerLabel, status: language === "ru" ? "полный ответ" : "complete", sources: [...(Array.isArray(data.sources) ? data.sources.map((source) => ({ ...source, kind: "web" as const })) : []), ...(Array.isArray(data.ragSources) ? data.ragSources.map((source) => ({ ...source, kind: "rag" as const })) : [])] } : message)) }); await Promise.all([utils.chats.messages.invalidate({ sessionId }), utils.chats.list.invalidate(), utils.attachments.list.invalidate({ sessionId }), utils.models.list.invalidate(), utils.knowledge.status.invalidate()]); setOptimisticMessages([]);
+    try { const response = await fetch("/api/chat/stream", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...runtimeAuthHeaders() }, signal: controller.signal, body: JSON.stringify({ sessionId, modelId: selectedId, content, settings: { style: settings.responseStyle, responseLength: settings.responseLength, effort: settings.effort, thinking: Boolean(settings.thinking), toolAccess: toolAccessEnabled }, attachmentIds: options?.attachmentIds, webSearch: options?.webSearch, regenerateMessageId: options?.regenerateMessageId }) }); if (!response.ok || !response.body) { const error = await response.json().catch(() => ({ error: language === "ru" ? "Не удалось начать потоковый ответ." : "Could not start the stream." })); throw new Error(typeof error.error === "string" ? error.error : "Stream error"); }
+      await consumeChatStream(response, { onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)), onDone: (data) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: typeof data.content === "string" ? data.content : message.content, model: typeof data.modelUsed === "string" ? data.modelUsed : message.model, providerLabel: typeof data.label === "string" ? data.label : message.providerLabel, status: language === "ru" ? "полный ответ" : "complete", suggestions: Array.isArray(data.suggestions) ? data.suggestions.filter((suggestion): suggestion is string => typeof suggestion === "string").slice(0, 3) : undefined, sources: [...(Array.isArray(data.sources) ? data.sources.map((source) => ({ ...source, kind: "web" as const })) : []), ...(Array.isArray(data.ragSources) ? data.ragSources.map((source) => ({ ...source, kind: "rag" as const })) : [])] } : message)) }); await Promise.all([utils.chats.messages.invalidate({ sessionId }), utils.chats.list.invalidate(), utils.attachments.list.invalidate({ sessionId }), utils.models.list.invalidate(), utils.knowledge.status.invalidate()]); setOptimisticMessages([]);
     } catch (error) { if (error instanceof DOMException && error.name === "AbortError") { setOptimisticMessages([]); await utils.chats.messages.invalidate({ sessionId }); return; } const errorMessage = error instanceof Error ? error.message : "Stream error"; setOptimisticMessages((items) => [...items.filter((item) => item.id !== assistantId), { id: `stream-error-${Date.now()}`, role: "assistant", content: errorMessage, providerLabel: "Kairema", model: selectedId, status: language === "ru" ? "ошибка" : "error", isError: true }]); } finally { streamAbortRef.current = null; setIsStreaming(false); } };
   const uploadFiles = async (files: File[]): Promise<ChatAttachment[]> => { if (!isAuthenticated) { startLogin(); return []; } const sessionId = activeId || await createChat(); if (!sessionId) return []; try { const uploaded = await Promise.all(files.map(async (file) => { const item = await attachmentUploadMutation.mutateAsync({ sessionId, fileName: file.name, contentType: contentType(file) as "image/png" | "image/jpeg" | "image/webp" | "application/pdf" | "text/plain" | "text/markdown", contentBase64: await dataUrlContent(file) }); return { id: item.id, fileName: item.fileName, mimeType: item.contentType, sizeBytes: item.byteSize, kind: item.kind } as ChatAttachment; })); await utils.attachments.list.invalidate({ sessionId }); return uploaded; } catch (error) { setNotice(error instanceof Error ? error.message : t.uploadFailed); return []; } };
   const cancelStream = () => streamAbortRef.current?.abort(); const copyMessage = async (message: Message) => { try { await navigator.clipboard.writeText(message.content); setNotice(language === "ru" ? "Сообщение скопировано в буфер обмена." : "Message copied to clipboard."); } catch { setNotice(language === "ru" ? "Не удалось скопировать сообщение." : "Could not copy the message."); } }; const regenerate = (message: Message) => { const index = visibleMessages.findIndex((candidate) => candidate.id === message.id); const prompt = visibleMessages.slice(0, index).reverse().find((candidate) => candidate.role === "user"); const id = Number(message.id); if (!prompt?.content || !Number.isInteger(id) || id <= 0) { setNotice(language === "ru" ? "Не удалось найти исходный запрос." : "Original prompt was not found."); return; } void send(prompt.content, { regenerateMessageId: id }); };

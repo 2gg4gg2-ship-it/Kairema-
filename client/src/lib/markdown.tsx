@@ -1,25 +1,30 @@
-import React, { Fragment, type ReactNode } from "react";
+import { Streamdown } from "streamdown";
+
+type Language = "ru" | "en";
 
 /**
- * Lightweight Markdown rendering for AI messages. It deliberately renders text
- * as React nodes, never through raw HTML, so model output cannot inject markup.
+ * Safely renders streamed model output as GFM Markdown. Raw HTML is skipped,
+ * so model output is never interpreted as executable or trusted markup.
  */
-export function InlineMarkdown({ text }: { text: string }) {
-  const pieces = text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/g);
-  const nodes: ReactNode[] = [];
+export function InlineMarkdown({ text, language = "ru" }: { text: string; language?: Language }) {
+  const tableCount = (text.match(/^\s*\|.+\|\s*\n\s*\|(?:\s*:?-+:?\s*\|)+\s*$/gm) ?? []).length;
+  const tableLabel = language === "ru" ? "Таблица в ответе" : "Table in response";
+  const tableAnnouncement = language === "ru"
+    ? `В ответе ${tableCount === 1 ? "есть таблица" : `есть таблицы: ${tableCount}`}. Прокручивайте таблицу по горизонтали при необходимости.`
+    : `${tableCount === 1 ? "A table is" : `${tableCount} tables are`} included in the response. Scroll horizontally if needed.`;
 
-  pieces.forEach((piece, index) => {
-    if (!piece) return;
-    if (piece.startsWith("`") && piece.endsWith("`")) {
-      nodes.push(<code key={index} className="rounded bg-slate-950/80 px-1.5 py-0.5 font-mono text-[0.86em] text-violet-200">{piece.slice(1, -1)}</code>);
-      return;
-    }
-    if (piece.startsWith("**") && piece.endsWith("**")) {
-      nodes.push(<strong key={index} className="font-semibold text-slate-100">{piece.slice(2, -2)}</strong>);
-      return;
-    }
-    nodes.push(<Fragment key={index}>{piece}</Fragment>);
-  });
-
-  return <>{nodes}</>;
+  return <>
+    {tableCount > 0 && <span className="sr-only" role="status">{tableAnnouncement}</span>}
+    <Streamdown
+      className="kairema-gfm"
+      controls={false}
+      parseIncompleteMarkdown
+      skipHtml
+      components={{
+        table: ({ children, ...props }) => <div className="kairema-table-scroll" role="region" aria-label={tableLabel} tabIndex={0}><table {...props}><caption className="sr-only">{tableLabel}</caption>{children}</table></div>,
+      }}
+    >
+      {text}
+    </Streamdown>
+  </>;
 }
