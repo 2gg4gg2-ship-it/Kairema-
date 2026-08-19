@@ -9,7 +9,7 @@ import { trpc } from "@/lib/trpc";
 import { Ban, Bot, ChevronDown, CircleCheck, CircleDot, Clock3, Download, ExternalLink, FileText, Gauge, LoaderCircle, LogIn, Menu, MessageSquarePlus, PanelLeftClose, Search, Settings2, SlidersHorizontal, Sparkles, Trash2, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type ModelId = "fast" | "smart" | "context" | "flagship" | "code";
+type ModelId = "fast" | "smart" | "context" | "flagship";
 type ResponseStyle = "default" | "professional" | "friendly" | "concise" | "steps";
 type StaticModel = { key: string; modelId: ModelId; label: string; role: string };
 type PublicStatus = { state: string; badge: string; category: string | null; http: number | null; checkedAt: string; confirmed: string };
@@ -20,7 +20,6 @@ const MODELS: readonly StaticModel[] = [
   { key: "smart", modelId: "smart", label: "Kairema Смекалистый", role: "Логика, рассуждения и сложные задачи среднего объёма." },
   { key: "context", modelId: "context", label: "Kairema Контекст", role: "Длинные документы, большие фрагменты текста и связный контекст." },
   { key: "flagship", modelId: "flagship", label: "Kairema Флагман", role: "Самые требовательные задачи, глубокий анализ и комплексные ответы." },
-  { key: "code", modelId: "code", label: "Kairema Код", role: "Генерация, рефакторинг, разбор и отладка программного кода." },
 ];
 
 const statusClass = (status?: PublicStatus) => status?.state === "ready" ? "status-ready" : status?.state === "fallback" ? "status-ready" : status?.category === "RATE_LIMIT" || status?.category === "QUOTA" ? "status-quota" : status?.state === "not_configured" ? "status-muted" : status?.state === "unavailable" ? "status-unavailable" : status?.state === "loading" ? "status-loading" : "status-auth";

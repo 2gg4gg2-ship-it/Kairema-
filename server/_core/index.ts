@@ -7,6 +7,8 @@ import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { registerChatStreamRoute } from "../chat-stream";
+import { registerProviderHealthScheduleRoute } from "../provider-health-schedule";
+import { refreshProviderHealth } from "../providers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -38,6 +40,7 @@ async function startServer() {
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   registerChatStreamRoute(app);
+  registerProviderHealthScheduleRoute(app);
   // tRPC API
   app.use(
     "/api/trpc",
@@ -62,6 +65,8 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    // Best-effort deployment/start check. Daily rechecks are handled by Heartbeat.
+    void refreshProviderHealth().catch(() => undefined);
   });
 }
 

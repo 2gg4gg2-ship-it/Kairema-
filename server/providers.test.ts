@@ -1,29 +1,39 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ATTEMPT_TIMEOUT_MS, MODEL_CONFIG, MODEL_IDS, MODEL_ROLES, buildOpenRouterMessages, chatWithRoleStream, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, modelById, openRouterStreamDelta, publicChatError, selectAutoModel, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView } from "./providers";
+
+vi.mock("./db", () => ({
+  listProviderHealth: vi.fn().mockResolvedValue([]),
+  upsertProviderHealth: vi.fn().mockResolvedValue(undefined),
+}));
+
+import { ATTEMPT_TIMEOUT_MS, DIAGNOSTIC_CANDIDATES, InvalidModelSelectionError, MODEL_CONFIG, MODEL_IDS, MODEL_ROLES, __resetProviderHealthForTests, buildOpenRouterMessages, chatWithRole, chatWithRoleStream, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, getProviderHealthForTesting, isAllowedModelId, modelById, openRouterStreamDelta, publicChatError, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView } from "./providers";
 
 afterEach(() => {
-  vi.restoreAllMocks();
+  vi.clearAllMocks();
   vi.unstubAllEnvs();
+  __resetProviderHealthForTests();
 });
 
-describe("Kairema v3 role registry", () => {
-  it("declares exactly five always-visible roles", () => {
-    expect(MODEL_CONFIG).toHaveLength(5);
+function success(content = "Готово") {
+  return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200, headers: { "content-type": "application/json" } });
+}
+
+describe("Kairema v4 role registry", () => {
+  it("declares exactly four always-visible public roles", () => {
+    expect(MODEL_CONFIG).toHaveLength(4);
     expect(MODEL_CONFIG.map((role) => role.modelId)).toEqual(MODEL_IDS);
     expect(MODEL_CONFIG.map((role) => role.label)).toEqual([
-      "Kairema Быстрый", "Kairema Смекалистый", "Kairema Контекст", "Kairema Флагман", "Kairema Код",
+      "Kairema Быстрый", "Kairema Смекалистый", "Kairema Контекст", "Kairema Флагман",
     ]);
-    expect(modelById("not-in-registry")).toBeUndefined();
+    expect(modelById("code")).toBeUndefined();
   });
 
-  it("keeps raw provider IDs inside server-only chains and limits each chain to four attempts", () => {
+  it("keeps exactly four active candidates per role and one inactive diagnostic candidate", () => {
     for (const role of MODEL_ROLES) {
-      expect(role.chain.length).toBeGreaterThan(1);
-      expect(role.chain.length).toBeLessThanOrEqual(4);
+      expect(role.chain).toHaveLength(4);
       expect(role.chain.every((candidate) => candidate.modelId !== role.modelId)).toBe(true);
+      expect(role.chain.some((candidate) => candidate.modelId === "openrouter/free")).toBe(false);
     }
-    expect(MODEL_ROLES.find((role) => role.key === "fast")?.chain[0]?.provider).toBe("groq");
-    expect(MODEL_ROLES.find((role) => role.key === "smart")?.chain[0]?.provider).toBe("google");
+    expect(DIAGNOSTIC_CANDIDATES).toEqual([{ provider: "openrouter", modelId: "openrouter/free", displayName: "OpenRouter Auto" }]);
   });
 
   it("uses a 25-second budget for every provider attempt", () => {
@@ -45,6 +55,34 @@ describe("Kairema v3 role registry", () => {
     expect(classifyOpenRouterFailure(503, { error: { message: "high load" } }).category).toBe("PROVIDER_UNAVAILABLE");
   });
 
+  it("rejects any raw or unknown model ID before making a provider request", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    expect(isAllowedModelId("fast")).toBe(true);
+    expect(isAllowedModelId("openai/gpt-oss-20b:free")).toBe(false);
+    await expect(chatWithRole("openai/gpt-oss-20b:free", [{ role: "user", content: "Тест" }])).rejects.toBeInstanceOf(InvalidModelSelectionError);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("marks a quota-limited provider globally so another role skips it", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    vi.stubEnv("GEMINI_API_KEY", "test-google-key");
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "quota exhausted" } }), { status: 429 }))
+      .mockResolvedValueOnce(success("Резерв fast"))
+      .mockResolvedValueOnce(success("Резерв context"));
+
+    const fast = await chatWithRole("fast", [{ role: "user", content: "Первый" }]);
+    const context = await chatWithRole("context", [{ role: "user", content: "Второй" }]);
+    const health = await getProviderHealthForTesting();
+
+    expect(fast).toMatchObject({ provider: "groq", fallbackUsed: true });
+    expect(context).toMatchObject({ provider: "google", fallbackUsed: true });
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(String(fetchSpy.mock.calls[2]?.[0])).toContain("generativelanguage.googleapis.com");
+    expect(health.find((item) => item.provider === "openrouter")).toMatchObject({ state: "unavailable", category: "QUOTA" });
+  });
+
   it("removes reasoning blocks before any response reaches the browser", () => {
     expect(stripReasoningBlocks("<think>скрытая цепочка</think>Итог <reasoning>скрыто</reasoning>")).toBe("Итог");
     expect(statusFromChatPayload({ choices: [{ message: { content: "<think>hidden</think>" } }] }).state).toBe("error");
@@ -57,16 +95,6 @@ describe("Kairema v3 role registry", () => {
       expect(payload).toContain(role.label);
       expect(payload).toContain("Тест");
     }
-  });
-
-  it("selects the first ready role for automatic routing", () => {
-    const views = MODEL_CONFIG.map((role, index) => toPublicModelView(role, {
-      state: index === 1 || index === 3 ? "ready" : "error",
-      badge: index === 1 || index === 3 ? "Готов" : "Недоступно",
-      category: index === 1 || index === 3 ? null : "UNKNOWN",
-      http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Тест",
-    }));
-    expect(selectAutoModel(views)?.modelId).toBe("smart");
   });
 
   it("never serializes provider chains or auth transport in public role views", () => {
@@ -91,7 +119,6 @@ describe("Kairema v3 role registry", () => {
   });
 
   it("does not mix answers by falling back after a visible stream delta", async () => {
-    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
     vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
     const encoder = new TextEncoder();
     let pulls = 0;

@@ -42,11 +42,23 @@ export const chatExports = mysqlTable("chat_exports", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => [
   index("chat_exports_user_created_idx").on(table.userId, table.createdAt),
-  index("chat_exports_session_created_idx").on(table.sessionId, table.createdAt),
+	index("chat_exports_session_created_idx").on(table.sessionId, table.createdAt),
 ]);
+
+export const providerHealth = mysqlTable("provider_health", {
+	provider: varchar("provider", { length: 32 }).primaryKey(),
+	state: mysqlEnum("state", ["ready", "cooldown", "auth_failed", "unavailable", "not_configured"]).notNull(),
+	category: varchar("category", { length: 32 }),
+	http: int("http"),
+	confirmed: text("confirmed").notNull(),
+	checkedAt: timestamp("checkedAt").defaultNow().notNull(),
+	blockedUntil: timestamp("blockedUntil"),
+	updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type ChatSession = typeof chatSessions.$inferSelect;
 export type ChatMessageRecord = typeof messages.$inferSelect;
 export type ChatExport = typeof chatExports.$inferSelect;
+export type ProviderHealthRecord = typeof providerHealth.$inferSelect;

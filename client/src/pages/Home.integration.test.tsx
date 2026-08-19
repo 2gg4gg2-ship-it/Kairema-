@@ -30,7 +30,12 @@ vi.mock("@/lib/chat-export", () => ({
 }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
-    models: { list: { useQuery: () => ({ data: [{ key: "ultra", modelId: fixtures.modelId, label: "Kairema Ultra (Gemma 4)", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" } }] }) } },
+    models: { list: { useQuery: () => ({ data: [
+      { key: "fast", modelId: "fast", label: "Kairema Быстрый", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" } },
+      { key: "smart", modelId: "smart", label: "Kairema Смекалистый", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" } },
+      { key: "context", modelId: "context", label: "Kairema Контекст", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" } },
+      { key: "flagship", modelId: "flagship", label: "Kairema Флагман", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" } },
+    ] }) } },
     chats: {
       list: { useQuery: () => ({ data: fixtures.sessions, isLoading: false }) },
       messages: { useQuery: () => ({ data: fixtures.messages }) },
@@ -85,6 +90,16 @@ function resetFixtures() {
 describe("Home integration flows", () => {
   beforeEach(() => resetFixtures());
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  it("always renders exactly four public role cards and never renders the removed Code role", () => {
+    render(<Home />);
+
+    const visibleRoleCards = screen.getAllByRole("button").filter((element) =>
+      ["Kairema Быстрый", "Kairema Смекалистый", "Kairema Контекст", "Kairema Флагман"].some((label) => element.textContent?.includes(label)),
+    );
+    expect(visibleRoleCards).toHaveLength(4);
+    expect(screen.queryByText("Kairema Код")).toBeNull();
+  });
 
   it("exports only the active persisted history through both user-facing controls", async () => {
     const user = userEvent.setup();

@@ -1,7 +1,7 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
-import { ChatExport, ChatMessageRecord, ChatSession, InsertUser, chatExports, chatSessions, messages, users } from "../drizzle/schema";
+import { ChatExport, ChatMessageRecord, ChatSession, InsertUser, ProviderHealthRecord, chatExports, chatSessions, messages, providerHealth, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -122,4 +122,25 @@ export async function deleteOwnedChatExport(userId: number, exportId: string): P
   if (!isOwnedChatExport(userId, owned)) return false;
   await db.delete(chatExports).where(and(eq(chatExports.id, exportId), eq(chatExports.userId, userId)));
   return true;
+}
+
+export async function listProviderHealth(): Promise<ProviderHealthRecord[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(providerHealth);
+}
+
+export async function upsertProviderHealth(input: Omit<ProviderHealthRecord, "updatedAt">): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(providerHealth).values(input).onDuplicateKeyUpdate({
+    set: {
+      state: input.state,
+      category: input.category,
+      http: input.http,
+      confirmed: input.confirmed,
+      checkedAt: input.checkedAt,
+      blockedUntil: input.blockedUntil,
+    },
+  });
 }

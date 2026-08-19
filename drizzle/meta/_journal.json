@@ -22,6 +22,13 @@
       "when": 1787128050210,
       "tag": "0002_green_silver_sable",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1787132136406,
+      "tag": "0003_cold_speed",
+      "breakpoints": true
     }
   ]
 }

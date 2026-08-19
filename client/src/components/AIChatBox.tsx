@@ -80,7 +80,7 @@ export function AIChatBox({
           <div className="flex min-h-[420px] flex-col items-center justify-center px-6 text-center">
             <div className="kairema-orb mb-6"><Sparkles className="size-7" /></div>
             <h2 className="text-2xl font-semibold tracking-tight text-white">{emptyStateMessage}</h2>
-            <p className="mt-3 max-w-md text-sm leading-6 text-slate-400">Выберите одну из пяти моделей. Kairema покажет её подтверждённый статус до отправки запроса.</p>
+            <p className="mt-3 max-w-md text-sm leading-6 text-slate-400">Выберите одну из четырёх ролей. Kairema покажет её подтверждённый статус до отправки запроса.</p>
             <div className="mt-8 flex max-w-2xl flex-wrap justify-center gap-2">
               {suggestedPrompts.map((prompt) => (
                 <button key={prompt} onClick={() => onSendMessage(prompt)} disabled={isLoading} className="kairema-prompt">
