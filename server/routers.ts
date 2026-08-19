@@ -10,7 +10,7 @@ import { MODEL_IDS, chatWithRole, getModelViews, publicChatError } from "./provi
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { getOwnedAttachmentDownload, uploadOwnedChatAttachment } from "./attachments";
 import { buildChatContext, extractMemoryFacts } from "./chat-context";
-import { getWebSearchStatus, searchWeb } from "./web-search";
+import { getWebSearchStatus, probeWebSearchStatus } from "./web-search";
 
 const settingsSchema = z.object({
   style: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional(),
@@ -96,11 +96,8 @@ export const appRouter = router({
     query: protectedProcedure.input(z.object({ query: z.string().trim().min(2).max(120) })).query(({ ctx, input }) => searchUserContent(ctx.user.id, input.query)),
   }),
   webSearch: router({
-    status: protectedProcedure.query(() => getWebSearchStatus()),
-    probe: protectedProcedure.mutation(async () => {
-      try { await searchWeb("Проверь доступность Google Search grounding и верни один подтверждённый источник."); } catch { /* status is intentionally returned below */ }
-      return getWebSearchStatus();
-    }),
+    status: protectedProcedure.query(async () => getWebSearchStatus()),
+    probe: protectedProcedure.mutation(async () => probeWebSearchStatus()),
   }),
   attachments: router({
     list: protectedProcedure.input(z.object({ sessionId: z.string().uuid() })).query(({ ctx, input }) => listSessionAttachments(ctx.user.id, input.sessionId)),

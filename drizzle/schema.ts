@@ -57,6 +57,16 @@ export const providerHealth = mysqlTable("provider_health", {
 	updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const webSearchStatus = mysqlTable("web_search_status", {
+  key: varchar("key", { length: 32 }).primaryKey(),
+  state: mysqlEnum("state", ["ready", "unavailable", "unknown"]).notNull(),
+  reason: varchar("reason", { length: 255 }).notNull(),
+  googleHttp: int("googleHttp"),
+  openrouterHttp: int("openrouterHttp"),
+  checkedAt: timestamp("checkedAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export const userSettings = mysqlTable("user_settings", {
   userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   language: mysqlEnum("language", ["ru", "en"]).notNull().default("ru"),
@@ -111,6 +121,7 @@ export type ChatSession = typeof chatSessions.$inferSelect;
 export type ChatMessageRecord = typeof messages.$inferSelect;
 export type ChatExport = typeof chatExports.$inferSelect;
 export type ProviderHealthRecord = typeof providerHealth.$inferSelect;
+export type WebSearchStatusRecord = typeof webSearchStatus.$inferSelect;
 export type UserSettings = typeof userSettings.$inferSelect;
 export type MemoryProfile = typeof memoryProfiles.$inferSelect;
 export type MemoryFact = typeof memoryFacts.$inferSelect;

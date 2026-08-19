@@ -10,7 +10,9 @@ function saveBlob(blob: Blob, filename: string) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  // A zero-delay revoke can cancel the browser's deferred download, especially
+  // on mobile Safari/Chromium. Keep the opaque URL alive briefly, then release it.
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 export type PreparedChatExport = {

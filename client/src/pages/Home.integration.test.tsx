@@ -16,6 +16,8 @@ const fixtures = vi.hoisted(() => ({
   invalidateExports: vi.fn(),
   invalidateMessages: vi.fn(),
   invalidateSessions: vi.fn(),
+  createChat: vi.fn(),
+  updateSettings: vi.fn(),
   releaseSecondDelta: null as (() => void) | null,
 }));
 
@@ -37,7 +39,7 @@ vi.mock("@/lib/trpc", () => ({
       { key: "context", modelId: "context", label: "Kairema Контекст", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" } },
       { key: "flagship", modelId: "flagship", label: "Kairema Флагман", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" } },
     ] }) } },
-    settings: { get: { useQuery: () => ({ data: { language: "ru", theme: "dark", responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, defaultRole: "fast", webSearch: 0 } }) }, update: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
+    settings: { get: { useQuery: () => ({ data: { language: "ru", theme: "dark", responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, defaultRole: "fast", webSearch: 0 } }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateSettings }) } },
     memory: { get: { useQuery: () => ({ data: { profile: "", enabled: 1, autoExtract: 1, facts: [] } }) }, update: { useMutation: () => ({ mutateAsync: vi.fn() }) }, addFact: { useMutation: () => ({ mutateAsync: vi.fn() }) }, deleteFact: { useMutation: () => ({ mutateAsync: vi.fn() }) }, clear: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
     webSearch: { status: { useQuery: () => ({ data: { available: false, reason: "Поиск сейчас недоступен" } }) } },
     search: { query: { useQuery: () => ({ data: [] }) } },
@@ -45,7 +47,7 @@ vi.mock("@/lib/trpc", () => ({
     chats: {
       list: { useQuery: () => ({ data: fixtures.sessions, isLoading: false }) },
       messages: { useQuery: () => ({ data: fixtures.messages }) },
-      create: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
+      create: { useMutation: () => ({ mutateAsync: fixtures.createChat, isPending: false }) },
     },
     exports: {
       list: { useQuery: () => ({ data: [], isLoading: false }) },
@@ -83,6 +85,8 @@ function resetFixtures() {
   fixtures.deleteExport.mockReset().mockResolvedValue(undefined);
   fixtures.invalidateExports.mockReset().mockResolvedValue(undefined);
   fixtures.invalidateSessions.mockReset().mockResolvedValue(undefined);
+  fixtures.createChat.mockReset().mockResolvedValue({ id: "22222222-2222-4222-8222-222222222222", modelId: "fast", title: "Новый разговор" });
+  fixtures.updateSettings.mockReset().mockResolvedValue(undefined);
   fixtures.invalidateMessages.mockReset().mockImplementation(async () => {
     fixtures.messages = [
       ...fixtures.messages,
@@ -105,6 +109,18 @@ describe("Home integration flows", () => {
     );
     expect(visibleRoleCards).toHaveLength(4);
     expect(screen.queryByText("Kairema Код")).toBeNull();
+  });
+
+  it("creates an allowed new chat when an old history item still has the removed Code role", async () => {
+    const user = userEvent.setup();
+    fixtures.sessions = [{ id: fixtures.sessionId, modelId: "code", title: "Старый чат" }];
+    fixtures.messages = [];
+    render(<Home />);
+
+    await user.click(screen.getAllByRole("button", { name: "Новый чат" })[0]!);
+
+    await waitFor(() => expect(fixtures.createChat).toHaveBeenCalledWith({ modelId: "fast" }));
+    expect(screen.queryByText(/Invalid option/)).toBeNull();
   });
 
   it("exports only the active persisted history through both user-facing controls", async () => {
@@ -188,5 +204,20 @@ describe("Home integration flows", () => {
     await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Отменить генерацию" })).toBeNull());
     expect(screen.queryByText("Отменяемый запрос")).toBeNull();
+  });
+
+  it("updates a setting's active state immediately while its server save is still pending", async () => {
+    const user = userEvent.setup();
+    fixtures.updateSettings.mockImplementation(() => new Promise(() => undefined));
+    render(<Home />);
+
+    const thinking = screen.getByRole("button", { name: "Дополнительное рассуждение" });
+    const indicator = thinking.querySelector(".kairema-switch");
+    expect(indicator?.className).not.toContain("kairema-switch-on");
+
+    await user.click(thinking);
+
+    expect(indicator?.className).toContain("kairema-switch-on");
+    expect(fixtures.updateSettings).toHaveBeenCalledWith({ thinking: true });
   });
 });

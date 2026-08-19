@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
-import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, InsertUser, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, chatAttachments, chatExports, chatSessions, memoryFacts, memoryProfiles, messages, providerHealth, userSettings, users } from "../drizzle/schema";
+import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, InsertUser, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, memoryFacts, memoryProfiles, messages, providerHealth, userSettings, users, webSearchStatus } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -141,6 +141,27 @@ export async function upsertProviderHealth(input: Omit<ProviderHealthRecord, "up
       confirmed: input.confirmed,
       checkedAt: input.checkedAt,
       blockedUntil: input.blockedUntil,
+    },
+  });
+}
+
+export async function getWebSearchStatus(): Promise<WebSearchStatusRecord | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(webSearchStatus).where(eq(webSearchStatus.key, "google_grounding")).limit(1);
+  return result[0];
+}
+
+export async function upsertWebSearchStatus(input: Omit<WebSearchStatusRecord, "updatedAt">): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(webSearchStatus).values(input).onDuplicateKeyUpdate({
+    set: {
+      state: input.state,
+      reason: input.reason,
+      googleHttp: input.googleHttp,
+      openrouterHttp: input.openrouterHttp,
+      checkedAt: input.checkedAt,
     },
   });
 }
