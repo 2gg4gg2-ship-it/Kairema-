@@ -94,6 +94,91 @@ async function fetchJson(path: string, init: RequestInit) {
   return { response, data };
 }
 
+async function fetchSse(path: string, body: unknown, signal?: AbortSignal) {
+  const key = process.env.OPENROUTER_API_KEY?.trim();
+  if (!key) throw new OpenRouterError(notConfiguredStatus());
+  let response: Response;
+  try {
+    response = await fetch(`${OPENROUTER_BASE}${path}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Accept": "text/event-stream", "HTTP-Referer": "https://kairema.manus.space", "X-Title": "Kairema" },
+      body: JSON.stringify(body),
+      signal: signal ?? AbortSignal.timeout(90_000),
+    });
+  } catch (error) {
+    const category: StatusCategory = error instanceof DOMException && error.name === "TimeoutError" ? "TIMEOUT" : "NETWORK";
+    throw new OpenRouterError({ state: "error", badge: statusLabel(category, "error"), category, http: null, checkedAt: now(), confirmed: category === "TIMEOUT" ? "Превышено время ожидания потокового ответа OpenRouter." : "Сетевая ошибка при обращении к OpenRouter." });
+  }
+  if (!response.ok) {
+    let data: unknown = null;
+    try { data = await response.json(); } catch { data = { message: "Не удалось разобрать ошибку OpenRouter." }; }
+    throw new OpenRouterError(statusFromFailure(response.status, data));
+  }
+  if (!response.body) throw new OpenRouterError({ state: "error", badge: statusLabel("PARSE", "error"), category: "PARSE", http: response.status, checkedAt: now(), confirmed: "OpenRouter не открыл поток ответа." });
+  return response;
+}
+
+export function dataFromSseBlock(block: string) {
+  return block
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart())
+    .join("\n");
+}
+
+export function openRouterStreamDelta(payload: unknown) {
+  const content = (payload as { choices?: Array<{ delta?: { content?: unknown } }> })?.choices?.[0]?.delta?.content;
+  return typeof content === "string" ? content : "";
+}
+
+export function createReasoningStreamFilter() {
+  let pending = "";
+  let hiddenTag: string | null = null;
+  return (chunk: string, final = false) => {
+    pending += chunk;
+    let output = "";
+    while (pending) {
+      if (hiddenTag) {
+        const close = pending.match(new RegExp(`</${hiddenTag}\\s*>`, "i"));
+        if (close?.index !== undefined) {
+          pending = pending.slice(close.index + close[0].length);
+          hiddenTag = null;
+          continue;
+        }
+        if (final) pending = "";
+        else {
+          const lastTagStart = pending.lastIndexOf("<");
+          pending = lastTagStart >= 0 ? pending.slice(lastTagStart) : "";
+        }
+        break;
+      }
+
+      const opening = pending.match(/<(think|reasoning|thought)(?:\s[^>]*)?>/i);
+      if (opening?.index !== undefined) {
+        output += pending.slice(0, opening.index);
+        pending = pending.slice(opening.index + opening[0].length);
+        hiddenTag = opening[1]!.toLowerCase();
+        continue;
+      }
+      if (final) {
+        output += pending;
+        pending = "";
+      } else {
+        const lastTagStart = pending.lastIndexOf("<");
+        if (lastTagStart >= 0 && pending.length - lastTagStart < 24) {
+          output += pending.slice(0, lastTagStart);
+          pending = pending.slice(lastTagStart);
+        } else {
+          output += pending;
+          pending = "";
+        }
+      }
+      break;
+    }
+    return output;
+  };
+}
+
 export function statusFromChatPayload(payload: unknown): ModelStatus {
   const raw = (payload as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content;
   if (typeof raw !== "string" || !stripReasoningBlocks(raw)) return { state: "error", badge: statusLabel("PARSE", "error"), category: "PARSE", http: 200, checkedAt: now(), confirmed: "OpenRouter вернул ответ без финального текста во время проверки модели." };
@@ -164,6 +249,62 @@ export async function chatWithOpenRouter(modelId: string, history: ChatMessage[]
     }
   }
   throw lastError instanceof OpenRouterError ? lastError : new OpenRouterError(statusFromFailure(null, lastError));
+}
+
+export async function chatWithOpenRouterStream(modelId: string, history: ChatMessage[], settings: ChatSettings | undefined, onDelta: (delta: string) => void, signal?: AbortSignal): Promise<ChatResult> {
+  const requestedModel = modelById(modelId);
+  if (!requestedModel) throw new OpenRouterError({ state: "error", badge: statusLabel("MODEL", "error"), category: "MODEL", http: null, checkedAt: now(), confirmed: "Выбрана модель вне статического реестра Kairema." });
+  const model = requestedModel.key === "auto_router" ? (selectAutoModel(await getModelViews()) ?? requestedModel) : requestedModel;
+  const response = await fetchSse("/chat/completions", { model: model.modelId, messages: buildOpenRouterMessages(model, history, settings), stream: true }, signal);
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  const filter = createReasoningStreamFilter();
+  const pieces: string[] = [];
+  let buffer = "";
+  let modelUsed: string = model.modelId;
+
+  const emit = (raw: string) => {
+    const visible = filter(raw);
+    if (visible) {
+      pieces.push(visible);
+      onDelta(visible);
+    }
+  };
+  const consume = (block: string) => {
+    const data = dataFromSseBlock(block);
+    if (!data || data === "[DONE]") return;
+    try {
+      const payload = JSON.parse(data) as { model?: unknown };
+      if (typeof payload.model === "string") modelUsed = payload.model;
+      emit(openRouterStreamDelta(payload));
+    } catch {
+      // Keep the connection alive if an upstream comment or malformed event is encountered.
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const blocks = buffer.split(/\r?\n\r?\n/);
+      buffer = blocks.pop() ?? "";
+      blocks.forEach(consume);
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) consume(buffer);
+    const tail = filter("", true);
+    if (tail) {
+      pieces.push(tail);
+      onDelta(tail);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const content = stripReasoningBlocks(pieces.join(""));
+  if (!content) throw new OpenRouterError({ state: "error", badge: statusLabel("PARSE", "error"), category: "PARSE", http: 200, checkedAt: now(), confirmed: "После удаления reasoning-блоков не осталось финального ответа." });
+  return { content, modelUsed, label: model.label, status: readyStatus() };
 }
 
 export function publicChatError(modelId: string, error: unknown) {

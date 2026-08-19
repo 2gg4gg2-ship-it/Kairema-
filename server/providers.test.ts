@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MODEL_CONFIG, MODEL_IDS, buildOpenRouterMessages, classifyOpenRouterFailure, modelById, publicChatError, selectAutoModel, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView } from "./providers";
+import { MODEL_CONFIG, MODEL_IDS, buildOpenRouterMessages, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, modelById, openRouterStreamDelta, publicChatError, selectAutoModel, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView } from "./providers";
 
 describe("OpenRouter model registry", () => {
   it("declares exactly five static cards independently of API responses", () => {
@@ -81,5 +81,19 @@ describe("OpenRouter model registry", () => {
     const message = publicChatError(MODEL_CONFIG[0]!.modelId, new Error("raw upstream json"));
     expect(message).toContain("Провайдер: OpenRouter");
     expect(message).not.toContain("raw upstream json");
+  });
+
+  it("extracts text deltas from an OpenRouter SSE event without interpreting provider metadata", () => {
+    const data = dataFromSseBlock("event: message\ndata: {\"choices\":[{\"delta\":{\"content\":\"Привет\"}}]}\n\n");
+    expect(openRouterStreamDelta(JSON.parse(data))).toBe("Привет");
+    expect(dataFromSseBlock("data: [DONE]\n\n")).toBe("[DONE]");
+  });
+
+  it("hides reasoning tags even when they span streamed fragments", () => {
+    const filter = createReasoningStreamFilter();
+    expect(filter("Начало <thi")).toBe("Начало ");
+    expect(filter("nk>скрыто")).toBe("");
+    expect(filter("</think>Итог")).toBe("Итог");
+    expect(filter("", true)).toBe("");
   });
 });

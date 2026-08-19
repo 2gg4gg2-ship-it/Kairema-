@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { InlineMarkdown } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
-import { Loader2, Send, User, Sparkles } from "lucide-react";
+import { Download, FileText, Loader2, Send, User, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 export type Message = {
@@ -13,6 +13,7 @@ export type Message = {
   model?: string;
   status?: string;
   isError?: boolean;
+  createdAt?: Date | string;
 };
 
 type AIChatBoxProps = {
@@ -24,6 +25,11 @@ type AIChatBoxProps = {
   height?: string | number;
   emptyStateMessage?: string;
   suggestedPrompts?: string[];
+  onExportMarkdown?: () => void;
+  onExportPdf?: () => void;
+  canExport?: boolean;
+  exportBusy?: "markdown" | "pdf" | null;
+  exportError?: string;
 };
 
 export function AIChatBox({
@@ -35,6 +41,11 @@ export function AIChatBox({
   height,
   emptyStateMessage = "Начните разговор с Kairema",
   suggestedPrompts = [],
+  onExportMarkdown,
+  onExportPdf,
+  canExport = false,
+  exportBusy = null,
+  exportError = "",
 }: AIChatBoxProps) {
   const [input, setInput] = useState("");
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -56,6 +67,8 @@ export function AIChatBox({
 
   return (
     <section className={cn("kairema-chat flex min-h-0 flex-1 flex-col", className)} style={height ? { height } : undefined}>
+      {(onExportMarkdown || onExportPdf) && <div className="kairema-chat-tools"><span>История чата</span><div className="kairema-export-actions"><button type="button" onClick={onExportMarkdown} disabled={!canExport || Boolean(exportBusy)} className="kairema-export-button"><FileText className="size-3.5" />{exportBusy === "markdown" ? "Готовим…" : "Markdown"}</button><button type="button" onClick={onExportPdf} disabled={!canExport || Boolean(exportBusy)} className="kairema-export-button"><Download className="size-3.5" />{exportBusy === "pdf" ? "Готовим…" : "PDF"}</button></div></div>}
+      {exportError && <p className="kairema-export-error" role="status">{exportError}</p>}
       <div ref={viewportRef} className="min-h-0 flex-1 overflow-y-auto">
         {displayMessages.length === 0 ? (
           <div className="flex min-h-[420px] flex-col items-center justify-center px-6 text-center">
@@ -86,7 +99,7 @@ export function AIChatBox({
                 {message.role === "user" && <div className="kairema-avatar"><User className="size-4" /></div>}
               </article>
             ))}
-            {isLoading && <div className="flex items-center gap-3"><div className="kairema-avatar kairema-avatar-ai"><Sparkles className="size-4" /></div><div className="kairema-typing"><Loader2 className="size-4 animate-spin" /> Kairema готовит ответ</div></div>}
+            {isLoading && displayMessages.at(-1)?.role !== "assistant" && <div className="flex items-center gap-3"><div className="kairema-avatar kairema-avatar-ai"><Sparkles className="size-4" /></div><div className="kairema-typing"><Loader2 className="size-4 animate-spin" /> Kairema готовит ответ</div></div>}
           </div>
         )}
       </div>

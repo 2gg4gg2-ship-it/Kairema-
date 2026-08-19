@@ -1,0 +1,116 @@
+import type { Express, Request, RequestHandler, Response } from "express";
+import { z } from "zod";
+import { appendChatMessage, getOwnedChatSession, listSessionMessages, updateChatTitle } from "./db";
+import { sdk } from "./_core/sdk";
+import { MODEL_IDS, chatWithOpenRouterStream, publicChatError } from "./providers";
+
+const streamInputSchema = z.object({
+  sessionId: z.string().uuid(),
+  modelId: z.enum(MODEL_IDS),
+  content: z.string().trim().min(1).max(16_000),
+  settings: z.object({ style: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional() }).optional(),
+});
+
+export function writeEvent(res: Response, event: string, payload: unknown) {
+  res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+}
+
+function historyError(error: unknown) {
+  return error instanceof Error && /чат|хранилище/i.test(error.message)
+    ? "История чата временно недоступна. Повторите попытку позже."
+    : "Не удалось подготовить потоковый ответ. Повторите попытку позже.";
+}
+
+type StreamDependencies = {
+  authenticateRequest: (request: Request) => Promise<{ id: number } | null>;
+  getOwnedChatSession: typeof getOwnedChatSession;
+  appendChatMessage: typeof appendChatMessage;
+  updateChatTitle: typeof updateChatTitle;
+  listSessionMessages: typeof listSessionMessages;
+  chatWithOpenRouterStream: typeof chatWithOpenRouterStream;
+};
+
+const defaultDependencies: StreamDependencies = {
+  authenticateRequest: async (request) => sdk.authenticateRequest(request) as Promise<{ id: number }>,
+  getOwnedChatSession,
+  appendChatMessage,
+  updateChatTitle,
+  listSessionMessages,
+  chatWithOpenRouterStream,
+};
+
+export function createChatStreamHandler(overrides: Partial<StreamDependencies> = {}): RequestHandler {
+  const dependencies = { ...defaultDependencies, ...overrides };
+  return async (req: Request, res: Response) => {
+    const user = await dependencies.authenticateRequest(req).catch(() => null);
+    if (!user) {
+      res.status(401).json({ error: "Войдите, чтобы продолжить разговор." });
+      return;
+    }
+
+    const parsed = streamInputSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Проверьте текст сообщения и выбранную модель." });
+      return;
+    }
+
+    const input = parsed.data;
+    try {
+      const session = await dependencies.getOwnedChatSession(user.id, input.sessionId);
+      if (!session) throw new Error("Чат не найден или недоступен.");
+      await dependencies.appendChatMessage(user.id, input.sessionId, "user", input.content, input.modelId);
+      if (session.title === "Новый разговор") await dependencies.updateChatTitle(user.id, input.sessionId, input.content.slice(0, 72));
+      const history = await dependencies.listSessionMessages(user.id, input.sessionId);
+
+      res.status(200);
+      res.set({
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+      res.flushHeaders();
+
+      const controller = new AbortController();
+      let closed = false;
+      let finished = false;
+      res.on("close", () => {
+        if (!finished) {
+          closed = true;
+          controller.abort();
+        }
+      });
+      writeEvent(res, "start", { sessionId: input.sessionId });
+
+      try {
+        const result = await dependencies.chatWithOpenRouterStream(
+          input.modelId,
+          history.map((message) => ({ role: message.role, content: message.content })),
+          input.settings,
+          (delta: string) => {
+            if (!closed) writeEvent(res, "delta", { content: delta });
+          },
+          controller.signal,
+        );
+        if (!closed) {
+          await dependencies.appendChatMessage(user.id, input.sessionId, "assistant", result.content, result.modelUsed);
+          writeEvent(res, "done", result);
+          finished = true;
+          res.end();
+        }
+      } catch (error) {
+        if (!closed) {
+          writeEvent(res, "error", { message: publicChatError(input.modelId, error) });
+          finished = true;
+          res.end();
+        }
+      }
+    } catch (error) {
+      res.status(400).json({ error: historyError(error) });
+    }
+  };
+}
+
+export function registerChatStreamRoute(app: Express) {
+  app.post("/api/chat/stream", createChatStreamHandler());
+}
