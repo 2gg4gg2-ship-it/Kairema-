@@ -1,7 +1,7 @@
-import { and, asc, desc, eq, like } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
-import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, InsertUser, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, memoryFacts, memoryProfiles, messages, providerHealth, roleRuntimeStatus, userSettings, users, webSearchStatus } from "../drizzle/schema";
+import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryFacts, memoryProfiles, messages, providerHealth, roleRuntimeStatus, userSettings, users, webSearchStatus } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -194,6 +194,88 @@ export async function upsertWebSearchStatus(input: Omit<WebSearchStatusRecord, "
 }
 
 export type UserSettingsPatch = Partial<Pick<UserSettings, "language" | "theme" | "responseStyle" | "responseLength" | "quickReplies" | "effort" | "thinking" | "defaultRole" | "webSearch">>;
+export type KnowledgeSourcePatch = Omit<KnowledgeSource, "updatedAt">;
+export type KnowledgeDocumentInput = Omit<KnowledgeDocument, "retrievedAt" | "updatedAt">;
+export type KnowledgeRunInput = Omit<KnowledgeIngestionRun, "startedAt" | "finishedAt">;
+
+/** Ensures the stable official source row exists before dependent documents or audit runs are recorded. */
+export async function ensureKnowledgeSource(input: Pick<KnowledgeSourcePatch, "id" | "displayName" | "feedUrl">): Promise<void> {
+  const db = requireDatabase(await getDb());
+  await db.insert(knowledgeSources).values({ ...input, state: "unknown", lastFetchedAt: null, lastSuccessAt: null, lastError: null, indexedCount: 0 }).onDuplicateKeyUpdate({
+    set: { displayName: input.displayName, feedUrl: input.feedUrl },
+  });
+}
+
+export async function upsertKnowledgeSource(input: KnowledgeSourcePatch): Promise<void> {
+  const db = requireDatabase(await getDb());
+  await db.insert(knowledgeSources).values(input).onDuplicateKeyUpdate({
+    set: {
+      displayName: input.displayName,
+      feedUrl: input.feedUrl,
+      state: input.state,
+      lastFetchedAt: input.lastFetchedAt,
+      lastSuccessAt: input.lastSuccessAt,
+      lastError: input.lastError,
+      indexedCount: input.indexedCount,
+    },
+  });
+}
+
+export async function listKnowledgeSources(): Promise<KnowledgeSource[]> {
+  const db = requireDatabase(await getDb());
+  return db.select().from(knowledgeSources).orderBy(asc(knowledgeSources.displayName));
+}
+
+export async function recordKnowledgeDocument(input: KnowledgeDocumentInput): Promise<"created" | "updated"> {
+  const db = requireDatabase(await getDb());
+  const existing = await db.select({ id: knowledgeDocuments.id }).from(knowledgeDocuments).where(eq(knowledgeDocuments.sourceUrl, input.sourceUrl)).limit(1);
+  await db.insert(knowledgeDocuments).values(input).onDuplicateKeyUpdate({
+    set: {
+      sourceId: input.sourceId,
+      title: input.title,
+      excerpt: input.excerpt,
+      fingerprint: input.fingerprint,
+      publishedAt: input.publishedAt,
+      retrievedAt: new Date(),
+    },
+  });
+  return existing[0] ? "updated" : "created";
+}
+
+export async function trimKnowledgeDocuments(sourceId: string, maximum = 120): Promise<void> {
+  const db = requireDatabase(await getDb());
+  const rows = await db.select({ id: knowledgeDocuments.id, publishedAt: knowledgeDocuments.publishedAt }).from(knowledgeDocuments)
+    .where(eq(knowledgeDocuments.sourceId, sourceId))
+    .orderBy(desc(knowledgeDocuments.publishedAt), desc(knowledgeDocuments.retrievedAt));
+  const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1_000;
+  const currentRows = rows.filter((row) => !row.publishedAt || row.publishedAt.getTime() >= cutoff);
+  const staleIds = Array.from(new Set([
+    ...rows.filter((row) => row.publishedAt && row.publishedAt.getTime() < cutoff).map((row) => row.id),
+    ...currentRows.slice(maximum).map((row) => row.id),
+  ]));
+  if (staleIds.length) await db.delete(knowledgeDocuments).where(inArray(knowledgeDocuments.id, staleIds));
+}
+
+export async function listKnowledgeDocuments(limit = 160): Promise<KnowledgeDocument[]> {
+  const db = requireDatabase(await getDb());
+  return db.select().from(knowledgeDocuments).orderBy(desc(knowledgeDocuments.publishedAt), desc(knowledgeDocuments.retrievedAt)).limit(Math.min(Math.max(limit, 1), 240));
+}
+
+export async function createKnowledgeRun(input: KnowledgeRunInput): Promise<void> {
+  const db = requireDatabase(await getDb());
+  await db.insert(knowledgeIngestionRuns).values(input);
+}
+
+export async function finishKnowledgeRun(id: string, patch: Pick<KnowledgeIngestionRun, "state" | "fetchedCount" | "indexedCount" | "updatedCount" | "error">): Promise<void> {
+  const db = requireDatabase(await getDb());
+  await db.update(knowledgeIngestionRuns).set({ ...patch, finishedAt: new Date() }).where(eq(knowledgeIngestionRuns.id, id));
+}
+
+export async function listKnowledgeRuns(limit = 8): Promise<KnowledgeIngestionRun[]> {
+  const db = requireDatabase(await getDb());
+  return db.select().from(knowledgeIngestionRuns).orderBy(desc(knowledgeIngestionRuns.startedAt)).limit(Math.min(Math.max(limit, 1), 20));
+}
+
 export type MemoryProfilePatch = Partial<Pick<MemoryProfile, "enabled" | "autoExtract" | "profile" | "summary">>;
 
 async function ensureUserSettings(userId: number): Promise<void> {

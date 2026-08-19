@@ -11,6 +11,7 @@ import { storageGetSignedUrl, storagePut } from "./storage";
 import { getOwnedAttachmentDownload, uploadOwnedChatAttachment } from "./attachments";
 import { buildChatContext, extractMemoryFacts } from "./chat-context";
 import { getWebSearchStatus, probeWebSearchStatus } from "./web-search";
+import { getKnowledgeStatus, refreshKnowledgeBase } from "./knowledge";
 
 const settingsSchema = z.object({
   style: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional(),
@@ -99,6 +100,17 @@ export const appRouter = router({
     status: protectedProcedure.query(async () => getWebSearchStatus()),
     probe: protectedProcedure.mutation(async () => probeWebSearchStatus()),
   }),
+  knowledge: router({
+    status: protectedProcedure.query(async () => getKnowledgeStatus()),
+    refresh: protectedProcedure.mutation(async () => {
+      const current = await getKnowledgeStatus();
+      const latest = current.runs[0];
+      if (latest && Date.now() - latest.startedAt.getTime() < 60_000) {
+        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Обновление уже выполнялось недавно. Повторите через минуту." });
+      }
+      return refreshKnowledgeBase("manual");
+    }),
+  }),
   attachments: router({
     list: protectedProcedure.input(z.object({ sessionId: z.string().uuid() })).query(({ ctx, input }) => listSessionAttachments(ctx.user.id, input.sessionId)),
     upload: protectedProcedure.input(attachmentInputSchema).mutation(async ({ ctx, input }) => {
@@ -160,9 +172,12 @@ export const appRouter = router({
           await appendChatMessage(ctx.user.id, input.sessionId, "user", input.content, input.modelId);
           if (session.title === "Новый разговор") await updateChatTitle(ctx.user.id, input.sessionId, input.content.slice(0, 72));
           const history = await listSessionMessages(ctx.user.id, input.sessionId);
-          const storedSettings = await buildChatContext(ctx.user.id, input.sessionId, { attachmentIds: input.attachmentIds, webSearch: input.webSearch, query: input.content });
+          const storedSettings = await buildChatContext(ctx.user.id, input.sessionId, { attachmentIds: input.attachmentIds, webSearch: input.webSearch, query: input.content, role: input.modelId });
           const result = await chatWithRole(input.modelId, history.map((message) => ({ role: message.role, content: message.content })), { ...storedSettings, ...(input.settings?.style ? { style: input.settings.style } : {}) });
-          await appendChatMessage(ctx.user.id, input.sessionId, "assistant", result.content, result.modelUsed, result.sources?.length ? JSON.stringify({ sources: result.sources }) : undefined);
+          const sourceMetadata = result.sources?.length || result.ragSources?.length
+            ? JSON.stringify({ ...(result.sources?.length ? { sources: result.sources } : {}), ...(result.ragSources?.length ? { ragSources: result.ragSources } : {}) })
+            : undefined;
+          await appendChatMessage(ctx.user.id, input.sessionId, "assistant", result.content, result.modelUsed, sourceMetadata);
           await extractMemoryFacts(ctx.user.id, input.content).catch(() => undefined);
           return result;
         } catch (error) {

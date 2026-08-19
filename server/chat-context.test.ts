@@ -18,11 +18,20 @@ vi.mock("./attachments", () => ({
   getOwnedAttachmentDownload: vi.fn(),
 }));
 
+vi.mock("./knowledge", () => ({
+  retrieveRagContext: vi.fn().mockResolvedValue({ context: "Проверяемый RAG-контекст.", sources: [{ title: "Официальный RSS", url: "https://openai.com/news/release", publishedAt: "2026-08-19T00:00:00.000Z", sourceId: "openai-news" }] }),
+}));
+
 import { buildChatContext } from "./chat-context";
 
 describe("chat context web-search fallback", () => {
   it("keeps an ordinary text chat usable when optional web search is unavailable", async () => {
     await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Обычный вопрос", attachmentIds: [], webSearch: true }))
       .resolves.toMatchObject({ style: "default", responseLength: "balanced", quickReplies: true, effort: "standard", thinking: false });
+  });
+
+  it("injects attributable RAG context even when web search is disabled", async () => {
+    await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Что нового?", attachmentIds: [], webSearch: false }))
+      .resolves.toMatchObject({ ragResearch: "Проверяемый RAG-контекст.", ragSources: [{ title: "Официальный RSS", url: "https://openai.com/news/release", publishedAt: "2026-08-19T00:00:00.000Z" }] });
   });
 });

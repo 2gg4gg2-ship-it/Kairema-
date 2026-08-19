@@ -68,7 +68,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
     try {
       const session = await dependencies.getOwnedChatSession(user.id, input.sessionId);
       if (!session) throw new Error("Чат не найден или недоступен.");
-      const storedSettings = await dependencies.buildChatContext(user.id, input.sessionId, { attachmentIds: input.attachmentIds, webSearch: input.webSearch, query: input.content });
+      const storedSettings = await dependencies.buildChatContext(user.id, input.sessionId, { attachmentIds: input.attachmentIds, webSearch: input.webSearch, query: input.content, role: input.modelId });
       const effectiveSettings = { ...storedSettings, ...(input.settings?.style ? { style: input.settings.style } : {}) };
       let history;
       if (input.regenerateMessageId) {
@@ -114,7 +114,10 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
           controller.signal,
         );
         if (!closed) {
-          await dependencies.appendChatMessage(user.id, input.sessionId, "assistant", result.content, result.modelUsed, result.sources?.length ? JSON.stringify({ sources: result.sources }) : undefined);
+          const sourceMetadata = result.sources?.length || result.ragSources?.length
+            ? JSON.stringify({ ...(result.sources?.length ? { sources: result.sources } : {}), ...(result.ragSources?.length ? { ragSources: result.ragSources } : {}) })
+            : undefined;
+          await dependencies.appendChatMessage(user.id, input.sessionId, "assistant", result.content, result.modelUsed, sourceMetadata);
           if (!input.regenerateMessageId) await dependencies.extractMemoryFacts(user.id, input.content).catch(() => undefined);
           writeEvent(res, "done", result);
           finished = true;

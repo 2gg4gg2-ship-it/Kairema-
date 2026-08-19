@@ -2,13 +2,14 @@ import { getAttachmentPromptText, getOwnedAttachmentDownload } from "./attachmen
 import { createMemoryFact, getMemoryProfile, getOwnedChatAttachments, getUserSettings, listMemoryFacts } from "./db";
 import type { ChatSettings } from "./providers";
 import { WebSearchUnavailableError, searchWeb } from "./web-search";
+import { retrieveRagContext, type RagRole } from "./knowledge";
 
 function memoryContext(profile: { profile: string; summary: string }, facts: Array<{ fact: string }>) {
   const rows = [profile.profile.trim(), profile.summary.trim(), ...facts.slice(0, 16).map((fact) => `• ${fact.fact}`)].filter(Boolean);
   return rows.join("\n").slice(0, 5_000);
 }
 
-export async function buildChatContext(userId: number, sessionId: string, input: { attachmentIds?: string[]; webSearch?: boolean; query?: string }): Promise<ChatSettings> {
+export async function buildChatContext(userId: number, sessionId: string, input: { attachmentIds?: string[]; webSearch?: boolean; query?: string; role?: RagRole }): Promise<ChatSettings> {
   const [preferences, profile, facts] = await Promise.all([getUserSettings(userId), getMemoryProfile(userId), listMemoryFacts(userId)]);
   const attachments = input.attachmentIds?.length ? await getOwnedChatAttachments(userId, sessionId, input.attachmentIds.slice(0, 4)) : [];
   const documentContext = getAttachmentPromptText(attachments);
@@ -34,6 +35,15 @@ export async function buildChatContext(userId: number, sessionId: string, input:
       if (!(error instanceof WebSearchUnavailableError)) throw error;
       // Search has already persisted a final honest status. The chat remains usable without invented sources.
     }
+  }
+  try {
+    const rag = await retrieveRagContext(input.query ?? "", input.role ?? "flagship");
+    if (rag) {
+      context.ragResearch = rag.context;
+      context.ragSources = rag.sources.map(({ title, url, publishedAt }) => ({ title, url, publishedAt }));
+    }
+  } catch {
+    // RAG is optional: a temporary knowledge-base fault never blocks a private chat.
   }
   return context;
 }

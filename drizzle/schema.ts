@@ -1,4 +1,4 @@
-import { index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { index, int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -75,6 +75,50 @@ export const webSearchStatus = mysqlTable("web_search_status", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+/** Server-managed public-source registry. Users cannot add arbitrary URLs. */
+export const knowledgeSources = mysqlTable("knowledge_sources", {
+  id: varchar("id", { length: 32 }).primaryKey(),
+  displayName: varchar("displayName", { length: 120 }).notNull(),
+  feedUrl: varchar("feedUrl", { length: 512 }).notNull(),
+  state: mysqlEnum("state", ["ready", "unavailable", "unknown"]).notNull().default("unknown"),
+  lastFetchedAt: timestamp("lastFetchedAt"),
+  lastSuccessAt: timestamp("lastSuccessAt"),
+  lastError: varchar("lastError", { length: 255 }),
+  indexedCount: int("indexedCount").notNull().default(0),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+/** RSS item bodies are bounded, attributable public excerpts used only for retrieval. */
+export const knowledgeDocuments = mysqlTable("knowledge_documents", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  sourceId: varchar("sourceId", { length: 32 }).notNull().references(() => knowledgeSources.id, { onDelete: "cascade" }),
+  sourceUrl: varchar("sourceUrl", { length: 512 }).notNull(),
+  title: varchar("title", { length: 512 }).notNull(),
+  excerpt: text("excerpt").notNull(),
+  fingerprint: varchar("fingerprint", { length: 64 }).notNull(),
+  publishedAt: timestamp("publishedAt"),
+  retrievedAt: timestamp("retrievedAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [
+  uniqueIndex("knowledge_documents_url_unique").on(table.sourceUrl),
+  index("knowledge_documents_source_published_idx").on(table.sourceId, table.publishedAt),
+  index("knowledge_documents_fingerprint_idx").on(table.fingerprint),
+]);
+
+/** Bounded non-secret audit records for manual and scheduled ingestion attempts. */
+export const knowledgeIngestionRuns = mysqlTable("knowledge_ingestion_runs", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  sourceId: varchar("sourceId", { length: 32 }).references(() => knowledgeSources.id, { onDelete: "set null" }),
+  trigger: mysqlEnum("trigger", ["manual", "scheduled", "startup"]).notNull(),
+  state: mysqlEnum("state", ["success", "partial", "failed"]).notNull(),
+  fetchedCount: int("fetchedCount").notNull().default(0),
+  indexedCount: int("indexedCount").notNull().default(0),
+  updatedCount: int("updatedCount").notNull().default(0),
+  error: varchar("error", { length: 255 }),
+  startedAt: timestamp("startedAt").defaultNow().notNull(),
+  finishedAt: timestamp("finishedAt"),
+}, (table) => [index("knowledge_ingestion_runs_started_idx").on(table.startedAt)]);
+
 export const userSettings = mysqlTable("user_settings", {
   userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   language: mysqlEnum("language", ["ru", "en"]).notNull().default("ru"),
@@ -130,6 +174,9 @@ export type ChatMessageRecord = typeof messages.$inferSelect;
 export type ChatExport = typeof chatExports.$inferSelect;
 export type ProviderHealthRecord = typeof providerHealth.$inferSelect;
 export type WebSearchStatusRecord = typeof webSearchStatus.$inferSelect;
+export type KnowledgeSource = typeof knowledgeSources.$inferSelect;
+export type KnowledgeDocument = typeof knowledgeDocuments.$inferSelect;
+export type KnowledgeIngestionRun = typeof knowledgeIngestionRuns.$inferSelect;
 export type UserSettings = typeof userSettings.$inferSelect;
 export type MemoryProfile = typeof memoryProfiles.$inferSelect;
 export type MemoryFact = typeof memoryFacts.$inferSelect;

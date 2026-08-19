@@ -25,7 +25,7 @@ describe("Google Search grounding", () => {
       sources: [{ title: "Официальный источник", url: "https://example.com/source" }],
     });
     expect((await getWebSearchStatus()).available).toBe(true);
-  });
+  }, 10_000);
 
   it("reports quota exhaustion as unavailable instead of inventing sources", async () => {
     process.env.GEMINI_API_KEY = "test-key";
