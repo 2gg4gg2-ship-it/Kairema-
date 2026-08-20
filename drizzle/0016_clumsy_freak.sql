@@ -1,0 +1,2 @@
+ALTER TABLE `user_settings` ADD `exportSortBy` enum('createdAt','byteSize') DEFAULT 'createdAt' NOT NULL;--> statement-breakpoint
+ALTER TABLE `user_settings` ADD `exportSortDirection` enum('asc','desc') DEFAULT 'desc' NOT NULL;

@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearMemory, createChatExportRecord, createChatSession, createMemoryFact, deleteAllOwnedChatExports, deleteMemoryFact, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, getFlashTtftStats, getMemoryProfile, getOwnedChatExport, getOwnedChatSession, getUserSettings, listChatExports, listChatSessions, listMemoryFacts, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryFact, updateMemoryProfile, updateUserSettings } from "./db";
+import { appendChatMessage, clearMemory, createChatExportRecord, createChatSession, createMemoryFact, deleteAllOwnedChatExports, deleteMemoryFact, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getOwnedChatExport, getOwnedChatSession, getSearchOutageSummary, getUserSettings, listChatExports, listChatSessions, listMemoryFacts, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryFact, updateMemoryProfile, updateUserSettings } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -36,6 +36,8 @@ const userSettingsSchema = z.object({
   webSearch: z.boolean().optional(),
   toolAccess: z.boolean().optional(),
   healthRefreshSeconds: z.union([z.literal(0), z.literal(15), z.literal(30), z.literal(60)]).optional(),
+  exportSortBy: z.enum(["createdAt", "byteSize"]).optional(),
+  exportSortDirection: z.enum(["asc", "desc"]).optional(),
 });
 
 const attachmentInputSchema = z.object({
@@ -72,6 +74,14 @@ export const appRouter = router({
     flashTtft: protectedProcedure.query(async ({ ctx }) => {
       if (!ENV.ownerOpenId || ctx.user.openId !== ENV.ownerOpenId) throw new TRPCError({ code: "FORBIDDEN", message: "Панель производительности доступна только владельцу." });
       return getFlashTtftStats();
+    }),
+    flashTtftTrend: protectedProcedure.input(z.object({ days: z.union([z.literal(7), z.literal(30)]) })).query(async ({ ctx, input }) => {
+      if (!ENV.ownerOpenId || ctx.user.openId !== ENV.ownerOpenId) throw new TRPCError({ code: "FORBIDDEN", message: "Панель производительности доступна только владельцу." });
+      return getFlashTtftTrend(input.days);
+    }),
+    searchOutages: protectedProcedure.query(async ({ ctx }) => {
+      if (!ENV.ownerOpenId || ctx.user.openId !== ENV.ownerOpenId) throw new TRPCError({ code: "FORBIDDEN", message: "Журнал поиска доступен только владельцу." });
+      return getSearchOutageSummary();
     }),
   }),
   settings: router({

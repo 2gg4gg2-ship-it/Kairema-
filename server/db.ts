@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, like, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
-import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryFacts, memoryProfiles, messages, providerDailyUsage, providerHealth, roleRuntimeStatus, userSettings, users, webSearchStatus } from "../drizzle/schema";
+import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryFacts, memoryProfiles, messages, providerDailyUsage, providerHealth, roleRuntimeStatus, searchOutageLogs, userSettings, users, webSearchStatus } from "../drizzle/schema";
 import { providerHealthHistory } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -257,7 +257,7 @@ export async function recordFlashTtftMetric(durationMs: number): Promise<void> {
   if (!db) return;
   const safeDuration = Math.max(0, Math.min(Math.round(durationMs), 120_000));
   await db.insert(flashTtftMetrics).values({ durationMs: safeDuration });
-  const retention = new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000);
+  const retention = new Date(Date.now() - 90 * 24 * 60 * 60 * 1_000);
   await db.delete(flashTtftMetrics).where(sql`${flashTtftMetrics.createdAt} < ${retention}`);
 }
 
@@ -283,6 +283,70 @@ export async function getFlashTtftStats(): Promise<FlashTtftStats> {
   return {
     last24h: aggregate(rows.filter((row) => row.createdAt.getTime() >= last24hCutoff).map((row) => row.durationMs)),
     last7d: aggregate(rows.map((row) => row.durationMs)),
+  };
+}
+
+export type FlashTtftTrendPoint = { date: string; samples: number; p50Ms: number | null; p95Ms: number | null };
+
+/** Owner-safe 7/30-day trend: anonymous timing values are reduced into daily quantiles only. */
+export async function getFlashTtftTrend(days: 7 | 30): Promise<FlashTtftTrendPoint[]> {
+  const db = await getDb();
+  const dayMs = 24 * 60 * 60 * 1_000;
+  const start = new Date(Date.now() - (days - 1) * dayMs);
+  start.setUTCHours(0, 0, 0, 0);
+  const aggregate = (durations: number[]): Omit<FlashTtftTrendPoint, "date"> => {
+    if (!durations.length) return { samples: 0, p50Ms: null, p95Ms: null };
+    const sorted = [...durations].sort((left, right) => left - right);
+    const quantile = (percentile: number) => sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * percentile) - 1)]!;
+    return { samples: sorted.length, p50Ms: quantile(0.5), p95Ms: quantile(0.95) };
+  };
+  const buckets = new Map<string, number[]>();
+  for (let offset = 0; offset < days; offset += 1) {
+    buckets.set(new Date(start.getTime() + offset * dayMs).toISOString().slice(0, 10), []);
+  }
+  if (db) {
+    const rows = await db.select({ durationMs: flashTtftMetrics.durationMs, createdAt: flashTtftMetrics.createdAt }).from(flashTtftMetrics)
+      .where(gt(flashTtftMetrics.createdAt, start)).orderBy(asc(flashTtftMetrics.createdAt)).limit(10_000);
+    for (const row of rows) buckets.get(row.createdAt.toISOString().slice(0, 10))?.push(row.durationMs);
+  }
+  return Array.from(buckets.entries()).map(([date, durations]) => ({ date, ...aggregate(durations) }));
+}
+
+export type SearchOutageInput = {
+  layer: "google" | "tavily" | "openrouter";
+  errorClass: "rate_limited" | "auth" | "not_found" | "http_error" | "network_error" | "no_sources" | "not_configured";
+  latencyMs: number;
+  fellBack: boolean;
+};
+
+/** Retains only bounded operational metadata for 30 days; prompts, URLs, sources, users and models are never stored. */
+export async function recordSearchOutage(input: SearchOutageInput): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(searchOutageLogs).values({
+    layer: input.layer,
+    errorClass: input.errorClass,
+    latencyMs: Math.max(0, Math.min(Math.round(input.latencyMs), 30_000)),
+    fellBack: input.fellBack ? 1 : 0,
+  });
+  const retention = new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000);
+  await db.delete(searchOutageLogs).where(sql`${searchOutageLogs.createdAt} < ${retention}`);
+}
+
+export type SearchOutageSummary = { last24h: number; last7d: number; recent: Array<{ layer: "google" | "tavily" | "openrouter"; errorClass: string; latencyMs: number; fellBack: boolean; createdAt: string }> };
+
+/** Narrow owner-only audit DTO; it deliberately excludes URLs, query text, sources, user data, providers and models. */
+export async function getSearchOutageSummary(): Promise<SearchOutageSummary> {
+  const db = await getDb();
+  if (!db) return { last24h: 0, last7d: 0, recent: [] };
+  const now = Date.now();
+  const since = new Date(now - 7 * 24 * 60 * 60 * 1_000);
+  const rows = await db.select().from(searchOutageLogs).where(gt(searchOutageLogs.createdAt, since)).orderBy(desc(searchOutageLogs.createdAt)).limit(80);
+  const last24hCutoff = now - 24 * 60 * 60 * 1_000;
+  return {
+    last24h: rows.filter((row) => row.createdAt.getTime() >= last24hCutoff).length,
+    last7d: rows.length,
+    recent: rows.slice(0, 20).map((row) => ({ layer: row.layer, errorClass: row.errorClass, latencyMs: row.latencyMs, fellBack: Boolean(row.fellBack), createdAt: row.createdAt.toISOString() })),
   };
 }
 

@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const { recordSearchOutage } = vi.hoisted(() => ({ recordSearchOutage: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("./db", async (importOriginal) => ({ ...(await importOriginal<typeof import("./db")>()), recordSearchOutage }));
+
 import { buildGlobalDiscoveryQuery, getWebSearchStatus, probeWebSearchStatus, searchWeb, WebSearchUnavailableError } from "./web-search";
 
 const originalKey = process.env.GEMINI_API_KEY;
@@ -10,6 +14,7 @@ afterEach(() => {
   process.env.OPENROUTER_API_KEY = originalOpenRouterKey;
   process.env.TAVILY_API_KEY = originalTavilyKey;
   vi.unstubAllGlobals();
+  recordSearchOutage.mockClear();
 });
 
 describe("Google Search grounding", () => {
@@ -70,6 +75,16 @@ describe("Google Search grounding", () => {
       cascadeUsed: "tavily",
     });
     await expect(getWebSearchStatus()).resolves.toMatchObject({ available: true, googleHttp: 503, reason: "Поиск доступен через резервный сервис." });
+    await vi.waitFor(() => expect(recordSearchOutage).toHaveBeenCalledWith(expect.objectContaining({
+      layer: "google",
+      errorClass: "http_error",
+      fellBack: true,
+      latencyMs: expect.any(Number),
+    })));
+    const [outage] = recordSearchOutage.mock.calls[0] ?? [];
+    expect(outage).not.toHaveProperty("url");
+    expect(outage).not.toHaveProperty("query");
+    expect(outage).not.toHaveProperty("model");
   });
 
   it("uses OpenRouter online once after Google fails and Tavily cannot return sources", async () => {

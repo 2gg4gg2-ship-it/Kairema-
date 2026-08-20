@@ -81,6 +81,16 @@ export const flashTtftMetrics = mysqlTable("flash_ttft_metrics", {
 	createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => [index("flash_ttft_metrics_created_idx").on(table.createdAt)]);
 
+/** Metadata-only record of a controlled web-search layer failover. No query, URL, source, user or model is persisted. */
+export const searchOutageLogs = mysqlTable("search_outage_logs", {
+	id: int("id").autoincrement().primaryKey(),
+	layer: mysqlEnum("layer", ["google", "tavily", "openrouter"]).notNull(),
+	errorClass: varchar("errorClass", { length: 32 }).notNull(),
+	latencyMs: int("latencyMs").notNull(),
+	fellBack: int("fellBack").notNull().default(0),
+	createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("search_outage_logs_created_idx").on(table.createdAt)]);
+
 export const roleRuntimeStatus = mysqlTable("role_runtime_status", {
 	roleId: mysqlEnum("roleId", ["fast", "smart", "context", "flagship"]).primaryKey(),
 	state: mysqlEnum("state", ["ready", "backup", "unavailable"]).notNull(),
@@ -173,6 +183,8 @@ export const userSettings = mysqlTable("user_settings", {
   webSearch: int("webSearch").notNull().default(0),
   toolAccess: int("toolAccess").notNull().default(1),
   healthRefreshSeconds: int("healthRefreshSeconds").notNull().default(30),
+  exportSortBy: mysqlEnum("exportSortBy", ["createdAt", "byteSize"]).notNull().default("createdAt"),
+  exportSortDirection: mysqlEnum("exportSortDirection", ["asc", "desc"]).notNull().default("desc"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -220,6 +232,7 @@ export type ChatExport = typeof chatExports.$inferSelect;
 export type ProviderHealthRecord = typeof providerHealth.$inferSelect;
 export type ProviderDailyUsageRecord = typeof providerDailyUsage.$inferSelect;
 export type FlashTtftMetricRecord = typeof flashTtftMetrics.$inferSelect;
+export type SearchOutageLogRecord = typeof searchOutageLogs.$inferSelect;
 export type WebSearchStatusRecord = typeof webSearchStatus.$inferSelect;
 export type KnowledgeSource = typeof knowledgeSources.$inferSelect;
 export type KnowledgeDocument = typeof knowledgeDocuments.$inferSelect;

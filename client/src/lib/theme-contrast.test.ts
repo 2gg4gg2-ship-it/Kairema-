@@ -33,4 +33,15 @@ describe("Kairema theme contrast", () => {
     expect(contrast("#121212", "#ffffff")).toBeGreaterThanOrEqual(4.5);
     expect(contrast("#f4f4f1", "#131313")).toBeGreaterThanOrEqual(4.5);
   });
+
+  it("uses dedicated readable bubble tokens in both themes", () => {
+    expect(css).toContain("--k-bubble-user-bg");
+    expect(css).toContain("--k-bubble-user-text");
+    expect(css).toContain("--k-bubble-ai-bg");
+    expect(css).toContain("--k-bubble-ai-text");
+    expect(contrast("#1d263a", "#f8fafc")).toBeGreaterThanOrEqual(4.5);
+    expect(contrast("#eef4ff", "#10213a")).toBeGreaterThanOrEqual(4.5);
+    expect(contrast("#151922", "#f3f4f6")).toBeGreaterThanOrEqual(4.5);
+    expect(contrast("#f7f8fa", "#18202b")).toBeGreaterThanOrEqual(4.5);
+  });
 });

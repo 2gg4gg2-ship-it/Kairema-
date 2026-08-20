@@ -249,3 +249,12 @@
 - [x] v6-F/F: добавлены search-unavailable badge, сессионное предупреждение provider-health, поиск и фильтры формата/даты экспортов, а также owner-safe p50/p95 Flash TTFT 24ч/7д по серверным метрикам.
 - [x] v6-F/G: контраст текста пользовательского пузыря усилен в обеих темах; автоматические проверки и browser screenshots подтверждают интерфейс без наложений, ровно четыре видимых роли и сохранение инвариантов v6-E.
 - [x] v6-F/H: добавлены целевые и полные регрессии; `pnpm test`, `pnpm check`, production build, bundle audit и desktop/mobile browser-приёмка завершены, отчёт обновлён, TODO закрыт; checkpoint сохраняется следующим действием.
+
+## v6-G — тема пузырей, экспортная сортировка и owner-наблюдаемость
+- [x] v6-G/A: все активные цвета пузырей AI и пользователя заменены на единые CSS-токены обеих тем; устранён риск нечитаемого пользовательского сообщения в dark, выполнен аудит chat/sidebar на hardcoded text/background colors.
+- [x] v6-G/B: добавлена автоматическая проверка computed contrast ≥4.5:1 для текста user/assistant bubbles в светлой и тёмной темах; desktop/mobile screenshots подтвердили доступную компоновку.
+- [x] v6-G/C: добавлена user-scoped persistent sorting истории экспортов по дате и размеру в обоих направлениях с сочетанием существующих поиска/фильтров и проверяемым изменением порядка строк.
+- [x] v6-G/D: реализован owner-only безопасный Flash TTFT daily DTO за 7/30 дней с date/p50/p95/count, 90-дневным retention агрегатов, линейным графиком и таблицей без user ID, IP, текста, provider или model ID.
+- [x] v6-G/E: создан 30-дневный search_outage_log с metadata-only полями слоя, error class, latency и признаком перехода; записи появляются при controlled failover, owner получает ленту/сводку 24ч/7д, non-owner получает 403, а тексты/URL/источники/секреты не сохраняются.
+- [x] v6-G/F: выполнена только read-only проверка scheduler state без создания дубликатов; текущая задача вернула пустой статус, а существующие ранее Heartbeat не изменялись и не имитировались.
+- [x] v6-G/G: добавлены server/client/integration-регрессии темы, сортировки, TTFT, owner isolation/outage log; `pnpm test`, `pnpm check`, production build, bundle audit и desktop/mobile browser-приёмка завершены, отчёт обновлён; checkpoint v6-G сохраняется следующим действием без изменения четырёх ролей, цепей или памяти.

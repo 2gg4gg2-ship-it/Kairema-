@@ -1,5 +1,5 @@
 import type { WebSource } from "./providers";
-import { getWebSearchStatus as getSavedWebSearchStatus, upsertWebSearchStatus } from "./db";
+import { getWebSearchStatus as getSavedWebSearchStatus, recordSearchOutage, type SearchOutageInput, upsertWebSearchStatus } from "./db";
 
 export type WebSearchStatus = {
   available: boolean;
@@ -29,7 +29,7 @@ export class WebSearchUnavailableError extends Error {
   constructor(message: string) { super(message); this.name = "WebSearchUnavailableError"; }
 }
 
-type SearchAttempt = { result: SearchResult | null; http: number | null };
+type SearchAttempt = { result: SearchResult | null; http: number | null; latencyMs: number };
 
 function statusFromHttp(http: number, payload: unknown) {
   const body = JSON.stringify(payload ?? "").toLowerCase();
@@ -110,33 +110,45 @@ function safeCascadeTelemetry(http: { google: number | null; tavily: number | nu
   console.info("[Kairema search]", JSON.stringify({ event: "search.cascade", googleHttp: http.google, tavilyHttp: http.tavily, openrouterHttp: http.openrouter, selected }));
 }
 
+function outageClass(http: number | null): SearchOutageInput["errorClass"] {
+  if (http === 429) return "rate_limited";
+  if (http === 401 || http === 403) return "auth";
+  if (http === 404) return "not_found";
+  if (http === null) return "network_error";
+  if (http >= 400) return "http_error";
+  return "no_sources";
+}
+
 async function searchGoogle(query: string, key: string, signal: AbortSignal): Promise<SearchAttempt> {
+  const startedAt = Date.now();
   try {
     const response = await fetch(GOOGLE_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key }, body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: query }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0.2, maxOutputTokens: 1_200 } }), signal });
     const payload = await response.json().catch(() => null);
     const summary = googleAnswer(payload); const sources = googleSources(payload);
-    return { http: response.status, result: response.ok && summary && sources.length ? { summary, sources, cascadeUsed: "google" } : null };
-  } catch { return { http: null, result: null }; }
+    return { http: response.status, latencyMs: Date.now() - startedAt, result: response.ok && summary && sources.length ? { summary, sources, cascadeUsed: "google" } : null };
+  } catch { return { http: null, latencyMs: Date.now() - startedAt, result: null }; }
 }
 
 async function searchTavily(query: string, signal: AbortSignal): Promise<SearchAttempt> {
   const key = process.env.TAVILY_API_KEY?.trim();
-  if (!key) return { http: null, result: null };
+  if (!key) return { http: null, latencyMs: 0, result: null };
+  const startedAt = Date.now();
   try {
     const response = await fetch(TAVILY_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ query: query.slice(0, QUERY_LIMIT), search_depth: "basic", max_results: SOURCE_LIMIT, include_answer: false, include_raw_content: false }), signal });
     const parsed = tavilyResult(await response.json().catch(() => null));
-    return { http: response.status, result: response.ok && parsed ? { ...parsed, cascadeUsed: "tavily" } : null };
-  } catch { return { http: null, result: null }; }
+    return { http: response.status, latencyMs: Date.now() - startedAt, result: response.ok && parsed ? { ...parsed, cascadeUsed: "tavily" } : null };
+  } catch { return { http: null, latencyMs: Date.now() - startedAt, result: null }; }
 }
 
 async function searchOpenRouterOnline(query: string, signal: AbortSignal): Promise<SearchAttempt> {
   const key = process.env.OPENROUTER_API_KEY?.trim();
-  if (!key) return { http: null, result: null };
+  if (!key) return { http: null, latencyMs: 0, result: null };
+  const startedAt = Date.now();
   try {
     const response = await fetch(OPENROUTER_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ model: "openrouter/free:online", messages: [{ role: "user", content: query.slice(0, QUERY_LIMIT) }], max_tokens: 1_200 }), signal });
     const payload = await response.json().catch(() => null); const summary = openRouterAnswer(payload); const sources = openRouterSources(payload);
-    return { http: response.status, result: response.ok && summary && sources.length ? { summary, sources, cascadeUsed: "openrouter" } : null };
-  } catch { return { http: null, result: null }; }
+    return { http: response.status, latencyMs: Date.now() - startedAt, result: response.ok && summary && sources.length ? { summary, sources, cascadeUsed: "openrouter" } : null };
+  } catch { return { http: null, latencyMs: Date.now() - startedAt, result: null }; }
 }
 
 async function probeOpenRouterOnline(): Promise<number | null> {
@@ -174,6 +186,7 @@ export async function searchWeb(query: string, options: SearchWebOptions = {}): 
       await saveStatus({ available: true, reason: "Поиск доступен.", checkedAt, googleHttp: http.google, openrouterHttp: previous.openrouterHttp });
       return google.result;
     }
+    void recordSearchOutage({ layer: "google", errorClass: outageClass(google.http), latencyMs: google.latencyMs, fellBack: !signal.aborted });
   }
   if (!signal.aborted) {
     const tavily = await searchTavily(globalQuery, signal); http.tavily = tavily.http;
@@ -182,6 +195,7 @@ export async function searchWeb(query: string, options: SearchWebOptions = {}): 
       await saveStatus({ available: true, reason: "Поиск доступен через резервный сервис.", checkedAt, googleHttp: http.google, openrouterHttp: previous.openrouterHttp });
       return tavily.result;
     }
+    void recordSearchOutage({ layer: "tavily", errorClass: outageClass(tavily.http), latencyMs: tavily.latencyMs, fellBack: !signal.aborted });
   }
   if (!signal.aborted) {
     const online = await searchOpenRouterOnline(globalQuery, signal); http.openrouter = online.http;
@@ -190,6 +204,7 @@ export async function searchWeb(query: string, options: SearchWebOptions = {}): 
       await saveStatus({ available: true, reason: "Поиск доступен через резервный сервис.", checkedAt, googleHttp: http.google, openrouterHttp: http.openrouter });
       return online.result;
     }
+    void recordSearchOutage({ layer: "openrouter", errorClass: outageClass(online.http), latencyMs: online.latencyMs, fellBack: false });
   }
   safeCascadeTelemetry(http, null);
   const reason = signal.aborted && options.timeoutMs
