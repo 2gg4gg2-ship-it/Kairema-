@@ -373,6 +373,10 @@ RAG реализован как самостоятельный server-side сл�
 
 > **Итог v6-B v3:** Kairema получила безопасную публичную историю доступности 24ч/7д, компактный health-виджет, сортируемые GFM-таблицы и user-scoped защиту streaming-маршрута. Ограничение и аудит не содержат текста чата; четыре публичные роли, скрытые server-only резервы, лимит четырёх upstream-попыток и отсутствие ключей в клиентском bundle сохранены.
 
+### Документированные внешние ограничения
+
+Физический S3 DELETE не имитируется: текущий platform storage adapter предоставляет только безопасную загрузку и выдачу ссылок. Ежедневный Heartbeat будет создан только после публикации checkpoint, поскольку dev sandbox не является cron-target. ZenMux не добавлен в active chains: свежая проверка не достигла порога трёх HTTP 200. Полная карта решений и условий пересмотра хранится в [`known-platform-limitations.md`](./known-platform-limitations.md).
+
 ## References
 
 [1]: https://ai.google.dev/gemini-api/docs/google-search "Google Gemini API — Grounding with Google Search"
