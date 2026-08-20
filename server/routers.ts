@@ -187,7 +187,6 @@ export const appRouter = router({
         content: z.string().trim().min(1).max(16_000),
         settings: settingsSchema,
         attachmentIds: z.array(z.string().uuid()).max(4).optional(),
-        webSearch: z.boolean().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         try {
@@ -196,7 +195,7 @@ export const appRouter = router({
           await appendChatMessage(ctx.user.id, input.sessionId, "user", input.content, input.modelId);
           if (session.title === "Новый разговор") await updateChatTitle(ctx.user.id, input.sessionId, input.content.slice(0, 72));
           const history = await listSessionMessages(ctx.user.id, input.sessionId);
-          const storedSettings = await buildChatContext(ctx.user.id, input.sessionId, { attachmentIds: input.attachmentIds, webSearch: input.webSearch, query: input.content, role: input.modelId });
+          const storedSettings = await buildChatContext(ctx.user.id, input.sessionId, { attachmentIds: input.attachmentIds, query: input.content, role: input.modelId });
           const result = await chatWithRole(input.modelId, history.map((message) => ({ role: message.role, content: message.content })), { ...storedSettings, ...input.settings });
           const sourceMetadata = result.sources?.length || result.ragSources?.length
             ? JSON.stringify({ ...(result.sources?.length ? { sources: result.sources } : {}), ...(result.ragSources?.length ? { ragSources: result.ragSources } : {}) })

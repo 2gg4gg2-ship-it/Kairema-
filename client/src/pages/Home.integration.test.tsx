@@ -195,7 +195,9 @@ describe("Home integration flows", () => {
     await user.keyboard("{Enter}");
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
-    expect(JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body))).toMatchObject({ sessionId: fixtures.sessionId, modelId: "fast", content: "Новый вопрос", attachmentIds: [], webSearch: false, settings: { style: "default", responseLength: "balanced", effort: "standard", thinking: false } });
+    const streamPayload = JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body));
+    expect(streamPayload).toMatchObject({ sessionId: fixtures.sessionId, modelId: "fast", content: "Новый вопрос", attachmentIds: [], settings: { style: "default", responseLength: "balanced", effort: "standard", thinking: false } });
+    expect(streamPayload).not.toHaveProperty("webSearch");
 
     await waitFor(() => expect(screen.getByText("Первый фрагмент")).toBeTruthy());
     expect(screen.queryByText("Первый фрагмент ответа")).toBeNull();
@@ -254,7 +256,7 @@ describe("Home integration flows", () => {
     fixtures.updateSettings.mockImplementation(() => new Promise(() => undefined));
     render(<Home />);
 
-    const thinking = screen.getByRole("button", { name: "Дополнительное рассуждение" });
+    const thinking = screen.getByRole("button", { name: /Дополнительное рассуждение/ });
     const indicator = thinking.querySelector(".kairema-switch");
     expect(indicator?.className).not.toContain("kairema-switch-on");
 
@@ -272,6 +274,13 @@ describe("Home integration flows", () => {
     expect(screen.getAllByText(/Kairema Flash/).length).toBeGreaterThanOrEqual(1);
     expect(await screen.findByText(/Готов · OpenRouter/)).toBeTruthy();
     expect(screen.queryByText(/Authorization|Bearer|chain|Llama Fast/i)).toBeNull();
+  });
+
+  it("keeps the role selector to one interactive trigger without an external chevron icon", async () => {
+    const { container } = render(<Home />);
+
+    await waitFor(() => expect(container.querySelectorAll(".kairema-role-menu-trigger")).toHaveLength(1));
+    expect(container.querySelectorAll(".kairema-select-wrap svg")).toHaveLength(0);
   });
 
   it("opens public provider and RAG audit panels without exposing server-only reserves or routing chains", async () => {

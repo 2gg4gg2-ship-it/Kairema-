@@ -9,7 +9,7 @@ vi.mock("./db", () => ({
   getProviderDailySuccess: vi.fn().mockResolvedValue(0),
 }));
 
-import { ATTEMPT_TIMEOUT_MS, DIAGNOSTIC_CANDIDATES, InvalidModelSelectionError, MAX_ATTEMPTS, MODEL_CONFIG, MODEL_IDS, MODEL_ROLES, __resetProviderHealthForTests, buildOpenRouterMessages, chatWithRole, chatWithRoleStream, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, getProviderHealthForTesting, getZenmuxHeartbeatTrackingForTests, isAllowedModelId, modelById, openRouterStreamDelta, publicChatError, refreshProviderHealth, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView, toRoleRuntimeView } from "./providers";
+import { ATTEMPT_TIMEOUT_MS, DIAGNOSTIC_CANDIDATES, FLASH_VISIBLE_TTFT_DEADLINE_MS, InvalidModelSelectionError, MAX_ATTEMPTS, MODEL_CONFIG, MODEL_IDS, MODEL_ROLES, __resetProviderHealthForTests, buildOpenRouterMessages, chatWithRole, chatWithRoleStream, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, getProviderHealthForTesting, getZenmuxHeartbeatTrackingForTests, isAllowedModelId, modelById, openRouterStreamDelta, publicChatError, refreshProviderHealth, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView, toRoleRuntimeView } from "./providers";
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -48,6 +48,7 @@ describe("Kairema v4 role registry", () => {
 
   it("uses a 25-second budget for every provider attempt", () => {
     expect(ATTEMPT_TIMEOUT_MS).toBe(25_000);
+    expect(FLASH_VISIBLE_TTFT_DEADLINE_MS).toBe(1_500);
   });
 
   it("maps role health into the fixed Russian badge set", () => {
@@ -191,6 +192,12 @@ describe("Kairema v4 role registry", () => {
     }
   });
 
+  it("uses a compact first-response instruction for Flash without overriding an explicit detailed answer", () => {
+    const flash = MODEL_CONFIG.find((role) => role.key === "fast")!;
+    expect(JSON.stringify(buildOpenRouterMessages(flash, [{ role: "user", content: "Тест" }], {}))).toContain("Режим Flash");
+    expect(JSON.stringify(buildOpenRouterMessages(flash, [{ role: "user", content: "Тест" }], { responseLength: "detailed" }))).not.toContain("Режим Flash");
+  });
+
   it("never serializes provider chains or auth transport in public role views", () => {
     const view = toPublicModelView(MODEL_CONFIG[0]!, { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" });
     expect(Object.keys(view).sort()).toEqual(["key", "label", "limits", "modelId", "role", "runtime", "status"]);
@@ -236,5 +243,56 @@ describe("Kairema v4 role registry", () => {
 
     await expect(chatWithRoleStream("fast", [{ role: "user", content: "Тест" }], undefined, vi.fn())).rejects.toThrow("upstream interrupted");
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("records Flash TTFT once at the first visible delta without logging prompt or response text", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Безопасный фрагмент"}}]}\n\n'));
+        controller.close();
+      },
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200 }));
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    await chatWithRoleStream("fast", [{ role: "user", content: "Секретный пользовательский текст" }], undefined, vi.fn());
+
+    const metric = info.mock.calls.map((args) => args.join(" ")).find((entry) => entry.includes('"event":"flash.ttft"'));
+    expect(metric).toContain('"provider":"openrouter"');
+    expect(metric).toMatch(/"durationMs":\d+/);
+    expect(metric).not.toContain("Секретный пользовательский текст");
+    expect(metric).not.toContain("Безопасный фрагмент");
+    info.mockRestore();
+  });
+
+  it("moves Flash to a reserve when its primary has no visible delta within the dedicated deadline", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+    vi.stubEnv("ORCAROUTER_API_KEY", "test-orcarouter-key");
+    const encoder = new TextEncoder();
+    const reserveBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Резервный ответ"}}]}\n\n'));
+        controller.close();
+      },
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockImplementationOnce((_url, init) => new Promise((_, reject) => {
+        const requestSignal = init?.signal as AbortSignal;
+        requestSignal.addEventListener("abort", () => reject(requestSignal.reason), { once: true });
+      }))
+      .mockResolvedValueOnce(new Response(reserveBody, { status: 200 }));
+
+    const pending = chatWithRoleStream("fast", [{ role: "user", content: "Тест дедлайна" }], undefined, vi.fn());
+    await vi.advanceTimersByTimeAsync(FLASH_VISIBLE_TTFT_DEADLINE_MS);
+    const result = await pending;
+    const health = await getProviderHealthForTesting();
+
+    expect(result).toMatchObject({ provider: "orcarouter", fallbackUsed: true, content: "Резервный ответ" });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(health.find((item) => item.provider === "openrouter")).toMatchObject({ state: "cooldown", category: "TIMEOUT" });
+    vi.useRealTimers();
   });
 });

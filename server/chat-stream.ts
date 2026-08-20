@@ -14,6 +14,9 @@ type ChatStreamAuditRecord = {
   userId: number;
   roleId?: RoleId;
   provider?: Provider;
+  searchAttached?: boolean;
+  sourcesCount?: number;
+  sourcesFreshness?: "live_verified";
   timestamp: string;
   retryAfterSeconds?: number;
 };
@@ -67,7 +70,6 @@ const streamInputSchema = z.object({
     thinking: z.boolean().optional(),
   }).optional(),
   attachmentIds: z.array(z.string().uuid()).max(4).optional(),
-  webSearch: z.boolean().optional(),
 });
 
 export function writeEvent(res: Response, event: string, payload: unknown) {
@@ -78,7 +80,7 @@ function historyError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
   if (/чат|хранилище/i.test(message)) return "Этап «история чата»: данные временно недоступны. Повторите попытку позже.";
   if (/вложен|файл|документ/i.test(message)) return "Этап «вложения»: не удалось подготовить выбранные файлы. Уберите вложение и повторите попытку.";
-  if (/поиск|google|grounding/i.test(message)) return "Этап «web-поиск»: поиск недоступен; обычный чат будет отправлен без источников.";
+  if (/поиск|google|grounding|источник/i.test(message)) return "Этап «web-поиск»: не получены проверяемые свежие источники. Ответ без источников не будет сгенерирован; повторите попытку позже.";
   return "Этап «подготовка сообщения»: не удалось собрать приватный контекст. Повторите попытку позже.";
 }
 
@@ -137,7 +139,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
     try {
       const session = await dependencies.getOwnedChatSession(user.id, input.sessionId);
       if (!session) throw new Error("Чат не найден или недоступен.");
-      const storedSettings = await dependencies.buildChatContext(user.id, input.sessionId, { attachmentIds: input.attachmentIds, webSearch: input.webSearch, query: input.content, role: input.modelId });
+      const storedSettings = await dependencies.buildChatContext(user.id, input.sessionId, { attachmentIds: input.attachmentIds, query: input.content, role: input.modelId });
       const effectiveSettings = { ...storedSettings, ...input.settings };
       let history;
       if (input.regenerateMessageId) {
@@ -188,11 +190,15 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
             : undefined;
           await dependencies.appendChatMessage(user.id, input.sessionId, "assistant", result.content, result.modelUsed, sourceMetadata);
           if (!input.regenerateMessageId) await dependencies.extractMemoryFacts(user.id, input.content).catch(() => undefined);
+          const sourcesCount = result.sources?.length ?? 0;
           void Promise.resolve(dependencies.auditChatStream({
             event: "chat_stream.completed",
             userId: user.id,
             roleId: input.modelId,
             provider: result.provider,
+            searchAttached: sourcesCount > 0,
+            sourcesCount,
+            ...(sourcesCount > 0 ? { sourcesFreshness: "live_verified" } : {}),
             timestamp: new Date().toISOString(),
           })).catch(() => undefined);
           writeEvent(res, "done", result);

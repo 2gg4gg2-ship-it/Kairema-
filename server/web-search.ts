@@ -10,6 +10,7 @@ export type WebSearchStatus = {
 };
 
 type SearchResult = { summary: string; sources: WebSource[] };
+export type SearchWebOptions = { timeoutMs?: number };
 
 const GOOGLE_SEARCH_MODEL = "gemini-3.6-flash";
 const GOOGLE_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GOOGLE_SEARCH_MODEL}:generateContent`;
@@ -140,7 +141,7 @@ async function probeOpenRouterOnline(): Promise<number | null> {
   } catch { return null; }
 }
 
-async function searchTavily(query: string): Promise<SearchResult | null> {
+async function searchTavily(query: string, signal?: AbortSignal): Promise<SearchResult | null> {
   const key = process.env.TAVILY_API_KEY?.trim();
   if (!key) return null;
   try {
@@ -148,14 +149,14 @@ async function searchTavily(query: string): Promise<SearchResult | null> {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({ query: query.slice(0, QUERY_LIMIT), search_depth: "basic", max_results: SOURCE_LIMIT, include_answer: false, include_raw_content: false }),
-      signal: AbortSignal.timeout(20_000),
+      signal: signal ?? AbortSignal.timeout(20_000),
     });
     if (!response.ok) return null;
     return tavilyResult(await response.json().catch(() => null));
   } catch { return null; }
 }
 
-async function searchOpenRouterOnline(query: string): Promise<SearchResult | null> {
+async function searchOpenRouterOnline(query: string, signal?: AbortSignal): Promise<SearchResult | null> {
   const key = process.env.OPENROUTER_API_KEY?.trim();
   if (!key) return null;
   try {
@@ -163,7 +164,7 @@ async function searchOpenRouterOnline(query: string): Promise<SearchResult | nul
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({ model: "openrouter/free:online", messages: [{ role: "user", content: query.slice(0, QUERY_LIMIT) }], max_tokens: 1_200 }),
-      signal: AbortSignal.timeout(25_000),
+      signal: signal ?? AbortSignal.timeout(25_000),
     });
     const payload = await response.json().catch(() => null);
     const summary = openRouterAnswer(payload);
@@ -172,13 +173,13 @@ async function searchOpenRouterOnline(query: string): Promise<SearchResult | nul
   } catch { return null; }
 }
 
-async function fallbackAfterGoogleQuota(query: string, checkedAt: string, googleHttp: number | null, openrouterHttp: number | null): Promise<SearchResult | null> {
-  const tavily = await searchTavily(query);
+async function fallbackAfterGoogleQuota(query: string, checkedAt: string, googleHttp: number | null, openrouterHttp: number | null, signal?: AbortSignal): Promise<SearchResult | null> {
+  const tavily = await searchTavily(query, signal);
   if (tavily) {
     await saveStatus({ available: true, reason: "Google недоступен по квоте; используется Tavily с проверяемыми источниками.", checkedAt, googleHttp, openrouterHttp });
     return tavily;
   }
-  const openrouter = await searchOpenRouterOnline(query);
+  const openrouter = await searchOpenRouterOnline(query, signal);
   if (openrouter) {
     await saveStatus({ available: true, reason: "Google недоступен по квоте; Tavily не вернул проверяемые источники, используется OpenRouter online.", checkedAt, googleHttp, openrouterHttp: 200 });
     return openrouter;
@@ -212,10 +213,12 @@ export async function probeWebSearchStatus(): Promise<WebSearchStatus> {
 }
 
 /** Raw user text stays server-side and is passed to search providers as data, never as a system instruction. */
-export async function searchWeb(query: string): Promise<SearchResult> {
+export async function searchWeb(query: string, options: SearchWebOptions = {}): Promise<SearchResult> {
   const key = process.env.GEMINI_API_KEY?.trim();
   const previous = await getWebSearchStatus();
   const checkedAt = new Date().toISOString();
+  const timeoutMs = Math.max(100, Math.min(options.timeoutMs ?? 25_000, 25_000));
+  const searchSignal = AbortSignal.timeout(timeoutMs);
   if (!key) {
     const status = await saveStatus({ available: false, reason: "Поиск недоступен: server-side ключ Google не настроен.", checkedAt, googleHttp: null, openrouterHttp: previous.openrouterHttp });
     throw new WebSearchUnavailableError(status.reason);
@@ -227,16 +230,19 @@ export async function searchWeb(query: string): Promise<SearchResult> {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
       body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: globalQuery }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0.2, maxOutputTokens: 1_200 } }),
-      signal: AbortSignal.timeout(25_000),
+      signal: searchSignal,
     });
   } catch {
-    const status = await saveStatus({ available: false, reason: "Поиск временно недоступен: не удалось связаться с Google.", checkedAt, googleHttp: null, openrouterHttp: previous.openrouterHttp });
+    const reason = options.timeoutMs && searchSignal.aborted
+      ? "Поиск временно недоступен: для Flash превышен бюджет свежих источников 1,5 с. Ответ без источников не будет сгенерирован."
+      : "Поиск временно недоступен: не удалось связаться с Google.";
+    const status = await saveStatus({ available: false, reason, checkedAt, googleHttp: null, openrouterHttp: previous.openrouterHttp });
     throw new WebSearchUnavailableError(status.reason);
   }
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
     if (response.status === 429) {
-      const fallback = await fallbackAfterGoogleQuota(globalQuery, checkedAt, response.status, previous.openrouterHttp);
+      const fallback = await fallbackAfterGoogleQuota(globalQuery, checkedAt, response.status, previous.openrouterHttp, searchSignal);
       if (fallback) return fallback;
       const status = await saveStatus({ available: false, reason: "Поиск временно недоступен: квота Google; Tavily и OpenRouter online не вернули проверяемые источники. RAG может использоваться отдельно, если релевантен.", checkedAt, googleHttp: response.status, openrouterHttp: previous.openrouterHttp });
       throw new WebSearchUnavailableError(status.reason);

@@ -9,10 +9,13 @@ vi.mock("./db", () => ({
   listRelevantMemoryFacts: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock("./web-search", () => ({
-  WebSearchUnavailableError: class WebSearchUnavailableError extends Error {},
-  searchWeb: vi.fn().mockRejectedValue(new (class WebSearchUnavailableError extends Error {})()),
-}));
+vi.mock("./web-search", () => {
+  class WebSearchUnavailableError extends Error {}
+  return {
+    WebSearchUnavailableError,
+    searchWeb: vi.fn().mockResolvedValue({ summary: "Свежие проверяемые данные.", sources: [{ title: "Официальный источник", url: "https://example.com", domain: "example.com" }] }),
+  };
+});
 
 vi.mock("./attachments", () => ({
   getAttachmentPromptText: vi.fn().mockReturnValue(""),
@@ -23,34 +26,51 @@ vi.mock("./knowledge", () => ({
   retrieveRagContext: vi.fn().mockResolvedValue({ context: "Проверяемый RAG-контекст.", sources: [{ title: "Официальный RSS", url: "https://openai.com/news/release", publishedAt: "2026-08-19T00:00:00.000Z", sourceId: "openai-news" }] }),
 }));
 
-import { buildChatContext, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
+import { buildChatContext, FLASH_WEB_RESEARCH_BUDGET_MS, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
 import { getMemoryProfile, listRelevantMemoryFacts } from "./db";
+import { WebSearchUnavailableError, searchWeb } from "./web-search";
+
+const input = { query: "Что нового?", attachmentIds: [] };
 
 afterEach(() => {
   vi.mocked(getMemoryProfile).mockResolvedValue({ enabled: 0, autoExtract: 0, profile: "", summary: "" });
   vi.mocked(listRelevantMemoryFacts).mockResolvedValue([]);
+  vi.mocked(searchWeb).mockResolvedValue({ summary: "Свежие проверяемые данные.", sources: [{ title: "Официальный источник", url: "https://example.com", domain: "example.com" }] });
 });
 
-describe("chat context web-search fallback", () => {
-  it("limits live search to the server-side policy for the four public roles", () => {
+describe("chat context mandatory web search", () => {
+  it("retains the server-side policy for exactly four public roles", () => {
     expect([...WEB_RESEARCH_ROLE_POLICY]).toEqual(["fast", "smart", "context", "flagship"]);
   });
 
-  it("keeps an ordinary text chat usable when optional web search is unavailable", async () => {
-    await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Обычный вопрос", attachmentIds: [], webSearch: true }))
-      .resolves.toMatchObject({ style: "default", responseLength: "balanced", quickReplies: true, effort: "standard", thinking: false });
+  it("always injects verified fresh web research for a public role", async () => {
+    await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, role: "fast" }))
+      .resolves.toMatchObject({ webResearch: "Свежие проверяемые данные.", webSources: [{ title: "Официальный источник", url: "https://example.com" }] });
+    expect(searchWeb).toHaveBeenCalledTimes(1);
+    expect(searchWeb).toHaveBeenCalledWith(expect.any(String), { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS });
   });
 
-  it("injects attributable RAG context even when web search is disabled", async () => {
-    await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Что нового?", attachmentIds: [], webSearch: false }))
-      .resolves.toMatchObject({ ragResearch: "Проверяемый RAG-контекст.", ragSources: [{ title: "Официальный RSS", url: "https://openai.com/news/release", publishedAt: "2026-08-19T00:00:00.000Z" }] });
+  it("does not constrain non-Flash roles to the Flash freshness budget", async () => {
+    await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, role: "smart" });
+    expect(searchWeb).toHaveBeenCalledWith(expect.any(String), undefined);
+  });
+
+  it("rejects instead of silently generating without fresh sources", async () => {
+    vi.mocked(searchWeb).mockRejectedValueOnce(new WebSearchUnavailableError("Поиск не вернул проверяемые свежие источники."));
+    await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, role: "smart" }))
+      .rejects.toThrow("Поиск не вернул проверяемые свежие источники.");
+  });
+
+  it("keeps attributable RAG as an additional context rather than a search substitute", async () => {
+    await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, role: "context" }))
+      .resolves.toMatchObject({ webResearch: "Свежие проверяемые данные.", ragResearch: "Проверяемый RAG-контекст.", ragSources: [{ title: "Официальный RSS", url: "https://openai.com/news/release", publishedAt: "2026-08-19T00:00:00.000Z" }] });
   });
 
   it("injects only a bounded personal-memory context when the owner enabled memory", async () => {
     vi.mocked(getMemoryProfile).mockResolvedValueOnce({ enabled: 1, autoExtract: 1, profile: "Профиль владельца", summary: "Краткая сводка" });
     vi.mocked(listRelevantMemoryFacts).mockResolvedValueOnce(Array.from({ length: 24 }, (_, index) => ({ fact: `Факт ${index + 1}: ${"x".repeat(120)}` })));
 
-    const context = await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Продолжи", webSearch: false });
+    const context = await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Продолжи", role: "flagship" });
 
     expect(context.memoryContext).toContain("Профиль владельца");
     expect(context.memoryContext).toContain("Факт 15");
@@ -62,7 +82,7 @@ describe("chat context web-search fallback", () => {
     vi.mocked(getMemoryProfile).mockResolvedValueOnce({ enabled: 0, autoExtract: 0, profile: "Не должно попасть в контекст", summary: "" });
     vi.mocked(listRelevantMemoryFacts).mockResolvedValueOnce([{ fact: "Не должен попасть в контекст" }]);
 
-    await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Новый чат", webSearch: false }))
+    await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Новый чат", role: "flagship" }))
       .resolves.not.toHaveProperty("memoryContext");
   });
 });

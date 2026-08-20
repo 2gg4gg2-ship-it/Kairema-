@@ -4,15 +4,16 @@ import type { ChatSettings } from "./providers";
 import { WebSearchUnavailableError, searchWeb } from "./web-search";
 import { retrieveRagContext, type RagRole } from "./knowledge";
 
-/** Public roles allowed to request live web data. The set is server-side so UI switches never expand policy. */
+/** All four public roles require a live, verifiable web-research pass on every accepted turn. */
 export const WEB_RESEARCH_ROLE_POLICY: ReadonlySet<RagRole> = new Set<RagRole>(["fast", "smart", "context", "flagship"]);
+export const FLASH_WEB_RESEARCH_BUDGET_MS = 1_500;
 
 function memoryContext(profile: { profile: string; summary: string }, facts: Array<{ fact: string }>) {
   const rows = [profile.profile.trim(), profile.summary.trim(), ...facts.slice(0, 20).map((fact) => `• ${fact.fact}`)].filter(Boolean);
   return rows.join("\n").slice(0, 2_000);
 }
 
-export async function buildChatContext(userId: number, sessionId: string, input: { attachmentIds?: string[]; webSearch?: boolean; query?: string; role?: RagRole }): Promise<ChatSettings> {
+export async function buildChatContext(userId: number, sessionId: string, input: { attachmentIds?: string[]; query?: string; role?: RagRole }): Promise<ChatSettings> {
   const [preferences, profile, facts] = await Promise.all([getUserSettings(userId), getMemoryProfile(userId), listRelevantMemoryFacts(userId, input.query ?? "", 20)]);
   const attachments = preferences.toolAccess && input.attachmentIds?.length ? await getOwnedChatAttachments(userId, sessionId, input.attachmentIds.slice(0, 4)) : [];
   const documentContext = getAttachmentPromptText(attachments);
@@ -30,15 +31,17 @@ export async function buildChatContext(userId: number, sessionId: string, input:
     ...(imageUrls.length ? { imageUrls } : {}),
   };
 
-  if (preferences.toolAccess && preferences.webSearch && input.webSearch && WEB_RESEARCH_ROLE_POLICY.has(input.role ?? "flagship")) {
-    try {
-      const search = await searchWeb("Собери только релевантные актуальные факты и источники для запроса пользователя:\n" + (input.query?.slice(0, 8_000) ?? ""));
-      context.webResearch = search.summary;
-      context.webSources = search.sources;
-    } catch (error) {
-      if (!(error instanceof WebSearchUnavailableError)) throw error;
-      // Search has already persisted a final honest status. The chat remains usable without invented sources.
+  if (WEB_RESEARCH_ROLE_POLICY.has(input.role ?? "flagship")) {
+    const role = input.role ?? "flagship";
+    const search = await searchWeb(
+      "Собери только релевантные актуальные факты и источники для запроса пользователя:\n" + (input.query?.slice(0, 8_000) ?? ""),
+      role === "fast" ? { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS } : undefined,
+    );
+    if (!search.sources.length) {
+      throw new WebSearchUnavailableError("Поиск не вернул проверяемые свежие источники.");
     }
+    context.webResearch = search.summary;
+    context.webSources = search.sources;
   }
   try {
     const rag = await retrieveRagContext(input.query ?? "", input.role ?? "flagship");
@@ -47,7 +50,7 @@ export async function buildChatContext(userId: number, sessionId: string, input:
       context.ragSources = rag.sources.map(({ title, url, publishedAt }) => ({ title, url, publishedAt }));
     }
   } catch {
-    // RAG is optional: a temporary knowledge-base fault never blocks a private chat.
+    // RAG remains optional: a temporary knowledge-base fault never blocks a fresh, sourced chat turn.
   }
   return context;
 }

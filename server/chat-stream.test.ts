@@ -28,7 +28,7 @@ describe("chat stream happy-path", () => {
       appendChatMessage: vi.fn(async (_userId, _sessionId, role, content) => { appended.push({ role, content }); }),
       updateChatTitle: vi.fn(), listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
       buildChatContext: vi.fn().mockResolvedValue(context), extractMemoryFacts: vi.fn().mockResolvedValue(undefined),
-      chatWithRoleStream: vi.fn(async (_modelId, _history, _settings, onDelta) => { onDelta("При"); onDelta("вет"); return { content: "Привет", modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Llama 3.1 8B Instant" }; }),
+      chatWithRoleStream: vi.fn(async (_modelId, _history, _settings, onDelta) => { onDelta("При"); onDelta("вет"); return { content: "Привет", modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Llama 3.1 8B Instant", sources: [{ title: "Официальный источник", url: "https://example.com/fresh", domain: "example.com" }] }; }),
       auditChatStream,
     });
 
@@ -39,8 +39,9 @@ describe("chat stream happy-path", () => {
     expect(writes.join("")).toContain('event: delta\ndata: {"content":"вет"}');
     expect(writes.join("")).toContain("event: done");
     expect(appended).toEqual([{ role: "user", content: "Привет" }, { role: "assistant", content: "Привет" }]);
-    expect(auditChatStream).toHaveBeenCalledWith(expect.objectContaining({ event: "chat_stream.completed", userId: 42, roleId: "fast", provider: "groq" }));
+    expect(auditChatStream).toHaveBeenCalledWith(expect.objectContaining({ event: "chat_stream.completed", userId: 42, roleId: "fast", provider: "groq", searchAttached: true, sourcesCount: 1, sourcesFreshness: "live_verified" }));
     expect(JSON.stringify(auditChatStream.mock.calls[0][0])).not.toContain("Привет");
+    expect(JSON.stringify(auditChatStream.mock.calls[0][0])).not.toContain("example.com");
     expect(streamResponse.end).toHaveBeenCalledOnce();
   });
 
@@ -70,6 +71,28 @@ describe("chat stream happy-path", () => {
     expect(streamResponse.status).toHaveBeenCalledWith(400);
     expect(streamResponse.json).toHaveBeenCalledWith({ error: "Проверьте текст сообщения и выбранную модель." });
     expect(getOwnedChatSession).not.toHaveBeenCalled();
+    expect(chatWithRoleStream).not.toHaveBeenCalled();
+  });
+
+  it("rejects before persistence and generation when the mandatory freshness guardrail has no sources", async () => {
+    const streamResponse = response();
+    const appendChatMessage = vi.fn();
+    const chatWithRoleStream = vi.fn();
+    const buildChatContext = vi.fn().mockRejectedValue(new Error("Поиск не вернул проверяемые свежие источники."));
+    const handler = createChatStreamHandler({
+      authenticateRequest: vi.fn().mockResolvedValue({ id: 42 }),
+      getOwnedChatSession: vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Новый разговор" }),
+      appendChatMessage,
+      buildChatContext,
+      chatWithRoleStream,
+    });
+
+    await handler({ body: { ...validRequestBody, webSearch: false } } as Request, streamResponse, vi.fn());
+
+    expect(buildChatContext).toHaveBeenCalledWith(42, validRequestBody.sessionId, { attachmentIds: undefined, query: "Привет", role: "fast" });
+    expect(streamResponse.status).toHaveBeenCalledWith(400);
+    expect(streamResponse.json).toHaveBeenCalledWith({ error: "Этап «web-поиск»: не получены проверяемые свежие источники. Ответ без источников не будет сгенерирован; повторите попытку позже." });
+    expect(appendChatMessage).not.toHaveBeenCalled();
     expect(chatWithRoleStream).not.toHaveBeenCalled();
   });
 

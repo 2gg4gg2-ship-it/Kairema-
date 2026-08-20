@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { InlineMarkdown } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
-import { ChevronDown, Copy, Download, ExternalLink, FileImage, FileText, Globe2, Loader2, Paperclip, RotateCcw, Send, Square, Trash2, User, Sparkles, X } from "lucide-react";
+import { ChevronDown, Copy, Download, ExternalLink, FileImage, FileText, Loader2, Paperclip, RotateCcw, Send, Square, Trash2, User, Sparkles, X } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 
 export type Source = { title: string; url: string; domain?: string; kind?: "web" | "rag"; publishedAt?: string | null; snippet?: string | null };
@@ -23,7 +23,7 @@ export type Message = {
 type Language = "ru" | "en";
 type AIChatBoxProps = {
   messages: Message[];
-  onSendMessage: (content: string, options?: { attachmentIds?: string[]; webSearch?: boolean }) => void;
+  onSendMessage: (content: string, options?: { attachmentIds?: string[] }) => void;
   onUploadFiles?: (files: File[]) => Promise<ChatAttachment[]>;
   isLoading?: boolean;
   placeholder?: string;
@@ -41,10 +41,6 @@ type AIChatBoxProps = {
   onRegenerate?: (message: Message) => void;
   onCancelStream?: () => void;
   language?: Language;
-  webSearchAvailable?: boolean;
-  webSearchReason?: string;
-  initialWebSearch?: boolean;
-  onWebSearchChange?: (enabled: boolean) => void;
   onSuggestion?: (suggestion: string) => void;
 };
 
@@ -56,13 +52,12 @@ const copy = {
 export function AIChatBox({
   messages, onSendMessage, onUploadFiles, isLoading = false, placeholder, className, height, emptyStateMessage,
   suggestedPrompts = [], onExportMarkdown, onExportPdf, canExport = false, exportBusy = null, exportError = "",
-  onCopyAssistant, onCopyUser, onRegenerate, onCancelStream, language = "ru", webSearchAvailable = false, webSearchReason, initialWebSearch = false, onWebSearchChange, onSuggestion,
+  onCopyAssistant, onCopyUser, onRegenerate, onCancelStream, language = "ru", onSuggestion,
 }: AIChatBoxProps) {
   const t = copy[language];
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [useWebSearch, setUseWebSearch] = useState(false);
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
   const [continuationSuggestions, setContinuationSuggestions] = useState<string[]>([]);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -70,17 +65,15 @@ export function AIChatBox({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const displayMessages = messages.filter((message) => message.role !== "system");
   const effectivePlaceholder = placeholder ?? (language === "ru" ? "Напишите сообщение…" : "Write a message…");
-  const freshnessIntent = /(сегодня|сейчас|последн(?:ие|яя|ий)|новост|актуальн|курс|погода|цена|вчера|завтра|today|latest|news|current|weather|price)/i.test(input);
 
   useEffect(() => { viewportRef.current?.scrollTo?.({ top: viewportRef.current.scrollHeight, behavior: "smooth" }); }, [displayMessages.length, isLoading]);
-  useEffect(() => { setUseWebSearch(Boolean(initialWebSearch) && webSearchAvailable); }, [initialWebSearch, webSearchAvailable]);
   useEffect(() => { const last = displayMessages.at(-1); if (last?.role === "assistant" && last.suggestions?.length) setContinuationSuggestions(last.suggestions.slice(0, 3)); else if (last?.role === "user") setContinuationSuggestions([]); }, [messages]);
 
   const submit = (event?: React.FormEvent) => {
     event?.preventDefault();
     const value = input.trim();
     if (!value || isLoading || isUploading) return;
-    onSendMessage(value, { attachmentIds: attachments.map((attachment) => attachment.id), webSearch: useWebSearch });
+    onSendMessage(value, { attachmentIds: attachments.map((attachment) => attachment.id) });
     setInput("");
     setAttachments([]);
     textareaRef.current?.focus();
@@ -112,9 +105,7 @@ export function AIChatBox({
       <form onSubmit={submit} className="kairema-composer">
         <div className="kairema-composer-main">
           {attachments.length > 0 && <div className="kairema-attachment-chips">{attachments.map((attachment) => <span className="kairema-attachment-chip" key={attachment.id}>{attachment.kind === "image" ? <FileImage className="size-3.5" /> : <FileText className="size-3.5" />}<span>{attachment.fileName}</span><button type="button" title={t.remove} aria-label={t.remove} onClick={() => setAttachments((items) => items.filter((item) => item.id !== attachment.id))}><X className="size-3" /></button></span>)}</div>}
-          <div className="kairema-composer-row"><input ref={fileInputRef} className="sr-only" type="file" multiple accept="image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown,.md" onChange={(event) => void addFiles(event.target.files)} /><button type="button" onClick={() => fileInputRef.current?.click()} disabled={!onUploadFiles || isLoading || isUploading} className="kairema-composer-tool" title={t.attach} aria-label={t.attach}>{isUploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}</button><Textarea ref={textareaRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={effectivePlaceholder} className="kairema-textarea" rows={1} /><button type="button" onClick={() => { const next = !useWebSearch; setUseWebSearch(next); onWebSearchChange?.(next); }} disabled={!webSearchAvailable || isLoading} className={cn("kairema-search-toggle", useWebSearch && "kairema-search-toggle-active")} title={webSearchAvailable ? t.search : webSearchReason ?? t.searchUnavailable} aria-label={t.search}><Globe2 className="size-4" /></button></div>
-          {!webSearchAvailable && webSearchReason && <p className="kairema-composer-note">{webSearchReason}</p>}
-          {webSearchAvailable && freshnessIntent && !useWebSearch && <p className="kairema-composer-note">{t.freshnessHint}</p>}
+          <div className="kairema-composer-row"><input ref={fileInputRef} className="sr-only" type="file" multiple accept="image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown,.md" onChange={(event) => void addFiles(event.target.files)} /><button type="button" onClick={() => fileInputRef.current?.click()} disabled={!onUploadFiles || isLoading || isUploading} className="kairema-composer-tool" title={t.attach} aria-label={t.attach}>{isUploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}</button><Textarea ref={textareaRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={effectivePlaceholder} className="kairema-textarea" rows={1} /></div>
         </div>
         {isLoading && <Button type="button" size="icon" onClick={onCancelStream} className="kairema-cancel" aria-label={t.stop}><Square className="size-3.5 fill-current" /></Button>}<Button type="submit" size="icon" disabled={!input.trim() || isLoading || isUploading} className="kairema-send" aria-label={t.send}>{isLoading || isUploading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}</Button>
       </form>

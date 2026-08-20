@@ -4,13 +4,13 @@ import { describe, expect, it, vi } from "vitest";
 import { AIChatBox } from "./AIChatBox";
 
 describe("AIChatBox v5.6", () => {
-  it("reflects the saved web-search preference and reports an explicit user change", () => {
-    const onWebSearchChange = vi.fn();
-    render(<AIChatBox messages={[]} onSendMessage={vi.fn()} webSearchAvailable initialWebSearch onWebSearchChange={onWebSearchChange} emptyStateMessage="Kairema" />);
-    const toggle = screen.getByLabelText("Искать в интернете");
-    expect(toggle.classList.contains("kairema-search-toggle-active")).toBe(true);
-    fireEvent.click(toggle);
-    expect(onWebSearchChange).toHaveBeenCalledWith(false);
+  it("forwards an attachment request without exposing a web-search preference", () => {
+    const onSendMessage = vi.fn();
+    render(<AIChatBox messages={[]} onSendMessage={onSendMessage} emptyStateMessage="Kairema" />);
+    fireEvent.change(screen.getByPlaceholderText("Напишите сообщение…"), { target: { value: "Какие сегодня новости?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Отправить сообщение" }));
+    expect(onSendMessage).toHaveBeenCalledWith("Какие сегодня новости?", { attachmentIds: [] });
+    expect(screen.queryByLabelText("Искать в интернете")).toBeNull();
   });
 
   it("exposes copy for a user message independently from assistant actions", () => {
