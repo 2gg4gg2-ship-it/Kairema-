@@ -34,6 +34,7 @@ const userSettingsSchema = z.object({
   defaultRole: z.enum(MODEL_IDS).optional(),
   webSearch: z.boolean().optional(),
   toolAccess: z.boolean().optional(),
+  healthRefreshSeconds: z.union([z.literal(0), z.literal(15), z.literal(30), z.literal(60)]).optional(),
 });
 
 const attachmentInputSchema = z.object({

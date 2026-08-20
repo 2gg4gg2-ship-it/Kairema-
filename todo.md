@@ -212,3 +212,13 @@
 - [x] v6-B/H: подтвердить строгую user-scoped изоляцию chat/export/memory (чужой ID → 404) и решение не хранить личные ключи в БД.
 - [x] v6-B/I: добавить регрессии, controlled failover включённых резервов, полный test/typecheck/build/bundle-log audit, desktop/mobile screenshots и runtime-проверки без превышения четырёх upstream-попыток.
 - [x] v6-B/J: обновить отчёт форматом «Проблема → Причина → Что изменено → Как проверено», закрыть TODO и сохранить checkpoint v6-B v3.
+- [x] v6-C/A: исправить mobile/tablet-шапку: flex-wrap без перекрытий, touch-target ≥44px, compact health badge «точка + N/N» при нехватке ширины и перенос без перекрытия управляющих кнопок.
+- [x] v6-C/B: переработать меню ролей отдельными строками-карточками (имя, краткое описание, status badge, active state), закрытием по выбору, outside tap и открытию любого другого overlay.
+- [x] v6-C/C: заменить только отображаемые имена ролей на Flash / Think / Context / Apex во всех RU/EN-представлениях, сохранив role keys fast/smart/context/flagship и server-side цепи без изменений.
+- [x] v6-C/D: добавить в настройках безопасный owner-scoped экран «Модели и лимиты» для четырёх ролей: текущий публичный кандидат, провайдер, состояние квоты, один следующий резерв и флаг последнего fallback без model ID, ключей и полной цепи.
+- [x] v6-C/E: добавить per-user настройку частоты health-widget 15/30/60 секунд или вручную с default 30 секунд, server-side ограничением нагрузки и сохранением в профильных настройках.
+- [x] v6-C/F: подготовить idempotent cron-only endpoint `/api/scheduled/provider-health-check` и `/api/scheduled/knowledge-refresh` с безопасными логами и без изменения текущих active chains.
+- [x] v6-C/G: реализовать только безопасный ZenMux retry tracking в Heartbeat; автоинтеграцию не выполнять до трёх новых последовательных HTTP 200 и отдельной повторной верификации.
+- [x] v6-C/H: покрыть UI/server-инварианты тестами: header/menu, имена и неизменность keys, models DTO, интервал и owner isolation; подтвердить ≤4 upstream-попыток и отсутствие секретов.
+- [x] v6-C/I: пройти полный test/typecheck/build/bundle-log audit и desktop 768px / mobile 360px приёмку, включая сценарий закрытия меню настройками и экран «Модели и лимиты».
+- [x] v6-C/J: обновить отчёт по схеме «Проблема → Причина → Что изменено → Как проверено» и подготовить checkpoint. Создание и проверка двух ежедневных Heartbeat — отдельный post-publish шаг, который нельзя безопасно выполнить до публикации проекта.

@@ -9,7 +9,7 @@ vi.mock("./db", () => ({
   getProviderDailySuccess: vi.fn().mockResolvedValue(0),
 }));
 
-import { ATTEMPT_TIMEOUT_MS, DIAGNOSTIC_CANDIDATES, InvalidModelSelectionError, MAX_ATTEMPTS, MODEL_CONFIG, MODEL_IDS, MODEL_ROLES, __resetProviderHealthForTests, buildOpenRouterMessages, chatWithRole, chatWithRoleStream, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, getProviderHealthForTesting, isAllowedModelId, modelById, openRouterStreamDelta, publicChatError, refreshProviderHealth, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView, toRoleRuntimeView } from "./providers";
+import { ATTEMPT_TIMEOUT_MS, DIAGNOSTIC_CANDIDATES, InvalidModelSelectionError, MAX_ATTEMPTS, MODEL_CONFIG, MODEL_IDS, MODEL_ROLES, __resetProviderHealthForTests, buildOpenRouterMessages, chatWithRole, chatWithRoleStream, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, getProviderHealthForTesting, getZenmuxHeartbeatTrackingForTests, isAllowedModelId, modelById, openRouterStreamDelta, publicChatError, refreshProviderHealth, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView, toRoleRuntimeView } from "./providers";
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -26,8 +26,9 @@ describe("Kairema v4 role registry", () => {
     expect(MODEL_CONFIG).toHaveLength(4);
     expect(MODEL_CONFIG.map((role) => role.modelId)).toEqual(MODEL_IDS);
     expect(MODEL_CONFIG.map((role) => role.label)).toEqual([
-      "Kairema Быстрый", "Kairema Смекалистый", "Kairema Контекст", "Kairema Флагман",
+      "Kairema Flash", "Kairema Think", "Kairema Context", "Kairema Apex",
     ]);
+    expect(MODEL_CONFIG.map((role) => role.key)).toEqual(["fast", "smart", "context", "flagship"]);
     expect(modelById("code")).toBeUndefined();
   });
 
@@ -139,6 +140,7 @@ describe("Kairema v4 role registry", () => {
     expect(health.find((item) => item.provider === "zenmux")).toMatchObject({ state: "auth_failed", category: "AUTH", http: 403 });
     expect(MODEL_ROLES.every((role) => role.chain.every((candidate) => candidate.provider !== "zenmux"))).toBe(true);
     expect(MODEL_ROLES.find((role) => role.key === "context")?.chain[4]?.provider).toBe("dots");
+    expect(getZenmuxHeartbeatTrackingForTests()).toEqual({ consecutiveHttp200: 0, activation: "manual-verification-required" });
   });
 
   it("does not invoke the fifth Dots reserve after four real context attempts", async () => {
@@ -191,9 +193,10 @@ describe("Kairema v4 role registry", () => {
 
   it("never serializes provider chains or auth transport in public role views", () => {
     const view = toPublicModelView(MODEL_CONFIG[0]!, { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" });
-    expect(Object.keys(view).sort()).toEqual(["key", "label", "modelId", "role", "runtime", "status"]);
+    expect(Object.keys(view).sort()).toEqual(["key", "label", "limits", "modelId", "role", "runtime", "status"]);
     expect(view.runtime).toBeNull();
-    expect(JSON.stringify(view)).not.toMatch(/chain|OPENROUTER_API_KEY|Authorization|Bearer/i);
+    expect(view.limits).toMatchObject({ candidate: "primary", quota: "ready", provider: "OpenRouter" });
+    expect(JSON.stringify(view)).not.toMatch(/chain|modelId.*openai|OPENROUTER_API_KEY|Authorization|Bearer/i);
   });
 
   it("publishes a safe runtime override after a real reserve answer", async () => {

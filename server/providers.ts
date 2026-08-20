@@ -32,33 +32,34 @@ export type ChatResult = { content: string; modelUsed: string; provider: Provide
 type Candidate = { provider: Provider; modelId: string; displayName: string; vision?: boolean; requiresWebResearch?: boolean };
 export type ModelConfig = { key: RoleId; modelId: RoleId; label: string; role: string; chain: readonly Candidate[] };
 export type RoleRuntimeView = { state: "ready" | "backup" | "unavailable"; provider: string | null; modelUsed: string | null; checkedAt: string };
-export type ModelView = Pick<ModelConfig, "key" | "modelId" | "label" | "role"> & { status: ModelStatus; runtime: RoleRuntimeView | null };
+export type PublicRoleLimitView = { candidate: "primary" | "backup" | "unavailable"; provider: string | null; quota: "ready" | "limited" | "unavailable"; nextFallback: string | null; lastFallback: boolean };
+export type ModelView = Pick<ModelConfig, "key" | "modelId" | "label" | "role"> & { status: ModelStatus; runtime: RoleRuntimeView | null; limits: PublicRoleLimitView };
 type ProviderHealthState = "ready" | "cooldown" | "auth_failed" | "unavailable" | "not_configured";
 type ProviderHealthSnapshot = { provider: Provider; state: ProviderHealthState; category: StatusCategory | null; http: number | null; confirmed: string; checkedAt: Date; blockedUntil: Date | null };
 type ChainAttempt = { provider: Provider; modelId: string; status: "ready" | "skipped" | "failed"; category?: StatusCategory; http?: number | null };
 
 /** Exactly four public roles. All upstream model IDs remain server-only. */
 export const MODEL_ROLES: readonly ModelConfig[] = [
-  { key: "fast", modelId: "fast", label: "Kairema Быстрый", role: "Мгновенные ответы на повседневные вопросы.", chain: [
+  { key: "fast", modelId: "fast", label: "Kairema Flash", role: "Мгновенные ответы на повседневные вопросы.", chain: [
     { provider: "openrouter", modelId: "openai/gpt-oss-20b:free", displayName: "GPT-OSS 20B" },
     { provider: "orcarouter", modelId: "deepseek/deepseek-v4-flash-free", displayName: "DeepSeek V4 Flash" },
     { provider: "groq", modelId: "openai/gpt-oss-20b", displayName: "GPT-OSS 20B" },
     { provider: "google", modelId: "gemini-flash-lite-latest", displayName: "Gemini Flash Lite", vision: true, requiresWebResearch: true },
   ] },
-  { key: "smart", modelId: "smart", label: "Kairema Смекалистый", role: "Математика, логика и последовательные рассуждения.", chain: [
+  { key: "smart", modelId: "smart", label: "Kairema Think", role: "Математика, логика и последовательные рассуждения.", chain: [
     { provider: "openrouter", modelId: "google/gemma-4-26b-a4b-it:free", displayName: "Gemma 4 26B" },
     { provider: "orcarouter", modelId: "tencent/hy3-free", displayName: "Tencent HY 3" },
     { provider: "google", modelId: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash", vision: true, requiresWebResearch: true },
     { provider: "groq", modelId: "openai/gpt-oss-120b", displayName: "GPT-OSS 120B" },
   ] },
-  { key: "context", modelId: "context", label: "Kairema Контекст", role: "Большие тексты, история диалога и глубокий анализ.", chain: [
+  { key: "context", modelId: "context", label: "Kairema Context", role: "Большие тексты, история диалога и глубокий анализ.", chain: [
     { provider: "openrouter", modelId: "nvidia/nemotron-3-ultra-550b-a55b:free", displayName: "Nemotron 3 Ultra" },
     { provider: "orcarouter", modelId: "deepseek/deepseek-v4-flash-free", displayName: "DeepSeek V4 Flash" },
     { provider: "google", modelId: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash", vision: true, requiresWebResearch: true },
     { provider: "groq", modelId: "openai/gpt-oss-120b", displayName: "GPT-OSS 120B" },
     { provider: "dots", modelId: "dots-studio/dots3-note-prev", displayName: "Dots Studio" },
   ] },
-  { key: "flagship", modelId: "flagship", label: "Kairema Флагман", role: "Сложнейшие задачи, переводы и максимальная мощность.", chain: [
+  { key: "flagship", modelId: "flagship", label: "Kairema Apex", role: "Сложнейшие задачи, переводы и максимальная мощность.", chain: [
     { provider: "openrouter", modelId: "google/gemma-4-31b-it:free", displayName: "Gemma 4 31B" },
     { provider: "orcarouter", modelId: "deepseek/deepseek-v4-pro-free", displayName: "DeepSeek V4 Pro" },
     { provider: "google", modelId: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash", vision: true, requiresWebResearch: true },
@@ -114,6 +115,13 @@ export const KAIREMA_SYSTEM_PROMPT = `Ты Kairema, AI-ассистент. Не 
 
 const providerHealth = new Map<Provider, ProviderHealthSnapshot>();
 const providerGeneration = new Map<Provider, number>();
+let zenmuxHeartbeatSuccesses = 0;
+
+/** Server-only diagnostic. It never activates ZenMux and deliberately resets on process restart. */
+function trackZenmuxHeartbeat(success: boolean) {
+  zenmuxHeartbeatSuccesses = success ? zenmuxHeartbeatSuccesses + 1 : 0;
+  console.info(JSON.stringify({ event: "zenmux-heartbeat", success, consecutiveHttp200: zenmuxHeartbeatSuccesses, activation: "manual-verification-required" }));
+}
 let providerHealthHydrated = false;
 let providerHealthHydration: Promise<void> | null = null;
 let providerHealthRefresh: Promise<void> | null = null;
@@ -275,11 +283,13 @@ async function recordProviderIssue(provider: Provider, status: ModelStatus, cool
   if (!state) return;
   providerGeneration.set(provider, getGeneration(provider) + 1);
   await persistProviderHealth({ provider, state, category: status.category, http: status.http, confirmed: status.confirmed, checkedAt: new Date(), blockedUntil });
+  if (provider === "zenmux") trackZenmuxHeartbeat(false);
 }
 
 async function recordPingReady(provider: Provider) {
   providerGeneration.set(provider, getGeneration(provider) + 1);
   await persistProviderHealth({ provider, state: "ready", category: null, http: 200, confirmed: "Короткая серверная проверка провайдера успешно завершена.", checkedAt: new Date(), blockedUntil: null });
+  if (provider === "zenmux") trackZenmuxHeartbeat(true);
 }
 
 async function recordNotConfigured(provider: Provider) {
@@ -353,7 +363,18 @@ export function roleById(roleId: string): ModelConfig | undefined { return MODEL
 export function modelById(modelId: string): ModelConfig | undefined { return roleById(modelId); }
 export function isAllowedModelId(modelId: string): modelId is RoleId { return ROLE_IDS.includes(modelId as RoleId); }
 export function assertAllowedModelId(modelId: string): asserts modelId is RoleId { if (!isAllowedModelId(modelId)) throw new InvalidModelSelectionError(); }
-export function toPublicModelView(config: ModelConfig, status: ModelStatus): ModelView { return { key: config.key, modelId: config.modelId, label: config.label, role: config.role, status, runtime: null }; }
+export function toPublicModelView(config: ModelConfig, status: ModelStatus): ModelView {
+  const quota = status.category === "RATE_LIMIT" || status.category === "QUOTA" ? "limited" : status.state === "unavailable" || status.state === "not_configured" ? "unavailable" : "ready";
+  return {
+    key: config.key,
+    modelId: config.modelId,
+    label: config.label,
+    role: config.role,
+    status,
+    runtime: null,
+    limits: { candidate: quota === "unavailable" ? "unavailable" : "primary", provider: providerLabel(config.chain[0]?.provider ?? null), quota, nextFallback: config.chain[1] ? providerLabel(config.chain[1].provider) : null, lastFallback: false },
+  };
+}
 export function selectAutoModel(views: readonly ModelView[]): ModelConfig | undefined { const view = views.find((item) => item.status.state === "ready" || item.status.state === "fallback"); return view ? roleById(view.key) : undefined; }
 
 export function sanitizeAssistantContent(value: string) {
@@ -449,7 +470,22 @@ export async function getModelViews() {
   const runtimeByRole = new Map(runtimeRows.map((item) => [item.roleId, toRoleRuntimeView(item.state, item.provider, item.modelUsed, item.checkedAt)]));
   return MODEL_ROLES.map((role) => {
     const runtime = runtimeByRole.get(role.key) ?? null;
-    return { ...toPublicModelView(role, runtime ? modelStatusFromRuntime(runtime) : statusForRole(role)), runtime };
+    const status = runtime ? modelStatusFromRuntime(runtime) : statusForRole(role);
+    const activeIndex = runtime?.state === "backup" ? 1 : 0;
+    const currentProvider = runtime?.provider ?? providerLabel(role.chain[activeIndex]?.provider ?? role.chain[0].provider);
+    const nextProvider = role.chain[activeIndex + 1]?.provider;
+    const quota = status.category === "RATE_LIMIT" || status.category === "QUOTA" ? "limited" : status.state === "unavailable" || status.state === "not_configured" ? "unavailable" : "ready";
+    return {
+      ...toPublicModelView(role, status),
+      runtime,
+      limits: {
+        candidate: status.state === "unavailable" || status.state === "not_configured" ? "unavailable" : runtime?.state === "backup" ? "backup" : "primary",
+        provider: currentProvider,
+        quota,
+        nextFallback: nextProvider ? providerLabel(nextProvider) : null,
+        lastFallback: runtime?.state === "backup",
+      },
+    };
   });
 }
 
@@ -487,6 +523,11 @@ export function __resetProviderHealthForTests() {
   providerHealthHydrated = false;
   providerHealthHydration = null;
   providerHealthRefresh = null;
+  zenmuxHeartbeatSuccesses = 0;
+}
+
+export function getZenmuxHeartbeatTrackingForTests() {
+  return { consecutiveHttp200: zenmuxHeartbeatSuccesses, activation: "manual-verification-required" as const };
 }
 
 export function dataFromSseBlock(block: string) { return block.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n"); }

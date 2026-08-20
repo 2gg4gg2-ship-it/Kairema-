@@ -165,6 +165,7 @@ export const userSettings = mysqlTable("user_settings", {
   defaultRole: mysqlEnum("defaultRole", ["fast", "smart", "context", "flagship"]).notNull().default("fast"),
   webSearch: int("webSearch").notNull().default(0),
   toolAccess: int("toolAccess").notNull().default(1),
+  healthRefreshSeconds: int("healthRefreshSeconds").notNull().default(30),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

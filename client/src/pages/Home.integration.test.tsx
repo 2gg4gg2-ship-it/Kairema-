@@ -37,12 +37,12 @@ vi.mock("@/lib/chat-export", () => ({
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     models: { list: { useQuery: () => ({ data: [
-      { key: "fast", modelId: "fast", label: "Kairema Быстрый", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, runtime: { state: "ready", provider: "OpenRouter", modelUsed: "Llama Fast", checkedAt: "2026-08-19T00:00:00.000Z" } },
-      { key: "smart", modelId: "smart", label: "Kairema Смекалистый", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" } },
-      { key: "context", modelId: "context", label: "Kairema Контекст", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" } },
-      { key: "flagship", modelId: "flagship", label: "Kairema Флагман", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" } },
+      { key: "fast", modelId: "fast", label: "Kairema Flash", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, runtime: { state: "ready", provider: "OpenRouter", modelUsed: "Fast", checkedAt: "2026-08-19T00:00:00.000Z" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
+      { key: "smart", modelId: "smart", label: "Kairema Think", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
+      { key: "context", modelId: "context", label: "Kairema Context", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
+      { key: "flagship", modelId: "flagship", label: "Kairema Apex", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
     ] }) } },
-    settings: { get: { useQuery: () => ({ data: { language: "ru", theme: "dark", responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, defaultRole: "fast", webSearch: 0 } }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateSettings }) } },
+    settings: { get: { useQuery: () => ({ data: { language: "ru", theme: "dark", responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, defaultRole: "fast", webSearch: 0, healthRefreshSeconds: 30 } }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateSettings }) } },
     memory: { get: { useQuery: () => ({ data: { profile: "", enabled: 1, autoExtract: 1, facts: [] } }) }, update: { useMutation: () => ({ mutateAsync: vi.fn() }) }, addFact: { useMutation: () => ({ mutateAsync: vi.fn() }) }, deleteFact: { useMutation: () => ({ mutateAsync: vi.fn() }) }, clear: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
     webSearch: { status: { useQuery: () => ({ data: { available: false, reason: "Поиск сейчас недоступен" } }) } },
     knowledge: { status: { useQuery: () => ({ data: { documents: 0, sources: [], lastRun: null } }) }, audit: { useQuery: () => ({ data: { sources: [{ name: "OpenAI News", url: "https://openai.com/news/rss.xml", indexedCount: 12, lastSuccessAt: "2026-08-19T00:00:00.000Z" }], latestRun: { state: "completed", startedAt: "2026-08-19T00:00:00.000Z", finishedAt: "2026-08-19T00:01:00.000Z" } } }) }, refresh: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) } },
@@ -264,11 +264,14 @@ describe("Home integration flows", () => {
     expect(fixtures.updateSettings).toHaveBeenCalledWith({ thinking: true });
   });
 
-  it("shows only safe last-provider metadata for a role in settings", () => {
+  it("shows display-only role metadata in settings without exposing internal routing", async () => {
+    const user = userEvent.setup();
     render(<Home />);
 
-    expect(screen.getByText(/Готов · OpenRouter · Llama Fast/)).toBeTruthy();
-    expect(screen.queryByText(/Authorization|Bearer|chain/i)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Открыть настройки" }));
+    expect(screen.getAllByText(/Kairema Flash/).length).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByText(/Готов · OpenRouter/)).toBeTruthy();
+    expect(screen.queryByText(/Authorization|Bearer|chain|Llama Fast/i)).toBeNull();
   });
 
   it("opens public provider and RAG audit panels without exposing server-only reserves or routing chains", async () => {
