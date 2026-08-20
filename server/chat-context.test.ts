@@ -6,6 +6,7 @@ vi.mock("./db", () => ({
   getOwnedChatAttachments: vi.fn().mockResolvedValue([]),
   getUserSettings: vi.fn().mockResolvedValue({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0 }),
   listMemoryFacts: vi.fn().mockResolvedValue([]),
+  listRelevantMemoryFacts: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("./web-search", () => ({

@@ -1,5 +1,5 @@
 import { getAttachmentPromptText, getOwnedAttachmentDownload } from "./attachments";
-import { createMemoryFact, getMemoryProfile, getOwnedChatAttachments, getUserSettings, listMemoryFacts } from "./db";
+import { createMemoryFact, getMemoryProfile, getOwnedChatAttachments, getUserSettings, listRelevantMemoryFacts } from "./db";
 import type { ChatSettings } from "./providers";
 import { WebSearchUnavailableError, searchWeb } from "./web-search";
 import { retrieveRagContext, type RagRole } from "./knowledge";
@@ -8,12 +8,12 @@ import { retrieveRagContext, type RagRole } from "./knowledge";
 export const WEB_RESEARCH_ROLE_POLICY: ReadonlySet<RagRole> = new Set<RagRole>(["fast", "smart", "context", "flagship"]);
 
 function memoryContext(profile: { profile: string; summary: string }, facts: Array<{ fact: string }>) {
-  const rows = [profile.profile.trim(), profile.summary.trim(), ...facts.slice(0, 16).map((fact) => `• ${fact.fact}`)].filter(Boolean);
-  return rows.join("\n").slice(0, 5_000);
+  const rows = [profile.profile.trim(), profile.summary.trim(), ...facts.slice(0, 20).map((fact) => `• ${fact.fact}`)].filter(Boolean);
+  return rows.join("\n").slice(0, 2_000);
 }
 
 export async function buildChatContext(userId: number, sessionId: string, input: { attachmentIds?: string[]; webSearch?: boolean; query?: string; role?: RagRole }): Promise<ChatSettings> {
-  const [preferences, profile, facts] = await Promise.all([getUserSettings(userId), getMemoryProfile(userId), listMemoryFacts(userId)]);
+  const [preferences, profile, facts] = await Promise.all([getUserSettings(userId), getMemoryProfile(userId), listRelevantMemoryFacts(userId, input.query ?? "", 20)]);
   const attachments = preferences.toolAccess && input.attachmentIds?.length ? await getOwnedChatAttachments(userId, sessionId, input.attachmentIds.slice(0, 4)) : [];
   const documentContext = getAttachmentPromptText(attachments);
   const imageUrls = await Promise.all(attachments.filter((attachment) => attachment.kind === "image").map(async (attachment) => (await getOwnedAttachmentDownload(userId, attachment.id)).url));
@@ -52,8 +52,8 @@ export async function buildChatContext(userId: number, sessionId: string, input:
   return context;
 }
 
-/** Conservative server-side extraction avoids sending private chat text to another processor solely for memory. */
-export async function extractMemoryFacts(userId: number, userText: string) {
+/** Conservative asynchronous extraction keeps private text on the server and never delays an accepted chat turn. */
+export async function extractMemoryFacts(userId: number, userText: string, sourceMessageId?: number | null) {
   const profile = await getMemoryProfile(userId);
   if (!profile.enabled || !profile.autoExtract) return;
   const patterns = [
@@ -66,5 +66,5 @@ export async function extractMemoryFacts(userId: number, userText: string) {
     const matched = userText.match(pattern)?.[1]?.trim();
     return matched ? [matched.replace(/[«»"']/g, "")] : [];
   });
-  await Promise.all(candidates.slice(0, 2).map((fact) => createMemoryFact(userId, fact)));
+  await Promise.all(candidates.slice(0, 2).map((fact) => createMemoryFact(userId, fact, sourceMessageId, "auto")));
 }

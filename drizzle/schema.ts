@@ -57,6 +57,16 @@ export const providerHealth = mysqlTable("provider_health", {
 	updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+/** Bounded health history only: no prompts, keys, models, fallback chains, or request bodies. */
+export const providerHealthHistory = mysqlTable("provider_health_history", {
+	id: int("id").autoincrement().primaryKey(),
+	provider: varchar("provider", { length: 32 }).notNull(),
+	state: mysqlEnum("state", ["ready", "cooldown", "auth_failed", "unavailable", "not_configured"]).notNull(),
+	category: varchar("category", { length: 32 }),
+	http: int("http"),
+	checkedAt: timestamp("checkedAt").defaultNow().notNull(),
+}, (table) => [index("provider_health_history_provider_checked_idx").on(table.provider, table.checkedAt)]);
+
 /** Aggregate-only daily provider usage; prompts, users and response content are never stored here. */
 export const providerDailyUsage = mysqlTable("provider_daily_usage", {
 	provider: varchar("provider", { length: 32 }).notNull(),
@@ -173,6 +183,8 @@ export const memoryFacts = mysqlTable("memory_facts", {
   id: varchar("id", { length: 36 }).primaryKey(),
   userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
   fact: varchar("fact", { length: 280 }).notNull(),
+  source: mysqlEnum("source", ["manual", "auto"]).notNull().default("manual"),
+  version: int("version").notNull().default(1),
   sourceMessageId: int("sourceMessageId").references(() => messages.id, { onDelete: "set null" }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

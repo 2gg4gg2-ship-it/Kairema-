@@ -196,7 +196,7 @@ export default function Home() {
       const list = document.createElement("div"); list.className = "kairema-ops-list";
       if (kind === "providers") {
         const entries = providerDashboardQuery.data ?? [];
-        entries.forEach((entry) => { const card = document.createElement("article"); card.className = "kairema-ops-card"; const heading = document.createElement("h3"); heading.textContent = entry.label; card.append(heading, line(language === "ru" ? "Состояние" : "State", entry.capacity), line(labels.checked, format(entry.checkedAt)), line(labels.next, format(entry.nextCheckAt))); if (entry.usageToday !== null && entry.usageToday !== undefined) card.append(line(labels.usage, String(entry.usageToday))); list.append(card); });
+        entries.forEach((entry) => { const card = document.createElement("article"); card.className = "kairema-ops-card"; const heading = document.createElement("h3"); heading.textContent = entry.label; card.append(heading, line(language === "ru" ? "Состояние" : "State", entry.capacity), line(labels.checked, format(entry.checkedAt)), line(labels.next, format(entry.nextCheckAt))); if (entry.usageToday !== null && entry.usageToday !== undefined) card.append(line(labels.usage, String(entry.usageToday))); if (entry.uptime30d?.samples) card.append(line(language === "ru" ? "Доступность за 30 дней" : "30-day availability", `${entry.uptime30d.uptime}%`)); list.append(card); });
         if (!entries.length) { const empty = document.createElement("p"); empty.textContent = language === "ru" ? "Статусы пока не получены." : "Statuses are not available yet."; list.append(empty); }
       } else {
         const audit = knowledgeAuditQuery.data;

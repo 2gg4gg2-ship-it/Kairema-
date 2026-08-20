@@ -1,7 +1,8 @@
-import { and, asc, desc, eq, inArray, like, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, like, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
 import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, devApiAuditRecords, devApiRateWindows, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryFacts, memoryProfiles, messages, providerDailyUsage, providerHealth, roleRuntimeStatus, userSettings, users, webSearchStatus } from "../drizzle/schema";
+import { providerHealthHistory } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -155,6 +156,26 @@ export async function upsertProviderHealth(input: Omit<ProviderHealthRecord, "up
       blockedUntil: input.blockedUntil,
     },
   });
+  await db.insert(providerHealthHistory).values({
+    provider: input.provider,
+    state: input.state,
+    category: input.category,
+    http: input.http,
+    checkedAt: input.checkedAt,
+  });
+  const retention = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  await db.delete(providerHealthHistory).where(sql`${providerHealthHistory.checkedAt} < ${retention}`);
+}
+
+/** Returns a bounded readiness aggregate, never raw diagnostic probe details. */
+export async function getProviderAvailability(provider: string, days = 30): Promise<{ samples: number; ready: number; uptime: number }> {
+  const db = await getDb();
+  if (!db) return { samples: 0, ready: 0, uptime: 0 };
+  const since = new Date(Date.now() - Math.max(1, Math.min(days, 30)) * 24 * 60 * 60 * 1000);
+  const rows = await db.select({ state: providerHealthHistory.state }).from(providerHealthHistory)
+    .where(and(eq(providerHealthHistory.provider, provider), gt(providerHealthHistory.checkedAt, since)));
+  const ready = rows.filter((row) => row.state === "ready").length;
+  return { samples: rows.length, ready, uptime: rows.length ? Math.round((ready / rows.length) * 1000) / 10 : 0 };
 }
 
 function utcDayKey(date = new Date()) { return date.toISOString().slice(0, 10); }
@@ -378,15 +399,44 @@ export async function listMemoryFacts(userId: number): Promise<MemoryFact[]> {
   return db.select().from(memoryFacts).where(eq(memoryFacts.userId, userId)).orderBy(desc(memoryFacts.updatedAt), desc(memoryFacts.createdAt));
 }
 
-export async function createMemoryFact(userId: number, fact: string, sourceMessageId?: number | null): Promise<MemoryFact | null> {
+export type MemoryFactSource = "manual" | "auto";
+
+function normalizeMemoryFact(fact: string) {
+  return fact.trim().replace(/\s+/g, " ").slice(0, 280);
+}
+
+export async function listRelevantMemoryFacts(userId: number, query: string, limit = 20): Promise<MemoryFact[]> {
+  const facts = await listMemoryFacts(userId);
+  const terms = new Set(query.toLocaleLowerCase("ru-RU").match(/[A-Za-zА-Яа-яЁё0-9]{3,}/g) ?? []);
+  if (!terms.size) return facts.slice(0, limit);
+  return facts
+    .map((fact, position) => ({ fact, position, score: (fact.fact.toLocaleLowerCase("ru-RU").match(/[A-Za-zА-Яа-яЁё0-9]{3,}/g) ?? []).filter((term) => terms.has(term)).length }))
+    .sort((left, right) => right.score - left.score || left.position - right.position)
+    .slice(0, limit)
+    .map(({ fact }) => fact);
+}
+
+export async function createMemoryFact(userId: number, fact: string, sourceMessageId?: number | null, source: MemoryFactSource = "manual"): Promise<MemoryFact | null> {
   const db = requireDatabase(await getDb());
-  const normalized = fact.trim().replace(/\s+/g, " ").slice(0, 280);
+  const normalized = normalizeMemoryFact(fact);
   if (normalized.length < 3) return null;
   const existing = await listMemoryFacts(userId);
   if (existing.some((item) => item.fact.toLocaleLowerCase("ru-RU") === normalized.toLocaleLowerCase("ru-RU"))) return null;
-  const record: MemoryFact = { id: randomUUID(), userId, fact: normalized, sourceMessageId: sourceMessageId ?? null, createdAt: new Date(), updatedAt: new Date() };
+  const record: MemoryFact = { id: randomUUID(), userId, fact: normalized, source, version: 1, sourceMessageId: sourceMessageId ?? null, createdAt: new Date(), updatedAt: new Date() };
   await db.insert(memoryFacts).values(record);
   return record;
+}
+
+export async function updateMemoryFact(userId: number, factId: string, fact: string): Promise<MemoryFact | null> {
+  const db = requireDatabase(await getDb());
+  const normalized = normalizeMemoryFact(fact);
+  if (normalized.length < 3) return null;
+  const sameUser = await listMemoryFacts(userId);
+  if (sameUser.some((item) => item.id !== factId && item.fact.toLocaleLowerCase("ru-RU") === normalized.toLocaleLowerCase("ru-RU"))) return null;
+  const result = await db.update(memoryFacts).set({ fact: normalized, version: sql`${memoryFacts.version} + 1` }).where(and(eq(memoryFacts.id, factId), eq(memoryFacts.userId, userId)));
+  if (!Number(result[0]?.affectedRows ?? 0)) return null;
+  const record = await db.select().from(memoryFacts).where(and(eq(memoryFacts.id, factId), eq(memoryFacts.userId, userId))).limit(1);
+  return record[0] ?? null;
 }
 
 export async function deleteMemoryFact(userId: number, factId: string): Promise<boolean> {

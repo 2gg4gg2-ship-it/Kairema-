@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearMemory, createChatExportRecord, createChatSession, createMemoryFact, deleteAllOwnedChatExports, deleteMemoryFact, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, getMemoryProfile, getOwnedChatExport, getOwnedChatSession, getUserSettings, listChatExports, listChatSessions, listMemoryFacts, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryProfile, updateUserSettings } from "./db";
+import { appendChatMessage, clearMemory, createChatExportRecord, createChatSession, createMemoryFact, deleteAllOwnedChatExports, deleteMemoryFact, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, getMemoryProfile, getOwnedChatExport, getOwnedChatSession, getUserSettings, listChatExports, listChatSessions, listMemoryFacts, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryFact, updateMemoryProfile, updateUserSettings } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -91,6 +91,11 @@ export const appRouter = router({
     addFact: protectedProcedure.input(z.object({ fact: z.string().trim().min(3).max(280) })).mutation(async ({ ctx, input }) => {
       const fact = await createMemoryFact(ctx.user.id, input.fact);
       if (!fact) throw new TRPCError({ code: "CONFLICT", message: "Такой факт уже есть в памяти." });
+      return fact;
+    }),
+    updateFact: protectedProcedure.input(z.object({ factId: z.string().uuid(), fact: z.string().trim().min(3).max(280) })).mutation(async ({ ctx, input }) => {
+      const fact = await updateMemoryFact(ctx.user.id, input.factId, input.fact);
+      if (!fact) throw new TRPCError({ code: "NOT_FOUND", message: "Факт не найден, недоступен или конфликтует с существующим." });
       return fact;
     }),
     deleteFact: protectedProcedure.input(z.object({ factId: z.string().uuid() })).mutation(async ({ ctx, input }) => {

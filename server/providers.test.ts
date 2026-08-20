@@ -9,7 +9,7 @@ vi.mock("./db", () => ({
   getProviderDailySuccess: vi.fn().mockResolvedValue(0),
 }));
 
-import { ATTEMPT_TIMEOUT_MS, DIAGNOSTIC_CANDIDATES, InvalidModelSelectionError, MODEL_CONFIG, MODEL_IDS, MODEL_ROLES, __resetProviderHealthForTests, buildOpenRouterMessages, chatWithRole, chatWithRoleStream, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, getProviderHealthForTesting, isAllowedModelId, modelById, openRouterStreamDelta, publicChatError, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView, toRoleRuntimeView } from "./providers";
+import { ATTEMPT_TIMEOUT_MS, DIAGNOSTIC_CANDIDATES, InvalidModelSelectionError, MODEL_CONFIG, MODEL_IDS, MODEL_ROLES, __resetProviderHealthForTests, buildOpenRouterMessages, chatWithRole, chatWithRoleStream, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, getProviderHealthForTesting, isAllowedModelId, modelById, openRouterStreamDelta, publicChatError, refreshProviderHealth, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView, toRoleRuntimeView } from "./providers";
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -112,6 +112,29 @@ describe("Kairema v4 role registry", () => {
     expect(orcaCalls).toHaveLength(1);
     expect(fetchSpy).toHaveBeenCalledTimes(4);
     expect(health.find((item) => item.provider === "orcarouter")).toMatchObject({ state: "cooldown", category: "RATE_LIMIT" });
+  });
+
+  it("keeps inaccessible ZenMux in server-only health checks and does not add a fifth role attempt", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    vi.stubEnv("ORCAROUTER_API_KEY", "");
+    vi.stubEnv("GROQ_API_KEY", "");
+    vi.stubEnv("GEMINI_API_KEY", "");
+    vi.stubEnv("SAMBANOVA_API_KEY", "");
+    vi.stubEnv("MISTRAL_API_KEY", "");
+    vi.stubEnv("CEREBRAS_API_KEY", "");
+    vi.stubEnv("DEEPSEEK_API_KEY", "");
+    vi.stubEnv("ZENMUX_API_KEY", "test-zenmux-key");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: "You have no permission to access this resource" } }), { status: 403 }),
+    );
+
+    await refreshProviderHealth({ force: true });
+    const health = await getProviderHealthForTesting();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe("https://zenmux.ai/api/v1/chat/completions");
+    expect(health.find((item) => item.provider === "zenmux")).toMatchObject({ state: "auth_failed", category: "AUTH", http: 403 });
+    expect(MODEL_ROLES.every((role) => role.chain.length === 4 && role.chain.every((candidate) => candidate.provider !== "zenmux"))).toBe(true);
   });
 
   it("removes reasoning blocks before any response reaches the browser", () => {
