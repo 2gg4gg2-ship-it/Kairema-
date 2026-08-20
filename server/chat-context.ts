@@ -24,11 +24,32 @@ function memoryContext(profile: { profile: string; summary: string }, facts: Arr
   return rows.join("\n").slice(0, 2_000);
 }
 
+const DEFAULT_CONTEXT_PREFERENCES = {
+  responseStyle: "default" as const,
+  responseLength: "balanced" as const,
+  quickReplies: 1,
+  effort: "standard" as const,
+  thinking: 0,
+  toolAccess: 1,
+};
+
 export async function buildChatContext(userId: number, sessionId: string, input: { attachmentIds?: string[]; query?: string; role?: RagRole }): Promise<ChatSettings> {
-  const [preferences, profile, facts] = await Promise.all([getUserSettings(userId), getMemoryProfile(userId), listRelevantMemoryFacts(userId, input.query ?? "", 20)]);
-  const attachments = preferences.toolAccess && input.attachmentIds?.length ? await getOwnedChatAttachments(userId, sessionId, input.attachmentIds.slice(0, 4)) : [];
+  const [preferences, profile, facts] = await Promise.all([
+    getUserSettings(userId).catch(() => DEFAULT_CONTEXT_PREFERENCES),
+    getMemoryProfile(userId).catch(() => null),
+    listRelevantMemoryFacts(userId, input.query ?? "", 20).catch(() => []),
+  ]);
+  const attachments = preferences.toolAccess && input.attachmentIds?.length
+    ? await getOwnedChatAttachments(userId, sessionId, input.attachmentIds.slice(0, 4)).catch(() => [])
+    : [];
   const documentContext = getAttachmentPromptText(attachments);
-  const imageUrls = await Promise.all(attachments.filter((attachment) => attachment.kind === "image").map(async (attachment) => (await getOwnedAttachmentDownload(userId, attachment.id)).url));
+  const imageUrls = (await Promise.all(attachments.filter((attachment) => attachment.kind === "image").map(async (attachment) => {
+    try {
+      return (await getOwnedAttachmentDownload(userId, attachment.id)).url;
+    } catch {
+      return null;
+    }
+  }))).filter((url): url is string => typeof url === "string");
 
   const context: ChatSettings = {
     style: preferences.responseStyle,
@@ -37,7 +58,7 @@ export async function buildChatContext(userId: number, sessionId: string, input:
     effort: preferences.effort,
     thinking: Boolean(preferences.thinking),
     toolAccess: Boolean(preferences.toolAccess),
-    ...(profile.enabled ? { memoryContext: memoryContext(profile, facts) } : {}),
+    ...(profile?.enabled ? { memoryContext: memoryContext(profile, facts) } : {}),
     ...(documentContext ? { documentContext } : {}),
     ...(imageUrls.length ? { imageUrls } : {}),
   };

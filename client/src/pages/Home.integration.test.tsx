@@ -134,6 +134,17 @@ describe("Home integration flows", () => {
     expect(screen.queryByText(/Invalid option/)).toBeNull();
   });
 
+  it("renders the structured create-chat failure message instead of a raw JSON object", async () => {
+    const user = userEvent.setup();
+    fixtures.createChat.mockRejectedValueOnce({ error: { message: "Хранилище временно недоступно." } });
+    render(<Home />);
+
+    await user.click(screen.getAllByRole("button", { name: "Новый чат" })[0]!);
+
+    expect(await screen.findByText("Хранилище временно недоступно.")).toBeTruthy();
+    expect(screen.queryByText(/\[object Object\]|\{"error"/)).toBeNull();
+  });
+
   it("deletes the active owned chat and clears the active-message query", async () => {
     const user = userEvent.setup();
     vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));

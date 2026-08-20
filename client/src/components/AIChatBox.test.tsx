@@ -96,6 +96,21 @@ describe("AIChatBox user flows", () => {
     expect(screen.queryByText(/https?:\/\//i)).toBeNull();
   });
 
+  it("renders three identical continuation suggestions without a React duplicate-key warning", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    render(<AIChatBox messages={[{
+      id: "assistant-duplicate-suggestions",
+      role: "assistant",
+      content: "Ответ готов",
+      suggestions: ["Уточните подробнее", "Уточните подробнее", "Уточните подробнее"],
+    }]} onSendMessage={vi.fn()} />);
+
+    expect(screen.getAllByRole("button", { name: "Уточните подробнее" })).toHaveLength(3);
+    expect(consoleError.mock.calls.flat().join(" ")).not.toMatch(/same key|duplicate key/i);
+    consoleError.mockRestore();
+  });
+
   it("renders a delta before the stream completes and replaces it with the persisted final answer", async () => {
     const user = userEvent.setup();
     const { container } = render(<StreamingHarness />);

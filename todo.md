@@ -258,3 +258,11 @@
 - [x] v6-G/E: создан 30-дневный search_outage_log с metadata-only полями слоя, error class, latency и признаком перехода; записи появляются при controlled failover, owner получает ленту/сводку 24ч/7д, non-owner получает 403, а тексты/URL/источники/секреты не сохраняются.
 - [x] v6-G/F: выполнена только read-only проверка scheduler state без создания дубликатов; текущая задача вернула пустой статус, а существующие ранее Heartbeat не изменялись и не имитировались.
 - [x] v6-G/G: добавлены server/client/integration-регрессии темы, сортировки, TTFT, owner isolation/outage log; `pnpm test`, `pnpm check`, production build, bundle audit и desktop/mobile browser-приёмка завершены, отчёт обновлён; checkpoint v6-G сохраняется следующим действием без изменения четырёх ролей, цепей или памяти.
+
+## v6-H — hotfix схемы, дубликатов и сборки контекста
+- [x] v6-H/A: до правок собрана диагностическая таблица: фактическая схема `user_settings` против server whitelist, последние search/provider log-строки с key-коллизиями, trace buildKairemaContext и endpoint/ответ для new-chat/upload.
+- [x] v6-H/B: устранена рассинхронизация schema/validator `user_settings`: additive repair-миграция добавила отсутствующий `exportSortBy`, а типизированный DB whitelist и tRPC-валидатор согласованы для persistent-сортировки и `responseStyle`.
+- [x] v6-H/C: React duplicate keys устранены составными стабильными ключами для журналов, сообщений, источников и suggestions; component-регрессия покрывает три одинаковых элемента без console warning.
+- [x] v6-H/D: memory/history/search/RAG в `buildKairemaContext` изолированы: сбой необязательного слоя использует безопасный fallback или пропуск, сохраняет privacy-safe поведение и не блокирует обычный чат.
+- [x] v6-H/E: JSON-контракты new-chat/upload нормализованы, а frontend показывает человекочитаемые русские сообщения без raw parse error или HTML в JSON-пути.
+- [x] v6-H/F: добавлены hotfix-регрессии; full test/typecheck/build/bundle audit и desktop/mobile browser-приёмка четырёх ролей и потокового чата завершены. Отчёт и TODO обновлены; checkpoint v6-H сохраняется следующим действием без изменения памяти, активных цепей, слогов, расписаний или числа публичных карточек.

@@ -27,12 +27,13 @@ vi.mock("./knowledge", () => ({
 }));
 
 import { buildChatContext, FLASH_WEB_RESEARCH_BUDGET_MS, FRESHNESS_UNAVAILABLE_PROMPT, isKairemaIdentityQuery, needsWebResearch, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
-import { getMemoryProfile, listRelevantMemoryFacts } from "./db";
+import { getMemoryProfile, getUserSettings, listRelevantMemoryFacts } from "./db";
 import { WebSearchUnavailableError, searchWeb } from "./web-search";
 
 const input = { query: "Что нового?", attachmentIds: [] };
 
 afterEach(() => {
+  vi.mocked(getUserSettings).mockResolvedValue({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0 });
   vi.mocked(getMemoryProfile).mockResolvedValue({ enabled: 0, autoExtract: 0, profile: "", summary: "" });
   vi.mocked(listRelevantMemoryFacts).mockResolvedValue([]);
   vi.mocked(searchWeb).mockReset().mockResolvedValue({ summary: "Свежие проверяемые данные.", sources: [{ title: "Официальный источник", url: "https://example.com", domain: "example.com" }] });
@@ -96,5 +97,14 @@ describe("chat context soft web research", () => {
 
     await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Новый чат", role: "flagship" }))
       .resolves.not.toHaveProperty("memoryContext");
+  });
+
+  it("continues with safe defaults when optional settings and memory context are unavailable", async () => {
+    vi.mocked(getUserSettings).mockRejectedValueOnce(new Error("settings unavailable"));
+    vi.mocked(getMemoryProfile).mockRejectedValueOnce(new Error("memory unavailable"));
+    vi.mocked(listRelevantMemoryFacts).mockRejectedValueOnce(new Error("facts unavailable"));
+
+    await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Обычный вопрос", role: "fast" }))
+      .resolves.toMatchObject({ style: "default", responseLength: "balanced", effort: "standard", thinking: false, toolAccess: true });
   });
 });
