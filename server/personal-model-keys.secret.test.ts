@@ -14,14 +14,22 @@ const requestedKeys = [
 
 async function isAuthorizedForCatalog(apiKey: string): Promise<boolean> {
   for (const endpoint of SAFE_CATALOG_ENDPOINTS) {
-    const response = await fetch(endpoint, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(12_000),
-    });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await fetch(endpoint, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(12_000),
+        });
 
-    if (response.status === 200) {
-      const payload = (await response.json()) as { data?: unknown };
-      return Array.isArray(payload.data);
+        if (response.status === 200) {
+          const payload = (await response.json()) as { data?: unknown };
+          return Array.isArray(payload.data);
+        }
+        break;
+      } catch {
+        // A transient socket failure must not prevent checking the second approved catalog.
+        if (attempt === 1) break;
+      }
     }
   }
   return false;

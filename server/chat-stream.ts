@@ -2,8 +2,58 @@ import type { Express, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import { appendChatMessage, getOwnedChatSession, listSessionMessages, updateChatTitle } from "./db";
 import { sdk } from "./_core/sdk";
-import { MODEL_IDS, chatWithRoleStream, publicChatError } from "./providers";
+import { MODEL_IDS, chatWithRoleStream, publicChatError, type Provider, type RoleId } from "./providers";
 import { buildChatContext, extractMemoryFacts } from "./chat-context";
+
+export const CHAT_STREAM_RATE_LIMIT = 60;
+const CHAT_STREAM_RATE_WINDOW_MS = 60_000;
+
+type RateWindow = { count: number; windowStart: number };
+type ChatStreamAuditRecord = {
+  event: "chat_stream.completed" | "chat_stream.rate_limited";
+  userId: number;
+  roleId?: RoleId;
+  provider?: Provider;
+  timestamp: string;
+  retryAfterSeconds?: number;
+};
+
+/** Process-local protection for the SSE entry point. Entries are keyed only by authenticated user ID. */
+const chatStreamRateWindows = new Map<number, RateWindow>();
+let lastRateWindowPruneAt = 0;
+
+function pruneExpiredRateWindows(now: number) {
+  if (now - lastRateWindowPruneAt < CHAT_STREAM_RATE_WINDOW_MS) return;
+  lastRateWindowPruneAt = now;
+  chatStreamRateWindows.forEach((window, userId) => {
+    if (now - window.windowStart >= CHAT_STREAM_RATE_WINDOW_MS) chatStreamRateWindows.delete(userId);
+  });
+}
+
+export function consumeChatStreamRateLimit(userId: number, now = Date.now()): { allowed: boolean; retryAfterSeconds: number } {
+  pruneExpiredRateWindows(now);
+  const current = chatStreamRateWindows.get(userId);
+  if (!current || now - current.windowStart >= CHAT_STREAM_RATE_WINDOW_MS) {
+    chatStreamRateWindows.set(userId, { count: 1, windowStart: now });
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+  if (current.count >= CHAT_STREAM_RATE_LIMIT) {
+    return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((CHAT_STREAM_RATE_WINDOW_MS - (now - current.windowStart)) / 1_000)) };
+  }
+  current.count += 1;
+  return { allowed: true, retryAfterSeconds: 0 };
+}
+
+/** Test-only reset; production instances naturally discard this in-memory state on restart. */
+export function resetChatStreamRateLimits() {
+  chatStreamRateWindows.clear();
+  lastRateWindowPruneAt = 0;
+}
+
+/** Writes metadata only: no prompt, reply, session ID, headers, credentials, or client address. */
+function recordChatStreamAudit(record: ChatStreamAuditRecord) {
+  console.info("[Kairema audit]", JSON.stringify(record));
+}
 
 const streamInputSchema = z.object({
   sessionId: z.string().uuid(),
@@ -41,6 +91,7 @@ type StreamDependencies = {
   chatWithRoleStream: typeof chatWithRoleStream;
   buildChatContext: typeof buildChatContext;
   extractMemoryFacts: typeof extractMemoryFacts;
+  auditChatStream: (record: ChatStreamAuditRecord) => void | Promise<void>;
 };
 
 const defaultDependencies: StreamDependencies = {
@@ -52,6 +103,7 @@ const defaultDependencies: StreamDependencies = {
   chatWithRoleStream,
   buildChatContext,
   extractMemoryFacts,
+  auditChatStream: recordChatStreamAudit,
 };
 
 export function createChatStreamHandler(overrides: Partial<StreamDependencies> = {}): RequestHandler {
@@ -60,6 +112,18 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
     const user = await dependencies.authenticateRequest(req).catch(() => null);
     if (!user) {
       res.status(401).json({ error: "Войдите, чтобы продолжить разговор." });
+      return;
+    }
+
+    const rateLimit = consumeChatStreamRateLimit(user.id);
+    if (!rateLimit.allowed) {
+      void Promise.resolve(dependencies.auditChatStream({
+        event: "chat_stream.rate_limited",
+        userId: user.id,
+        timestamp: new Date().toISOString(),
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+      })).catch(() => undefined);
+      res.set("Retry-After", String(rateLimit.retryAfterSeconds)).status(429).json({ error: "Слишком много запросов. Подождите минуту." });
       return;
     }
 
@@ -124,6 +188,13 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
             : undefined;
           await dependencies.appendChatMessage(user.id, input.sessionId, "assistant", result.content, result.modelUsed, sourceMetadata);
           if (!input.regenerateMessageId) await dependencies.extractMemoryFacts(user.id, input.content).catch(() => undefined);
+          void Promise.resolve(dependencies.auditChatStream({
+            event: "chat_stream.completed",
+            userId: user.id,
+            roleId: input.modelId,
+            provider: result.provider,
+            timestamp: new Date().toISOString(),
+          })).catch(() => undefined);
           writeEvent(res, "done", result);
           finished = true;
           res.end();

@@ -23,5 +23,7 @@ export function createProviderHealthScheduleHandler(): RequestHandler {
 }
 
 export function registerProviderHealthScheduleRoute(app: { post: (path: string, handler: RequestHandler) => unknown }) {
-  app.post("/api/scheduled/provider-health", createProviderHealthScheduleHandler());
+  const handler = createProviderHealthScheduleHandler();
+  app.post("/api/scheduled/provider-health", handler);
+  app.post("/api/scheduled/provider-health-check", handler);
 }

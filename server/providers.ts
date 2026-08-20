@@ -1,4 +1,4 @@
-import { getProviderAvailability, getProviderDailySuccess, incrementProviderDailySuccess, listProviderHealth, listRoleRuntimeStatus, upsertProviderHealth, upsertRoleRuntimeStatus } from "./db";
+import { getProviderAvailability, getProviderDailySuccess, getPublicProviderAvailabilityHistory, incrementProviderDailySuccess, listProviderHealth, listRoleRuntimeStatus, upsertProviderHealth, upsertRoleRuntimeStatus } from "./db";
 
 export const ROLE_IDS = ["fast", "smart", "context", "flagship"] as const;
 /** Compatibility alias: clients select a role, never a raw upstream model. */
@@ -55,7 +55,7 @@ export const MODEL_ROLES: readonly ModelConfig[] = [
     { provider: "openrouter", modelId: "nvidia/nemotron-3-ultra-550b-a55b:free", displayName: "Nemotron 3 Ultra" },
     { provider: "orcarouter", modelId: "deepseek/deepseek-v4-flash-free", displayName: "DeepSeek V4 Flash" },
     { provider: "google", modelId: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash", vision: true, requiresWebResearch: true },
-    { provider: "openrouter", modelId: "nvidia/nemotron-3-ultra-550b-a55b:free", displayName: "Nemotron 3 Ultra" },
+    { provider: "groq", modelId: "openai/gpt-oss-120b", displayName: "GPT-OSS 120B" },
     { provider: "dots", modelId: "dots-studio/dots3-note-prev", displayName: "Dots Studio" },
   ] },
   { key: "flagship", modelId: "flagship", label: "Kairema Флагман", role: "Сложнейшие задачи, переводы и максимальная мощность.", chain: [
@@ -472,6 +472,7 @@ export async function getPublicProviderDashboard() {
       capacity: health?.state === "ready" ? "available" : health?.state === "cooldown" ? "limited" : "unavailable",
       usageToday: provider === "orcarouter" ? await getProviderDailySuccess("orcarouter") : null,
       uptime30d: await getProviderAvailability(provider, 30),
+      availability: await getPublicProviderAvailabilityHistory(provider),
     } as const;
   }));
 }

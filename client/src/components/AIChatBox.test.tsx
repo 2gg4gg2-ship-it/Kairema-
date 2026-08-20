@@ -7,8 +7,12 @@ import { consumeChatStream } from "@/lib/chat-stream";
 import { AIChatBox, type Message } from "./AIChatBox";
 
 const encoder = new TextEncoder();
+let releaseFinalStream: (() => void) | null = null;
 
-afterEach(() => cleanup());
+afterEach(() => {
+  releaseFinalStream = null;
+  cleanup();
+});
 
 function StreamingHarness() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -21,13 +25,14 @@ function StreamingHarness() {
       { id: assistantId, role: "assistant", content: "", providerLabel: "Kairema", model: "openrouter/free", status: "печатает" },
     ]);
     setIsLoading(true);
+    const finalChunk = new Promise<void>((resolve) => { releaseFinalStream = resolve; });
     const response = new Response(new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(encoder.encode('event: delta\ndata: {"content":"Первый фрагмент"}\n\n'));
-        window.setTimeout(() => {
+        void finalChunk.then(() => {
           controller.enqueue(encoder.encode('event: delta\ndata: {"content":" ответа"}\n\nevent: done\ndata: {"content":"Первый фрагмент ответа","modelUsed":"openrouter/free","label":"Kairema Auto-Router"}\n\n'));
           controller.close();
-        }, 25);
+        });
       },
     }));
     void consumeChatStream(response, {
@@ -85,6 +90,7 @@ describe("AIChatBox user flows", () => {
     await user.keyboard("{Enter}");
 
     await waitFor(() => expect(screen.getByText("Первый фрагмент")).toBeTruthy());
+    releaseFinalStream?.();
     await waitFor(() => expect(screen.getByText("Первый фрагмент ответа")).toBeTruthy());
     expect(screen.getByText(/полный ответ/)).toBeTruthy();
     expect(screen.queryByText("печатает")).toBeNull();

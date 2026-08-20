@@ -159,8 +159,10 @@ describe("Kairema v4 role registry", () => {
     vi.stubEnv("OPENROUTER_API_KEY", "");
     vi.stubEnv("ORCAROUTER_API_KEY", "test-orcarouter-key");
     vi.stubEnv("GEMINI_API_KEY", "test-google-key");
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
     vi.stubEnv("API_KEY_DOTS3", "test-dots-key");
     const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "unsupported model" } }), { status: 400 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "unsupported model" } }), { status: 400 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "unsupported model" } }), { status: 400 }))
       .mockResolvedValueOnce(success("Ответ Dots"));
@@ -168,9 +170,9 @@ describe("Kairema v4 role registry", () => {
     const result = await chatWithRole("context", [{ role: "user", content: "Проверка резерва" }]);
 
     expect(result).toMatchObject({ provider: "dots", modelUsed: "Dots Studio", fallbackUsed: true });
-    expect(fetchSpy).toHaveBeenCalledTimes(3);
-    expect(String(fetchSpy.mock.calls[2]?.[0])).toBe("https://zenmux.ai/api/v1/chat/completions");
-    expect(JSON.parse(String(fetchSpy.mock.calls[2]?.[1]?.body))).toMatchObject({ model: "dots-studio/dots3-note-prev" });
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    expect(String(fetchSpy.mock.calls[3]?.[0])).toBe("https://zenmux.ai/api/v1/chat/completions");
+    expect(JSON.parse(String(fetchSpy.mock.calls[3]?.[1]?.body))).toMatchObject({ model: "dots-studio/dots3-note-prev" });
   });
 
   it("removes reasoning blocks before any response reaches the browser", () => {

@@ -9,7 +9,7 @@ const { authenticateRequest, refreshProviderHealth } = vi.hoisted(() => ({
 vi.mock("./_core/sdk", () => ({ sdk: { authenticateRequest } }));
 vi.mock("./providers", () => ({ refreshProviderHealth }));
 
-import { createProviderHealthScheduleHandler } from "./provider-health-schedule";
+import { createProviderHealthScheduleHandler, registerProviderHealthScheduleRoute } from "./provider-health-schedule";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -43,5 +43,16 @@ describe("provider health schedule", () => {
     expect(res.status).toHaveBeenCalledWith(403);
     expect(res.json).toHaveBeenCalledWith({ error: "cron-only" });
     expect(refreshProviderHealth).not.toHaveBeenCalled();
+  });
+
+  it("registers the documented heartbeat path alongside the legacy route", () => {
+    const post = vi.fn();
+    registerProviderHealthScheduleRoute({ post });
+
+    expect(post.mock.calls.map(([path]) => path)).toEqual([
+      "/api/scheduled/provider-health",
+      "/api/scheduled/provider-health-check",
+    ]);
+    expect(post.mock.calls[0][1]).toBe(post.mock.calls[1][1]);
   });
 });

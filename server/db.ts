@@ -178,6 +178,60 @@ export async function getProviderAvailability(provider: string, days = 30): Prom
   return { samples: rows.length, ready, uptime: rows.length ? Math.round((ready / rows.length) * 1000) / 10 : 0 };
 }
 
+type PublicAvailabilityState = "ready" | "cooldown" | "auth_failed" | "unavailable" | "not_configured";
+type PublicAvailabilityAggregate = { samples: number; ready: number; uptime: number };
+
+/**
+ * Bounded public history DTO. It deliberately excludes HTTP details, failure categories,
+ * model IDs, probe routes and all fallback information.
+ */
+export async function getPublicProviderAvailabilityHistory(provider: string): Promise<{
+  uptime24h: PublicAvailabilityAggregate;
+  uptime7d: PublicAvailabilityAggregate;
+  segments24h: Array<{ at: string; state: PublicAvailabilityState | "unknown" }>;
+  events: Array<{ at: string; state: PublicAvailabilityState }>;
+}> {
+  const db = await getDb();
+  const now = new Date();
+  const hourMs = 60 * 60 * 1000;
+  const start24h = new Date(now.getTime() - 24 * hourMs);
+  const start7d = new Date(now.getTime() - 7 * 24 * hourMs);
+  const emptyAggregate = { samples: 0, ready: 0, uptime: 0 };
+  const emptySegments = Array.from({ length: 24 }, (_, index) => ({
+    at: new Date(start24h.getTime() + index * hourMs).toISOString(),
+    state: "unknown" as const,
+  }));
+  if (!db) return { uptime24h: emptyAggregate, uptime7d: emptyAggregate, segments24h: emptySegments, events: [] };
+
+  const rows = await db.select({ state: providerHealthHistory.state, checkedAt: providerHealthHistory.checkedAt })
+    .from(providerHealthHistory)
+    .where(and(eq(providerHealthHistory.provider, provider), gt(providerHealthHistory.checkedAt, start7d)))
+    .orderBy(desc(providerHealthHistory.checkedAt))
+    .limit(512);
+  const toPublicState = (value: string): PublicAvailabilityState => {
+    if (value === "ready" || value === "cooldown" || value === "auth_failed" || value === "unavailable" || value === "not_configured") return value;
+    return "unavailable";
+  };
+
+  const aggregate = (since: Date): PublicAvailabilityAggregate => {
+    const windowRows = rows.filter((row) => row.checkedAt > since);
+    const ready = windowRows.filter((row) => row.state === "ready").length;
+    return { samples: windowRows.length, ready, uptime: windowRows.length ? Math.round((ready / windowRows.length) * 1000) / 10 : 0 };
+  };
+  const segments24h: Array<{ at: string; state: PublicAvailabilityState | "unknown" }> = emptySegments.map((segment, index) => {
+    const start = start24h.getTime() + index * hourMs;
+    const end = start + hourMs;
+    const newest = rows.find((row) => row.checkedAt.getTime() >= start && row.checkedAt.getTime() < end);
+    return { ...segment, state: newest ? toPublicState(newest.state) : "unknown" as const };
+  });
+  return {
+    uptime24h: aggregate(start24h),
+    uptime7d: aggregate(start7d),
+    segments24h,
+    events: rows.slice(0, 8).map((row) => ({ at: row.checkedAt.toISOString(), state: toPublicState(row.state) })),
+  };
+}
+
 function utcDayKey(date = new Date()) { return date.toISOString().slice(0, 10); }
 
 /** Counts only successful final answers and never stores prompt, user or model details. */
