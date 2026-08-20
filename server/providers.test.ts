@@ -9,7 +9,7 @@ vi.mock("./db", () => ({
   getProviderDailySuccess: vi.fn().mockResolvedValue(0),
 }));
 
-import { ATTEMPT_TIMEOUT_MS, DIAGNOSTIC_CANDIDATES, InvalidModelSelectionError, MODEL_CONFIG, MODEL_IDS, MODEL_ROLES, __resetProviderHealthForTests, buildOpenRouterMessages, chatWithRole, chatWithRoleStream, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, getProviderHealthForTesting, isAllowedModelId, modelById, openRouterStreamDelta, publicChatError, refreshProviderHealth, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView, toRoleRuntimeView } from "./providers";
+import { ATTEMPT_TIMEOUT_MS, DIAGNOSTIC_CANDIDATES, InvalidModelSelectionError, MAX_ATTEMPTS, MODEL_CONFIG, MODEL_IDS, MODEL_ROLES, __resetProviderHealthForTests, buildOpenRouterMessages, chatWithRole, chatWithRoleStream, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, getProviderHealthForTesting, isAllowedModelId, modelById, openRouterStreamDelta, publicChatError, refreshProviderHealth, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView, toRoleRuntimeView } from "./providers";
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -31,12 +31,14 @@ describe("Kairema v4 role registry", () => {
     expect(modelById("code")).toBeUndefined();
   });
 
-  it("keeps exactly four active candidates per role and the two inactive diagnostic candidates", () => {
+  it("keeps four primary candidates and permits only Dots as the fifth server-side reserve", () => {
     for (const role of MODEL_ROLES) {
-      expect(role.chain).toHaveLength(4);
+      expect(role.chain.slice(0, MAX_ATTEMPTS)).toHaveLength(4);
       expect(role.chain.every((candidate) => candidate.modelId !== role.modelId)).toBe(true);
       expect(role.chain.some((candidate) => candidate.modelId === "openrouter/free")).toBe(false);
     }
+    expect(MODEL_ROLES.find((role) => role.key === "context")?.chain[4]).toEqual({ provider: "dots", modelId: "dots-studio/dots3-note-prev", displayName: "Dots Studio" });
+    expect(MODEL_ROLES.filter((role) => role.key !== "context").every((role) => role.chain.length === 4)).toBe(true);
     expect(DIAGNOSTIC_CANDIDATES).toEqual([
       { provider: "openrouter", modelId: "openrouter/free", displayName: "OpenRouter Auto" },
       { provider: "orcarouter", modelId: "orcarouter/free", displayName: "OrcaRouter Auto" },
@@ -114,7 +116,7 @@ describe("Kairema v4 role registry", () => {
     expect(health.find((item) => item.provider === "orcarouter")).toMatchObject({ state: "cooldown", category: "RATE_LIMIT" });
   });
 
-  it("keeps inaccessible ZenMux in server-only health checks and does not add a fifth role attempt", async () => {
+  it("keeps inaccessible ZenMux in server-only health checks while Dots uses a separate key", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "");
     vi.stubEnv("ORCAROUTER_API_KEY", "");
     vi.stubEnv("GROQ_API_KEY", "");
@@ -124,6 +126,7 @@ describe("Kairema v4 role registry", () => {
     vi.stubEnv("CEREBRAS_API_KEY", "");
     vi.stubEnv("DEEPSEEK_API_KEY", "");
     vi.stubEnv("ZENMUX_API_KEY", "test-zenmux-key");
+    vi.stubEnv("API_KEY_DOTS3", "");
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ error: { message: "You have no permission to access this resource" } }), { status: 403 }),
     );
@@ -134,7 +137,40 @@ describe("Kairema v4 role registry", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(String(fetchSpy.mock.calls[0]?.[0])).toBe("https://zenmux.ai/api/v1/chat/completions");
     expect(health.find((item) => item.provider === "zenmux")).toMatchObject({ state: "auth_failed", category: "AUTH", http: 403 });
-    expect(MODEL_ROLES.every((role) => role.chain.length === 4 && role.chain.every((candidate) => candidate.provider !== "zenmux"))).toBe(true);
+    expect(MODEL_ROLES.every((role) => role.chain.every((candidate) => candidate.provider !== "zenmux"))).toBe(true);
+    expect(MODEL_ROLES.find((role) => role.key === "context")?.chain[4]?.provider).toBe("dots");
+  });
+
+  it("does not invoke the fifth Dots reserve after four real context attempts", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+    vi.stubEnv("ORCAROUTER_API_KEY", "test-orcarouter-key");
+    vi.stubEnv("GEMINI_API_KEY", "test-google-key");
+    vi.stubEnv("API_KEY_DOTS3", "test-dots-key");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({ error: { message: "unsupported model" } }), { status: 400 }),
+    ));
+
+    await expect(chatWithRole("context", [{ role: "user", content: "Проверка лимита" }])).rejects.toMatchObject({ name: "OpenRouterError" });
+    expect(fetchSpy).toHaveBeenCalledTimes(MAX_ATTEMPTS);
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("zenmux.ai"))).toBe(false);
+  });
+
+  it("uses Dots only as the last Context reserve when an earlier candidate is skipped", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    vi.stubEnv("ORCAROUTER_API_KEY", "test-orcarouter-key");
+    vi.stubEnv("GEMINI_API_KEY", "test-google-key");
+    vi.stubEnv("API_KEY_DOTS3", "test-dots-key");
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "unsupported model" } }), { status: 400 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "unsupported model" } }), { status: 400 }))
+      .mockResolvedValueOnce(success("Ответ Dots"));
+
+    const result = await chatWithRole("context", [{ role: "user", content: "Проверка резерва" }]);
+
+    expect(result).toMatchObject({ provider: "dots", modelUsed: "Dots Studio", fallbackUsed: true });
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(String(fetchSpy.mock.calls[2]?.[0])).toBe("https://zenmux.ai/api/v1/chat/completions");
+    expect(JSON.parse(String(fetchSpy.mock.calls[2]?.[1]?.body))).toMatchObject({ model: "dots-studio/dots3-note-prev" });
   });
 
   it("removes reasoning blocks before any response reaches the browser", () => {

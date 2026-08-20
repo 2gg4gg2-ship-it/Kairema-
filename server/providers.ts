@@ -6,7 +6,7 @@ export const MODEL_IDS = ROLE_IDS;
 export type RoleId = (typeof ROLE_IDS)[number];
 export type ModelId = RoleId;
 export type ModelKey = RoleId;
-export type Provider = "openrouter" | "orcarouter" | "zenmux" | "google" | "groq" | "sambanova" | "mistral" | "cerebras" | "deepseek";
+export type Provider = "openrouter" | "orcarouter" | "zenmux" | "dots" | "google" | "groq" | "sambanova" | "mistral" | "cerebras" | "deepseek";
 export type StatusCategory = "AUTH" | "QUOTA" | "RATE_LIMIT" | "PROVIDER_UNAVAILABLE" | "ENDPOINT" | "MODEL" | "NETWORK" | "TIMEOUT" | "PARSE" | "CONFIG" | "UNKNOWN";
 export type ModelStatus = { state: "ready" | "fallback" | "loading" | "error" | "unavailable" | "not_configured"; badge: string; category: StatusCategory | null; http: number | null; checkedAt: string; confirmed: string };
 export type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -56,6 +56,7 @@ export const MODEL_ROLES: readonly ModelConfig[] = [
     { provider: "orcarouter", modelId: "deepseek/deepseek-v4-flash-free", displayName: "DeepSeek V4 Flash" },
     { provider: "google", modelId: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash", vision: true, requiresWebResearch: true },
     { provider: "openrouter", modelId: "nvidia/nemotron-3-ultra-550b-a55b:free", displayName: "Nemotron 3 Ultra" },
+    { provider: "dots", modelId: "dots-studio/dots3-note-prev", displayName: "Dots Studio" },
   ] },
   { key: "flagship", modelId: "flagship", label: "Kairema Флагман", role: "Сложнейшие задачи, переводы и максимальная мощность.", chain: [
     { provider: "openrouter", modelId: "google/gemma-4-31b-it:free", displayName: "Gemma 4 31B" },
@@ -82,11 +83,14 @@ const ZENMUX_FREE_MODEL_ALLOWLIST = [
   "z-ai/glm-4.7-flash-free",
   "z-ai/glm-4.6v-flash-free",
 ] as const;
+/** Confirmed by a fresh HTTP 200 completion on 2026-08-20; never exposed to the client. */
+const DOTS_MODEL_ALLOWLIST = ["dots-studio/dots3-note-prev"] as const;
 
 const ENDPOINTS: Record<Provider, string> = {
   openrouter: "https://openrouter.ai/api/v1/chat/completions",
   orcarouter: "https://api.orcarouter.ai/v1/chat/completions",
   zenmux: "https://zenmux.ai/api/v1/chat/completions",
+  dots: "https://zenmux.ai/api/v1/chat/completions",
   google: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
   groq: "https://api.groq.com/openai/v1/chat/completions",
   sambanova: "https://api.sambanova.ai/v1/chat/completions",
@@ -94,8 +98,9 @@ const ENDPOINTS: Record<Provider, string> = {
   cerebras: "https://api.cerebras.ai/v1/chat/completions",
   deepseek: "https://api.deepseek.com/chat/completions",
 };
-const PROVIDERS: readonly Provider[] = ["openrouter", "orcarouter", "zenmux", "google", "groq", "sambanova", "mistral", "cerebras", "deepseek"];
-const MAX_ATTEMPTS = 4;
+const PROVIDERS: readonly Provider[] = ["openrouter", "orcarouter", "zenmux", "dots", "google", "groq", "sambanova", "mistral", "cerebras", "deepseek"];
+/** Hard cap on real upstream requests. Health or capability skips never consume this budget. */
+export const MAX_ATTEMPTS = 4;
 /** The dashboard deliberately excludes server-only fallback and diagnostic providers. */
 export const PUBLIC_DASHBOARD_PROVIDERS = ["openrouter", "orcarouter", "google", "groq"] as const satisfies readonly Provider[];
 /** Every provider attempt has the same bounded latency budget, including SSE. */
@@ -120,6 +125,8 @@ function secretFor(provider: Provider) {
       ? "ORCAROUTER_API_KEY"
       : provider === "zenmux"
         ? "ZENMUX_API_KEY"
+      : provider === "dots"
+        ? "API_KEY_DOTS3"
       : provider === "google"
       ? "GEMINI_API_KEY"
       : provider === "groq"
@@ -299,6 +306,7 @@ function probeCandidate(provider: Provider): Candidate {
   if (provider === "openrouter") return { provider, modelId: "openai/gpt-oss-20b:free", displayName: "health probe" };
   if (provider === "orcarouter") return { provider, modelId: "orcarouter/free", displayName: "diagnostic health probe" };
   if (provider === "zenmux") return { provider, modelId: ZENMUX_FREE_MODEL_ALLOWLIST[1], displayName: "diagnostic health probe" };
+  if (provider === "dots") return { provider, modelId: DOTS_MODEL_ALLOWLIST[0], displayName: "diagnostic health probe" };
   if (provider === "google") return { provider, modelId: "gemini-flash-lite-latest", displayName: "health probe" };
   if (provider === "groq") return { provider, modelId: "openai/gpt-oss-20b", displayName: "health probe" };
   if (provider === "sambanova") return { provider, modelId: "Meta-Llama-3.3-70B-Instruct", displayName: "health probe" };
@@ -406,7 +414,7 @@ export async function refreshProviderHealth(options: { force?: boolean; knownOnl
 }
 
 function statusForRole(role: ModelConfig) {
-  const candidates = role.chain.slice(0, MAX_ATTEMPTS);
+  const candidates = role.chain;
   let hasConfiguredCandidate = false;
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index]!;
@@ -418,7 +426,7 @@ function statusForRole(role: ModelConfig) {
 }
 
 function providerLabel(provider: Provider | null) {
-  return provider === "openrouter" ? "OpenRouter" : provider === "orcarouter" ? "OrcaRouter" : provider === "zenmux" ? "ZenMux" : provider === "google" ? "Google AI Studio" : provider === "groq" ? "Groq" : provider === "sambanova" ? "SambaNova" : provider === "mistral" ? "Mistral" : provider === "cerebras" ? "Cerebras" : provider === "deepseek" ? "DeepSeek" : null;
+  return provider === "openrouter" ? "OpenRouter" : provider === "orcarouter" ? "OrcaRouter" : provider === "zenmux" ? "ZenMux" : provider === "dots" ? "Dots Studio" : provider === "google" ? "Google AI Studio" : provider === "groq" ? "Groq" : provider === "sambanova" ? "SambaNova" : provider === "mistral" ? "Mistral" : provider === "cerebras" ? "Cerebras" : provider === "deepseek" ? "DeepSeek" : null;
 }
 
 export function toRoleRuntimeView(state: RoleRuntimeView["state"], provider: string | null, modelUsed: string | null, checkedAt: Date): RoleRuntimeView {
@@ -500,11 +508,11 @@ export function statusFromChatPayload(payload: unknown): ModelStatus { const raw
 export async function chatWithRole(roleId: string, history: ChatMessage[], settings?: ChatSettings): Promise<ChatResult> {
   assertAllowedModelId(roleId);
   await hydrateProviderHealth();
-  await refreshProviderHealth({ knownOnly: true });
   const role = roleById(roleId)!;
   const attempts: ChainAttempt[] = [];
   let last: OpenRouterError | null = null;
-  const candidates = role.chain.slice(0, MAX_ATTEMPTS);
+  const candidates = role.chain;
+  let networkAttempts = 0;
   if (settings?.imageUrls?.length && !candidates.some((candidate) => candidate.vision && providerAvailable(candidate.provider))) {
     throw new OpenRouterError({ state: "unavailable", badge: "Недоступно", category: "PROVIDER_UNAVAILABLE", http: null, checkedAt: now(), confirmed: "Анализ изображений временно недоступен: нет готового vision-кандидата." });
   }
@@ -512,6 +520,8 @@ export async function chatWithRole(roleId: string, history: ChatMessage[], setti
     const candidate = candidates[index]!;
     if (settings?.imageUrls?.length && !candidate.vision) { attempts.push(attempt(candidate, "skipped")); continue; }
     if (!providerAvailable(candidate.provider)) { attempts.push(attempt(candidate, "skipped")); continue; }
+    if (networkAttempts >= MAX_ATTEMPTS) break;
+    networkAttempts += 1;
     try {
       const response = await invoke(candidate, role, history, settings, false);
       const content = contentFrom(await response.json());
@@ -537,11 +547,11 @@ export async function chatWithRole(roleId: string, history: ChatMessage[], setti
 export async function chatWithRoleStream(roleId: string, history: ChatMessage[], settings: ChatSettings | undefined, onDelta: (delta: string) => void, signal?: AbortSignal): Promise<ChatResult> {
   assertAllowedModelId(roleId);
   await hydrateProviderHealth();
-  await refreshProviderHealth({ knownOnly: true });
   const role = roleById(roleId)!;
   const attempts: ChainAttempt[] = [];
   let last: OpenRouterError | null = null;
-  const candidates = role.chain.slice(0, MAX_ATTEMPTS);
+  const candidates = role.chain;
+  let networkAttempts = 0;
   if (settings?.imageUrls?.length && !candidates.some((candidate) => candidate.vision && providerAvailable(candidate.provider))) {
     throw new OpenRouterError({ state: "unavailable", badge: "Недоступно", category: "PROVIDER_UNAVAILABLE", http: null, checkedAt: now(), confirmed: "Анализ изображений временно недоступен: нет готового vision-кандидата." });
   }
@@ -549,6 +559,8 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
     const candidate = candidates[index]!;
     if (settings?.imageUrls?.length && !candidate.vision) { attempts.push(attempt(candidate, "skipped")); continue; }
     if (!providerAvailable(candidate.provider)) { attempts.push(attempt(candidate, "skipped")); continue; }
+    if (networkAttempts >= MAX_ATTEMPTS) break;
+    networkAttempts += 1;
     let visibleDeltaDelivered = false;
     let providerDeltaReceived = false;
     try {

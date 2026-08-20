@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { MODEL_ROLES, PUBLIC_DASHBOARD_PROVIDERS, ROLE_IDS, sanitizeAssistantContent } from "./providers";
+import { MAX_ATTEMPTS, MODEL_ROLES, PUBLIC_DASHBOARD_PROVIDERS, ROLE_IDS, sanitizeAssistantContent } from "./providers";
 
 describe("v5.5 server-side role safety", () => {
-  it("keeps exactly four public role cards and a maximum of four hidden attempts each", () => {
+  it("keeps exactly four public role cards and a maximum of four real upstream attempts", () => {
     expect(ROLE_IDS).toEqual(["fast", "smart", "context", "flagship"]);
     expect(MODEL_ROLES).toHaveLength(4);
-    expect(MODEL_ROLES.every((role) => role.chain.length === 4)).toBe(true);
+    expect(MODEL_ROLES.every((role) => role.chain.slice(0, MAX_ATTEMPTS).length === 4)).toBe(true);
+    expect(MODEL_ROLES.find((role) => role.key === "context")?.chain[4]?.provider).toBe("dots");
   });
 
   it("uses Google candidates only behind web-research policy and keeps OrcaRouter in server-side chains", () => {
