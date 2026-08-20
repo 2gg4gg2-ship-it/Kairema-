@@ -74,6 +74,13 @@ export const providerDailyUsage = mysqlTable("provider_daily_usage", {
 	successCount: int("successCount").notNull().default(0),
 }, (table) => [primaryKey({ columns: [table.provider, table.dayKey] })]);
 
+/** Anonymous Flash first-visible-token durations. This table deliberately has no user, session, prompt, reply, provider or model column. */
+export const flashTtftMetrics = mysqlTable("flash_ttft_metrics", {
+	id: int("id").autoincrement().primaryKey(),
+	durationMs: int("durationMs").notNull(),
+	createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("flash_ttft_metrics_created_idx").on(table.createdAt)]);
+
 export const roleRuntimeStatus = mysqlTable("role_runtime_status", {
 	roleId: mysqlEnum("roleId", ["fast", "smart", "context", "flagship"]).primaryKey(),
 	state: mysqlEnum("state", ["ready", "backup", "unavailable"]).notNull(),
@@ -212,6 +219,7 @@ export type ChatMessageRecord = typeof messages.$inferSelect;
 export type ChatExport = typeof chatExports.$inferSelect;
 export type ProviderHealthRecord = typeof providerHealth.$inferSelect;
 export type ProviderDailyUsageRecord = typeof providerDailyUsage.$inferSelect;
+export type FlashTtftMetricRecord = typeof flashTtftMetrics.$inferSelect;
 export type WebSearchStatusRecord = typeof webSearchStatus.$inferSelect;
 export type KnowledgeSource = typeof knowledgeSources.$inferSelect;
 export type KnowledgeDocument = typeof knowledgeDocuments.$inferSelect;

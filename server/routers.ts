@@ -2,10 +2,11 @@ import { TRPCError } from "@trpc/server";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearMemory, createChatExportRecord, createChatSession, createMemoryFact, deleteAllOwnedChatExports, deleteMemoryFact, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, getMemoryProfile, getOwnedChatExport, getOwnedChatSession, getUserSettings, listChatExports, listChatSessions, listMemoryFacts, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryFact, updateMemoryProfile, updateUserSettings } from "./db";
+import { appendChatMessage, clearMemory, createChatExportRecord, createChatSession, createMemoryFact, deleteAllOwnedChatExports, deleteMemoryFact, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, getFlashTtftStats, getMemoryProfile, getOwnedChatExport, getOwnedChatSession, getUserSettings, listChatExports, listChatSessions, listMemoryFacts, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryFact, updateMemoryProfile, updateUserSettings } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { ENV } from "./_core/env";
 import { MODEL_IDS, chatWithRole, getModelViews, getPublicProviderDashboard, publicChatError } from "./providers";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { getOwnedAttachmentDownload, uploadOwnedChatAttachment } from "./attachments";
@@ -65,6 +66,13 @@ export const appRouter = router({
   }),
   providers: router({
     dashboard: protectedProcedure.query(() => getPublicProviderDashboard()),
+  }),
+  owner: router({
+    isOwner: protectedProcedure.query(({ ctx }) => Boolean(ENV.ownerOpenId && ctx.user.openId === ENV.ownerOpenId)),
+    flashTtft: protectedProcedure.query(async ({ ctx }) => {
+      if (!ENV.ownerOpenId || ctx.user.openId !== ENV.ownerOpenId) throw new TRPCError({ code: "FORBIDDEN", message: "Панель производительности доступна только владельцу." });
+      return getFlashTtftStats();
+    }),
   }),
   settings: router({
     get: protectedProcedure.query(({ ctx }) => getUserSettings(ctx.user.id)),
@@ -152,7 +160,13 @@ export const appRouter = router({
     list: protectedProcedure.query(({ ctx }) => listChatSessions(ctx.user.id)),
     create: protectedProcedure
       .input(z.object({ modelId: modelIdSchema }))
-      .mutation(({ ctx, input }) => createChatSession(ctx.user.id, input.modelId)),
+      .mutation(async ({ ctx, input }) => {
+        try {
+          return await createChatSession(ctx.user.id, input.modelId);
+        } catch (error) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: storageError(error) });
+        }
+      }),
     messages: protectedProcedure
       .input(z.object({ sessionId: z.string().uuid() }))
       .query(async ({ ctx, input }) => {

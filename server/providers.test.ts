@@ -7,8 +7,10 @@ vi.mock("./db", () => ({
   upsertRoleRuntimeStatus: vi.fn().mockResolvedValue(undefined),
   incrementProviderDailySuccess: vi.fn().mockResolvedValue(undefined),
   getProviderDailySuccess: vi.fn().mockResolvedValue(0),
+  recordFlashTtftMetric: vi.fn().mockResolvedValue(undefined),
 }));
 
+import { recordFlashTtftMetric } from "./db";
 import { ATTEMPT_TIMEOUT_MS, DIAGNOSTIC_CANDIDATES, FLASH_VISIBLE_TTFT_DEADLINE_MS, InvalidModelSelectionError, MAX_ATTEMPTS, MODEL_CONFIG, MODEL_IDS, MODEL_ROLES, __resetProviderHealthForTests, buildOpenRouterMessages, chatWithRole, chatWithRoleStream, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, getProviderHealthForTesting, getZenmuxHeartbeatTrackingForTests, isAllowedModelId, modelById, openRouterStreamDelta, publicChatError, refreshProviderHealth, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView, toRoleRuntimeView } from "./providers";
 
 afterEach(() => {
@@ -228,21 +230,42 @@ describe("Kairema v4 role registry", () => {
     expect(filter("</think>Итог")).toBe("Итог");
   });
 
-  it("does not mix answers by falling back after a visible stream delta", async () => {
+  it("continues the visible partial answer with a reserve in one stream bubble", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+    vi.stubEnv("ORCAROUTER_API_KEY", "test-orcarouter-key");
     const encoder = new TextEncoder();
-    let pulls = 0;
-    const body = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        pulls += 1;
-        if (pulls === 1) controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Начало"}}]}\n\n'));
-        else controller.error(new Error("upstream interrupted"));
+    let primaryRead = 0;
+    const partialThenError = {
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: async () => {
+            primaryRead += 1;
+            if (primaryRead === 1) return { done: false, value: encoder.encode('data: {"choices":[{"delta":{"content":"Начало"}}]}\n\n') };
+            throw new Error("upstream interrupted");
+          },
+          releaseLock: vi.fn(),
+        }),
+      },
+    } as unknown as Response;
+    const reserveBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":" и продолжение"}}]}\n\n'));
+        controller.close();
       },
     });
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200 }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(partialThenError)
+      .mockResolvedValueOnce(new Response(reserveBody, { status: 200 }));
+    const deltas: string[] = [];
 
-    await expect(chatWithRoleStream("fast", [{ role: "user", content: "Тест" }], undefined, vi.fn())).rejects.toThrow("upstream interrupted");
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const result = await chatWithRoleStream("fast", [{ role: "user", content: "Тест" }], undefined, (delta) => deltas.push(delta));
+
+    expect(result).toMatchObject({ provider: "orcarouter", fallbackUsed: true, content: "Начало и продолжение" });
+    expect(deltas.join("")).toBe("Начало и продолжение");
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(fetchSpy.mock.calls[1]?.[1]?.body)).toContain("Начало");
   });
 
   it("records Flash TTFT once at the first visible delta without logging prompt or response text", async () => {
@@ -255,16 +278,12 @@ describe("Kairema v4 role registry", () => {
       },
     });
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200 }));
-    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
-
     await chatWithRoleStream("fast", [{ role: "user", content: "Секретный пользовательский текст" }], undefined, vi.fn());
 
-    const metric = info.mock.calls.map((args) => args.join(" ")).find((entry) => entry.includes('"event":"flash.ttft"'));
-    expect(metric).toContain('"provider":"openrouter"');
-    expect(metric).toMatch(/"durationMs":\d+/);
-    expect(metric).not.toContain("Секретный пользовательский текст");
-    expect(metric).not.toContain("Безопасный фрагмент");
-    info.mockRestore();
+    expect(recordFlashTtftMetric).toHaveBeenCalledTimes(1);
+    expect(recordFlashTtftMetric).toHaveBeenCalledWith(expect.any(Number));
+    expect(JSON.stringify(vi.mocked(recordFlashTtftMetric).mock.calls)).not.toContain("Секретный пользовательский текст");
+    expect(JSON.stringify(vi.mocked(recordFlashTtftMetric).mock.calls)).not.toContain("Безопасный фрагмент");
   });
 
   it("moves Flash to a reserve when its primary has no visible delta within the dedicated deadline", async () => {

@@ -47,6 +47,7 @@ vi.mock("@/lib/trpc", () => ({
     webSearch: { status: { useQuery: () => ({ data: { available: false, reason: "Поиск сейчас недоступен" } }) } },
     knowledge: { status: { useQuery: () => ({ data: { documents: 0, sources: [], lastRun: null } }) }, audit: { useQuery: () => ({ data: { sources: [{ name: "OpenAI News", url: "https://openai.com/news/rss.xml", indexedCount: 12, lastSuccessAt: "2026-08-19T00:00:00.000Z" }], latestRun: { state: "completed", startedAt: "2026-08-19T00:00:00.000Z", finishedAt: "2026-08-19T00:01:00.000Z" } } }) }, refresh: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) } },
     providers: { dashboard: { useQuery: () => ({ data: [{ id: "openrouter", label: "OpenRouter", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }, { id: "google", label: "Google AI Studio", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }, { id: "groq", label: "Groq", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }] }) } },
+    owner: { isOwner: { useQuery: () => ({ data: false }) }, flashTtft: { useQuery: () => ({ data: null }) } },
     search: { query: { useQuery: () => ({ data: [] }) } },
     attachments: { list: { useQuery: () => ({ data: [] }) }, upload: { useMutation: () => ({ mutateAsync: vi.fn() }) }, delete: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
     chats: {
@@ -164,6 +165,20 @@ describe("Home integration flows", () => {
     const filesSection = screen.getByRole("region", { name: "Файлы" });
     expect(exportsSection.querySelector(".kairema-empty")?.textContent).toContain("Экспортов пока нет");
     expect(filesSection.querySelector(".kairema-empty")?.textContent).toContain("Вложений в этом чате пока нет");
+  });
+
+  it("filters export history locally by file name without changing the server contract", async () => {
+    const user = userEvent.setup();
+    fixtures.exports = [
+      { id: "33333333-3333-4333-8333-333333333333", fileName: "Проектный архив.md", format: "markdown", createdAt: new Date("2026-08-19T00:00:00.000Z") },
+      { id: "44444444-4444-4444-8444-444444444444", fileName: "Итоги встречи.pdf", format: "pdf", createdAt: new Date("2026-08-18T00:00:00.000Z") },
+    ];
+    render(<Home />);
+
+    await user.type(screen.getByRole("textbox", { name: "Поиск: Экспорты" }), "архив");
+
+    expect(screen.getByText("Проектный архив.md")).toBeTruthy();
+    expect(screen.queryByText("Итоги встречи.pdf")).toBeNull();
   });
 
   it("confirms before deleting all exports and refreshes the export history after the owned operation succeeds", async () => {

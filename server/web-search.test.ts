@@ -49,16 +49,17 @@ describe("Google Search grounding", () => {
     await expect(searchWeb("Проверь факт")).resolves.toEqual({
       summary: "Проверенный краткий ответ.",
       sources: [{ title: "Официальный источник", url: "https://example.com/source", domain: "example.com" }],
+      cascadeUsed: "google",
     });
     expect((await getWebSearchStatus()).available).toBe(true);
   }, 10_000);
 
-  it("uses Tavily after Google 429 and preserves only real Tavily URLs", async () => {
+  it("uses Tavily after a non-quota Google failure and preserves only real Tavily URLs", async () => {
     process.env.GEMINI_API_KEY = "test-google";
     process.env.TAVILY_API_KEY = "test-tavily";
     process.env.OPENROUTER_API_KEY = "";
     vi.stubGlobal("fetch", vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { status: "RESOURCE_EXHAUSTED" } }), { status: 429 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { status: "UNAVAILABLE" } }), { status: 503 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ results: [
         { title: "Проверяемый материал", url: "https://example.com/tavily", content: "Краткий подтверждаемый фрагмент." },
         { title: "Дубликат", url: "https://example.com/tavily", content: "Не должен дублироваться." },
@@ -66,16 +67,17 @@ describe("Google Search grounding", () => {
 
     await expect(searchWeb("Проверь актуальный факт")).resolves.toMatchObject({
       sources: [{ title: "Проверяемый материал", url: "https://example.com/tavily" }],
+      cascadeUsed: "tavily",
     });
-    await expect(getWebSearchStatus()).resolves.toMatchObject({ available: true, googleHttp: 429, reason: "Google недоступен по квоте; используется Tavily с проверяемыми источниками." });
+    await expect(getWebSearchStatus()).resolves.toMatchObject({ available: true, googleHttp: 503, reason: "Поиск доступен через резервный сервис." });
   });
 
-  it("uses OpenRouter online only after Google 429 when Tavily cannot return sources", async () => {
+  it("uses OpenRouter online once after Google fails and Tavily cannot return sources", async () => {
     process.env.GEMINI_API_KEY = "test-google";
     process.env.TAVILY_API_KEY = "test-tavily";
     process.env.OPENROUTER_API_KEY = "test-openrouter";
     vi.stubGlobal("fetch", vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { status: "RESOURCE_EXHAUSTED" } }), { status: 429 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { status: "UNAVAILABLE" } }), { status: 503 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ results: [] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         choices: [{ message: { content: "Актуальный ответ OpenRouter." } }],
@@ -85,8 +87,9 @@ describe("Google Search grounding", () => {
     await expect(searchWeb("Проверь актуальный факт")).resolves.toEqual({
       summary: "Актуальный ответ OpenRouter.",
       sources: [{ title: "https://example.com/verified", url: "https://example.com/verified", domain: "example.com" }],
+      cascadeUsed: "openrouter",
     });
-    await expect(getWebSearchStatus()).resolves.toMatchObject({ available: true, googleHttp: 429, openrouterHttp: 200 });
+    await expect(getWebSearchStatus()).resolves.toMatchObject({ available: true, googleHttp: 503, openrouterHttp: 200 });
   });
 
   it("reports unavailable honestly when all external search fallbacks lack sources", async () => {
@@ -96,7 +99,7 @@ describe("Google Search grounding", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { status: "RESOURCE_EXHAUSTED", message: "quota exceeded" } }), { status: 429 })));
 
     await expect(searchWeb("Проверь факт")).rejects.toBeInstanceOf(WebSearchUnavailableError);
-    await expect(getWebSearchStatus()).resolves.toMatchObject({ available: false, reason: "Поиск временно недоступен: квота Google; Tavily и OpenRouter online не вернули проверяемые источники. RAG может использоваться отдельно, если релевантен." });
+    await expect(getWebSearchStatus()).resolves.toMatchObject({ available: false, reason: "Поиск временно недоступен: квота основного поискового сервиса. Резервные сервисы не вернули проверяемые источники." });
   });
 
   it("persists one final availability result from Google grounding and diagnostic OpenRouter online", async () => {
@@ -111,7 +114,7 @@ describe("Google Search grounding", () => {
 
     await expect(probeWebSearchStatus()).resolves.toMatchObject({
       available: true,
-      reason: "Google Search grounding доступен.",
+      reason: "Поиск доступен.",
       googleHttp: 200,
       openrouterHttp: 200,
     });

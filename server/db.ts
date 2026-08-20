@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, like, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
-import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, devApiAuditRecords, devApiRateWindows, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryFacts, memoryProfiles, messages, providerDailyUsage, providerHealth, roleRuntimeStatus, userSettings, users, webSearchStatus } from "../drizzle/schema";
+import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryFacts, memoryProfiles, messages, providerDailyUsage, providerHealth, roleRuntimeStatus, userSettings, users, webSearchStatus } from "../drizzle/schema";
 import { providerHealthHistory } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -249,6 +249,41 @@ export async function getProviderDailySuccess(provider: string, dayKey = utcDayK
   const row = await db.select({ successCount: providerDailyUsage.successCount }).from(providerDailyUsage)
     .where(and(eq(providerDailyUsage.provider, provider), eq(providerDailyUsage.dayKey, dayKey))).limit(1);
   return row[0]?.successCount ?? 0;
+}
+
+/** Stores only a bounded timing sample; all identifiers and conversational content are intentionally excluded. */
+export async function recordFlashTtftMetric(durationMs: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const safeDuration = Math.max(0, Math.min(Math.round(durationMs), 120_000));
+  await db.insert(flashTtftMetrics).values({ durationMs: safeDuration });
+  const retention = new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000);
+  await db.delete(flashTtftMetrics).where(sql`${flashTtftMetrics.createdAt} < ${retention}`);
+}
+
+export type FlashTtftWindowStats = { samples: number; p50Ms: number | null; p95Ms: number | null };
+export type FlashTtftStats = { last24h: FlashTtftWindowStats; last7d: FlashTtftWindowStats };
+
+/** Owner-safe aggregates: only quantiles over anonymous Flash timings from the last 24 hours and 7 days. */
+export async function getFlashTtftStats(): Promise<FlashTtftStats> {
+  const db = await getDb();
+  const empty: FlashTtftWindowStats = { samples: 0, p50Ms: null, p95Ms: null };
+  if (!db) return { last24h: empty, last7d: empty };
+  const now = Date.now();
+  const since = new Date(now - 7 * 24 * 60 * 60 * 1_000);
+  const rows = await db.select({ durationMs: flashTtftMetrics.durationMs, createdAt: flashTtftMetrics.createdAt }).from(flashTtftMetrics)
+    .where(gt(flashTtftMetrics.createdAt, since)).orderBy(asc(flashTtftMetrics.durationMs)).limit(2_000);
+  const aggregate = (durations: number[]): FlashTtftWindowStats => {
+    if (!durations.length) return { samples: 0, p50Ms: null, p95Ms: null };
+    const sorted = [...durations].sort((left, right) => left - right);
+    const quantile = (percentile: number) => sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * percentile) - 1)]!;
+    return { samples: sorted.length, p50Ms: quantile(0.5), p95Ms: quantile(0.95) };
+  };
+  const last24hCutoff = now - 24 * 60 * 60 * 1_000;
+  return {
+    last24h: aggregate(rows.filter((row) => row.createdAt.getTime() >= last24hCutoff).map((row) => row.durationMs)),
+    last7d: aggregate(rows.map((row) => row.durationMs)),
+  };
 }
 
 export type RoleRuntimeStatusRecord = {

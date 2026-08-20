@@ -80,6 +80,22 @@ describe("AIChatBox user flows", () => {
     expect(onCancelStream).toHaveBeenCalledOnce();
   });
 
+  it("renders only the safe web-search status beneath an assistant reply", () => {
+    const reply: Message = {
+      id: "assistant-search",
+      role: "assistant",
+      content: "Проверенный ответ",
+      providerLabel: "Kairema Flash",
+      model: "hidden-server-model",
+      status: "полный ответ",
+      searchStatus: { cascadeUsed: "tavily", sourcesCount: 2 },
+    };
+    render(<AIChatBox messages={[reply]} onSendMessage={vi.fn()} />);
+
+    expect(screen.getByRole("status").textContent).toContain("Поиск: Tavily");
+    expect(screen.queryByText(/https?:\/\//i)).toBeNull();
+  });
+
   it("renders a delta before the stream completes and replaces it with the persisted final answer", async () => {
     const user = userEvent.setup();
     const { container } = render(<StreamingHarness />);

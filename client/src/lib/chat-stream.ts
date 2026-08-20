@@ -1,5 +1,13 @@
 export type StreamSource = { title: string; url: string; publishedAt?: string | null };
-export type StreamDonePayload = { content?: string; modelUsed?: string; label?: string; sources?: StreamSource[]; ragSources?: StreamSource[]; suggestions?: string[] };
+export type StreamDonePayload = {
+  content?: string;
+  modelUsed?: string;
+  label?: string;
+  sources?: StreamSource[];
+  ragSources?: StreamSource[];
+  suggestions?: string[];
+  searchStatus?: { cascadeUsed?: "google" | "tavily" | "openrouter" | null; sourcesCount?: number };
+};
 
 export function sseEventFromBlock(block: string) {
   const event = block.split(/\r?\n/).find((line) => line.startsWith("event:"))?.slice(6).trim() ?? "message";

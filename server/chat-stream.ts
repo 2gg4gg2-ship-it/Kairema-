@@ -199,7 +199,10 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
             sourcesCount,
             timestamp: new Date().toISOString(),
           })).catch(() => undefined);
-          writeEvent(res, "done", result);
+          writeEvent(res, "done", {
+            ...result,
+            ...(result.searchStatus ? { searchStatus: result.searchStatus } : {}),
+          });
           finished = true;
           res.end();
         }

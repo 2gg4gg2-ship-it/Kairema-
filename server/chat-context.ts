@@ -52,11 +52,14 @@ export async function buildChatContext(userId: number, sessionId: string, input:
       if (search.sources.length) {
         context.webResearch = search.summary;
         context.webSources = search.sources;
+        context.searchStatus = { cascadeUsed: search.cascadeUsed, sourcesCount: search.sources.length };
       } else {
         context.freshnessWarning = FRESHNESS_UNAVAILABLE_PROMPT;
+        context.searchStatus = { cascadeUsed: null, sourcesCount: 0 };
       }
     } catch {
       context.freshnessWarning = FRESHNESS_UNAVAILABLE_PROMPT;
+      context.searchStatus = { cascadeUsed: null, sourcesCount: 0 };
     }
   }
   try {
