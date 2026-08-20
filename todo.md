@@ -233,3 +233,10 @@
 - [x] v6-D/H: для пользовательских и AI-пузырей включён `user-select: text`; отдельная кнопка копирования полного ответа сохранена.
 - [x] v6-D/I: добавлены server/client/integration-регрессии обязательного поиска, guardrail, TTFT/search budget, чипов, export empty state, settings labels, одной стрелки, контрастных действий и text selection. Три configured-current-source проверки выполнены без имитации: Google Grounding вернул rate-limit, Tavily fallback вернул проверяемые источники. Claude не входит в configured provider set и не имеет server-side секрета, поэтому Claude-запросы не подменялись другим сервисом.
 - [x] v6-D/J: полные `pnpm test`, `pnpm check`, `pnpm build`, bundle audit и browser-приёмка desktop/360 px выполнены; отчёт обновлён. На опубликованном домене созданы и подтверждены две ежедневные Heartbeat-задачи provider health и knowledge refresh; checkpoint сохраняется следующим действием.
+
+- [x] v6-E/A: фатальный freshness guardrail заменён на мягкую деградацию: поиск выполняется только для внешне-актуальных запросов, а его отказ не останавливает модель; audit хранит только `search_attached` и `sources_count`, system prompt содержит честное правило о недоступности свежих данных.
+- [x] v6-E/B: self-identity-запросы распознаются server-side и обходят поиск; для запросов о версиях, датах и событиях без источников system prompt запрещает выдавать неподтверждённые актуальные сведения как факт.
+- [x] v6-E/C: send/stop control получил явные контрастные токены для idle, streaming и disabled в обеих темах; автоматические тесты подтверждают контраст не ниже 3:1.
+- [x] v6-E/D: заголовки и empty state разделов «Экспорты» и «Файлы» исправлены в обеих темах с текстовым контрастом не ниже 4.5:1.
+- [x] v6-E/E: добавлены регрессии трёх сценариев поиска, состояний send/stop и sidebar exports; выполнены полные test/typecheck/build/bundle audit и desktop/mobile browser-приёмка в тёмной и светлой темах, включая доступные состояния действий.
+- [x] v6-E/F: технический отчёт дополнен блоком «расхождение отчёта и факта», пункты v6-E закрыты после логов и визуальной приёмки; checkpoint сохраняется следующим действием.

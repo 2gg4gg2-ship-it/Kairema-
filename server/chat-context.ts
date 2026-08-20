@@ -1,12 +1,23 @@
 import { getAttachmentPromptText, getOwnedAttachmentDownload } from "./attachments";
 import { createMemoryFact, getMemoryProfile, getOwnedChatAttachments, getUserSettings, listRelevantMemoryFacts } from "./db";
 import type { ChatSettings } from "./providers";
-import { WebSearchUnavailableError, searchWeb } from "./web-search";
+import { searchWeb } from "./web-search";
 import { retrieveRagContext, type RagRole } from "./knowledge";
 
-/** All four public roles require a live, verifiable web-research pass on every accepted turn. */
+/** All four public roles may use live research when the user asks for external current facts. */
 export const WEB_RESEARCH_ROLE_POLICY: ReadonlySet<RagRole> = new Set<RagRole>(["fast", "smart", "context", "flagship"]);
 export const FLASH_WEB_RESEARCH_BUDGET_MS = 1_500;
+const FRESHNESS_QUERY_PATTERN = /(?:сегодня|сейчас|нынешн|текущ|последн|новост|свеж|актуальн|обновлен|верси[яиюе]|релиз|курс|цен[аы]|погод|врем[яени]|дата|событи|\bnow\b|\btoday\b|\bcurrent\b|\blatest\b|\brecent\b|\bnews\b|\bupdate\b|\bversion\b|\brelease\b|\bprice\b|\bweather\b)/i;
+const IDENTITY_QUERY_PATTERN = /^\s*(?:кто\s+ты|что\s+ты\s+(?:такое|за\s+ассистент)|как\s+тебя\s+зовут|ты\s+(?:kairema|кайрема)|who\s+are\s+you|what\s+are\s+you|what(?:'s|\s+is)\s+your\s+name)\s*[?!。.]?\s*$/i;
+export const FRESHNESS_UNAVAILABLE_PROMPT = "Свежие источники сейчас недоступны, поэтому я не могу надёжно подтвердить актуальные сведения.";
+
+export function isKairemaIdentityQuery(query: string) {
+  return IDENTITY_QUERY_PATTERN.test(query.trim());
+}
+
+export function needsWebResearch(query: string) {
+  return !isKairemaIdentityQuery(query) && FRESHNESS_QUERY_PATTERN.test(query);
+}
 
 function memoryContext(profile: { profile: string; summary: string }, facts: Array<{ fact: string }>) {
   const rows = [profile.profile.trim(), profile.summary.trim(), ...facts.slice(0, 20).map((fact) => `• ${fact.fact}`)].filter(Boolean);
@@ -31,17 +42,22 @@ export async function buildChatContext(userId: number, sessionId: string, input:
     ...(imageUrls.length ? { imageUrls } : {}),
   };
 
-  if (WEB_RESEARCH_ROLE_POLICY.has(input.role ?? "flagship")) {
+  if (WEB_RESEARCH_ROLE_POLICY.has(input.role ?? "flagship") && needsWebResearch(input.query ?? "")) {
     const role = input.role ?? "flagship";
-    const search = await searchWeb(
-      "Собери только релевантные актуальные факты и источники для запроса пользователя:\n" + (input.query?.slice(0, 8_000) ?? ""),
-      role === "fast" ? { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS } : undefined,
-    );
-    if (!search.sources.length) {
-      throw new WebSearchUnavailableError("Поиск не вернул проверяемые свежие источники.");
+    try {
+      const search = await searchWeb(
+        "Собери только релевантные актуальные факты и источники для запроса пользователя:\n" + (input.query?.slice(0, 8_000) ?? ""),
+        role === "fast" ? { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS } : undefined,
+      );
+      if (search.sources.length) {
+        context.webResearch = search.summary;
+        context.webSources = search.sources;
+      } else {
+        context.freshnessWarning = FRESHNESS_UNAVAILABLE_PROMPT;
+      }
+    } catch {
+      context.freshnessWarning = FRESHNESS_UNAVAILABLE_PROMPT;
     }
-    context.webResearch = search.summary;
-    context.webSources = search.sources;
   }
   try {
     const rag = await retrieveRagContext(input.query ?? "", input.role ?? "flagship");

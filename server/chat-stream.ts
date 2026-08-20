@@ -16,7 +16,6 @@ type ChatStreamAuditRecord = {
   provider?: Provider;
   searchAttached?: boolean;
   sourcesCount?: number;
-  sourcesFreshness?: "live_verified";
   timestamp: string;
   retryAfterSeconds?: number;
 };
@@ -80,7 +79,7 @@ function historyError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
   if (/чат|хранилище/i.test(message)) return "Этап «история чата»: данные временно недоступны. Повторите попытку позже.";
   if (/вложен|файл|документ/i.test(message)) return "Этап «вложения»: не удалось подготовить выбранные файлы. Уберите вложение и повторите попытку.";
-  if (/поиск|google|grounding|источник/i.test(message)) return "Этап «web-поиск»: не получены проверяемые свежие источники. Ответ без источников не будет сгенерирован; повторите попытку позже.";
+  if (/поиск|google|grounding|источник/i.test(message)) return "Этап «web-поиск»: свежие источники временно недоступны; попробуйте повторить запрос позже.";
   return "Этап «подготовка сообщения»: не удалось собрать приватный контекст. Повторите попытку позже.";
 }
 
@@ -198,7 +197,6 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
             provider: result.provider,
             searchAttached: sourcesCount > 0,
             sourcesCount,
-            ...(sourcesCount > 0 ? { sourcesFreshness: "live_verified" } : {}),
             timestamp: new Date().toISOString(),
           })).catch(() => undefined);
           writeEvent(res, "done", result);

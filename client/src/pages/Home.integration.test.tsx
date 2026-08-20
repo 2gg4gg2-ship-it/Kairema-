@@ -157,6 +157,15 @@ describe("Home integration flows", () => {
     expect(fixtures.downloadPrepared).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps exports and files as labelled sidebar sections with readable empty states", () => {
+    render(<Home />);
+
+    const exportsSection = screen.getByRole("region", { name: "Экспорты" });
+    const filesSection = screen.getByRole("region", { name: "Файлы" });
+    expect(exportsSection.querySelector(".kairema-empty")?.textContent).toContain("Экспортов пока нет");
+    expect(filesSection.querySelector(".kairema-empty")?.textContent).toContain("Вложений в этом чате пока нет");
+  });
+
   it("confirms before deleting all exports and refreshes the export history after the owned operation succeeds", async () => {
     const user = userEvent.setup();
     const confirm = vi.fn().mockReturnValue(true);

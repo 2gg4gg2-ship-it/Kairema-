@@ -16,12 +16,19 @@ interface ThemeProviderProps {
   switchable?: boolean;
 }
 
+function getPreviewTheme(): Theme | undefined {
+  const theme = new URLSearchParams(window.location.search).get("theme");
+  return theme === "light" || theme === "dark" ? theme : undefined;
+}
+
 export function ThemeProvider({
   children,
   defaultTheme = "light",
   switchable = false,
 }: ThemeProviderProps) {
   const [theme, setTheme] = useState<Theme>(() => {
+    const previewTheme = getPreviewTheme();
+    if (previewTheme) return previewTheme;
     if (switchable) {
       const stored = localStorage.getItem("theme");
       return (stored as Theme) || defaultTheme;

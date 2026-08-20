@@ -39,7 +39,7 @@ describe("chat stream happy-path", () => {
     expect(writes.join("")).toContain('event: delta\ndata: {"content":"вет"}');
     expect(writes.join("")).toContain("event: done");
     expect(appended).toEqual([{ role: "user", content: "Привет" }, { role: "assistant", content: "Привет" }]);
-    expect(auditChatStream).toHaveBeenCalledWith(expect.objectContaining({ event: "chat_stream.completed", userId: 42, roleId: "fast", provider: "groq", searchAttached: true, sourcesCount: 1, sourcesFreshness: "live_verified" }));
+    expect(auditChatStream).toHaveBeenCalledWith(expect.objectContaining({ event: "chat_stream.completed", userId: 42, roleId: "fast", provider: "groq", searchAttached: true, sourcesCount: 1 }));
     expect(JSON.stringify(auditChatStream.mock.calls[0][0])).not.toContain("Привет");
     expect(JSON.stringify(auditChatStream.mock.calls[0][0])).not.toContain("example.com");
     expect(streamResponse.end).toHaveBeenCalledOnce();
@@ -74,26 +74,36 @@ describe("chat stream happy-path", () => {
     expect(chatWithRoleStream).not.toHaveBeenCalled();
   });
 
-  it("rejects before persistence and generation when the mandatory freshness guardrail has no sources", async () => {
-    const streamResponse = response();
+  it("continues generation with a truthful soft-degradation warning when fresh search is unavailable", async () => {
+    const writes: string[] = [];
+    const streamResponse = Object.assign(new EventEmitter(), {
+      status: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis(), flushHeaders: vi.fn(), write: vi.fn((chunk: string) => writes.push(chunk)), end: vi.fn(), json: vi.fn(),
+    }) as unknown as Response;
     const appendChatMessage = vi.fn();
-    const chatWithRoleStream = vi.fn();
-    const buildChatContext = vi.fn().mockRejectedValue(new Error("Поиск не вернул проверяемые свежие источники."));
+    const chatWithRoleStream = vi.fn(async (_modelId, _history, settings) => {
+      expect(settings).toMatchObject({ freshnessWarning: "Свежие источники сейчас недоступны, поэтому я не могу надёжно подтвердить актуальные сведения." });
+      return { content: "Свежие источники сейчас недоступны, поэтому я не могу надёжно подтвердить актуальные сведения.", modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Llama 3.1 8B Instant" };
+    });
+    const buildChatContext = vi.fn().mockResolvedValue({ ...context, freshnessWarning: "Свежие источники сейчас недоступны, поэтому я не могу надёжно подтвердить актуальные сведения." });
     const handler = createChatStreamHandler({
       authenticateRequest: vi.fn().mockResolvedValue({ id: 42 }),
       getOwnedChatSession: vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Новый разговор" }),
       appendChatMessage,
+      updateChatTitle: vi.fn().mockResolvedValue(undefined),
+      listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
       buildChatContext,
       chatWithRoleStream,
+      extractMemoryFacts: vi.fn().mockResolvedValue(undefined),
+      auditChatStream: vi.fn(),
     });
 
-    await handler({ body: { ...validRequestBody, webSearch: false } } as Request, streamResponse, vi.fn());
+    await handler({ body: validRequestBody } as Request, streamResponse, vi.fn());
 
     expect(buildChatContext).toHaveBeenCalledWith(42, validRequestBody.sessionId, { attachmentIds: undefined, query: "Привет", role: "fast" });
-    expect(streamResponse.status).toHaveBeenCalledWith(400);
-    expect(streamResponse.json).toHaveBeenCalledWith({ error: "Этап «web-поиск»: не получены проверяемые свежие источники. Ответ без источников не будет сгенерирован; повторите попытку позже." });
-    expect(appendChatMessage).not.toHaveBeenCalled();
-    expect(chatWithRoleStream).not.toHaveBeenCalled();
+    expect(streamResponse.status).toHaveBeenCalledWith(200);
+    expect(chatWithRoleStream).toHaveBeenCalledOnce();
+    expect(appendChatMessage).toHaveBeenCalledTimes(2);
+    expect(writes.join("")).toContain("event: done");
   });
 
   it("limits each authenticated user to 60 stream requests per rolling in-memory minute", async () => {
