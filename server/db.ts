@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, like, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
-import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, devApiAuditRecords, devApiRateWindows, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryFacts, memoryProfiles, messages, providerHealth, roleRuntimeStatus, userSettings, users, webSearchStatus } from "../drizzle/schema";
+import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, devApiAuditRecords, devApiRateWindows, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryFacts, memoryProfiles, messages, providerDailyUsage, providerHealth, roleRuntimeStatus, userSettings, users, webSearchStatus } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -155,6 +155,25 @@ export async function upsertProviderHealth(input: Omit<ProviderHealthRecord, "up
       blockedUntil: input.blockedUntil,
     },
   });
+}
+
+function utcDayKey(date = new Date()) { return date.toISOString().slice(0, 10); }
+
+/** Counts only successful final answers and never stores prompt, user or model details. */
+export async function incrementProviderDailySuccess(provider: string, dayKey = utcDayKey()): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(providerDailyUsage).values({ provider, dayKey, successCount: 1 }).onDuplicateKeyUpdate({
+    set: { successCount: sql`${providerDailyUsage.successCount} + 1` },
+  });
+}
+
+export async function getProviderDailySuccess(provider: string, dayKey = utcDayKey()): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const row = await db.select({ successCount: providerDailyUsage.successCount }).from(providerDailyUsage)
+    .where(and(eq(providerDailyUsage.provider, provider), eq(providerDailyUsage.dayKey, dayKey))).limit(1);
+  return row[0]?.successCount ?? 0;
 }
 
 export type RoleRuntimeStatusRecord = {

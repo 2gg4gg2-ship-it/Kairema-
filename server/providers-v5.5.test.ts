@@ -8,11 +8,12 @@ describe("v5.5 server-side role safety", () => {
     expect(MODEL_ROLES.every((role) => role.chain.length === 4)).toBe(true);
   });
 
-  it("uses Google candidates only behind web-research policy and keeps optional reserves server-side", () => {
+  it("uses Google candidates only behind web-research policy and keeps OrcaRouter in server-side chains", () => {
     for (const role of MODEL_ROLES) {
       const googleCandidate = role.chain.find((candidate) => candidate.provider === "google");
       expect(googleCandidate?.requiresWebResearch).toBe(true);
-      expect(role.chain.some((candidate) => candidate.provider === "sambanova" || candidate.provider === "cerebras")).toBe(true);
+      expect(role.chain.some((candidate) => candidate.provider === "orcarouter")).toBe(true);
+      expect(role.chain.some((candidate) => candidate.provider === "sambanova" || candidate.provider === "cerebras")).toBe(false);
     }
   });
 
@@ -22,8 +23,8 @@ describe("v5.5 server-side role safety", () => {
     expect(content).not.toMatch(/https?:\/\//i);
   });
 
-  it("exposes only the three public providers in the dashboard allowlist", () => {
-    expect(PUBLIC_DASHBOARD_PROVIDERS).toEqual(["openrouter", "google", "groq"]);
+  it("exposes OrcaRouter and the three primary public providers in the dashboard allowlist", () => {
+    expect(PUBLIC_DASHBOARD_PROVIDERS).toEqual(["openrouter", "orcarouter", "google", "groq"]);
     expect(PUBLIC_DASHBOARD_PROVIDERS).not.toContain("sambanova");
     expect(PUBLIC_DASHBOARD_PROVIDERS).not.toContain("cerebras");
     expect(PUBLIC_DASHBOARD_PROVIDERS).not.toContain("mistral");

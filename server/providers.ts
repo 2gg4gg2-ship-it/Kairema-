@@ -1,4 +1,4 @@
-import { listProviderHealth, listRoleRuntimeStatus, upsertProviderHealth, upsertRoleRuntimeStatus } from "./db";
+import { getProviderDailySuccess, incrementProviderDailySuccess, listProviderHealth, listRoleRuntimeStatus, upsertProviderHealth, upsertRoleRuntimeStatus } from "./db";
 
 export const ROLE_IDS = ["fast", "smart", "context", "flagship"] as const;
 /** Compatibility alias: clients select a role, never a raw upstream model. */
@@ -6,7 +6,7 @@ export const MODEL_IDS = ROLE_IDS;
 export type RoleId = (typeof ROLE_IDS)[number];
 export type ModelId = RoleId;
 export type ModelKey = RoleId;
-export type Provider = "openrouter" | "google" | "groq" | "sambanova" | "mistral" | "cerebras" | "deepseek";
+export type Provider = "openrouter" | "orcarouter" | "google" | "groq" | "sambanova" | "mistral" | "cerebras" | "deepseek";
 export type StatusCategory = "AUTH" | "QUOTA" | "RATE_LIMIT" | "PROVIDER_UNAVAILABLE" | "ENDPOINT" | "MODEL" | "NETWORK" | "TIMEOUT" | "PARSE" | "CONFIG" | "UNKNOWN";
 export type ModelStatus = { state: "ready" | "fallback" | "loading" | "error" | "unavailable" | "not_configured"; badge: string; category: StatusCategory | null; http: number | null; checkedAt: string; confirmed: string };
 export type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -41,36 +41,40 @@ type ChainAttempt = { provider: Provider; modelId: string; status: "ready" | "sk
 export const MODEL_ROLES: readonly ModelConfig[] = [
   { key: "fast", modelId: "fast", label: "Kairema Быстрый", role: "Мгновенные ответы на повседневные вопросы.", chain: [
     { provider: "openrouter", modelId: "openai/gpt-oss-20b:free", displayName: "GPT-OSS 20B" },
+    { provider: "orcarouter", modelId: "deepseek/deepseek-v4-flash-free", displayName: "DeepSeek V4 Flash" },
     { provider: "groq", modelId: "openai/gpt-oss-20b", displayName: "GPT-OSS 20B" },
     { provider: "google", modelId: "gemini-flash-lite-latest", displayName: "Gemini Flash Lite", vision: true, requiresWebResearch: true },
-    { provider: "cerebras", modelId: "gpt-oss-120b", displayName: "GPT-OSS 120B" },
   ] },
   { key: "smart", modelId: "smart", label: "Kairema Смекалистый", role: "Математика, логика и последовательные рассуждения.", chain: [
     { provider: "openrouter", modelId: "google/gemma-4-26b-a4b-it:free", displayName: "Gemma 4 26B" },
+    { provider: "orcarouter", modelId: "tencent/hy3-free", displayName: "Tencent HY 3" },
     { provider: "google", modelId: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash", vision: true, requiresWebResearch: true },
     { provider: "groq", modelId: "openai/gpt-oss-120b", displayName: "GPT-OSS 120B" },
-    { provider: "sambanova", modelId: "Meta-Llama-3.3-70B-Instruct", displayName: "Llama 3.3 70B" },
   ] },
   { key: "context", modelId: "context", label: "Kairema Контекст", role: "Большие тексты, история диалога и глубокий анализ.", chain: [
     { provider: "openrouter", modelId: "nvidia/nemotron-3-ultra-550b-a55b:free", displayName: "Nemotron 3 Ultra" },
+    { provider: "orcarouter", modelId: "deepseek/deepseek-v4-flash-free", displayName: "DeepSeek V4 Flash" },
     { provider: "google", modelId: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash", vision: true, requiresWebResearch: true },
-    { provider: "groq", modelId: "openai/gpt-oss-120b", displayName: "GPT-OSS 120B" },
-    { provider: "sambanova", modelId: "Meta-Llama-3.3-70B-Instruct", displayName: "Llama 3.3 70B" },
+    { provider: "openrouter", modelId: "nvidia/nemotron-3-ultra-550b-a55b:free", displayName: "Nemotron 3 Ultra" },
   ] },
   { key: "flagship", modelId: "flagship", label: "Kairema Флагман", role: "Сложнейшие задачи, переводы и максимальная мощность.", chain: [
     { provider: "openrouter", modelId: "google/gemma-4-31b-it:free", displayName: "Gemma 4 31B" },
+    { provider: "orcarouter", modelId: "deepseek/deepseek-v4-pro-free", displayName: "DeepSeek V4 Pro" },
     { provider: "google", modelId: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash", vision: true, requiresWebResearch: true },
     { provider: "groq", modelId: "openai/gpt-oss-120b", displayName: "GPT-OSS 120B" },
-    { provider: "sambanova", modelId: "gemma-4-31B-it", displayName: "Gemma 4 31B" },
   ] },
 ] as const;
 
 /** Kept server-only for diagnostics; it is deliberately excluded from every active request chain. */
-export const DIAGNOSTIC_CANDIDATES = [{ provider: "openrouter", modelId: "openrouter/free", displayName: "OpenRouter Auto" }] as const;
+export const DIAGNOSTIC_CANDIDATES = [
+  { provider: "openrouter", modelId: "openrouter/free", displayName: "OpenRouter Auto" },
+  { provider: "orcarouter", modelId: "orcarouter/free", displayName: "OrcaRouter Auto" },
+] as const;
 export const MODEL_CONFIG = MODEL_ROLES;
 
 const ENDPOINTS: Record<Provider, string> = {
   openrouter: "https://openrouter.ai/api/v1/chat/completions",
+  orcarouter: "https://api.orcarouter.ai/v1/chat/completions",
   google: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
   groq: "https://api.groq.com/openai/v1/chat/completions",
   sambanova: "https://api.sambanova.ai/v1/chat/completions",
@@ -78,10 +82,10 @@ const ENDPOINTS: Record<Provider, string> = {
   cerebras: "https://api.cerebras.ai/v1/chat/completions",
   deepseek: "https://api.deepseek.com/chat/completions",
 };
-const PROVIDERS: readonly Provider[] = ["openrouter", "google", "groq", "sambanova", "mistral", "cerebras", "deepseek"];
+const PROVIDERS: readonly Provider[] = ["openrouter", "orcarouter", "google", "groq", "sambanova", "mistral", "cerebras", "deepseek"];
 const MAX_ATTEMPTS = 4;
 /** The dashboard deliberately excludes server-only fallback and diagnostic providers. */
-export const PUBLIC_DASHBOARD_PROVIDERS = ["openrouter", "google", "groq"] as const satisfies readonly Provider[];
+export const PUBLIC_DASHBOARD_PROVIDERS = ["openrouter", "orcarouter", "google", "groq"] as const satisfies readonly Provider[];
 /** Every provider attempt has the same bounded latency budget, including SSE. */
 export const ATTEMPT_TIMEOUT_MS = 25_000;
 const PROVIDER_RECHECK_MS = 24 * 60 * 60 * 1_000;
@@ -100,6 +104,8 @@ let providerHealthRefresh: Promise<void> | null = null;
 function secretFor(provider: Provider) {
   const envName = provider === "openrouter"
     ? "OPENROUTER_API_KEY"
+    : provider === "orcarouter"
+      ? "ORCAROUTER_API_KEY"
     : provider === "google"
       ? "GEMINI_API_KEY"
       : provider === "groq"
@@ -277,6 +283,7 @@ function providerNeedsPing(provider: Provider, force: boolean) {
 
 function probeCandidate(provider: Provider): Candidate {
   if (provider === "openrouter") return { provider, modelId: "openai/gpt-oss-20b:free", displayName: "health probe" };
+  if (provider === "orcarouter") return { provider, modelId: "orcarouter/free", displayName: "diagnostic health probe" };
   if (provider === "google") return { provider, modelId: "gemini-flash-lite-latest", displayName: "health probe" };
   if (provider === "groq") return { provider, modelId: "openai/gpt-oss-20b", displayName: "health probe" };
   if (provider === "sambanova") return { provider, modelId: "Meta-Llama-3.3-70B-Instruct", displayName: "health probe" };
@@ -396,7 +403,7 @@ function statusForRole(role: ModelConfig) {
 }
 
 function providerLabel(provider: Provider | null) {
-  return provider === "openrouter" ? "OpenRouter" : provider === "google" ? "Google AI Studio" : provider === "groq" ? "Groq" : provider === "sambanova" ? "SambaNova" : provider === "mistral" ? "Mistral" : provider === "cerebras" ? "Cerebras" : provider === "deepseek" ? "DeepSeek" : null;
+  return provider === "openrouter" ? "OpenRouter" : provider === "orcarouter" ? "OrcaRouter" : provider === "google" ? "Google AI Studio" : provider === "groq" ? "Groq" : provider === "sambanova" ? "SambaNova" : provider === "mistral" ? "Mistral" : provider === "cerebras" ? "Cerebras" : provider === "deepseek" ? "DeepSeek" : null;
 }
 
 export function toRoleRuntimeView(state: RoleRuntimeView["state"], provider: string | null, modelUsed: string | null, checkedAt: Date): RoleRuntimeView {
@@ -427,8 +434,8 @@ export async function getModelViews() {
 export async function getPublicProviderDashboard() {
   await refreshProviderHealth();
   await hydrateProviderHealth();
-  const labels: Record<(typeof PUBLIC_DASHBOARD_PROVIDERS)[number], string> = { openrouter: "OpenRouter", google: "Google AI Studio", groq: "Groq" };
-  return PUBLIC_DASHBOARD_PROVIDERS.map((provider) => {
+  const labels: Record<(typeof PUBLIC_DASHBOARD_PROVIDERS)[number], string> = { openrouter: "OpenRouter", orcarouter: "OrcaRouter", google: "Google AI Studio", groq: "Groq" };
+  return Promise.all(PUBLIC_DASHBOARD_PROVIDERS.map(async (provider) => {
     const health = providerHealth.get(provider);
     const checkedAt = health?.checkedAt ?? null;
     const nextCheckAt = health?.blockedUntil ?? (checkedAt ? new Date(checkedAt.getTime() + PROVIDER_RECHECK_MS) : null);
@@ -440,8 +447,9 @@ export async function getPublicProviderDashboard() {
       checkedAt: checkedAt?.toISOString() ?? null,
       nextCheckAt: nextCheckAt?.toISOString() ?? null,
       capacity: health?.state === "ready" ? "available" : health?.state === "cooldown" ? "limited" : "unavailable",
+      usageToday: provider === "orcarouter" ? await getProviderDailySuccess("orcarouter") : null,
     } as const;
-  });
+  }));
 }
 
 export async function getProviderHealthForTesting() {
@@ -494,6 +502,7 @@ export async function chatWithRole(roleId: string, history: ChatMessage[], setti
       attempts.push(attempt(candidate, "ready"));
       const fallbackUsed = index > 0;
       const suggestions = createContinuationSuggestions(history, settings?.quickReplies !== false);
+      if (candidate.provider === "orcarouter") await incrementProviderDailySuccess("orcarouter");
       await saveRoleRuntime(role.key, fallbackUsed ? "backup" : "ready", candidate.provider, candidate.displayName);
       return { content, modelUsed: candidate.displayName, provider: candidate.provider, fallbackUsed, label: role.label, status: fallbackUsed ? backup(`Ответил резерв ${candidate.displayName}.`) : ready(), ...(settings?.webSources?.length ? { sources: settings.webSources } : {}), ...(settings?.ragSources?.length ? { ragSources: settings.ragSources } : {}), ...(suggestions ? { suggestions } : {}) };
     } catch (error) {
@@ -543,6 +552,7 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
       attempts.push(attempt(candidate, "ready"));
       const fallbackUsed = index > 0;
       const suggestions = createContinuationSuggestions(history, settings?.quickReplies !== false);
+      if (candidate.provider === "orcarouter") await incrementProviderDailySuccess("orcarouter");
       await saveRoleRuntime(role.key, fallbackUsed ? "backup" : "ready", candidate.provider, candidate.displayName);
       return { content, modelUsed: candidate.displayName, provider: candidate.provider, fallbackUsed, label: role.label, status: fallbackUsed ? backup(`Ответил резерв ${candidate.displayName}.`) : ready(), ...(settings?.webSources?.length ? { sources: settings.webSources } : {}), ...(settings?.ragSources?.length ? { ragSources: settings.ragSources } : {}), ...(suggestions ? { suggestions } : {}) };
     } catch (error) {

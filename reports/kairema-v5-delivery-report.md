@@ -227,6 +227,40 @@ RAG реализован как самостоятельный server-side сл�
 
 После публикации остаётся создать ежедневные Heartbeat-задачи для provider-health и knowledge-refresh. Эта операция не запускается в непубликованной среде.
 
+## v5.9 — OrcaRouter и бесплатные модели в цепи
+
+### Проблема → причина → что изменено → как проверено
+
+| Область | Проблема и причина | Что изменено | Как проверено |
+|---|---|---|---|
+| Безопасная интеграция | Требовался второй кросс-провайдерный маршрут с бесплатными моделями без передачи ключа или внутренних цепей в браузер. | `ORCAROUTER_API_KEY` добавлен только через защищённую серверную конфигурацию. Используется подтверждённый OpenAI-совместимый API `https://api.orcarouter.ai/v1/chat/completions` с Bearer-авторизацией. [7] | Изолированный secret test выполнил аутентифицированный `/models` без вывода значения ключа; bundle-аудит проверил восемь секретов. |
+| Каталог и allowlist | Имена свободных моделей в UI могли быть неполными либо устаревшими. | Перед внедрением выполнен аутентифицированный `GET /models` 2026-08-20T05:52:07Z. Подтверждённые ID: `deepseek/deepseek-v4-pro-free`, `deepseek/deepseek-v4-flash-free`, `tencent/hy3-free`, `qwen/qwen3.8-27b-free`, `orcarouter/free`. В allowlist активных цепей внесены только первые три; Qwen разрешён только для живой проверки, `orcarouter/free` — только диагностический и никогда не вызывается в пользовательской цепи. [7] [8] | Подробная запись: `reports/orcarouter-v5.9-verification-notes.md`; живые HTTP-проверки подтверждают model-used значения. |
+| Четыре цепи и лимит | Добавление нового источника могло превысить четыре попытки или создать пятую карточку. | Роли сохранены в количестве четырёх. OrcaRouter встроен вторым кандидатом: «Быстрый» — DeepSeek V4 Flash, «Смекалистый» — Tencent HY 3, «Контекст» — DeepSeek V4 Flash, «Флагман» — DeepSeek V4 Pro. Каждая роль содержит ровно четыре последовательных кандидата; жёсткий лимит сетевых попыток не изменён. | `providers.test.ts` и `providers-v5.5.test.ts`: 19 серверных проверок, включая порядок и лимит. |
+| Health и публичная панель | Нужны единый health-статус и понятная строка OrcaRouter без раскрытия fallback-порядка, model ID или внутренних ошибок. | OrcaRouter включён в общий server-side `PROVIDER_HEALTH`, ежедневный health-check и атомарные обновления `state`, cooldown/blocked time, check time и error class. Экран «Провайдеры» получает только безопасные поля: доступность, время последней проверки и обезличенное число успешных ответов за сегодня. Внутренние цепи, ключи, model ID и техническая причина здоровья не сериализуются. | Миграция `0010_slippery_kang.sql` добавила агрегированный дневной счётчик; server- и UI-регрессии прошли. |
+| HTTP 429 и failover | Free-модель может временно вернуть 429; такой источник нельзя повторно вызывать в каждой роли. | `Retry-After` переводит OrcaRouter в cooldown. Следующая роль пропускает OrcaRouter и продолжает с другим кандидатом; UI у фактического fallback-ответа использует существующую метку «(резерв)». Free ID не передаются в provider-native fallback параметр одного запроса, что соответствует документации. [8] | Контролируемый тест: 400 первичного кандидата → 429 OrcaRouter → успешный Groq для «Быстрого», затем «Контекст» завершился через другой провайдер; OrcaRouter был вызван ровно один раз, все 19 server-provider тестов зелёные. |
+| Качество «Флагмана» | Требовалось повысить DeepSeek V4 Pro только при явном превосходстве над Gemma 4 31B. | Primary «Флагмана» не менялся. В одинаковом RU-задании DeepSeek вернул HTTP 200, но завершил вывод с `length` без финального пользовательского текста; Gemma 4 31B через Google AI Studio завершила перевод и объяснение. Оба вызова заняли около 26 секунд; качество DeepSeek в этом контролируемом примере не было выше. | Живой side-by-side с `temperature: 0.2`, `max_tokens: 1400` записан в `reports/orcarouter-v5.9-live-results.md`. Первичный вызов Gemma через OpenRouter и одна корректная отложенная попытка вернули 429, поэтому для честного сравнения использован доступный server-side Google AI Studio с тем же документом и параметрами. |
+
+### Живые результаты подтверждённых моделей
+
+| Запрошенная модель | `model_used` | HTTP | Время | Итог |
+|---|---|---:|---:|---|
+| `deepseek/deepseek-v4-pro-free` | `deepseek-v4-pro` | 200 | 4.154 s | Финальный `Готово`; разрешена как второй кандидат «Флагмана». |
+| `deepseek/deepseek-v4-flash-free` | `deepseek-v4-flash` | 200 | 2.514 s | Финальный `Готово`; разрешена для «Быстрого» и «Контекста». |
+| `tencent/hy3-free` | `hy3` | 200 | 4.993 s | Финальный `Готово` при повторной проверке с достаточным лимитом вывода; разрешена для «Смекалистого». |
+| `qwen/qwen3.8-27b-free` | `Qwen/Qwen3.8-27B` | 200 | 102.477 s | Каталог и ответ подтверждены; не входит в активную цепь, так как не был предусмотрен требованиями роли и заметно медленнее. |
+
+### Финальная валидация v5.9
+
+| Проверка | Результат |
+|---|---|
+| `pnpm test` | **27 test files, 89/89 tests passed.** |
+| `pnpm check` | Passed; TypeScript errors отсутствуют. |
+| `pnpm build` | Passed после остановки лишнего TypeScript watcher, освободившей память. Осталось только стандартное Vite-предупреждение о chunk свыше 500 kB. |
+| Аудит bundle | Точные значения `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `TAVILY_API_KEY`, `SAMBANOVA_API_KEY`, `MISTRAL_API_KEY`, `CEREBRAS_API_KEY` и `ORCAROUTER_API_KEY` не найдены в `dist/public`. |
+| Визуальная приёмка | Desktop 1280×720: ровно четыре карточки ролей и выбранная роль в верхнем menu-button. Mobile 375×812: читаемая адаптивная шапка, выбранная роль и чат. |
+
+> OrcaRouter опубликован в публичной панели как безопасный provider-status, а не как описание маршрутизации. Это намеренно сохраняет прежние границы приватности v4–v5.8: пользователь видит состояние и дневной агрегат, но не получает ключи, технические причины, список моделей или цепи fallback.
+
 ## References
 
 [1]: https://ai.google.dev/gemini-api/docs/google-search "Google Gemini API — Grounding with Google Search"
@@ -235,3 +269,5 @@ RAG реализован как самостоятельный server-side сл�
 [4]: https://inference-docs.cerebras.ai/resources/openai "Cerebras Inference — OpenAI Compatibility"
 [5]: https://inference-docs.cerebras.ai/models/overview "Cerebras Inference — Model Catalog"
 [6]: https://www.microsoft.com/en-us/research/feed/ "Microsoft Research — RSS Feed"
+[7]: https://www.orcarouter.ai/models/deepseek/deepseek-v4-pro-free "OrcaRouter — DeepSeek V4 Pro Free"
+[8]: https://docs.orcarouter.ai/routing/free-models "OrcaRouter — Free Models"

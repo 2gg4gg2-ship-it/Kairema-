@@ -1,4 +1,4 @@
-import { index, int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { index, int, mysqlEnum, mysqlTable, primaryKey, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -56,6 +56,13 @@ export const providerHealth = mysqlTable("provider_health", {
 	blockedUntil: timestamp("blockedUntil"),
 	updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
+
+/** Aggregate-only daily provider usage; prompts, users and response content are never stored here. */
+export const providerDailyUsage = mysqlTable("provider_daily_usage", {
+	provider: varchar("provider", { length: 32 }).notNull(),
+	dayKey: varchar("dayKey", { length: 10 }).notNull(),
+	successCount: int("successCount").notNull().default(0),
+}, (table) => [primaryKey({ columns: [table.provider, table.dayKey] })]);
 
 export const roleRuntimeStatus = mysqlTable("role_runtime_status", {
 	roleId: mysqlEnum("roleId", ["fast", "smart", "context", "flagship"]).primaryKey(),
@@ -191,6 +198,7 @@ export type ChatSession = typeof chatSessions.$inferSelect;
 export type ChatMessageRecord = typeof messages.$inferSelect;
 export type ChatExport = typeof chatExports.$inferSelect;
 export type ProviderHealthRecord = typeof providerHealth.$inferSelect;
+export type ProviderDailyUsageRecord = typeof providerDailyUsage.$inferSelect;
 export type WebSearchStatusRecord = typeof webSearchStatus.$inferSelect;
 export type KnowledgeSource = typeof knowledgeSources.$inferSelect;
 export type KnowledgeDocument = typeof knowledgeDocuments.$inferSelect;

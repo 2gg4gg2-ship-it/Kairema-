@@ -183,7 +183,7 @@ export default function Home() {
   useEffect(() => {
     const footer = document.querySelector<HTMLElement>(".kairema-sidebar-footer");
     if (!footer || !isAuthenticated) return;
-    const labels = language === "ru" ? { providers: "Провайдеры", rag: "Аудит RAG", close: "Закрыть", publicOnly: "Показываются только публичные сервисы. Серверные резервы, ключи и цепочки маршрутизации не раскрываются.", checked: "Проверено", next: "Следующая проверка", documents: "Фрагментов", lastRun: "Последний запуск" } : { providers: "Providers", rag: "RAG audit", close: "Close", publicOnly: "Only public services are shown. Server reserves, keys, and routing chains are not exposed.", checked: "Checked", next: "Next check", documents: "Excerpts", lastRun: "Latest run" };
+    const labels = language === "ru" ? { providers: "Провайдеры", rag: "Аудит RAG", close: "Закрыть", publicOnly: "Показываются только публичные сервисы. Серверные резервы, ключи и цепочки маршрутизации не раскрываются.", checked: "Проверено", next: "Следующая проверка", usage: "Успешных ответов сегодня", documents: "Фрагментов", lastRun: "Последний запуск" } : { providers: "Providers", rag: "RAG audit", close: "Close", publicOnly: "Only public services are shown. Server reserves, keys, and routing chains are not exposed.", checked: "Checked", next: "Next check", usage: "Successful answers today", documents: "Excerpts", lastRun: "Latest run" };
     const format = (value: string | null | undefined) => value ? new Intl.DateTimeFormat(language === "ru" ? "ru-RU" : "en-US", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)) : "—";
     const overlay = document.createElement("div"); overlay.className = "kairema-ops-overlay"; overlay.hidden = true;
     const panel = document.createElement("section"); panel.className = "kairema-ops-panel"; panel.setAttribute("role", "dialog"); panel.setAttribute("aria-modal", "true"); overlay.append(panel);
@@ -196,7 +196,7 @@ export default function Home() {
       const list = document.createElement("div"); list.className = "kairema-ops-list";
       if (kind === "providers") {
         const entries = providerDashboardQuery.data ?? [];
-        entries.forEach((entry) => { const card = document.createElement("article"); card.className = "kairema-ops-card"; const heading = document.createElement("h3"); heading.textContent = entry.label; card.append(heading, line(language === "ru" ? "Состояние" : "State", entry.capacity), line(labels.checked, format(entry.checkedAt)), line(labels.next, format(entry.nextCheckAt))); list.append(card); });
+        entries.forEach((entry) => { const card = document.createElement("article"); card.className = "kairema-ops-card"; const heading = document.createElement("h3"); heading.textContent = entry.label; card.append(heading, line(language === "ru" ? "Состояние" : "State", entry.capacity), line(labels.checked, format(entry.checkedAt)), line(labels.next, format(entry.nextCheckAt))); if (entry.usageToday !== null && entry.usageToday !== undefined) card.append(line(labels.usage, String(entry.usageToday))); list.append(card); });
         if (!entries.length) { const empty = document.createElement("p"); empty.textContent = language === "ru" ? "Статусы пока не получены." : "Statuses are not available yet."; list.append(empty); }
       } else {
         const audit = knowledgeAuditQuery.data;

@@ -5,6 +5,8 @@ vi.mock("./db", () => ({
   upsertProviderHealth: vi.fn().mockResolvedValue(undefined),
   listRoleRuntimeStatus: vi.fn().mockResolvedValue([]),
   upsertRoleRuntimeStatus: vi.fn().mockResolvedValue(undefined),
+  incrementProviderDailySuccess: vi.fn().mockResolvedValue(undefined),
+  getProviderDailySuccess: vi.fn().mockResolvedValue(0),
 }));
 
 import { ATTEMPT_TIMEOUT_MS, DIAGNOSTIC_CANDIDATES, InvalidModelSelectionError, MODEL_CONFIG, MODEL_IDS, MODEL_ROLES, __resetProviderHealthForTests, buildOpenRouterMessages, chatWithRole, chatWithRoleStream, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, getProviderHealthForTesting, isAllowedModelId, modelById, openRouterStreamDelta, publicChatError, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView, toRoleRuntimeView } from "./providers";
@@ -29,13 +31,16 @@ describe("Kairema v4 role registry", () => {
     expect(modelById("code")).toBeUndefined();
   });
 
-  it("keeps exactly four active candidates per role and one inactive diagnostic candidate", () => {
+  it("keeps exactly four active candidates per role and the two inactive diagnostic candidates", () => {
     for (const role of MODEL_ROLES) {
       expect(role.chain).toHaveLength(4);
       expect(role.chain.every((candidate) => candidate.modelId !== role.modelId)).toBe(true);
       expect(role.chain.some((candidate) => candidate.modelId === "openrouter/free")).toBe(false);
     }
-    expect(DIAGNOSTIC_CANDIDATES).toEqual([{ provider: "openrouter", modelId: "openrouter/free", displayName: "OpenRouter Auto" }]);
+    expect(DIAGNOSTIC_CANDIDATES).toEqual([
+      { provider: "openrouter", modelId: "openrouter/free", displayName: "OpenRouter Auto" },
+      { provider: "orcarouter", modelId: "orcarouter/free", displayName: "OrcaRouter Auto" },
+    ]);
   });
 
   it("uses a 25-second budget for every provider attempt", () => {
@@ -67,6 +72,7 @@ describe("Kairema v4 role registry", () => {
 
   it("marks a quota-limited provider globally so another role skips it", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+    vi.stubEnv("ORCAROUTER_API_KEY", "");
     vi.stubEnv("GROQ_API_KEY", "test-groq-key");
     vi.stubEnv("GEMINI_API_KEY", "test-google-key");
     const fetchSpy = vi.spyOn(globalThis, "fetch")
@@ -83,6 +89,29 @@ describe("Kairema v4 role registry", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(3);
     expect(String(fetchSpy.mock.calls[2]?.[0])).toContain("generativelanguage.googleapis.com");
     expect(health.find((item) => item.provider === "openrouter")).toMatchObject({ state: "unavailable", category: "QUOTA" });
+  });
+
+  it("globally skips OrcaRouter after its 429 and continues each later role with another provider", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+    vi.stubEnv("ORCAROUTER_API_KEY", "test-orcarouter-key");
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    vi.stubEnv("GEMINI_API_KEY", "test-google-key");
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "unsupported model" } }), { status: 400 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429, headers: { "retry-after": "60" } }))
+      .mockResolvedValueOnce(success("Резерв fast"))
+      .mockResolvedValueOnce(success("Ответ context"));
+
+    const fast = await chatWithRole("fast", [{ role: "user", content: "Первый" }]);
+    const context = await chatWithRole("context", [{ role: "user", content: "Второй" }]);
+    const orcaCalls = fetchSpy.mock.calls.filter(([url]) => String(url).includes("api.orcarouter.ai"));
+    const health = await getProviderHealthForTesting();
+
+    expect(fast).toMatchObject({ provider: "groq", fallbackUsed: true });
+    expect(context).toMatchObject({ provider: "openrouter", fallbackUsed: false });
+    expect(orcaCalls).toHaveLength(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    expect(health.find((item) => item.provider === "orcarouter")).toMatchObject({ state: "cooldown", category: "RATE_LIMIT" });
   });
 
   it("removes reasoning blocks before any response reaches the browser", () => {
