@@ -286,6 +286,19 @@ RAG реализован как самостоятельный server-side сл�
 
 > **Инварианты после v6-A:** публичных ролей ровно четыре — «Быстрый», «Смекалистый», «Контекст», «Флагман»; скрытые резервы не сериализуются в клиент; suggestions не сохраняются в БД; `appendChatMessage` предшествует SSE `done`; каждая роль сохраняет максимум четыре сетевые попытки; production bundle не содержит provider secrets.
 
+## v6-A.1 — повторная проверка ZenMux после заявленной разблокировки
+
+### Проблема → причина → что изменено → как проверено
+
+| Область | Проблема и причина | Что изменено | Как проверено |
+|---|---|---|---|
+| Каталог и $0 | Запрошенные человекочитаемые имена не совпадают с отдельными exact free ID, а OpenAI-compatible `/models` не содержит pricing-полей. | Повторно выполнен server-side `GET /models`: exact ID подтверждены как `z-ai/glm-5.3-free`, `z-ai/glm-4.7-flash-free`, `dots-studio/dots3-note-prev`. Нулевой input/output подтверждён по официальной витрине ZenMux, которая маркирует эти варианты как Free; каталог использован только для ID. [11] [12] | Изолированный скрипт не печатает ключ, headers, prompt или output. Результат: HTTP 200 у каталога, у моделей — только публичные ID и источник тарифа. |
+| Живые generation-вызовы | Наличие key и доступ к каталогу не означают право на generation. | Для трёх exact free ID выполнены короткие server-side `POST /chat/completions`, без вывода содержимого ответа. Все получили HTTP 403, поэтому ZenMux намеренно **не интегрирован** в active allowlist, active chains и UI. | `z-ai/glm-5.3-free`: 403 / 893 ms; `z-ai/glm-4.7-flash-free`: 403 / 835 ms; `dots-studio/dots3-note-prev`: 403 / 772 ms. Это повторная проверка после заявления о разблокировке; положительного HTTP 200 нет. |
+| Лимиты и fallback | Добавление пятой позиции без подтверждения нарушило бы правило максимум четырёх попыток и могло бы создать скрытый платный/недоступный путь. | Первые четыре кандидата каждой роли не менялись. ZenMux остаётся server-only health-узлом, который классифицирует 403 как `AUTH`; пользовательский запрос не делает дополнительную ZenMux-попытку. | `providers.test.ts` подтверждает HTTP 403 → `auth_failed`, одну health-попытку и отсутствие ZenMux в каждой из четырёх active chains. |
+| Безопасность и регрессия | Верификатор и отчёт не должны передать ключ в клиент или сломать существующие функции. | Служебный скрипт использует только `process.env.ZENMUX_API_KEY`, сохраняет минимальную временную сводку с правами `0600`; приложение и публичный DTO не изменены. | **91/91** теста, `pnpm check` и клиентская Vite-сборка прошли. Bundled server-step собран отдельно после прерывания объединённой команды средой; аудит `dist/public` не нашёл ни одного literal provider secret. |
+
+> **Решение v6-A.1:** ZenMux не активирован. Повторная интеграция допустима только после трёх HTTP 200 completion-проверок для exact free ID. До того Kairema сохраняет четыре публичные роли, четыре активные попытки, прежние первые четыре кандидата и отсутствие секретов в bundle.
+
 ## References
 
 [1]: https://ai.google.dev/gemini-api/docs/google-search "Google Gemini API — Grounding with Google Search"
@@ -298,3 +311,5 @@ RAG реализован как самостоятельный server-side сл�
 [8]: https://docs.orcarouter.ai/routing/free-models "OrcaRouter — Free Models"
 [9]: https://zenmux.ai/docs/best-practices/openclaw.html "ZenMux — OpenAI-compatible API endpoint"
 [10]: https://zenmux.ai/docs/api/openai/openai-list-models.html "ZenMux — List Models"
+[11]: https://zenmux.ai/models "ZenMux — Models and Free model cards"
+[12]: https://zenmux.ai/docs/about/pricing-and-cost.html "ZenMux — Pricing and Fees"
