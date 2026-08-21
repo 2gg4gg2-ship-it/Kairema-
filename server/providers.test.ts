@@ -53,6 +53,19 @@ describe("Kairema v4 role registry", () => {
     expect(FLASH_VISIBLE_TTFT_DEADLINE_MS).toBe(1_500);
   });
 
+  it("adds temporary image URLs only to the last user turn for vision-capable routing", () => {
+    const messages = buildOpenRouterMessages(MODEL_ROLES[0]!, [
+      { role: "user", content: "Предыдущий вопрос" },
+      { role: "assistant", content: "Предыдущий ответ" },
+      { role: "user", content: "Опиши вложение" },
+    ], { imageUrls: ["https://storage.example.test/chat-image.png"] });
+    expect(messages[1]?.content).toBe("Предыдущий вопрос");
+    expect(messages[3]?.content).toEqual([
+      { type: "text", text: "Опиши вложение" },
+      { type: "image_url", image_url: { url: "https://storage.example.test/chat-image.png" } },
+    ]);
+  });
+
   it("maps role health into the fixed Russian badge set", () => {
     expect(statusLabel(null, "ready")).toBe("Готов");
     expect(statusLabel(null, "fallback")).toBe("Резерв активен");
@@ -158,6 +171,27 @@ describe("Kairema v4 role registry", () => {
     await expect(chatWithRole("context", [{ role: "user", content: "Проверка лимита" }])).rejects.toMatchObject({ name: "OpenRouterError" });
     expect(fetchSpy).toHaveBeenCalledTimes(MAX_ATTEMPTS);
     expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("zenmux.ai"))).toBe(false);
+  });
+
+  it("records one request-scoped budget trace for each of no more than four real LLM calls", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+    vi.stubEnv("ORCAROUTER_API_KEY", "test-orcarouter-key");
+    vi.stubEnv("GEMINI_API_KEY", "test-google-key");
+    vi.stubEnv("API_KEY_DOTS3", "test-dots-key");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ error: { message: "unsupported model" } }), { status: 400 }));
+    const logSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    await expect(chatWithRole("context", [{ role: "user", content: "Секретный текст не должен попасть в telemetry" }])).rejects.toMatchObject({ name: "OpenRouterError" });
+
+    const traces = logSpy.mock.calls
+      .filter(([prefix]) => prefix === "[Kairema LLM]")
+      .map(([, payload]) => JSON.parse(String(payload)));
+    expect(traces).toHaveLength(MAX_ATTEMPTS);
+    expect(traces.map((trace) => trace.attemptIndex)).toEqual([1, 2, 3, 4]);
+    expect(traces.map((trace) => trace.remainingBudget)).toEqual([3, 2, 1, 0]);
+    expect(traces.every((trace) => typeof trace.requestId === "string" && trace.requestId.length > 0 && trace.attemptType === "generation" && typeof trace.provider === "string" && typeof trace.model === "string")).toBe(true);
+    expect(JSON.stringify(traces)).not.toContain("Секретный текст не должен попасть в telemetry");
+    expect(JSON.stringify(traces)).not.toContain("test-openrouter-key");
   });
 
   it("uses Dots only as the last Context reserve when an earlier candidate is skipped", async () => {

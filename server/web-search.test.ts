@@ -45,13 +45,22 @@ describe("v6-K SearchProvider", () => {
       { title: "Дубликат", url: "https://agency.gov/source", description: "Не должен повториться" },
     ] } }), { status: 200 })));
 
-    await expect(searchWeb("Проверь актуальный стандарт")).resolves.toMatchObject({
+    const result = await searchWeb("Проверь актуальный стандарт");
+    expect(result).toMatchObject({
+      state: "found",
+      verificationStatus: "verified",
       cascadeUsed: "you",
       sources: [
-        { title: "Официальный материал", url: "https://agency.gov/source", domain: "agency.gov" },
-        { title: "Коммерческий материал", url: "https://example.com/source", domain: "example.com" },
+        { title: "Официальный материал", url: "https://agency.gov/source", domain: "agency.gov", sourceId: expect.stringMatching(/^[a-f0-9]{16}$/), retrievedAt: expect.any(String) },
+        { title: "Коммерческий материал", url: "https://example.com/source", domain: "example.com", sourceId: expect.stringMatching(/^[a-f0-9]{16}$/), retrievedAt: expect.any(String) },
       ],
+      evidence: expect.arrayContaining([
+        expect.objectContaining({ fact: "Проверяемый фрагмент", sourceUrl: "https://agency.gov/source", sourceTitle: "Официальный материал", sourceDomain: "agency.gov", retrievedAt: expect.any(String), confidence: "high", sourceId: expect.stringMatching(/^[a-f0-9]{16}$/) }),
+        expect.objectContaining({ fact: "Вторичный фрагмент", sourceUrl: "https://example.com/source", sourceTitle: "Коммерческий материал", sourceDomain: "example.com", retrievedAt: expect.any(String), confidence: "medium", sourceId: expect.stringMatching(/^[a-f0-9]{16}$/) }),
+      ]),
     });
+    expect(result.evidence).toHaveLength(result.sources.length);
+    expect(new Set(result.evidence.map((entry) => entry.sourceId))).toEqual(new Set(result.sources.map((source) => source.sourceId)));
     expect((await getWebSearchStatus()).available).toBe(true);
     expect(upsertWebSearchStatus).toHaveBeenCalledWith(expect.objectContaining({ youHttp: 200, state: "ready" }));
   });
@@ -88,16 +97,43 @@ describe("v6-K SearchProvider", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("returns nullable soft fallback and cooldown state honestly when the primary layer is rate limited", async () => {
+  it("returns an error outcome and cooldown state honestly when the primary layer is rate limited", async () => {
     process.env.YOU_API_KEY = "test-you";
     process.env.SERPER_API_KEY = "";
     process.env.EXA_API_KEY = "";
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "quota" }), { status: 429 })));
 
-    await expect(searchWeb("Проверь факт")).resolves.toBeNull();
+    await expect(searchWeb("Проверь факт")).resolves.toMatchObject({ state: "error", verificationStatus: "unavailable", sources: [] });
     const status = await getWebSearchStatus();
     expect(status).toMatchObject({ available: false, reason: expect.stringMatching(/ограничен/i) });
     expect(status.layers).toContainEqual(expect.objectContaining({ id: "you", state: "limited", retryAt: expect.any(String) }));
+  });
+
+  it("marks a completed cascade with no sources as empty rather than a technical provider failure", async () => {
+    process.env.YOU_API_KEY = "test-you";
+    process.env.SERPER_API_KEY = "test-serper";
+    process.env.EXA_API_KEY = "test-exa";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.now() + 16 * 60_000));
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: { web: [] } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ organic: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [] }), { status: 200 })));
+
+    await expect(searchWeb("Найди неизвестный термин")).resolves.toMatchObject({ state: "empty", verificationStatus: "no_results", sources: [], evidence: [] });
+  });
+
+  it("marks a mixed empty-and-failed cascade as degraded rather than pretending no information exists", async () => {
+    process.env.YOU_API_KEY = "test-you";
+    process.env.SERPER_API_KEY = "test-serper";
+    process.env.EXA_API_KEY = "";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.now() + 16 * 60_000));
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: { web: [] } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "busy" }), { status: 503 })));
+
+    await expect(searchWeb("Проверь спорный факт")).resolves.toMatchObject({ state: "degraded", verificationStatus: "degraded", sources: [] });
   });
 
   it("performs one bounded health probe through the active provider-neutral cascade", async () => {

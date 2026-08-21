@@ -291,3 +291,14 @@
 - [x] v6-K/H: создан и штатно валидирован skill `kairema-spec-driven-dev` с циклом спецификации, screenshot-приёмки, честного отчёта и защитой от регрессий.
 - [x] v6-K/I: добавлены unit/component/integration-регрессии; выполнены typecheck, production build, bundle audit, desktop/mobile browser-приёмка и отчёт о расхождениях. В полном test-прогоне прошли 129 тестов; пять внешних credential/health проверок нестабильны (Cerebras/Groq/OpenRouter/Tavily 403, OrcaRouter timeout) и честно задокументированы в отчёте, без изменения цепей или имитации успеха. Checkpoint v6-K подготовлен без изменения запрещённых инвариантов.
 - [x] v6-K/I-fix: обновлено component-ожидание AIChatBox: оно сохраняет проверку вложений и подтверждает обязательный UUID clientMessageId новой отправки.
+- [x] v6-L/A: полностью разобрать исходное ТЗ, составить трассировку требований к существующему коду и подтвердить неизменные инварианты v4–v6-K.
+- [x] v6-L/B: реализовать строгий pipeline актуального поиска: rewrite, нормализация источников, извлечение фактов, абсолютный prompt-priority, verification и bounded retry/escalation для всех четырёх ролей.
+- [x] v6-L/C: исправить обязательный поиск Flash и мгновенный bounded failover Think при 429/503/timeout/model unavailable без раскрытия цепей.
+- [x] v6-L/D: подтвердить общий chatId-контекст четырёх ролей и доработать общую память, профиль, пользовательские инструкции и явное сохранение.
+- [x] v6-L/E: исправить отображение и безопасную передачу фото/вложений в сообщения и модели, а также доступность тумблеров, меню настроек и экспортов.
+- [x] v6-L/F: сократить RAG/search audit до owner-safe полезных показателей без технических URL и внутренней реализации.
+- [x] v6-L/G: добавить регрессии, выполнить production build, аудит секретов, desktop/mobile browser-приёмку, обновить отчёт и опубликовать v6-L.
+- [x] v6-L/PATCH: ввести единый request-scoped MAX_NETWORK_LLM_ATTEMPTS=4 с attempt_index/type/provider/model/remaining_budget, provenance каждого extracted fact, корректные verification-status и честный PASS/PASS WITH WARNINGS/FAIL после обязательного smoke-test.
+- [x] v6-L/CRITICAL: завершить единый requestId-scoped бюджет для каждого генеративного LLM-вызова, включая закрытый dev-path; логировать только metadata `requestId`, `attemptIndex`, `attemptType`, `provider`, `model`, `remainingBudget`.
+- [x] v6-L/CRITICAL: различить provider_success, provider_empty, provider_timeout, provider_failed и all_providers_failed в безопасном server-side outcome; сохранить provenance каждого переданного факта.
+- [x] v6-L/CRITICAL: провести обязательные smoke tests: актуальный поиск Flash/Think, controlled failover Think, общая история Flash→Think→Context, memory save→refresh→new chat, image vision, AppSwitch/AppSelect, RAG audit и bundle/security audit; непроверенные пункты пометить NOT VERIFIED.

@@ -13,7 +13,7 @@ vi.mock("./web-search", () => {
   class WebSearchUnavailableError extends Error {}
   return {
     WebSearchUnavailableError,
-    searchWeb: vi.fn().mockResolvedValue({ summary: "Свежие проверяемые данные.", sources: [{ title: "Официальный источник", url: "https://example.com", domain: "example.com" }] }),
+    searchWeb: vi.fn().mockResolvedValue({ summary: "Свежие проверяемые данные.", state: "found", verificationStatus: "verified", cascadeUsed: "you", sources: [{ title: "Официальный источник", url: "https://example.com", domain: "example.com", sourceId: "source-001", retrievedAt: "2026-08-21T00:00:00.000Z" }], evidence: [{ fact: "Проверяемый факт", sourceUrl: "https://example.com", sourceTitle: "Официальный источник", sourceDomain: "example.com", retrievedAt: "2026-08-21T00:00:00.000Z", confidence: "high", sourceId: "source-001" }] }),
   };
 });
 
@@ -26,7 +26,7 @@ vi.mock("./knowledge", () => ({
   retrieveRagContext: vi.fn().mockResolvedValue({ context: "Проверяемый RAG-контекст.", sources: [{ title: "Официальный RSS", url: "https://openai.com/news/release", publishedAt: "2026-08-19T00:00:00.000Z", sourceId: "openai-news" }] }),
 }));
 
-import { buildChatContext, FLASH_WEB_RESEARCH_BUDGET_MS, FRESHNESS_UNAVAILABLE_PROMPT, isKairemaIdentityQuery, needsWebResearch, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
+import { buildChatContext, FLASH_WEB_RESEARCH_BUDGET_MS, FRESHNESS_EMPTY_PROMPT, FRESHNESS_UNAVAILABLE_PROMPT, isKairemaIdentityQuery, needsWebResearch, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
 import { getMemoryProfile, getUserSettings, listRelevantMemoryFacts } from "./db";
 import { WebSearchUnavailableError, searchWeb } from "./web-search";
 
@@ -36,7 +36,7 @@ afterEach(() => {
   vi.mocked(getUserSettings).mockResolvedValue({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0 });
   vi.mocked(getMemoryProfile).mockResolvedValue({ enabled: 0, autoExtract: 0, profile: "", summary: "" });
   vi.mocked(listRelevantMemoryFacts).mockResolvedValue([]);
-  vi.mocked(searchWeb).mockReset().mockResolvedValue({ summary: "Свежие проверяемые данные.", sources: [{ title: "Официальный источник", url: "https://example.com", domain: "example.com" }] });
+  vi.mocked(searchWeb).mockReset().mockResolvedValue({ summary: "Свежие проверяемые данные.", state: "found", verificationStatus: "verified", cascadeUsed: "you", sources: [{ title: "Официальный источник", url: "https://example.com", domain: "example.com", sourceId: "source-001", retrievedAt: "2026-08-21T00:00:00.000Z" }], evidence: [{ fact: "Проверяемый факт", sourceUrl: "https://example.com", sourceTitle: "Официальный источник", sourceDomain: "example.com", retrievedAt: "2026-08-21T00:00:00.000Z", confidence: "high", sourceId: "source-001" }] });
 });
 
 beforeEach(() => {
@@ -50,7 +50,7 @@ describe("chat context soft web research", () => {
 
   it("injects verified fresh web research for an external-current request", async () => {
     await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какая последняя версия браузера?", role: "fast" }))
-      .resolves.toMatchObject({ webResearch: "Свежие проверяемые данные.", webSources: [{ title: "Официальный источник", url: "https://example.com" }] });
+      .resolves.toMatchObject({ webResearch: "Свежие проверяемые данные.", webSources: [{ title: "Официальный источник", url: "https://example.com", sourceId: "source-001", retrievedAt: "2026-08-21T00:00:00.000Z" }], webEvidence: [{ fact: "Проверяемый факт", sourceId: "source-001" }], searchStatus: { state: "found", verificationStatus: "verified", sourcesCount: 1 } });
     expect(searchWeb).toHaveBeenCalledTimes(1);
     expect(searchWeb).toHaveBeenCalledWith(expect.any(String), { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS });
   });
@@ -64,6 +64,20 @@ describe("chat context soft web research", () => {
     vi.mocked(searchWeb).mockRejectedValueOnce(new WebSearchUnavailableError("Поиск не вернул проверяемые свежие источники."));
     await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какие последние новости?", role: "smart" }))
       .resolves.toMatchObject({ freshnessWarning: FRESHNESS_UNAVAILABLE_PROMPT });
+  });
+
+  it("marks completed zero-source search as empty and does not call it a provider outage", async () => {
+    vi.mocked(searchWeb).mockResolvedValueOnce({ summary: "", state: "empty", verificationStatus: "no_results", cascadeUsed: null, sources: [], evidence: [] });
+
+    await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какая последняя версия редкого продукта?", role: "smart" }))
+      .resolves.toMatchObject({ freshnessWarning: FRESHNESS_EMPTY_PROMPT, searchStatus: { state: "empty", verificationStatus: "no_results", sourcesCount: 0 } });
+  });
+
+  it("marks partial provider failure as degraded rather than presenting it as an empty search", async () => {
+    vi.mocked(searchWeb).mockResolvedValueOnce({ summary: "", state: "degraded", verificationStatus: "degraded", cascadeUsed: null, sources: [], evidence: [] });
+
+    await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какая актуальная цена?", role: "smart" }))
+      .resolves.toMatchObject({ freshnessWarning: FRESHNESS_UNAVAILABLE_PROMPT, searchStatus: { state: "degraded", verificationStatus: "degraded", sourcesCount: 0 } });
   });
 
   it("does not search for self-identity or ordinary internal questions", async () => {

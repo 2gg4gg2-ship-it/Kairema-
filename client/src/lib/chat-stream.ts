@@ -5,8 +5,7 @@ export type StreamDonePayload = {
   label?: string;
   sources?: StreamSource[];
   ragSources?: StreamSource[];
-  suggestions?: string[];
-  searchStatus?: { cascadeUsed?: "google" | "tavily" | "openrouter" | null; sourcesCount?: number };
+  searchStatus?: { state?: "found" | "empty" | "degraded" | "error"; verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable"; sourcesCount?: number };
 };
 
 export function sseEventFromBlock(block: string) {

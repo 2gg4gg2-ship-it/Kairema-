@@ -10,6 +10,7 @@ export const FLASH_WEB_RESEARCH_BUDGET_MS = 1_500;
 const FRESHNESS_QUERY_PATTERN = /(?:сегодня|сейчас|нынешн|текущ|последн|новост|свеж|актуальн|обновлен|верси[яиюе]|релиз|курс|цен[аы]|погод|врем[яени]|дата|событи|\bnow\b|\btoday\b|\bcurrent\b|\blatest\b|\brecent\b|\bnews\b|\bupdate\b|\bversion\b|\brelease\b|\bprice\b|\bweather\b)/i;
 const IDENTITY_QUERY_PATTERN = /^\s*(?:кто\s+ты|что\s+ты\s+(?:такое|за\s+ассистент)|как\s+тебя\s+зовут|ты\s+(?:kairema|кайрема)|who\s+are\s+you|what\s+are\s+you|what(?:'s|\s+is)\s+your\s+name)\s*[?!。.]?\s*$/i;
 export const FRESHNESS_UNAVAILABLE_PROMPT = "Свежие источники сейчас недоступны, поэтому я не могу надёжно подтвердить актуальные сведения.";
+export const FRESHNESS_EMPTY_PROMPT = "По проверенным свежим источникам не найдено достаточных данных для надёжного ответа.";
 
 export function isKairemaIdentityQuery(query: string) {
   return IDENTITY_QUERY_PATTERN.test(query.trim());
@@ -68,17 +69,28 @@ export async function buildChatContext(userId: number, sessionId: string, input:
         "Собери только релевантные актуальные факты и источники для запроса пользователя:\n" + (input.query?.slice(0, 8_000) ?? ""),
         role === "fast" ? { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS } : undefined,
       );
-      if (search?.sources.length) {
+      if (search.state === "found" && search.sources.length) {
         context.webResearch = search.summary;
         context.webSources = search.sources;
-        context.searchStatus = { cascadeUsed: search.cascadeUsed, sourcesCount: search.sources.length };
+        context.webEvidence = search.evidence;
+        context.searchStatus = {
+          cascadeUsed: search.cascadeUsed,
+          sourcesCount: search.sources.length,
+          state: "found",
+          verificationStatus: "verified",
+        };
       } else {
-        context.freshnessWarning = FRESHNESS_UNAVAILABLE_PROMPT;
-        context.searchStatus = { cascadeUsed: null, sourcesCount: 0 };
+        context.freshnessWarning = search.state === "empty" ? FRESHNESS_EMPTY_PROMPT : FRESHNESS_UNAVAILABLE_PROMPT;
+        context.searchStatus = {
+          cascadeUsed: null,
+          sourcesCount: 0,
+          state: search.state,
+          verificationStatus: search.verificationStatus,
+        };
       }
     } catch {
       context.freshnessWarning = FRESHNESS_UNAVAILABLE_PROMPT;
-      context.searchStatus = { cascadeUsed: null, sourcesCount: 0 };
+      context.searchStatus = { cascadeUsed: null, sourcesCount: 0, state: "error", verificationStatus: "unavailable" };
     }
   }
   try {

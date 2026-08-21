@@ -222,8 +222,13 @@ export const appRouter = router({
           const history = await listSessionMessages(ctx.user.id, input.sessionId);
           const storedSettings = await buildChatContext(ctx.user.id, input.sessionId, { attachmentIds: input.attachmentIds, query: input.content, role: input.modelId });
           const result = await chatWithRole(input.modelId, history.map((message) => ({ role: message.role, content: message.content })), { ...storedSettings, ...input.settings });
-          const sourceMetadata = result.sources?.length || result.ragSources?.length
-            ? JSON.stringify({ ...(result.sources?.length ? { sources: result.sources } : {}), ...(result.ragSources?.length ? { ragSources: result.ragSources } : {}) })
+          const sourceMetadata = result.sources?.length || result.evidence?.length || result.ragSources?.length || result.searchStatus
+            ? JSON.stringify({
+              ...(result.sources?.length ? { sources: result.sources } : {}),
+              ...(result.evidence?.length ? { evidence: result.evidence } : {}),
+              ...(result.ragSources?.length ? { ragSources: result.ragSources } : {}),
+              ...(result.searchStatus ? { searchStatus: result.searchStatus } : {}),
+            })
             : undefined;
           await appendChatMessage(ctx.user.id, input.sessionId, "assistant", result.content, result.modelUsed, sourceMetadata);
           await extractMemoryFacts(ctx.user.id, input.content).catch(() => undefined);

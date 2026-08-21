@@ -9,7 +9,7 @@ export const CHAT_STREAM_RATE_LIMIT = 60;
 const CHAT_STREAM_RATE_WINDOW_MS = 60_000;
 const CHAT_STREAM_REPLAY_TTL_MS = 5 * 60_000;
 type StreamResult = Awaited<ReturnType<typeof chatWithRoleStream>>;
-type StoredReplay = Pick<StreamResult, "content" | "modelUsed" | "label"> & { sources?: unknown[]; ragSources?: unknown[] };
+type StoredReplay = Pick<StreamResult, "content" | "modelUsed" | "label" | "searchStatus"> & { sources?: unknown[]; evidence?: unknown[]; ragSources?: unknown[] };
 type PendingReplay = { promise: Promise<StreamResult | null>; resolve: (result: StreamResult | null) => void };
 
 type RateWindow = { count: number; windowStart: number };
@@ -195,7 +195,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
             content: stored.content,
             modelUsed: stored.modelId ?? input.modelId,
             label: "Kairema",
-            ...(stored.metadata ? (() => { try { return JSON.parse(stored.metadata) as Pick<StoredReplay, "sources" | "ragSources">; } catch { return {}; } })() : {}),
+            ...(stored.metadata ? (() => { try { return JSON.parse(stored.metadata) as Pick<StoredReplay, "sources" | "evidence" | "ragSources" | "searchStatus">; } catch { return {}; } })() : {}),
           } : null);
           if (!replay) throw new Error("Предыдущее сообщение ещё не дало готового ответа. Повторите отправку через несколько секунд.");
           res.status(200);
@@ -244,8 +244,8 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
           controller.signal,
         );
         if (!closed) {
-          const sourceMetadata = result.sources?.length || result.ragSources?.length
-            ? JSON.stringify({ ...(result.sources?.length ? { sources: result.sources } : {}), ...(result.ragSources?.length ? { ragSources: result.ragSources } : {}) })
+          const sourceMetadata = result.sources?.length || result.evidence?.length || result.ragSources?.length || result.searchStatus
+            ? JSON.stringify({ ...(result.sources?.length ? { sources: result.sources } : {}), ...(result.evidence?.length ? { evidence: result.evidence } : {}), ...(result.ragSources?.length ? { ragSources: result.ragSources } : {}), ...(result.searchStatus ? { searchStatus: result.searchStatus } : {}) })
             : undefined;
           await dependencies.appendChatMessage(user.id, input.sessionId, "assistant", result.content, result.modelUsed, sourceMetadata);
           if (idempotencyKey) {

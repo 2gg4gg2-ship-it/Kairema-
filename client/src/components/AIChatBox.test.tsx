@@ -88,11 +88,12 @@ describe("AIChatBox user flows", () => {
       providerLabel: "Kairema Flash",
       model: "hidden-server-model",
       status: "полный ответ",
-      searchStatus: { cascadeUsed: "tavily", sourcesCount: 2 },
+      searchStatus: { state: "found", verificationStatus: "verified", sourcesCount: 2 },
     };
     render(<AIChatBox messages={[reply]} onSendMessage={vi.fn()} />);
 
-    expect(screen.getByRole("status").textContent).toContain("Поиск: Tavily");
+    expect(screen.getByRole("status").textContent).toContain("Источники проверены");
+    expect(screen.queryByText(/Tavily|Google|OpenRouter/i)).toBeNull();
     expect(screen.queryByText(/https?:\/\//i)).toBeNull();
   });
 

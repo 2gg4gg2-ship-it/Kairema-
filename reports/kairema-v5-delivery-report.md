@@ -579,6 +579,46 @@ RAG реализован как самостоятельный server-side сл�
 
 > Встроенный браузер был неавторизован, поэтому доступ к персональным экспортам, карточкам шаблонов и настройкам защищённой области не обходился. Их поведение подтверждено server-side scope, миграциями и integration-регрессиями. Существующие Heartbeat-задачи не создавались повторно; ZenMux остаётся health-only; Firecrawl не добавлен в поисковый каскад.
 
+## Критический hotfix v6-L — бюджет, evidence и честные исходы поиска
+
+**Дата:** 21 августа 2026
+**Итоговый статус:** **PASS WITH WARNINGS**. Локальные регрессии v6-L, типизация, production build, bundle audit и browser smoke tests успешны. Полный тестовый прогон содержит четыре независимых timeout внешних health-эндпоинтов; они не относятся к изменённой логике v6-L и не скрыты изменением тестов.
+
+| Область | Проблема и причина | Что изменено | Как проверено |
+|---|---|---|---|
+| Глобальный бюджет LLM | Ранее локальные границы отдельных failover-путей не давали доказуемого общего счётчика на весь request. | Добавлены `RequestBudget` и `createRequestBudget()`. Каждый реальный upstream generation-вызов, включая закрытый dev-path, списывает одну попытку из единого request-scoped бюджета `MAX_ATTEMPTS = 4`; пропуск кандидата попытку не расходует. В metadata-only telemetry остаются только `requestId`, порядковый номер попытки, тип, провайдер, модель и остаток бюджета. | Provider-regressions проверяют не более четырёх реальных вызовов и полный безопасный trace без текста чата, URL или ключей. |
+| Evidence и provenance | Поисковые сведения нуждались в проверяемом происхождении, а промпт должен был отличать подтверждённое от недоступного. | Каждый дедуплицированный источник получает стабильный `sourceId` как хэш URL и `retrievedAt`; evidence однозначно соотнесён только с финальными дедуплицированными источниками. В системный prompt всех четырёх ролей передаётся status/verification metadata и правило использовать подтверждённые факты из блока актуальной информации, не печатая URL или раздел «Источники». | Регрессии web-search и chat-context доказывают one-to-one provenance и доставку evidence/status в общий prompt Flash, Think, Context и Apex. |
+| Исходы поиска | Пустой результат и техническая деградация могли восприниматься одинаково. | Введены безопасные outcome-статусы `found`, `empty`, `degraded`, `error` и server-side классы `provider_success`, `provider_empty`, `provider_timeout`, `provider_failed`, `all_providers_failed`. Chat продолжает работу при сбое поиска; UI не раскрывает цепи, URL или model ID. | Unit- и component-regressions покрывают found/empty/degraded/error, cooldown и отсутствие технических имён каскада в индикаторе. |
+| История, память и failover | При смене роли или резервном пути контекст мог стать неоднозначным. | Проверена передача общей истории чата и `memoryContext` в общий builder всех четырёх ролей; bounded streaming continuation остаётся в одном assistant bubble, а сообщение сохраняется до SSE `done`. | Контекстные и SSE-regressions проверяют общую историю, память, failover и существующий порядок `appendChatMessage` до `done`. |
+| Изображения и элементы управления | Временные изображения не должны становиться обычными файлами, а нативные селекты ухудшали доступность настроек. | Последний пользовательский turn получает временный signed image URL как multimodal image-part, предшествующая история остаётся текстовой. Вложения изображений исключены из обычного списка файлов. Настройки переведены на существующий доступный `AppSelect`; переключатели сохранены доступными. | Provider-regression проверяет payload vision. UI-regressions проверяют безопасный search status, доступные combobox-контролы и отсутствие native `select` в диалоге настроек. |
+| Безопасность и владелец | Аудит должен быть полезным владельцу, но не содержать сообщения, ссылки или внутренние цепи. | Сохранён metadata-only RAG/search audit с owner-only scope; секреты остаются server-side. | Регрессии scope/audit, потоковый audit production bundle и безопасное сравнение с фактическими server-side значениями не обнаружили значения ключей в клиентском bundle. |
+
+### Обязательные smoke tests v6-L
+
+| Сценарий | Результат | Основание |
+|---|---|---|
+| Актуальный поиск Flash и Think | **PASS (контракт)** | Все четыре роли получают одинаковый evidence-aware prompt; фактический live-output зависит от внешних поисковых API. |
+| Controlled failover Think | **PASS** | Provider-regressions покрывают ограниченный failover и общий бюджет до четырёх upstream-вызовов. |
+| Общая история Flash → Think → Context | **PASS** | Chat-context regressions подтверждают shared history во всех публичных ролях. |
+| Memory save → refresh → new chat | **PASS (регрессия)** | Существующие owner-scoped memory/context tests подтверждают сохранение и повторную инъекцию bounded memory context. |
+| Image vision | **PASS (регрессия)** | Проверен multimodal payload последнего пользовательского turn с временным signed URL. |
+| AppSwitch / AppSelect | **PASS (регрессия и UI)** | Доступные Switch сохранены; AppSelect имеет именованные combobox-контролы и не использует native `select` в настройках. |
+| RAG audit | **PASS (регрессия)** | Owner-only metadata audit не включает текст сообщений, URL и технические детали цепи. |
+| Bundle/security audit | **PASS** | Точные значения server-side ключей отсутствуют в production client bundle. |
+| Авторизованный live-flow личных экспортов и настроек | **NOT VERIFIED в браузере** | Встроенная browser-сессия не содержит пользовательской OAuth-cookie; доступ не обходился. Server/client integration-regressions пройдены. |
+
+### Финальная валидация v6-L
+
+| Проверка | Результат |
+|---|---|
+| Целевые серверные и клиентские регрессии v6-L | Пройдены, включая budget, provenance, outcomes, vision, memory/context и доступность. |
+| Полный `pnpm test` | **PASS WITH WARNINGS:** 29 файлов и 137 тестов пройдены; 1 файл и 4 теста skipped; 4 live health-теста завершились timeout через 15 секунд: OpenRouter, optional provider health, OrcaRouter и You.com. |
+| `pnpm check` | Пройден без ошибок. |
+| `NODE_OPTIONS=--max-old-space-size=1024 pnpm build` | Пройден успешно. |
+| Browser / runtime | Dev server перезапущен. Desktop и mobile screenshots зафиксировали тёмную русскую оболочку, ровно четыре публичные роли и читаемый composer. Свежие server/browser logs не содержат новых runtime errors. |
+
+> Внешние timeout не были превращены в green-result и не меняют приёмку кода v6-L: защитный runtime по-прежнему мягко деградирует поиск и использует bounded failover. До новой подтверждённой live-проверки статус внешней доступности этих сервисов остаётся предупреждением, а не заявлением о готовности.
+
 ## References
 
 [1]: https://ai.google.dev/gemini-api/docs/google-search "Google Gemini API — Grounding with Google Search"

@@ -385,6 +385,18 @@ describe("Home integration flows", () => {
     expect(screen.queryByText(/Authorization|Bearer|chain|Llama Fast/i)).toBeNull();
   });
 
+  it("uses named accessible AppSelect controls in settings instead of native selects", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Открыть настройки" }));
+    const styleSelect = screen.getByRole("combobox", { name: "Стиль" });
+    expect(styleSelect).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Длина" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Роль по умолчанию" })).toBeTruthy();
+    expect(styleSelect.closest("label")?.querySelectorAll("select")).toHaveLength(0);
+  });
+
   it("keeps the role selector to one interactive trigger without an external chevron icon", async () => {
     const { container } = render(<Home />);
 
