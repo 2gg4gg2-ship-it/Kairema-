@@ -74,6 +74,44 @@ describe("chat stream happy-path", () => {
     expect(chatWithRoleStream).not.toHaveBeenCalled();
   });
 
+  it("replays a completed idempotent send without a second model invocation", async () => {
+    const request = { ...validRequestBody, clientMessageId: "3b6a41a8-dfb4-4e6b-92ab-0395af0ed1fb" };
+    const appendChatMessage = vi.fn()
+      .mockResolvedValueOnce({ created: true })
+      .mockResolvedValueOnce({ created: true })
+      .mockResolvedValueOnce({ created: false });
+    const chatWithRoleStream = vi.fn().mockResolvedValue({ content: "Готовый ответ", modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Llama 3.1 8B Instant" });
+    const handler = createChatStreamHandler({
+      authenticateRequest: vi.fn().mockResolvedValue({ id: 42 }),
+      getOwnedChatSession: vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Обычный разговор" }),
+      appendChatMessage,
+      listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
+      buildChatContext: vi.fn().mockResolvedValue(context),
+      chatWithRoleStream,
+      extractMemoryFacts: vi.fn().mockResolvedValue(undefined),
+      auditChatStream: vi.fn(),
+    });
+
+    await handler({ body: request } as Request, response(), vi.fn());
+    const replayResponse = response();
+    await handler({ body: request } as Request, replayResponse, vi.fn());
+
+    expect(chatWithRoleStream).toHaveBeenCalledOnce();
+    expect(appendChatMessage).toHaveBeenCalledTimes(2);
+    expect(appendChatMessage.mock.calls[0].at(-1)).toBe(request.clientMessageId);
+    expect(replayResponse.write).toHaveBeenCalledWith(expect.stringContaining('"replayed":true'));
+    expect(replayResponse.write).toHaveBeenCalledWith(expect.stringContaining("Готовый ответ"));
+  });
+
+  it("rejects an invalid client message UUID before reading chat history", async () => {
+    const streamResponse = response();
+    const getOwnedChatSession = vi.fn();
+    const handler = createChatStreamHandler({ authenticateRequest: vi.fn().mockResolvedValue({ id: 42 }), getOwnedChatSession });
+    await handler({ body: { ...validRequestBody, clientMessageId: "not-a-uuid" } } as Request, streamResponse, vi.fn());
+    expect(streamResponse.status).toHaveBeenCalledWith(400);
+    expect(getOwnedChatSession).not.toHaveBeenCalled();
+  });
+
   it("continues generation with a truthful soft-degradation warning when fresh search is unavailable", async () => {
     const writes: string[] = [];
     const streamResponse = Object.assign(new EventEmitter(), {

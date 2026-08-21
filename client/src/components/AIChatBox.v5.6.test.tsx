@@ -9,7 +9,10 @@ describe("AIChatBox v5.6", () => {
     render(<AIChatBox messages={[]} onSendMessage={onSendMessage} emptyStateMessage="Kairema" />);
     fireEvent.change(screen.getByPlaceholderText("Напишите сообщение…"), { target: { value: "Какие сегодня новости?" } });
     fireEvent.click(screen.getByRole("button", { name: "Отправить сообщение" }));
-    expect(onSendMessage).toHaveBeenCalledWith("Какие сегодня новости?", { attachmentIds: [] });
+    expect(onSendMessage).toHaveBeenCalledWith("Какие сегодня новости?", expect.objectContaining({
+      attachmentIds: [],
+      clientMessageId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
+    }));
     expect(screen.queryByLabelText("Искать в интернете")).toBeNull();
   });
 

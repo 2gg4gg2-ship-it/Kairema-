@@ -13,6 +13,7 @@ const fixtures = vi.hoisted(() => ({
   downloadPrepared: vi.fn(),
   createExport: vi.fn(),
   archiveExport: vi.fn(),
+  batchArchiveExports: vi.fn(),
   deleteExport: vi.fn(),
   deleteAllExports: vi.fn(),
   exports: [] as Array<{ id: string; fileName: string; format: "markdown" | "pdf"; createdAt: Date; byteSize?: number }>,
@@ -60,12 +61,14 @@ vi.mock("@/lib/trpc", () => ({
     },
     exports: {
       list: { useQuery: () => ({ data: fixtures.exports, isLoading: false }) },
+      search: { useQuery: (input: { query: string }) => ({ data: input.query.trim().length >= 2 ? fixtures.exports.filter((entry) => entry.fileName.toLocaleLowerCase("ru-RU").includes(input.query.toLocaleLowerCase("ru-RU"))) : [] }) },
       create: { useMutation: () => ({ mutateAsync: fixtures.createExport }) },
       archive: { useMutation: () => ({ mutateAsync: fixtures.archiveExport }) },
+      batchArchive: { useMutation: () => ({ mutateAsync: fixtures.batchArchiveExports, isPending: false }) },
       delete: { useMutation: () => ({ mutateAsync: fixtures.deleteExport }) },
       deleteAll: { useMutation: () => ({ mutateAsync: fixtures.deleteAllExports }) },
     },
-    useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, list: { invalidate: fixtures.invalidateSessions } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: vi.fn() } } }),
+    useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, list: { invalidate: fixtures.invalidateSessions } }, exports: { list: { invalidate: fixtures.invalidateExports }, search: { invalidate: vi.fn() }, download: { fetch: vi.fn() } } }),
   },
 }));
 vi.mock("@/components/ui/dialog", () => ({
@@ -77,7 +80,7 @@ vi.mock("@/components/ui/dialog", () => ({
   DialogTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-import Home from "./Home";
+import Home, { SettingSwitch } from "./Home";
 
 const encoder = new TextEncoder();
 
@@ -183,7 +186,7 @@ describe("Home integration flows", () => {
     expect(filesSection.querySelector(".kairema-empty")?.textContent).toContain("Вложений в этом чате пока нет");
   });
 
-  it("filters export history locally by file name without changing the server contract", async () => {
+  it("queries export history by file name through the server-side contract", async () => {
     const user = userEvent.setup();
     fixtures.exports = [
       { id: "33333333-3333-4333-8333-333333333333", fileName: "Проектный архив.md", format: "markdown", createdAt: new Date("2026-08-19T00:00:00.000Z") },
@@ -324,14 +327,52 @@ describe("Home integration flows", () => {
     fixtures.updateSettings.mockImplementation(() => new Promise(() => undefined));
     render(<Home />);
 
-    const thinking = screen.getByRole("button", { name: /Дополнительное рассуждение/ });
-    const indicator = thinking.querySelector(".kairema-switch");
-    expect(indicator?.className).not.toContain("kairema-switch-on");
+    const thinking = screen.getByRole("switch", { name: /Дополнительное рассуждение/ });
+    expect(thinking.getAttribute("data-state")).toBe("unchecked");
 
     await user.click(thinking);
 
-    expect(indicator?.className).toContain("kairema-switch-on");
+    expect(thinking.getAttribute("data-state")).toBe("checked");
     expect(fixtures.updateSettings).toHaveBeenCalledWith({ thinking: true });
+  });
+
+  it("keeps independent Switch semantics and stable visual-state snapshots in light and dark wrappers", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<div data-theme="light"><SettingSwitch label="Тестовый переключатель" help="Подсказка" checked={false} onChange={onChange} /></div>);
+    const lightSwitch = screen.getByRole("switch", { name: "Тестовый переключатель" });
+    expect({ theme: lightSwitch.parentElement?.parentElement?.getAttribute("data-theme"), role: lightSwitch.getAttribute("role"), checked: lightSwitch.getAttribute("aria-checked"), state: lightSwitch.getAttribute("data-state") }).toMatchInlineSnapshot(`
+      {
+        "checked": "false",
+        "role": "switch",
+        "state": "unchecked",
+        "theme": "light",
+      }
+    `);
+
+    rerender(<div className="dark" data-theme="dark"><SettingSwitch label="Тестовый переключатель" help="Подсказка" checked onChange={onChange} /></div>);
+    const darkSwitch = screen.getByRole("switch", { name: "Тестовый переключатель" });
+    expect({ theme: darkSwitch.parentElement?.parentElement?.getAttribute("data-theme"), role: darkSwitch.getAttribute("role"), checked: darkSwitch.getAttribute("aria-checked"), state: darkSwitch.getAttribute("data-state") }).toMatchInlineSnapshot(`
+      {
+        "checked": "true",
+        "role": "switch",
+        "state": "checked",
+        "theme": "dark",
+      }
+    `);
+  });
+
+  it("filters template cards by category while preserving visible tokenized text and separate actions", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    expect(screen.getByText("YouTube-аналитика")).toBeTruthy();
+    expect(screen.getByText("[ССЫЛКА ИЛИ ДАННЫЕ]")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Копировать" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Вставить в запрос" }).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: "Аналитика" }));
+    expect(screen.getByText("YouTube-аналитика")).toBeTruthy();
+    expect(screen.queryByText("Контент-план на неделю")).toBeNull();
   });
 
   it("shows display-only role metadata in settings without exposing internal routing", async () => {

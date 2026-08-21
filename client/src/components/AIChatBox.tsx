@@ -23,7 +23,7 @@ export type Message = {
 type Language = "ru" | "en";
 type AIChatBoxProps = {
   messages: Message[];
-  onSendMessage: (content: string, options?: { attachmentIds?: string[] }) => void;
+  onSendMessage: (content: string, options?: { attachmentIds?: string[]; clientMessageId?: string }) => void;
   onUploadFiles?: (files: File[]) => Promise<ChatAttachment[]>;
   isLoading?: boolean;
   placeholder?: string;
@@ -75,7 +75,7 @@ export function AIChatBox({
     event?.preventDefault();
     const value = currentInput.trim();
     if (!value || isLoading || isUploading) return;
-    onSendMessage(value, { attachmentIds: attachments.map((attachment) => attachment.id) });
+    onSendMessage(value, { attachmentIds: attachments.map((attachment) => attachment.id), clientMessageId: crypto.randomUUID() });
     setComposerInput("");
     setAttachments([]);
     textareaRef.current?.focus();

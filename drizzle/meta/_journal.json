@@ -148,6 +148,27 @@
       "when": 1787292480000,
       "tag": "0020_v6j_high_contrast",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1787300879280,
+      "tag": "0021_v6k_search_provider_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "5",
+      "when": 1787301985039,
+      "tag": "0022_friendly_silhouette",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1787303500000,
+      "tag": "0023_v6k_export_search_text",
+      "breakpoints": true
     }
   ]
 }

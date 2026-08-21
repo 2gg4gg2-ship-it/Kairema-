@@ -1,65 +1,163 @@
 import type { WebSource } from "./providers";
 import { getWebSearchStatus as getSavedWebSearchStatus, recordSearchOutage, type SearchOutageInput, upsertWebSearchStatus } from "./db";
 
-export type SearchCascadeUsed = "google" | "tavily" | "openrouter";
+export type SearchCascadeUsed = "you" | "serper" | "exa";
 type SearchLayer = SearchCascadeUsed;
 type LayerState = "ready" | "limited" | "unavailable" | "unknown";
 export type SearchLayerStatus = { id: SearchLayer; state: LayerState; checkedAt: string; retryAt: string | null };
-export type WebSearchStatus = { available: boolean; reason: string; checkedAt: string; googleHttp: number | null; tavilyHttp: number | null; openrouterHttp: number | null; layers: SearchLayerStatus[] };
+export type WebSearchStatus = {
+  available: boolean;
+  reason: string;
+  checkedAt: string;
+  youHttp: number | null;
+  serperHttp: number | null;
+  exaHttp: number | null;
+  /** Kept as null-only compatibility fields while v6-K consumers move to provider-neutral layers. */
+  googleHttp: number | null;
+  tavilyHttp: number | null;
+  openrouterHttp: number | null;
+  layers: SearchLayerStatus[];
+};
 export type SearchResult = { summary: string; sources: WebSource[]; cascadeUsed: SearchCascadeUsed };
 export type SearchWebOptions = { timeoutMs?: number };
 
-const GOOGLE_SEARCH_MODEL = "gemini-3.6-flash";
-const GOOGLE_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GOOGLE_SEARCH_MODEL}:generateContent`;
-const TAVILY_ENDPOINT = "https://api.tavily.com/search";
-const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
+const YOU_ENDPOINT = "https://ydc-index.io/v1/search";
+const SERPER_ENDPOINT = "https://google.serper.dev/search";
+const EXA_ENDPOINT = "https://api.exa.ai/search";
 const STATUS_KEY = "google_grounding";
 const QUERY_LIMIT = 8_000;
 const SOURCE_LIMIT = 5;
 const SNIPPET_LIMIT = 550;
 const PREFERRED_GLOBAL_DOMAINS = [".gov", ".edu", ".int", ".org", "openai.com", "google.com", "microsoft.com", "who.int", "un.org", "europa.eu"];
-const LAYERS: SearchLayer[] = ["google", "tavily", "openrouter"];
-const LAYER_COOLDOWN_MS: Record<SearchLayer, number> = { google: 15 * 60_000, tavily: 10 * 60_000, openrouter: 10 * 60_000 };
+const LAYERS: SearchLayer[] = ["you", "serper", "exa"];
+const LAYER_COOLDOWN_MS: Record<SearchLayer, number> = { you: 10 * 60_000, serper: 10 * 60_000, exa: 10 * 60_000 };
 const layerCooldowns: Partial<Record<SearchLayer, number>> = {};
 
-/** Kept as a stable import for older server consumers; searchWeb now gracefully returns null instead of throwing it. */
+/** Stable compatibility export: search failure stays an optional context and never throws this error to chat users. */
 export class WebSearchUnavailableError extends Error { constructor(message: string) { super(message); this.name = "WebSearchUnavailableError"; } }
 type SearchAttempt = { result: SearchResult | null; http: number | null; latencyMs: number };
 type StatusInput = Omit<WebSearchStatus, "layers">;
 
-function noteLayerOutcome(layer: SearchLayer, http: number | null) { if (http === 429) layerCooldowns[layer] = Date.now() + LAYER_COOLDOWN_MS[layer]; else if (http !== null && http < 400) delete layerCooldowns[layer]; }
+function noteLayerOutcome(layer: SearchLayer, http: number | null) {
+  if (http === 429 || http === 503) layerCooldowns[layer] = Date.now() + LAYER_COOLDOWN_MS[layer];
+  else if (http !== null && http < 400) delete layerCooldowns[layer];
+}
 function isCooling(layer: SearchLayer) { return (layerCooldowns[layer] ?? 0) > Date.now(); }
-function layerStatus(layer: SearchLayer, http: number | null, checkedAt: string): SearchLayerStatus { const retry = layerCooldowns[layer]; return { id: layer, state: retry && retry > Date.now() ? "limited" : http === 200 ? "ready" : http === null ? "unknown" : "unavailable", checkedAt, retryAt: retry && retry > Date.now() ? new Date(retry).toISOString() : null }; }
-function expandStatus(input: StatusInput): WebSearchStatus { noteLayerOutcome("google", input.googleHttp); noteLayerOutcome("tavily", input.tavilyHttp); noteLayerOutcome("openrouter", input.openrouterHttp); return { ...input, layers: LAYERS.map((layer) => layerStatus(layer, input[`${layer}Http` as "googleHttp" | "tavilyHttp" | "openrouterHttp"], input.checkedAt)) }; }
+function layerStatus(layer: SearchLayer, http: number | null, checkedAt: string): SearchLayerStatus {
+  const retry = layerCooldowns[layer];
+  return { id: layer, state: retry && retry > Date.now() ? "limited" : http === 200 ? "ready" : http === null ? "unknown" : "unavailable", checkedAt, retryAt: retry && retry > Date.now() ? new Date(retry).toISOString() : null };
+}
+function expandStatus(input: StatusInput): WebSearchStatus {
+  noteLayerOutcome("you", input.youHttp);
+  noteLayerOutcome("serper", input.serperHttp);
+  noteLayerOutcome("exa", input.exaHttp);
+  return { ...input, layers: LAYERS.map((layer) => layerStatus(layer, input[`${layer}Http` as "youHttp" | "serperHttp" | "exaHttp"], input.checkedAt)) };
+}
+let lastStatus = expandStatus({ available: false, reason: "Проверка web-поиска ещё не выполнялась.", checkedAt: new Date().toISOString(), youHttp: null, serperHttp: null, exaHttp: null, googleHttp: null, tavilyHttp: null, openrouterHttp: null });
 
-let lastStatus = expandStatus({ available: false, reason: "Проверка web-поиска ещё не выполнялась.", checkedAt: new Date().toISOString(), googleHttp: null, tavilyHttp: null, openrouterHttp: null });
-
-function statusFromHttp(http: number) { if (http === 429) return "Поиск временно ограничен: основной слой ожидает сброса квоты."; if (http === 401 || http === 403) return "Поиск временно недоступен: серверная авторизация основного слоя отклонена."; if (http === 404) return "Поиск временно недоступен: требуется обновление server-side конфигурации."; return "Поиск временно недоступен: основной слой не ответил."; }
-function webSource(title: unknown, url: unknown): WebSource | null { if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return null; let domain: string | undefined; try { domain = new URL(url).hostname.replace(/^www\./i, ""); } catch { /* validated above */ } return { title: typeof title === "string" && title.trim() ? title.trim().slice(0, 240) : domain ?? url, url, ...(domain ? { domain } : {}) }; }
+function statusFromHttp(http: number) {
+  if (http === 429 || http === 503) return "Поиск временно ограничен: основной слой ожидает сброса квоты.";
+  if (http === 401 || http === 403) return "Поиск временно недоступен: серверная авторизация основного слоя отклонена.";
+  if (http === 404) return "Поиск временно недоступен: требуется обновление server-side конфигурации.";
+  return "Поиск временно недоступен: основной слой не ответил.";
+}
+function webSource(title: unknown, url: unknown): WebSource | null {
+  if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return null;
+  let domain: string | undefined;
+  try { domain = new URL(url).hostname.replace(/^www\./i, ""); } catch { /* URL already validated */ }
+  return { title: typeof title === "string" && title.trim() ? title.trim().slice(0, 240) : domain ?? url, url, ...(domain ? { domain } : {}) };
+}
 function sourcePriority(source: WebSource) { const domain = source.domain?.toLowerCase() ?? ""; return PREFERRED_GLOBAL_DOMAINS.some((preferred) => domain === preferred || domain.endsWith(preferred)) ? 0 : 1; }
-function uniqueSources(items: Array<WebSource | null>): WebSource[] { const seen = new Set<string>(); return items.flatMap((item) => !item || seen.has(item.url) ? [] : (seen.add(item.url), [item])).sort((a, b) => sourcePriority(a) - sourcePriority(b) || a.title.localeCompare(b.title)).slice(0, SOURCE_LIMIT); }
-export function buildGlobalDiscoveryQuery(query: string) { return `Find current, authoritative global information. Prefer official international primary sources and English-language source discovery when useful. Original user request: ${query.slice(0, QUERY_LIMIT)}`; }
-function googleSources(payload: unknown): WebSource[] { const raw = (payload as { candidates?: Array<{ groundingMetadata?: { groundingChunks?: Array<{ web?: { title?: unknown; uri?: unknown } }> } }> })?.candidates?.[0]?.groundingMetadata?.groundingChunks ?? []; return uniqueSources(raw.map((item) => webSource(item.web?.title, item.web?.uri))); }
-function googleAnswer(payload: unknown) { const parts = (payload as { candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }> })?.candidates?.[0]?.content?.parts ?? []; return parts.map((part) => typeof part.text === "string" ? part.text : "").join("\n").trim(); }
-function tavilyResult(payload: unknown): Omit<SearchResult, "cascadeUsed"> | null { const entries = ((payload as { results?: Array<{ title?: unknown; url?: unknown; content?: unknown }> })?.results ?? []).flatMap((item) => { const source = webSource(item.title, item.url); if (!source) return []; const text = typeof item.content === "string" ? item.content.replace(/\s+/g, " ").trim().slice(0, SNIPPET_LIMIT) : ""; return [{ source, text }]; }).slice(0, SOURCE_LIMIT); const sources = uniqueSources(entries.map((entry) => entry.source)); if (!sources.length) return null; return { summary: entries.map(({ source, text }) => `Источник: ${source.title}\nURL: ${source.url}${text ? `\nФрагмент: ${text}` : ""}`).join("\n\n"), sources }; }
-function openRouterSources(payload: unknown): WebSource[] { const citations = (payload as { citations?: unknown })?.citations; return Array.isArray(citations) ? uniqueSources(citations.map((value) => webSource(value, value))) : []; }
-function openRouterAnswer(payload: unknown) { const content = (payload as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content; return typeof content === "string" ? content.trim() : ""; }
-
-async function saveStatus(input: StatusInput) { const status = expandStatus(input); lastStatus = status; await upsertWebSearchStatus({ key: STATUS_KEY, state: status.available ? "ready" : "unavailable", reason: status.reason, googleHttp: status.googleHttp, tavilyHttp: status.tavilyHttp, openrouterHttp: status.openrouterHttp, checkedAt: new Date(status.checkedAt) }); return status; }
-export async function getWebSearchStatus(): Promise<WebSearchStatus> { const stored = await getSavedWebSearchStatus(); return stored ? expandStatus({ available: stored.state === "ready", reason: stored.reason, checkedAt: stored.checkedAt.toISOString(), googleHttp: stored.googleHttp ?? null, tavilyHttp: stored.tavilyHttp ?? null, openrouterHttp: stored.openrouterHttp ?? null }) : lastStatus; }
-function safeCascadeTelemetry(http: Record<SearchLayer, number | null>, selected: SearchCascadeUsed | null) { console.info("[Kairema search]", JSON.stringify({ event: "search.cascade", googleHttp: http.google, tavilyHttp: http.tavily, openrouterHttp: http.openrouter, selected })); }
-function outageClass(http: number | null): SearchOutageInput["errorClass"] { if (http === 429) return "rate_limited"; if (http === 401 || http === 403) return "auth"; if (http === 404) return "not_found"; if (http === null) return "network_error"; if (http >= 400) return "http_error"; return "no_sources"; }
-
-async function searchGoogle(query: string, key: string, signal: AbortSignal): Promise<SearchAttempt> { const startedAt = Date.now(); try { const response = await fetch(GOOGLE_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key }, body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: query }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0.2, maxOutputTokens: 1_200 } }), signal }); const payload = await response.json().catch(() => null); const summary = googleAnswer(payload); const sources = googleSources(payload); return { http: response.status, latencyMs: Date.now() - startedAt, result: response.ok && summary && sources.length ? { summary, sources, cascadeUsed: "google" } : null }; } catch { return { http: null, latencyMs: Date.now() - startedAt, result: null }; } }
-async function searchTavily(query: string, signal: AbortSignal): Promise<SearchAttempt> { const key = process.env.TAVILY_API_KEY?.trim(); if (!key) return { http: null, latencyMs: 0, result: null }; const startedAt = Date.now(); try { const response = await fetch(TAVILY_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ query: query.slice(0, QUERY_LIMIT), search_depth: "basic", max_results: SOURCE_LIMIT, include_answer: false, include_raw_content: false }), signal }); const parsed = tavilyResult(await response.json().catch(() => null)); return { http: response.status, latencyMs: Date.now() - startedAt, result: response.ok && parsed ? { ...parsed, cascadeUsed: "tavily" } : null }; } catch { return { http: null, latencyMs: Date.now() - startedAt, result: null }; } }
-async function searchOpenRouterOnline(query: string, signal: AbortSignal): Promise<SearchAttempt> { const key = process.env.OPENROUTER_API_KEY?.trim(); if (!key) return { http: null, latencyMs: 0, result: null }; const startedAt = Date.now(); try { const response = await fetch(OPENROUTER_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ model: "openrouter/free:online", messages: [{ role: "user", content: query.slice(0, QUERY_LIMIT) }], max_tokens: 1_200 }), signal }); const payload = await response.json().catch(() => null); const summary = openRouterAnswer(payload); const sources = openRouterSources(payload); return { http: response.status, latencyMs: Date.now() - startedAt, result: response.ok && summary && sources.length ? { summary, sources, cascadeUsed: "openrouter" } : null }; } catch { return { http: null, latencyMs: Date.now() - startedAt, result: null }; } }
+function uniqueSources(items: Array<WebSource | null>): WebSource[] {
+  const seen = new Set<string>();
+  return items.flatMap((item) => !item || seen.has(item.url) ? [] : (seen.add(item.url), [item]))
+    .sort((a, b) => sourcePriority(a) - sourcePriority(b) || a.title.localeCompare(b.title)).slice(0, SOURCE_LIMIT);
+}
+/** Deterministic rewrite only; input remains server-side and is never stored or logged. */
+export function buildGlobalDiscoveryQuery(query: string) {
+  const normalized = query.replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim().slice(0, QUERY_LIMIT);
+  return `Find current, authoritative global information. Prefer official primary sources and English-language source discovery when useful. Original user request: ${normalized}`;
+}
+function sourceSummary(entries: Array<{ source: WebSource; text: string }>) {
+  return entries.map(({ source, text }) => `Источник: ${source.title}\nURL: ${source.url}${text ? `\nФрагмент: ${text}` : ""}`).join("\n\n");
+}
+function youResult(payload: unknown): Omit<SearchResult, "cascadeUsed"> | null {
+  const results = (payload as { results?: { web?: Array<{ title?: unknown; url?: unknown; description?: unknown }>; news?: Array<{ title?: unknown; url?: unknown; description?: unknown }> } })?.results;
+  const entries = [...(results?.web ?? []), ...(results?.news ?? [])].flatMap((item) => {
+    const source = webSource(item.title, item.url);
+    return source ? [{ source, text: typeof item.description === "string" ? item.description.replace(/\s+/g, " ").trim().slice(0, SNIPPET_LIMIT) : "" }] : [];
+  });
+  const sources = uniqueSources(entries.map((entry) => entry.source));
+  return sources.length ? { summary: sourceSummary(entries.filter((entry) => sources.some((source) => source.url === entry.source.url))), sources } : null;
+}
+function serperResult(payload: unknown): Omit<SearchResult, "cascadeUsed"> | null {
+  const entries = ((payload as { organic?: Array<{ title?: unknown; link?: unknown; snippet?: unknown }> })?.organic ?? []).flatMap((item) => {
+    const source = webSource(item.title, item.link);
+    return source ? [{ source, text: typeof item.snippet === "string" ? item.snippet.replace(/\s+/g, " ").trim().slice(0, SNIPPET_LIMIT) : "" }] : [];
+  });
+  const sources = uniqueSources(entries.map((entry) => entry.source));
+  return sources.length ? { summary: sourceSummary(entries.filter((entry) => sources.some((source) => source.url === entry.source.url))), sources } : null;
+}
+function exaResult(payload: unknown): Omit<SearchResult, "cascadeUsed"> | null {
+  const entries = ((payload as { results?: Array<{ title?: unknown; url?: unknown; text?: unknown; highlights?: unknown }> })?.results ?? []).flatMap((item) => {
+    const source = webSource(item.title, item.url);
+    const highlight = Array.isArray(item.highlights) ? item.highlights.find((value): value is string => typeof value === "string") : null;
+    const text = highlight ?? (typeof item.text === "string" ? item.text : "");
+    return source ? [{ source, text: text.replace(/\s+/g, " ").trim().slice(0, SNIPPET_LIMIT) }] : [];
+  });
+  const sources = uniqueSources(entries.map((entry) => entry.source));
+  return sources.length ? { summary: sourceSummary(entries.filter((entry) => sources.some((source) => source.url === entry.source.url))), sources } : null;
+}
 function skippedAttempt(): SearchAttempt { return { result: null, http: null, latencyMs: 0 }; }
-
-export async function probeWebSearchStatus(): Promise<WebSearchStatus> { const checkedAt = new Date().toISOString(); const key = process.env.GEMINI_API_KEY?.trim(); const google = key && !isCooling("google") ? await searchGoogle("Проверь свежий поиск и верни проверяемый источник.", key, AbortSignal.timeout(25_000)) : skippedAttempt(); const tavily = !isCooling("tavily") ? await searchTavily("Kairema health check", AbortSignal.timeout(25_000)) : skippedAttempt(); const online = !isCooling("openrouter") ? await searchOpenRouterOnline("Kairema health check", AbortSignal.timeout(25_000)) : skippedAttempt(); const selected = google.result ?? tavily.result ?? online.result; return saveStatus({ available: Boolean(selected), reason: selected ? selected.cascadeUsed === "google" ? "Поиск доступен." : "Поиск доступен через резервный слой." : google.http ? statusFromHttp(google.http) : "Поиск временно недоступен: сервисы не вернули проверяемые источники.", checkedAt, googleHttp: google.http, tavilyHttp: tavily.http, openrouterHttp: online.http }); }
-
-/** A search outage is optional context, not a terminal chat error. */
-export async function searchWeb(query: string, options: SearchWebOptions = {}): Promise<SearchResult | null> { const checkedAt = new Date().toISOString(); const key = process.env.GEMINI_API_KEY?.trim(); const previous = await getWebSearchStatus(); const signal = AbortSignal.timeout(Math.max(100, Math.min(options.timeoutMs ?? 25_000, 25_000))); const globalQuery = buildGlobalDiscoveryQuery(query); const http: Record<SearchLayer, number | null> = { google: null, tavily: null, openrouter: null };
-  if (key && !isCooling("google")) { const attempt = await searchGoogle(globalQuery, key, signal); http.google = attempt.http; if (attempt.result) { safeCascadeTelemetry(http, attempt.result.cascadeUsed); await saveStatus({ available: true, reason: "Поиск доступен.", checkedAt, googleHttp: http.google, tavilyHttp: http.tavily, openrouterHttp: previous.openrouterHttp }); return attempt.result; } void recordSearchOutage({ layer: "google", errorClass: outageClass(attempt.http), latencyMs: attempt.latencyMs, fellBack: !signal.aborted }); }
-  if (!signal.aborted && !isCooling("tavily")) { const attempt = await searchTavily(globalQuery, signal); http.tavily = attempt.http; if (attempt.result) { safeCascadeTelemetry(http, attempt.result.cascadeUsed); await saveStatus({ available: true, reason: "Поиск доступен через резервный слой.", checkedAt, googleHttp: http.google, tavilyHttp: http.tavily, openrouterHttp: previous.openrouterHttp }); return attempt.result; } void recordSearchOutage({ layer: "tavily", errorClass: outageClass(attempt.http), latencyMs: attempt.latencyMs, fellBack: !signal.aborted }); }
-  if (!signal.aborted && !isCooling("openrouter")) { const attempt = await searchOpenRouterOnline(globalQuery, signal); http.openrouter = attempt.http; if (attempt.result) { safeCascadeTelemetry(http, attempt.result.cascadeUsed); await saveStatus({ available: true, reason: "Поиск доступен через резервный слой.", checkedAt, googleHttp: http.google, tavilyHttp: http.tavily, openrouterHttp: http.openrouter }); return attempt.result; } void recordSearchOutage({ layer: "openrouter", errorClass: outageClass(attempt.http), latencyMs: attempt.latencyMs, fellBack: false }); }
-  safeCascadeTelemetry(http, null); const reason = signal.aborted && options.timeoutMs ? "Поиск временно недоступен: превышен ограниченный бюджет свежих источников." : isCooling("google") ? "Поиск временно ограничен: основной слой ожидает сброса квоты." : key && http.google ? `${statusFromHttp(http.google)} Резервные слои не вернули проверяемые источники.` : "Поиск временно недоступен: ни один слой не вернул проверяемые источники."; await saveStatus({ available: false, reason, checkedAt, googleHttp: http.google, tavilyHttp: http.tavily, openrouterHttp: http.openrouter ?? previous.openrouterHttp }); return null; }
+async function requestSearch(layer: SearchLayer, query: string, signal: AbortSignal): Promise<SearchAttempt> {
+  const startedAt = Date.now();
+  const apiKey = (layer === "you" ? process.env.YOU_API_KEY : layer === "serper" ? process.env.SERPER_API_KEY : process.env.EXA_API_KEY)?.trim() ?? "";
+  if (!apiKey) return skippedAttempt();
+  try {
+    const request: { url: string; headers: Record<string, string>; body: object; parse: (payload: unknown) => Omit<SearchResult, "cascadeUsed"> | null } = layer === "you"
+      ? { url: YOU_ENDPOINT, headers: { "Content-Type": "application/json", "X-API-Key": apiKey }, body: { query, count: SOURCE_LIMIT, safesearch: "moderate" }, parse: youResult }
+      : layer === "serper"
+        ? { url: SERPER_ENDPOINT, headers: { "Content-Type": "application/json", "X-API-KEY": apiKey }, body: { q: query, num: SOURCE_LIMIT }, parse: serperResult }
+        : { url: EXA_ENDPOINT, headers: { "Content-Type": "application/json", "x-api-key": apiKey }, body: { query, numResults: SOURCE_LIMIT, contents: { text: { maxCharacters: 2_000 } } }, parse: exaResult };
+    const response = await fetch(request.url, { method: "POST", headers: request.headers, body: JSON.stringify(request.body), signal });
+    const parsed = request.parse(await response.json().catch(() => null));
+    return { http: response.status, latencyMs: Date.now() - startedAt, result: response.ok && parsed ? { ...parsed, cascadeUsed: layer } : null };
+  } catch { return { http: null, latencyMs: Date.now() - startedAt, result: null }; }
+}
+async function saveStatus(input: StatusInput) {
+  const status = expandStatus(input);
+  lastStatus = status;
+  await upsertWebSearchStatus({ key: STATUS_KEY, state: status.available ? "ready" : "unavailable", reason: status.reason, youHttp: status.youHttp, serperHttp: status.serperHttp, exaHttp: status.exaHttp, googleHttp: status.googleHttp, tavilyHttp: status.tavilyHttp, openrouterHttp: status.openrouterHttp, checkedAt: new Date(status.checkedAt) });
+  return status;
+}
+export async function getWebSearchStatus(): Promise<WebSearchStatus> {
+  const stored = await getSavedWebSearchStatus();
+  return stored ? expandStatus({ available: stored.state === "ready", reason: stored.reason, checkedAt: stored.checkedAt.toISOString(), youHttp: stored.youHttp ?? null, serperHttp: stored.serperHttp ?? null, exaHttp: stored.exaHttp ?? null, googleHttp: stored.googleHttp ?? null, tavilyHttp: stored.tavilyHttp ?? null, openrouterHttp: stored.openrouterHttp ?? null }) : lastStatus;
+}
+function safeCascadeTelemetry(http: Record<SearchLayer, number | null>, selected: SearchCascadeUsed | null) { console.info("[Kairema search]", JSON.stringify({ event: "search.cascade", youHttp: http.you, serperHttp: http.serper, exaHttp: http.exa, selected })); }
+function outageClass(http: number | null): SearchOutageInput["errorClass"] { if (http === 429) return "rate_limited"; if (http === 401 || http === 403) return "auth"; if (http === 404) return "not_found"; if (http === null) return "network_error"; if (http >= 400) return "http_error"; return "no_sources"; }
+async function runCascade(query: string, options: SearchWebOptions, recordOutages: boolean): Promise<SearchResult | null> {
+  const checkedAt = new Date().toISOString();
+  const previous = await getWebSearchStatus();
+  const signal = AbortSignal.timeout(Math.max(100, Math.min(options.timeoutMs ?? 25_000, 25_000)));
+  const http: Record<SearchLayer, number | null> = { you: null, serper: null, exa: null };
+  for (const layer of LAYERS) {
+    if (signal.aborted || isCooling(layer)) continue;
+    const attempt = await requestSearch(layer, query, signal);
+    http[layer] = attempt.http;
+    if (attempt.result) {
+      safeCascadeTelemetry(http, layer);
+      await saveStatus({ available: true, reason: layer === "you" ? "Поиск доступен." : "Поиск доступен через резервный слой.", checkedAt, youHttp: http.you ?? previous.youHttp, serperHttp: http.serper ?? previous.serperHttp, exaHttp: http.exa ?? previous.exaHttp, googleHttp: previous.googleHttp, tavilyHttp: previous.tavilyHttp, openrouterHttp: previous.openrouterHttp });
+      return attempt.result;
+    }
+    if (recordOutages) void recordSearchOutage({ layer, errorClass: outageClass(attempt.http), latencyMs: attempt.latencyMs, fellBack: layer !== "exa" && !signal.aborted });
+  }
+  safeCascadeTelemetry(http, null);
+  const primaryHttp = http.you;
+  const reason = signal.aborted && options.timeoutMs ? "Поиск временно недоступен: превышен ограниченный бюджет свежих источников." : isCooling("you") ? "Поиск временно ограничен: основной слой ожидает сброса квоты." : primaryHttp ? `${statusFromHttp(primaryHttp)} Резервные слои не вернули проверяемые источники.` : "Поиск временно недоступен: ни один слой не вернул проверяемые источники.";
+  await saveStatus({ available: false, reason, checkedAt, youHttp: http.you ?? previous.youHttp, serperHttp: http.serper ?? previous.serperHttp, exaHttp: http.exa ?? previous.exaHttp, googleHttp: previous.googleHttp, tavilyHttp: previous.tavilyHttp, openrouterHttp: previous.openrouterHttp });
+  return null;
+}
+export async function probeWebSearchStatus(): Promise<WebSearchStatus> { await runCascade("Kairema health check", { timeoutMs: 25_000 }, false); return getWebSearchStatus(); }
+/** Search is optional context: null means source retrieval failed but model generation may continue. */
+export async function searchWeb(query: string, options: SearchWebOptions = {}): Promise<SearchResult | null> { return runCascade(buildGlobalDiscoveryQuery(query), options, true); }

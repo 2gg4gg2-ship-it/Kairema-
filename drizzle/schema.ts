@@ -1,4 +1,4 @@
-import { boolean, index, int, mysqlEnum, mysqlTable, primaryKey, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { boolean, index, int, mediumtext, mysqlEnum, mysqlTable, primaryKey, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -27,9 +27,14 @@ export const messages = mysqlTable("messages", {
   role: mysqlEnum("role", ["user", "assistant"]).notNull(),
   content: text("content").notNull(),
   modelId: varchar("modelId", { length: 160 }),
+  /** Browser-generated UUID only for original user sends; makes retries safe. */
+  clientMessageId: varchar("clientMessageId", { length: 36 }),
   metadata: text("metadata"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-}, (table) => [index("messages_session_created_idx").on(table.sessionId, table.createdAt)]);
+}, (table) => [
+  index("messages_session_created_idx").on(table.sessionId, table.createdAt),
+  uniqueIndex("messages_client_message_id_unique").on(table.clientMessageId),
+]);
 
 export const chatExports = mysqlTable("chat_exports", {
   id: varchar("id", { length: 36 }).primaryKey(),
@@ -41,6 +46,8 @@ export const chatExports = mysqlTable("chat_exports", {
   contentType: varchar("contentType", { length: 128 }).notNull(),
   byteSize: int("byteSize").notNull(),
   archived: boolean("archived").default(false).notNull(),
+  /** Private text snapshot for owner-scoped full-text export search; never sent by list/download DTOs. */
+  searchText: mediumtext("searchText"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => [
   index("chat_exports_user_created_idx").on(table.userId, table.createdAt),
@@ -85,7 +92,7 @@ export const flashTtftMetrics = mysqlTable("flash_ttft_metrics", {
 /** Metadata-only record of a controlled web-search layer failover. No query, URL, source, user or model is persisted. */
 export const searchOutageLogs = mysqlTable("search_outage_logs", {
 	id: int("id").autoincrement().primaryKey(),
-	layer: mysqlEnum("layer", ["google", "tavily", "openrouter"]).notNull(),
+	layer: varchar("layer", { length: 32 }).notNull(),
 	errorClass: varchar("errorClass", { length: 32 }).notNull(),
 	latencyMs: int("latencyMs").notNull(),
 	fellBack: int("fellBack").notNull().default(0),
@@ -107,6 +114,9 @@ export const webSearchStatus = mysqlTable("web_search_status", {
   googleHttp: int("googleHttp"),
   tavilyHttp: int("tavilyHttp"),
   openrouterHttp: int("openrouterHttp"),
+  youHttp: int("youHttp"),
+  serperHttp: int("serperHttp"),
+  exaHttp: int("exaHttp"),
   checkedAt: timestamp("checkedAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, like, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, like, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
 import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryFacts, memoryProfiles, messages, providerDailyUsage, providerHealth, roleRuntimeStatus, searchOutageLogs, userSettings, users, webSearchStatus } from "../drizzle/schema";
@@ -82,11 +82,40 @@ export async function listSessionMessages(userId: number, sessionId: string): Pr
   return db.select().from(messages).where(eq(messages.sessionId, sessionId)).orderBy(asc(messages.createdAt), asc(messages.id));
 }
 
-export async function appendChatMessage(userId: number, sessionId: string, role: "user" | "assistant", content: string, modelId?: string, metadata?: string): Promise<void> {
+/**
+ * Appends a message once. A client UUID is accepted only for original user
+ * messages; retries return `created: false` without creating another record.
+ */
+export async function appendChatMessage(userId: number, sessionId: string, role: "user" | "assistant", content: string, modelId?: string, metadata?: string, clientMessageId?: string): Promise<{ created: boolean }> {
   const db = requireDatabase(await getDb());
   requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
-  await db.insert(messages).values({ sessionId, role, content, modelId: modelId ?? null, metadata: metadata ?? null });
+  const safeClientMessageId = role === "user" ? clientMessageId : undefined;
+  if (safeClientMessageId) {
+    const [existing] = await db.select({ id: messages.id }).from(messages)
+      .where(and(eq(messages.sessionId, sessionId), eq(messages.clientMessageId, safeClientMessageId)))
+      .limit(1);
+    if (existing) return { created: false };
+  }
+  try {
+    await db.insert(messages).values({ sessionId, role, content, modelId: modelId ?? null, metadata: metadata ?? null, clientMessageId: safeClientMessageId ?? null });
+  } catch (error) {
+    if (!safeClientMessageId) throw error;
+    const [existing] = await db.select({ id: messages.id }).from(messages)
+      .where(and(eq(messages.sessionId, sessionId), eq(messages.clientMessageId, safeClientMessageId)))
+      .limit(1);
+    if (existing) return { created: false };
+    throw error;
+  }
   await db.update(chatSessions).set({ updatedAt: new Date(), ...(modelId ? { modelId } : {}) }).where(eq(chatSessions.id, sessionId));
+  return { created: true };
+}
+
+/** Retrieves only the assistant message immediately following an idempotent user send. */
+export async function getStoredAssistantForClientMessage(userId: number, sessionId: string, clientMessageId: string): Promise<ChatMessageRecord | undefined> {
+  const history = await listSessionMessages(userId, sessionId);
+  const userIndex = history.findIndex((message) => message.clientMessageId === clientMessageId && message.role === "user");
+  const candidate = userIndex >= 0 ? history[userIndex + 1] : undefined;
+  return candidate?.role === "assistant" ? candidate : undefined;
 }
 
 export async function updateChatTitle(userId: number, sessionId: string, title: string): Promise<void> {
@@ -108,10 +137,56 @@ export async function createChatExportRecord(userId: number, input: Omit<ChatExp
   return record;
 }
 
-export async function listChatExports(userId: number, filter: "all" | "active" | "archived" = "all"): Promise<ChatExport[]> {
+export type ChatExportListItem = Omit<ChatExport, "fileKey" | "searchText">;
+
+/** Keeps private storage addressing and indexed export content on the server. */
+export function toChatExportListItem(record: ChatExport): ChatExportListItem {
+  const { fileKey: _fileKey, searchText: _searchText, ...visible } = record;
+  return visible;
+}
+
+export async function listChatExports(userId: number, filter: "all" | "active" | "archived" = "all"): Promise<ChatExportListItem[]> {
   const db = requireDatabase(await getDb());
   const visibility = filter === "all" ? undefined : eq(chatExports.archived, filter === "archived");
-  return db.select().from(chatExports).where(visibility ? and(eq(chatExports.userId, userId), visibility) : eq(chatExports.userId, userId)).orderBy(desc(chatExports.createdAt));
+  const rows = await db.select().from(chatExports).where(visibility ? and(eq(chatExports.userId, userId), visibility) : eq(chatExports.userId, userId)).orderBy(desc(chatExports.createdAt));
+  return rows.map(toChatExportListItem);
+}
+
+export type ExportSearchResult = ChatExportListItem & { snippet: string };
+
+function exportSearchSnippet(text: string, query: string): string {
+  const compact = text.replace(/\s+/g, " ").trim();
+  const index = compact.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
+  if (index < 0) return compact.slice(0, 180);
+  const start = Math.max(0, index - 72);
+  const end = Math.min(compact.length, index + query.length + 108);
+  return `${start > 0 ? "…" : ""}${compact.slice(start, end)}${end < compact.length ? "…" : ""}`;
+}
+
+/** Searches the private text snapshot and filename of signed-in user's exports; file bytes and storage keys stay private. */
+export async function searchChatExports(userId: number, query: string, filter: "all" | "active" | "archived" = "all"): Promise<ExportSearchResult[]> {
+  const db = requireDatabase(await getDb());
+  const normalized = query.trim().slice(0, 100);
+  if (!normalized) return [];
+  const escaped = normalized.replace(/[\\%_]/g, "\\$&");
+  const visibility = filter === "all" ? undefined : eq(chatExports.archived, filter === "archived");
+  const rows = await db.select().from(chatExports).where(and(
+    eq(chatExports.userId, userId),
+    or(like(chatExports.fileName, `%${escaped}%`), like(chatExports.searchText, `%${escaped}%`)),
+    ...(visibility ? [visibility] : []),
+  )).orderBy(desc(chatExports.createdAt)).limit(40);
+  const legacyRows = await db.select({ exportRecord: chatExports, content: messages.content }).from(chatExports).innerJoin(messages, eq(messages.sessionId, chatExports.sessionId)).where(and(
+    eq(chatExports.userId, userId),
+    isNull(chatExports.searchText),
+    like(messages.content, `%${escaped}%`),
+    ...(visibility ? [visibility] : []),
+  )).orderBy(desc(chatExports.createdAt)).limit(40);
+  const matched = new Map<string, ExportSearchResult>();
+  for (const row of rows) matched.set(row.id, { ...toChatExportListItem(row), snippet: exportSearchSnippet(row.searchText || row.fileName, normalized) });
+  for (const row of legacyRows) {
+    if (!matched.has(row.exportRecord.id)) matched.set(row.exportRecord.id, { ...toChatExportListItem(row.exportRecord), snippet: exportSearchSnippet(row.content, normalized) });
+  }
+  return Array.from(matched.values()).sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime()).slice(0, 40);
 }
 
 export async function getOwnedChatExport(userId: number, exportId: string): Promise<ChatExport | undefined> {
@@ -137,6 +212,19 @@ export async function archiveChatExport(userId: number, exportId: string, archiv
   const db = requireDatabase(await getDb());
   const result = await db.update(chatExports).set({ archived }).where(and(eq(chatExports.id, exportId), eq(chatExports.userId, userId)));
   return result[0].affectedRows > 0;
+}
+
+/** Changes only records owned by the signed-in user and returns the number whose state actually changed. */
+export async function batchArchiveChatExports(userId: number, exportIds: string[], archived: boolean): Promise<number> {
+  const ids = Array.from(new Set(exportIds)).slice(0, 50);
+  if (!ids.length) return 0;
+  const db = requireDatabase(await getDb());
+  const result = await db.update(chatExports).set({ archived }).where(and(
+    eq(chatExports.userId, userId),
+    inArray(chatExports.id, ids),
+    eq(chatExports.archived, !archived),
+  ));
+  return result[0].affectedRows;
 }
 
 export async function deleteAllOwnedChatExports(userId: number): Promise<number> {
@@ -321,7 +409,7 @@ export async function getFlashTtftTrend(days: 7 | 30): Promise<FlashTtftTrendPoi
 }
 
 export type SearchOutageInput = {
-  layer: "google" | "tavily" | "openrouter";
+	  layer: "you" | "serper" | "exa" | "firecrawl" | "google" | "tavily" | "openrouter";
   errorClass: "rate_limited" | "auth" | "not_found" | "http_error" | "network_error" | "no_sources" | "not_configured";
   latencyMs: number;
   fellBack: boolean;
@@ -341,7 +429,7 @@ export async function recordSearchOutage(input: SearchOutageInput): Promise<void
   await db.delete(searchOutageLogs).where(sql`${searchOutageLogs.createdAt} < ${retention}`);
 }
 
-export type SearchOutageSummary = { last24h: number; last7d: number; recent: Array<{ layer: "google" | "tavily" | "openrouter"; errorClass: string; latencyMs: number; fellBack: boolean; createdAt: string }> };
+export type SearchOutageSummary = { last24h: number; last7d: number; recent: Array<{ layer: string; errorClass: string; latencyMs: number; fellBack: boolean; createdAt: string }> };
 
 /** Narrow owner-only audit DTO; it deliberately excludes URLs, query text, sources, user data, providers and models. */
 export async function getSearchOutageSummary(): Promise<SearchOutageSummary> {
@@ -392,7 +480,9 @@ export async function getWebSearchStatus(): Promise<WebSearchStatusRecord | unde
   return result[0];
 }
 
-export async function upsertWebSearchStatus(input: Omit<WebSearchStatusRecord, "updatedAt">): Promise<void> {
+export type WebSearchStatusInput = Omit<WebSearchStatusRecord, "updatedAt" | "youHttp" | "serperHttp" | "exaHttp"> & Partial<Pick<WebSearchStatusRecord, "youHttp" | "serperHttp" | "exaHttp">>;
+
+export async function upsertWebSearchStatus(input: WebSearchStatusInput): Promise<void> {
   const db = await getDb();
   if (!db) return;
   await db.insert(webSearchStatus).values(input).onDuplicateKeyUpdate({
@@ -402,6 +492,9 @@ export async function upsertWebSearchStatus(input: Omit<WebSearchStatusRecord, "
       googleHttp: input.googleHttp,
       tavilyHttp: input.tavilyHttp,
       openrouterHttp: input.openrouterHttp,
+			youHttp: input.youHttp ?? null,
+			serperHttp: input.serperHttp ?? null,
+			exaHttp: input.exaHttp ?? null,
       checkedAt: input.checkedAt,
     },
   });

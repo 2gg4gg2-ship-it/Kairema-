@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, archiveChatExport, clearMemory, createChatExportRecord, createChatSession, createMemoryFact, deleteAllOwnedChatExports, deleteMemoryFact, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getOwnedChatExport, getOwnedChatSession, getSearchOutageSummary, getUserSettings, listChatExports, listChatSessions, listMemoryFacts, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryFact, updateMemoryProfile, updateUserSettings } from "./db";
+import { appendChatMessage, archiveChatExport, batchArchiveChatExports, clearMemory, createChatExportRecord, createChatSession, createMemoryFact, deleteAllOwnedChatExports, deleteMemoryFact, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getOwnedChatExport, getOwnedChatSession, getSearchOutageSummary, getUserSettings, listChatExports, listChatSessions, listMemoryFacts, listSessionAttachments, listSessionMessages, searchChatExports, searchUserContent, toChatExportListItem, updateChatTitle, updateMemoryFact, updateMemoryProfile, updateUserSettings } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -238,12 +238,14 @@ export const appRouter = router({
   }),
   exports: router({
     list: protectedProcedure.input(z.object({ filter: z.enum(["all", "active", "archived"]).default("active") }).optional()).query(({ ctx, input }) => listChatExports(ctx.user.id, input?.filter ?? "active")),
+    search: protectedProcedure.input(z.object({ query: z.string().trim().min(2).max(100), filter: z.enum(["all", "active", "archived"]).default("all") })).query(({ ctx, input }) => searchChatExports(ctx.user.id, input.query, input.filter)),
     create: protectedProcedure.input(z.object({
       sessionId: z.string().uuid(),
       format: z.enum(["markdown", "pdf"]),
       fileName: z.string().trim().min(1).max(255),
       contentType: z.string().trim().min(1).max(128),
       contentBase64: z.string().min(1).max(4_300_000),
+      searchText: z.string().trim().min(1).max(2_500_000),
     })).mutation(async ({ ctx, input }) => {
       try {
         const extension = input.format === "pdf" ? "pdf" : "md";
@@ -251,7 +253,7 @@ export const appRouter = router({
         if (!bytes.length || bytes.length > 3_000_000) throw new Error("Размер экспортируемого файла превышает допустимый предел.");
         const id = randomUUID();
         const { key } = await storagePut(`exports/${ctx.user.id}/${id}.${extension}`, bytes, input.contentType);
-        return await createChatExportRecord(ctx.user.id, { id, sessionId: input.sessionId, fileKey: key, fileName: input.fileName, format: input.format, contentType: input.contentType, byteSize: bytes.length });
+        return toChatExportListItem(await createChatExportRecord(ctx.user.id, { id, sessionId: input.sessionId, fileKey: key, fileName: input.fileName, format: input.format, contentType: input.contentType, byteSize: bytes.length, searchText: input.searchText }));
       } catch (error) {
         throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error && /размер/i.test(error.message) ? error.message : "Не удалось сохранить экспорт. Повторите попытку позже." });
       }
@@ -270,6 +272,11 @@ export const appRouter = router({
       const updated = await archiveChatExport(ctx.user.id, input.exportId, input.archived);
       if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "Экспорт не найден или недоступен." });
       return { success: true, archived: input.archived } as const;
+    }),
+    batchArchive: protectedProcedure.input(z.object({ exportIds: z.array(z.string().uuid()).min(1).max(50), archived: z.boolean() })).mutation(async ({ ctx, input }) => {
+      const requestedCount = Array.from(new Set(input.exportIds)).length;
+      const changedCount = await batchArchiveChatExports(ctx.user.id, input.exportIds, input.archived);
+      return { success: true, requestedCount, changedCount, archived: input.archived } as const;
     }),
     deleteAll: protectedProcedure.mutation(async ({ ctx }) => {
       const deletedCount = await deleteAllOwnedChatExports(ctx.user.id);
