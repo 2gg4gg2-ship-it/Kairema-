@@ -17,7 +17,6 @@ export type Message = {
   isError?: boolean;
   createdAt?: Date | string;
   sources?: Source[];
-  suggestions?: string[];
   searchStatus?: { cascadeUsed: "google" | "tavily" | "openrouter" | null; sourcesCount: number };
 };
 
@@ -31,7 +30,6 @@ type AIChatBoxProps = {
   className?: string;
   height?: string | number;
   emptyStateMessage?: string;
-  suggestedPrompts?: string[];
   onExportMarkdown?: () => void;
   onExportPdf?: () => void;
   canExport?: boolean;
@@ -41,8 +39,11 @@ type AIChatBoxProps = {
   onCopyUser?: (message: Message) => void;
   onRegenerate?: (message: Message) => void;
   onCancelStream?: () => void;
+  composerValue?: string;
+  onComposerValueChange?: (value: string) => void;
+  onOpenTemplates?: () => void;
+  uploadStatus?: string;
   language?: Language;
-  onSuggestion?: (suggestion: string) => void;
 };
 
 const copy = {
@@ -52,30 +53,30 @@ const copy = {
 
 export function AIChatBox({
   messages, onSendMessage, onUploadFiles, isLoading = false, placeholder, className, height, emptyStateMessage,
-  suggestedPrompts = [], onExportMarkdown, onExportPdf, canExport = false, exportBusy = null, exportError = "",
-  onCopyAssistant, onCopyUser, onRegenerate, onCancelStream, language = "ru", onSuggestion,
+  onExportMarkdown, onExportPdf, canExport = false, exportBusy = null, exportError = "",
+  onCopyAssistant, onCopyUser, onRegenerate, onCancelStream, composerValue, onComposerValueChange, onOpenTemplates, uploadStatus = "", language = "ru",
 }: AIChatBoxProps) {
   const t = copy[language];
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
-  const [continuationSuggestions, setContinuationSuggestions] = useState<string[]>([]);
   const viewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const displayMessages = messages.filter((message) => message.role !== "system");
   const effectivePlaceholder = placeholder ?? (language === "ru" ? "Напишите сообщение…" : "Write a message…");
+  const currentInput = composerValue ?? input;
+  const setComposerInput = (value: string) => { setInput(value); onComposerValueChange?.(value); };
 
   useEffect(() => { viewportRef.current?.scrollTo?.({ top: viewportRef.current.scrollHeight, behavior: "smooth" }); }, [displayMessages.length, isLoading]);
-  useEffect(() => { const last = displayMessages.at(-1); if (last?.role === "assistant" && last.suggestions?.length) setContinuationSuggestions(last.suggestions.slice(0, 3)); else if (last?.role === "user") setContinuationSuggestions([]); }, [messages]);
 
   const submit = (event?: React.FormEvent) => {
     event?.preventDefault();
-    const value = input.trim();
+    const value = currentInput.trim();
     if (!value || isLoading || isUploading) return;
     onSendMessage(value, { attachmentIds: attachments.map((attachment) => attachment.id) });
-    setInput("");
+    setComposerInput("");
     setAttachments([]);
     textareaRef.current?.focus();
   };
@@ -95,21 +96,20 @@ export function AIChatBox({
       {(onExportMarkdown || onExportPdf) && <div className="kairema-chat-tools"><span>{t.history}</span><div className="kairema-export-actions"><button type="button" onClick={onExportMarkdown} disabled={!canExport || Boolean(exportBusy)} className="kairema-export-button"><FileText className="size-3.5" />{exportBusy === "markdown" ? t.preparing : t.markdown}</button><button type="button" onClick={onExportPdf} disabled={!canExport || Boolean(exportBusy)} className="kairema-export-button"><Download className="size-3.5" />{exportBusy === "pdf" ? t.preparing : t.pdf}</button></div></div>}
       {exportError && <p className="kairema-export-error" role="status">{exportError}</p>}
       <div ref={viewportRef} className="min-h-0 flex-1 overflow-y-auto">
-        {displayMessages.length === 0 ? <div className="flex min-h-[420px] flex-col items-center justify-center px-6 text-center"><div className="kairema-orb mb-6"><Sparkles className="size-7" /></div><h2 className="text-2xl font-semibold tracking-tight text-foreground">{emptyStateMessage}</h2><p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">{t.fourRoles}</p><div className="mt-8 flex max-w-2xl flex-wrap justify-center gap-2">{suggestedPrompts.map((prompt, promptIndex) => <button key={`${prompt}-${promptIndex}`} onClick={() => onSendMessage(prompt)} disabled={isLoading} className="kairema-prompt">{prompt}</button>)}</div></div> : <div className="mx-auto flex w-full max-w-4xl flex-col gap-7 px-4 py-7 sm:px-8">{displayMessages.map((message, index) => <article key={message.id ?? `${message.role}-${index}`} className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
+        {displayMessages.length === 0 ? <div className="flex min-h-[420px] flex-col items-center justify-center px-6 text-center"><div className="kairema-orb mb-6"><Sparkles className="size-7" /></div><h2 className="text-2xl font-semibold tracking-tight text-foreground">{emptyStateMessage}</h2><p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">{t.fourRoles}</p></div> : <div className="mx-auto flex w-full max-w-4xl flex-col gap-7 px-4 py-7 sm:px-8">{displayMessages.map((message, index) => <article key={message.id ?? `${message.role}-${index}`} className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
           {message.role === "assistant" && <div className="kairema-avatar kairema-avatar-ai"><Sparkles className="size-4" /></div>}<div className={cn("max-w-[86%] sm:max-w-[76%]", message.role === "user" && "flex flex-col items-end")}><div className={cn("kairema-message", message.role === "user" ? "kairema-message-user" : "kairema-message-ai", message.isError && "kairema-message-error")}>{message.role === "assistant" && !message.isError ? <div className="kairema-markdown text-sm leading-6"><InlineMarkdown text={message.content} language={language} /></div> : <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>}</div>
           {message.role === "assistant" && message.providerLabel && <p className="mt-2 px-1 text-xs text-muted-foreground">{message.providerLabel} · {message.model} · {message.status}</p>}
           {message.role === "assistant" && message.searchStatus && <p className="mt-2 inline-flex rounded-full border border-border/70 bg-muted/40 px-2 py-1 text-xs text-muted-foreground" role="status">{message.searchStatus.cascadeUsed === "google" ? t.searchGoogle : message.searchStatus.cascadeUsed === "tavily" ? t.searchTavily : message.searchStatus.cascadeUsed === "openrouter" ? t.searchOnline : t.searchDown}</p>}
           {message.role === "assistant" && Boolean(message.sources?.length) && (() => { const sourceKey = String(message.id ?? index); const isExpanded = Boolean(expandedSources[sourceKey]); return <section className="kairema-sources"><button type="button" className="kairema-sources-toggle" aria-expanded={isExpanded} onClick={() => setExpandedSources((current) => ({ ...current, [sourceKey]: !isExpanded }))}><span>{t.sources} ({message.sources?.length ?? 0})</span><ChevronDown className={cn("size-3.5 transition-transform", isExpanded && "rotate-180")} /></button>{isExpanded && <ul>{message.sources?.map((source, sourceIndex) => { let fallbackDomain = ""; try { fallbackDomain = new URL(source.url).hostname.replace(/^www\./i, ""); } catch { /* source URLs are server-validated */ } const domain = source.domain ?? fallbackDomain; return <li key={`${source.kind ?? "web"}-${source.url}-${sourceIndex}`}><a href={source.url} target="_blank" rel="noreferrer" title={source.title}><span className="kairema-source-title"><ExternalLink className="size-3" />{source.title}</span><small>{domain}{source.publishedAt ? ` · ${new Intl.DateTimeFormat(language === "ru" ? "ru-RU" : "en-US", { dateStyle: "short" }).format(new Date(source.publishedAt))}` : ""}</small></a></li>; })}</ul>}</section>; })()}
-          {message.role === "assistant" && !message.isError && Boolean(message.suggestions?.length || (index === displayMessages.length - 1 && continuationSuggestions.length)) && <div className="kairema-suggestion-chips" aria-label={language === "ru" ? "Возможные продолжения" : "Suggested continuations"}>{(message.suggestions?.length ? message.suggestions : continuationSuggestions).map((suggestion, suggestionIndex) => <button key={`${suggestion}-${suggestionIndex}`} type="button" className="kairema-suggestion-chip" disabled={isLoading} onClick={() => (onSuggestion ?? onSendMessage)(suggestion)}>{suggestion}</button>)}</div>}
           {message.role === "assistant" && !message.isError && <div className="kairema-message-actions" aria-label="Actions"><button type="button" onClick={() => onCopyAssistant?.(message)} className="kairema-message-action"><Copy className="size-3.5" />{t.copy}</button><button type="button" onClick={() => onRegenerate?.(message)} disabled={isLoading} className="kairema-message-action"><RotateCcw className="size-3.5" />{t.retry}</button></div>}
           {message.role === "user" && <div className="kairema-message-actions" aria-label="Actions"><button type="button" onClick={() => onCopyUser?.(message)} className="kairema-message-action"><Copy className="size-3.5" />{t.copy}</button></div>}</div>{message.role === "user" && <div className="kairema-avatar"><User className="size-4" /></div>}</article>)}{isLoading && displayMessages.at(-1)?.role !== "assistant" && <div className="flex items-center gap-3"><div className="kairema-avatar kairema-avatar-ai"><Sparkles className="size-4" /></div><div className="kairema-typing"><Loader2 className="size-4 animate-spin" /> {t.typing}</div></div>}</div>}
       </div>
       <form onSubmit={submit} className="kairema-composer">
         <div className="kairema-composer-main">
           {attachments.length > 0 && <div className="kairema-attachment-chips">{attachments.map((attachment) => <span className="kairema-attachment-chip" key={attachment.id}>{attachment.kind === "image" ? <FileImage className="size-3.5" /> : <FileText className="size-3.5" />}<span>{attachment.fileName}</span><button type="button" title={t.remove} aria-label={t.remove} onClick={() => setAttachments((items) => items.filter((item) => item.id !== attachment.id))}><X className="size-3" /></button></span>)}</div>}
-          <div className="kairema-composer-row"><input ref={fileInputRef} className="sr-only" type="file" multiple accept="image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown,.md" onChange={(event) => void addFiles(event.target.files)} /><button type="button" onClick={() => fileInputRef.current?.click()} disabled={!onUploadFiles || isLoading || isUploading} className="kairema-composer-tool" title={t.attach} aria-label={t.attach}>{isUploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}</button><Textarea ref={textareaRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={effectivePlaceholder} className="kairema-textarea" rows={1} /></div>
+          {uploadStatus && <p className="px-1 pb-2 text-xs text-muted-foreground" role="status" aria-live="polite">{uploadStatus}</p>}<div className="kairema-composer-row"><input ref={fileInputRef} className="sr-only" type="file" multiple accept="image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown,.md" onChange={(event) => void addFiles(event.target.files)} />{onOpenTemplates && <button type="button" onClick={onOpenTemplates} disabled={isLoading} className="kairema-composer-tool" title={language === "ru" ? "Шаблоны промптов" : "Prompt templates"} aria-label={language === "ru" ? "Шаблоны промптов" : "Prompt templates"}><Sparkles className="size-4" /></button>}<button type="button" onClick={() => fileInputRef.current?.click()} disabled={!onUploadFiles || isLoading || isUploading} className="kairema-composer-tool" title={t.attach} aria-label={t.attach}>{isUploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}</button><Textarea ref={textareaRef} value={currentInput} onChange={(event) => setComposerInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={effectivePlaceholder} className="kairema-textarea" rows={1} /></div>
         </div>
-        {isLoading && <Button type="button" size="icon" onClick={onCancelStream} className="kairema-cancel" aria-label={t.stop}><Square className="size-3.5 fill-current" /></Button>}<Button type="submit" size="icon" disabled={!input.trim() || isLoading || isUploading} className="kairema-send" aria-label={t.send}>{isLoading || isUploading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}</Button>
+        {isLoading && <Button type="button" size="icon" onClick={onCancelStream} className="kairema-cancel" aria-label={t.stop}><Square className="size-3.5 fill-current" /></Button>}<Button type="submit" size="icon" disabled={!currentInput.trim() || isLoading || isUploading} className="kairema-send" aria-label={t.send}>{isLoading || isUploading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}</Button>
       </form>
       <p className="px-5 pb-4 text-center text-[11px] text-muted-foreground">{t.disclaimer}</p>
     </section>

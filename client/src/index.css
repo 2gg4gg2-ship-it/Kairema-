@@ -113,6 +113,52 @@
   --sidebar-ring: oklch(0.488 0.243 264.376);
 }
 
+/* Accessibility mode: neutral black/white pairs keep standard text at or above 7:1. */
+.high-contrast {
+  --background: #000000;
+  --foreground: #ffffff;
+  --card: #000000;
+  --card-foreground: #ffffff;
+  --popover: #000000;
+  --popover-foreground: #ffffff;
+  --secondary: #000000;
+  --secondary-foreground: #ffffff;
+  --muted: #000000;
+  --muted-foreground: #ffffff;
+  --accent: #000000;
+  --accent-foreground: #ffffff;
+  --primary: #ffffff;
+  --primary-foreground: #000000;
+  --destructive: #ff3b30;
+  --destructive-foreground: #000000;
+  --border: #ffffff;
+  --input: #ffffff;
+  --ring: #ffff00;
+  --sidebar: #000000;
+  --sidebar-foreground: #ffffff;
+  --sidebar-accent: #000000;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #ffffff;
+  --sidebar-ring: #ffff00;
+  --k-bg: #000000;
+  --k-panel: #000000;
+  --k-panel-2: #000000;
+  --k-text: #ffffff;
+  --k-muted: #ffffff;
+  --k-line: #ffffff;
+  --k-strong: #ffffff;
+  --k-invert: #000000;
+  --k-bubble-user-bg: #ffffff;
+  --k-bubble-user-text: #000000;
+  --k-bubble-user-line: #ffffff;
+  --k-bubble-ai-bg: #000000;
+  --k-bubble-ai-text: #ffffff;
+  --k-bubble-ai-line: #ffffff;
+}
+.high-contrast .kairema-send { border-color:#ffffff; color:#000000!important; background:#ffffff!important; }
+.high-contrast .kairema-cancel { border-color:#ffffff!important; color:#000000!important; background:#ffff00!important; }
+.high-contrast .kairema-status,.high-contrast .kairema-health-dot,.high-contrast .kairema-availability-cell { outline:1px solid #ffffff; }
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

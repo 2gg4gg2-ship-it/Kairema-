@@ -189,6 +189,8 @@ describe("Kairema v4 role registry", () => {
     for (const role of MODEL_CONFIG) {
       const payload = JSON.stringify(buildOpenRouterMessages(role, [{ role: "user", content: "Тест" }], { style: "steps" }));
       expect(payload).toContain("Ты Kairema, AI-ассистент.");
+      expect(payload).toContain("проверяемом Markdown");
+      expect(payload).toContain("не выдавай догадки за факты");
       expect(payload).toContain(role.label);
       expect(payload).toContain("Тест");
     }

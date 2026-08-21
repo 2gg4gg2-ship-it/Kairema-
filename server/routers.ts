@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearMemory, createChatExportRecord, createChatSession, createMemoryFact, deleteAllOwnedChatExports, deleteMemoryFact, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getOwnedChatExport, getOwnedChatSession, getSearchOutageSummary, getUserSettings, listChatExports, listChatSessions, listMemoryFacts, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryFact, updateMemoryProfile, updateUserSettings } from "./db";
+import { appendChatMessage, archiveChatExport, clearMemory, createChatExportRecord, createChatSession, createMemoryFact, deleteAllOwnedChatExports, deleteMemoryFact, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getOwnedChatExport, getOwnedChatSession, getSearchOutageSummary, getUserSettings, listChatExports, listChatSessions, listMemoryFacts, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryFact, updateMemoryProfile, updateUserSettings } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -29,13 +29,13 @@ const userSettingsSchema = z.object({
   theme: z.enum(["light", "dark"]).optional(),
   responseStyle: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional(),
   responseLength: z.enum(["brief", "balanced", "detailed"]).optional(),
-  quickReplies: z.boolean().optional(),
   effort: z.enum(["low", "standard", "high"]).optional(),
   thinking: z.boolean().optional(),
   defaultRole: z.enum(MODEL_IDS).optional(),
   webSearch: z.boolean().optional(),
   toolAccess: z.boolean().optional(),
   healthRefreshSeconds: z.union([z.literal(0), z.literal(15), z.literal(30), z.literal(60)]).optional(),
+  highContrast: z.boolean().optional(),
   exportSortBy: z.enum(["createdAt", "byteSize"]).optional(),
   exportSortDirection: z.enum(["asc", "desc"]).optional(),
 });
@@ -85,15 +85,18 @@ export const appRouter = router({
     }),
   }),
   settings: router({
-    get: protectedProcedure.query(({ ctx }) => getUserSettings(ctx.user.id)),
+    get: protectedProcedure.query(async ({ ctx }) => {
+      const { quickReplies: _legacyQuickReplies, ...settings } = await getUserSettings(ctx.user.id);
+      return settings;
+    }),
     update: protectedProcedure.input(userSettingsSchema).mutation(async ({ ctx, input }) => {
-      const { quickReplies, thinking, webSearch, toolAccess, ...rest } = input;
+      const { thinking, webSearch, toolAccess, highContrast, ...rest } = input;
       return updateUserSettings(ctx.user.id, {
         ...rest,
-        ...(quickReplies === undefined ? {} : { quickReplies: quickReplies ? 1 : 0 }),
         ...(thinking === undefined ? {} : { thinking: thinking ? 1 : 0 }),
         ...(webSearch === undefined ? {} : { webSearch: webSearch ? 1 : 0 }),
         ...(toolAccess === undefined ? {} : { toolAccess: toolAccess ? 1 : 0 }),
+        ...(highContrast === undefined ? {} : { highContrast: highContrast ? 1 : 0 }),
       });
     }),
   }),
@@ -199,10 +202,8 @@ export const appRouter = router({
     delete: protectedProcedure
       .input(z.object({ sessionId: z.string().uuid() }))
       .mutation(async ({ ctx, input }) => {
-        if (!await deleteOwnedChatSession(ctx.user.id, input.sessionId)) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Чат не найден или недоступен." });
-        }
-        return { success: true } as const;
+        const deleted = await deleteOwnedChatSession(ctx.user.id, input.sessionId);
+        return { success: true, alreadyDeleted: !deleted } as const;
       }),
     send: protectedProcedure
       .input(z.object({
@@ -236,7 +237,7 @@ export const appRouter = router({
       }),
   }),
   exports: router({
-    list: protectedProcedure.query(({ ctx }) => listChatExports(ctx.user.id)),
+    list: protectedProcedure.input(z.object({ filter: z.enum(["all", "active", "archived"]).default("active") }).optional()).query(({ ctx, input }) => listChatExports(ctx.user.id, input?.filter ?? "active")),
     create: protectedProcedure.input(z.object({
       sessionId: z.string().uuid(),
       format: z.enum(["markdown", "pdf"]),
@@ -264,6 +265,11 @@ export const appRouter = router({
       const deleted = await deleteOwnedChatExport(ctx.user.id, input.exportId);
       if (!deleted) throw new TRPCError({ code: "NOT_FOUND", message: "Экспорт не найден или недоступен." });
       return { success: true } as const;
+    }),
+    archive: protectedProcedure.input(z.object({ exportId: z.string().uuid(), archived: z.boolean() })).mutation(async ({ ctx, input }) => {
+      const updated = await archiveChatExport(ctx.user.id, input.exportId, input.archived);
+      if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "Экспорт не найден или недоступен." });
+      return { success: true, archived: input.archived } as const;
     }),
     deleteAll: protectedProcedure.mutation(async ({ ctx }) => {
       const deletedCount = await deleteAllOwnedChatExports(ctx.user.id);

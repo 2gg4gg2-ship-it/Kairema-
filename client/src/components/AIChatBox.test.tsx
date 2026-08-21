@@ -96,17 +96,18 @@ describe("AIChatBox user flows", () => {
     expect(screen.queryByText(/https?:\/\//i)).toBeNull();
   });
 
-  it("renders three identical continuation suggestions without a React duplicate-key warning", () => {
+  it("ignores legacy continuation suggestions and does not render quick-prompt chips", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-
-    render(<AIChatBox messages={[{
+    const legacyAssistantMessage = {
       id: "assistant-duplicate-suggestions",
-      role: "assistant",
+      role: "assistant" as const,
       content: "Ответ готов",
       suggestions: ["Уточните подробнее", "Уточните подробнее", "Уточните подробнее"],
-    }]} onSendMessage={vi.fn()} />);
+    } as unknown as Message;
 
-    expect(screen.getAllByRole("button", { name: "Уточните подробнее" })).toHaveLength(3);
+    render(<AIChatBox messages={[legacyAssistantMessage]} onSendMessage={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "Уточните подробнее" })).toBeNull();
     expect(consoleError.mock.calls.flat().join(" ")).not.toMatch(/same key|duplicate key/i);
     consoleError.mockRestore();
   });

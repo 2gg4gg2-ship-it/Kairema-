@@ -91,6 +91,17 @@ describe("chat context soft web research", () => {
     expect(context.memoryContext?.length).toBeLessThanOrEqual(2_000);
   });
 
+  it("shares one bounded user-scoped memory across all four roles and a new chat", async () => {
+    vi.mocked(getMemoryProfile).mockResolvedValue({ enabled: 1, autoExtract: 1, profile: "Предпочтение: русский язык", summary: "Пользователь предпочитает краткие ответы" });
+    vi.mocked(listRelevantMemoryFacts).mockResolvedValue([{ fact: "Рабочий контекст: Kairema" }]);
+    const roles = ["fast", "smart", "context", "flagship"] as const;
+    const contexts = await Promise.all(roles.map((role, index) => buildChatContext(7, `00000000-0000-4000-8000-00000000000${index}`, { query: "Продолжи работу", role })));
+
+    expect(contexts.map((context) => context.memoryContext)).toEqual(Array(4).fill(contexts[0]?.memoryContext));
+    expect(contexts[0]?.memoryContext).toContain("Предпочтение: русский язык");
+    expect(contexts[0]?.memoryContext).toContain("Рабочий контекст: Kairema");
+  });
+
   it("omits personal memory after the owner disables it", async () => {
     vi.mocked(getMemoryProfile).mockResolvedValueOnce({ enabled: 0, autoExtract: 0, profile: "Не должно попасть в контекст", summary: "" });
     vi.mocked(listRelevantMemoryFacts).mockResolvedValueOnce([{ fact: "Не должен попасть в контекст" }]);

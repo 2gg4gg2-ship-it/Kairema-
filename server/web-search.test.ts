@@ -14,6 +14,7 @@ afterEach(() => {
   process.env.OPENROUTER_API_KEY = originalOpenRouterKey;
   process.env.TAVILY_API_KEY = originalTavilyKey;
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   recordSearchOutage.mockClear();
 });
 
@@ -74,7 +75,7 @@ describe("Google Search grounding", () => {
       sources: [{ title: "Проверяемый материал", url: "https://example.com/tavily" }],
       cascadeUsed: "tavily",
     });
-    await expect(getWebSearchStatus()).resolves.toMatchObject({ available: true, googleHttp: 503, reason: "Поиск доступен через резервный сервис." });
+    await expect(getWebSearchStatus()).resolves.toMatchObject({ available: true, googleHttp: 503, reason: "Поиск доступен через резервный слой." });
     await vi.waitFor(() => expect(recordSearchOutage).toHaveBeenCalledWith(expect.objectContaining({
       layer: "google",
       errorClass: "http_error",
@@ -107,25 +108,29 @@ describe("Google Search grounding", () => {
     await expect(getWebSearchStatus()).resolves.toMatchObject({ available: true, googleHttp: 503, openrouterHttp: 200 });
   });
 
-  it("reports unavailable honestly when all external search fallbacks lack sources", async () => {
+  it("returns a nullable soft fallback honestly when all external search layers lack sources", async () => {
     process.env.GEMINI_API_KEY = "test-key";
     process.env.TAVILY_API_KEY = "";
     process.env.OPENROUTER_API_KEY = "";
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { status: "RESOURCE_EXHAUSTED", message: "quota exceeded" } }), { status: 429 })));
 
-    await expect(searchWeb("Проверь факт")).rejects.toBeInstanceOf(WebSearchUnavailableError);
-    await expect(getWebSearchStatus()).resolves.toMatchObject({ available: false, reason: "Поиск временно недоступен: квота основного поискового сервиса. Резервные сервисы не вернули проверяемые источники." });
+    await expect(searchWeb("Проверь факт")).resolves.toBeNull();
+    const status = await getWebSearchStatus();
+    expect(status).toMatchObject({ available: false, reason: "Поиск временно ограничен: основной слой ожидает сброса квоты. Резервные слои не вернули проверяемые источники." });
+    expect(status.layers).toContainEqual(expect.objectContaining({ id: "google", state: "limited", retryAt: expect.any(String) }));
   });
 
   it("persists one final availability result from Google grounding and diagnostic OpenRouter online", async () => {
     process.env.GEMINI_API_KEY = "test-google";
     process.env.OPENROUTER_API_KEY = "test-openrouter";
     process.env.TAVILY_API_KEY = "";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.now() + 16 * 60_000));
     vi.stubGlobal("fetch", vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         candidates: [{ content: { parts: [{ text: "Проверено." }] }, groundingMetadata: { groundingChunks: [{ web: { title: "Источник", uri: "https://example.com" } }] } }],
-      }), { status: 200 })));
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }], citations: ["https://example.com/online"] }), { status: 200 })));
 
     await expect(probeWebSearchStatus()).resolves.toMatchObject({
       available: true,

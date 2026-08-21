@@ -1413,12 +1413,6 @@ export default function ComponentsShowcase() {
                     placeholder="Try sending a message..."
                     height="500px"
                     emptyStateMessage="How can I help you today?"
-                    suggestedPrompts={[
-                      "What is React?",
-                      "Explain TypeScript",
-                      "How to use tRPC?",
-                      "Best practices for web development",
-                    ]}
                   />
                 </div>
               </CardContent>

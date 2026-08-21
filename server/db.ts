@@ -100,17 +100,18 @@ export async function deleteOwnedChatSession(userId: number, sessionId: string):
   return result[0].affectedRows > 0;
 }
 
-export async function createChatExportRecord(userId: number, input: Omit<ChatExport, "userId" | "createdAt">): Promise<ChatExport> {
+export async function createChatExportRecord(userId: number, input: Omit<ChatExport, "userId" | "createdAt" | "archived">): Promise<ChatExport> {
   const db = requireDatabase(await getDb());
   requireOwnedSession(userId, await getOwnedChatSession(userId, input.sessionId));
-  const record: ChatExport = { ...input, userId, createdAt: new Date() };
+  const record: ChatExport = { ...input, userId, archived: false, createdAt: new Date() };
   await db.insert(chatExports).values(record);
   return record;
 }
 
-export async function listChatExports(userId: number): Promise<ChatExport[]> {
+export async function listChatExports(userId: number, filter: "all" | "active" | "archived" = "all"): Promise<ChatExport[]> {
   const db = requireDatabase(await getDb());
-  return db.select().from(chatExports).where(eq(chatExports.userId, userId)).orderBy(desc(chatExports.createdAt));
+  const visibility = filter === "all" ? undefined : eq(chatExports.archived, filter === "archived");
+  return db.select().from(chatExports).where(visibility ? and(eq(chatExports.userId, userId), visibility) : eq(chatExports.userId, userId)).orderBy(desc(chatExports.createdAt));
 }
 
 export async function getOwnedChatExport(userId: number, exportId: string): Promise<ChatExport | undefined> {
@@ -129,6 +130,13 @@ export async function deleteOwnedChatExport(userId: number, exportId: string): P
   if (!isOwnedChatExport(userId, owned)) return false;
   await db.delete(chatExports).where(and(eq(chatExports.id, exportId), eq(chatExports.userId, userId)));
   return true;
+}
+
+/** Changes archive visibility only when the export belongs to the signed-in user. */
+export async function archiveChatExport(userId: number, exportId: string, archived: boolean): Promise<boolean> {
+  const db = requireDatabase(await getDb());
+  const result = await db.update(chatExports).set({ archived }).where(and(eq(chatExports.id, exportId), eq(chatExports.userId, userId)));
+  return result[0].affectedRows > 0;
 }
 
 export async function deleteAllOwnedChatExports(userId: number): Promise<number> {
@@ -392,13 +400,14 @@ export async function upsertWebSearchStatus(input: Omit<WebSearchStatusRecord, "
       state: input.state,
       reason: input.reason,
       googleHttp: input.googleHttp,
+      tavilyHttp: input.tavilyHttp,
       openrouterHttp: input.openrouterHttp,
       checkedAt: input.checkedAt,
     },
   });
 }
 
-export type UserSettingsPatch = Partial<Pick<UserSettings, "language" | "theme" | "responseStyle" | "responseLength" | "quickReplies" | "effort" | "thinking" | "defaultRole" | "webSearch" | "toolAccess" | "healthRefreshSeconds" | "exportSortBy" | "exportSortDirection">>;
+export type UserSettingsPatch = Partial<Pick<UserSettings, "language" | "theme" | "responseStyle" | "responseLength" | "effort" | "thinking" | "defaultRole" | "webSearch" | "toolAccess" | "healthRefreshSeconds" | "highContrast" | "exportSortBy" | "exportSortDirection">>;
 export type KnowledgeSourcePatch = Omit<KnowledgeSource, "updatedAt">;
 export type KnowledgeDocumentInput = Omit<KnowledgeDocument, "retrievedAt" | "updatedAt">;
 export type KnowledgeRunInput = Omit<KnowledgeIngestionRun, "startedAt" | "finishedAt">;

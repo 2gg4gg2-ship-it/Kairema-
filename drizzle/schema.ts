@@ -1,4 +1,4 @@
-import { index, int, mysqlEnum, mysqlTable, primaryKey, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { boolean, index, int, mysqlEnum, mysqlTable, primaryKey, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -40,6 +40,7 @@ export const chatExports = mysqlTable("chat_exports", {
   format: mysqlEnum("format", ["markdown", "pdf"]).notNull(),
   contentType: varchar("contentType", { length: 128 }).notNull(),
   byteSize: int("byteSize").notNull(),
+  archived: boolean("archived").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => [
   index("chat_exports_user_created_idx").on(table.userId, table.createdAt),
@@ -104,6 +105,7 @@ export const webSearchStatus = mysqlTable("web_search_status", {
   state: mysqlEnum("state", ["ready", "unavailable", "unknown"]).notNull(),
   reason: varchar("reason", { length: 255 }).notNull(),
   googleHttp: int("googleHttp"),
+  tavilyHttp: int("tavilyHttp"),
   openrouterHttp: int("openrouterHttp"),
   checkedAt: timestamp("checkedAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -183,6 +185,7 @@ export const userSettings = mysqlTable("user_settings", {
   webSearch: int("webSearch").notNull().default(0),
   toolAccess: int("toolAccess").notNull().default(1),
   healthRefreshSeconds: int("healthRefreshSeconds").notNull().default(30),
+  highContrast: int("highContrast").notNull().default(0),
   exportSortBy: mysqlEnum("exportSortBy", ["createdAt", "byteSize"]).notNull().default("createdAt"),
   exportSortDirection: mysqlEnum("exportSortDirection", ["asc", "desc"]).notNull().default("desc"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

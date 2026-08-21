@@ -27,7 +27,6 @@ function memoryContext(profile: { profile: string; summary: string }, facts: Arr
 const DEFAULT_CONTEXT_PREFERENCES = {
   responseStyle: "default" as const,
   responseLength: "balanced" as const,
-  quickReplies: 1,
   effort: "standard" as const,
   thinking: 0,
   toolAccess: 1,
@@ -54,7 +53,6 @@ export async function buildChatContext(userId: number, sessionId: string, input:
   const context: ChatSettings = {
     style: preferences.responseStyle,
     responseLength: preferences.responseLength,
-    quickReplies: Boolean(preferences.quickReplies),
     effort: preferences.effort,
     thinking: Boolean(preferences.thinking),
     toolAccess: Boolean(preferences.toolAccess),
@@ -70,7 +68,7 @@ export async function buildChatContext(userId: number, sessionId: string, input:
         "Собери только релевантные актуальные факты и источники для запроса пользователя:\n" + (input.query?.slice(0, 8_000) ?? ""),
         role === "fast" ? { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS } : undefined,
       );
-      if (search.sources.length) {
+      if (search?.sources.length) {
         context.webResearch = search.summary;
         context.webSources = search.sources;
         context.searchStatus = { cascadeUsed: search.cascadeUsed, sourcesCount: search.sources.length };

@@ -12,6 +12,7 @@ const fixtures = vi.hoisted(() => ({
   preparePdf: vi.fn(),
   downloadPrepared: vi.fn(),
   createExport: vi.fn(),
+  archiveExport: vi.fn(),
   deleteExport: vi.fn(),
   deleteAllExports: vi.fn(),
   exports: [] as Array<{ id: string; fileName: string; format: "markdown" | "pdf"; createdAt: Date; byteSize?: number }>,
@@ -28,7 +29,7 @@ const fixtures = vi.hoisted(() => ({
 vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ isAuthenticated: true, loading: false }) }));
 vi.mock("@/const", () => ({ startLogin: vi.fn() }));
 vi.mock("@/lib/runtime-auth", () => ({ runtimeAuthHeaders: () => ({ Authorization: "Bearer test-session" }) }));
-vi.mock("@/contexts/ThemeContext", () => ({ useTheme: () => ({ theme: "dark", toggleTheme: vi.fn() }) }));
+vi.mock("@/contexts/ThemeContext", () => ({ useTheme: () => ({ theme: "dark", toggleTheme: vi.fn(), highContrast: false, setHighContrast: vi.fn() }) }));
 vi.mock("@/lib/chat-export", () => ({
   prepareChatMarkdown: fixtures.prepareMarkdown,
   prepareChatPdf: fixtures.preparePdf,
@@ -43,9 +44,9 @@ vi.mock("@/lib/trpc", () => ({
       { key: "context", modelId: "context", label: "Kairema Context", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
       { key: "flagship", modelId: "flagship", label: "Kairema Apex", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
     ] }) } },
-    settings: { get: { useQuery: () => ({ data: { language: "ru", theme: "dark", responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, defaultRole: "fast", webSearch: 0, healthRefreshSeconds: 30, exportSortBy: "createdAt", exportSortDirection: "desc" } }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateSettings }) } },
+    settings: { get: { useQuery: () => ({ data: { language: "ru", theme: "dark", responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, defaultRole: "fast", webSearch: 0, healthRefreshSeconds: 30, highContrast: 0, exportSortBy: "createdAt", exportSortDirection: "desc" } }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateSettings }) } },
     memory: { get: { useQuery: () => ({ data: { profile: "", enabled: 1, autoExtract: 1, facts: [] } }) }, update: { useMutation: () => ({ mutateAsync: vi.fn() }) }, addFact: { useMutation: () => ({ mutateAsync: vi.fn() }) }, deleteFact: { useMutation: () => ({ mutateAsync: vi.fn() }) }, clear: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
-    webSearch: { status: { useQuery: () => ({ data: { available: false, reason: "Поиск сейчас недоступен" } }) } },
+    webSearch: { status: { useQuery: () => ({ data: { available: false, reason: "Поиск сейчас недоступен", checkedAt: "2026-08-19T00:00:00.000Z", layers: [{ id: "google", state: "limited", retryAt: null }, { id: "tavily", state: "ready", retryAt: null }, { id: "openrouter", state: "ready", retryAt: null }] } }) } },
     knowledge: { status: { useQuery: () => ({ data: { documents: 0, sources: [], lastRun: null } }) }, audit: { useQuery: () => ({ data: { sources: [{ name: "OpenAI News", url: "https://openai.com/news/rss.xml", indexedCount: 12, lastSuccessAt: "2026-08-19T00:00:00.000Z" }], latestRun: { state: "completed", startedAt: "2026-08-19T00:00:00.000Z", finishedAt: "2026-08-19T00:01:00.000Z" } } }) }, refresh: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) } },
     providers: { dashboard: { useQuery: () => ({ data: [{ id: "openrouter", label: "OpenRouter", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }, { id: "google", label: "Google AI Studio", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }, { id: "groq", label: "Groq", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }] }) } },
     owner: { isOwner: { useQuery: () => ({ data: fixtures.isOwner }) }, flashTtft: { useQuery: () => ({ data: fixtures.isOwner ? { last24h: { p50Ms: 220, p95Ms: 440, samples: 2 }, last7d: { p50Ms: 250, p95Ms: 480, samples: 5 } } : null }) }, flashTtftTrend: { useQuery: () => ({ data: fixtures.isOwner ? [{ date: "2026-08-20", p50Ms: 220, p95Ms: 440, samples: 2 }] : [] }) }, searchOutages: { useQuery: () => ({ data: fixtures.isOwner ? { last24h: 1, last7d: 2, recent: [{ layer: "google", errorClass: "http_429", latencyMs: 120, createdAt: "2026-08-20T00:00:00.000Z" }] } : null }) } },
@@ -60,6 +61,7 @@ vi.mock("@/lib/trpc", () => ({
     exports: {
       list: { useQuery: () => ({ data: fixtures.exports, isLoading: false }) },
       create: { useMutation: () => ({ mutateAsync: fixtures.createExport }) },
+      archive: { useMutation: () => ({ mutateAsync: fixtures.archiveExport }) },
       delete: { useMutation: () => ({ mutateAsync: fixtures.deleteExport }) },
       deleteAll: { useMutation: () => ({ mutateAsync: fixtures.deleteAllExports }) },
     },
@@ -91,6 +93,7 @@ function resetFixtures() {
   fixtures.preparePdf.mockReset().mockResolvedValue(pdfFile);
   fixtures.downloadPrepared.mockReset();
   fixtures.createExport.mockReset().mockResolvedValue({ id: "export-1" });
+  fixtures.archiveExport.mockReset().mockResolvedValue({ success: true });
   fixtures.deleteExport.mockReset().mockResolvedValue(undefined);
   fixtures.deleteAllExports.mockReset().mockResolvedValue({ success: true, deletedCount: 1 });
   fixtures.exports = [];
@@ -154,7 +157,7 @@ describe("Home integration flows", () => {
 
     await waitFor(() => expect(fixtures.deleteChat).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
     await waitFor(() => expect(fixtures.invalidateSessions).toHaveBeenCalled());
-    expect(fixtures.invalidateMessages).toHaveBeenCalledWith();
+    expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId });
   });
 
   it("exports only the active persisted history through both user-facing controls", async () => {
@@ -211,14 +214,14 @@ describe("Home integration flows", () => {
 
   it("keeps Flash TTFT and search-outage aggregates invisible to a non-owner and renders only aggregate owner data", () => {
     const { rerender } = render(<Home />);
-    expect(screen.queryByLabelText("Flash TTFT")).toBeNull();
-    expect(screen.queryByLabelText("Журнал поиска")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Flash TTFT" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Сбои поиска" })).toBeNull();
 
     fixtures.isOwner = true;
     rerender(<Home />);
 
-    expect(screen.getByLabelText("Flash TTFT").textContent).toContain("p50: 220 мс");
-    expect(screen.getByLabelText("Журнал поиска").textContent).toContain("24ч: 1");
+    expect(screen.getByRole("heading", { name: "Flash TTFT" }).parentElement?.textContent).toContain("p50 220 мс");
+    expect(screen.getByRole("heading", { name: "Сбои поиска" }).parentElement?.textContent).toContain("24 часа: 1");
     expect(screen.queryByText(/http_429/i)).toBeNull();
   });
 

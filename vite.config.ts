@@ -167,6 +167,18 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    reportCompressedSize: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ["react", "react-dom", "react-dom/client"],
+          icons: ["lucide-react"],
+          trpc: ["@trpc/client", "@trpc/react-query", "@tanstack/react-query"],
+          pdf: ["jspdf"],
+          charts: ["recharts"],
+        },
+      },
+    },
   },
   server: {
     host: true,

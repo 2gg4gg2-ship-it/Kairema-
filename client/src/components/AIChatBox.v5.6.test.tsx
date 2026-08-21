@@ -29,10 +29,8 @@ describe("AIChatBox v5.6", () => {
     expect(screen.getByText(/example\.com · 19\.08\.2026/)).toBeTruthy();
   });
 
-  it("renders an ephemeral continuation chip and forwards its text through the interaction callback", () => {
-    const onSuggestion = vi.fn();
-    render(<AIChatBox messages={[{ id: "assistant-1", role: "assistant", content: "Ответ", suggestions: ["Сделай краткий план следующих шагов"] }]} onSendMessage={vi.fn()} onSuggestion={onSuggestion} emptyStateMessage="Kairema" />);
-    fireEvent.click(screen.getByRole("button", { name: "Сделай краткий план следующих шагов" }));
-    expect(onSuggestion).toHaveBeenCalledWith("Сделай краткий план следующих шагов");
+  it("does not render quick prompts in an empty conversation", () => {
+    render(<AIChatBox messages={[]} onSendMessage={vi.fn()} emptyStateMessage="Kairema" />);
+    expect(screen.queryByRole("button", { name: /составь план|объясни|краткий план/i })).toBeNull();
   });
 });
