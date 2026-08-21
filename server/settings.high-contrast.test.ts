@@ -25,7 +25,7 @@ describe("high-contrast settings contract", () => {
     const css = readFileSync(`${project}/client/src/index.css`, "utf8");
     expect(context).toContain('classList.toggle("high-contrast", highContrast)');
     expect(home).toContain("Проверить настройки");
-    expect(home).toContain("Сортировка экспортов");
+    expect(home).not.toContain("Сортировка экспортов");
     expect(css).toContain(".high-contrast {");
   });
 });

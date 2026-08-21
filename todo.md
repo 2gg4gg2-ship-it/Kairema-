@@ -302,3 +302,18 @@
 - [x] v6-L/CRITICAL: завершить единый requestId-scoped бюджет для каждого генеративного LLM-вызова, включая закрытый dev-path; логировать только metadata `requestId`, `attemptIndex`, `attemptType`, `provider`, `model`, `remainingBudget`.
 - [x] v6-L/CRITICAL: различить provider_success, provider_empty, provider_timeout, provider_failed и all_providers_failed в безопасном server-side outcome; сохранить provenance каждого переданного факта.
 - [x] v6-L/CRITICAL: провести обязательные smoke tests: актуальный поиск Flash/Think, controlled failover Think, общая история Flash→Think→Context, memory save→refresh→new chat, image vision, AppSwitch/AppSelect, RAG audit и bundle/security audit; непроверенные пункты пометить NOT VERIFIED.
+- [x] v6-L.2/SMOKE: smoke-проверки и доказательства завершены в v6-L.2; фактические ограничения и статусы отражены в отчёте без ложного PASS.
+- [x] v6-L.2/MEMORY: реализованы user-scoped память между чатами и инъекция memory profile/entries в новый чат всех четырёх ролей.
+- [x] v6-L.2/ATTACHMENTS: реализованы preview до отправки и миниатюра в user-message; временные chat attachments исключены из постоянного файл-листа.
+- [x] v6-L.2/FILES: раздел и история «Файлы» удалены из интерфейса, а временные chat attachments сохранены как отдельный lifecycle.
+- [x] v6-L.2/EXPORTS: export инициируется только явным действием пользователя; последующая v6-L.3 сняла persistent storage-слой по уточнённому требованию.
+- [x] v6-L.2/CONTROLS: AppSwitch унифицирован, обе темы проверены, а select-контролы заменены доступными AppDropdown в v6-L.3.
+- [x] v6-L.2/AUDIT: owner-safe RAG audit сохранён без технических URL для обычных пользователей.
+- [x] v6-L.2/QUALITY: регрессии, browser-проверки, production build, bundle audit и доказательный отчёт v6-L.2 завершены.
+- [x] v6-L.3/REMOVAL: постоянные пункты «Файлы»/«Экспорты», client UI, tRPC procedures и DB helpers удалены из runtime; временные chat attachments сохранены отдельным lifecycle. Физический `DROP TABLE chat_exports` безопасно отложен согласно явным условиям пользователя после FAIL/PARTIAL доказательных проверок.
+- [x] v6-L.3/DROPDOWN: четыре listbox-настройки заменены на доступные AppDropdown с русскими подписями и описаниями; веб-поиск сохранён отдельным семантическим Switch. Встроенные keyboard/focus-примитивы Select и контраст dark/light/mobile покрыты интеграционной проверкой.
+- [x] v6-L.3/QUALITY-PANEL: реализована закрытая owner-only live-панель агрегированных метрик качества поиска без URL, текстов, model IDs или провайдерских цепей; server-side 403, отсутствие DB-вызова для не-владельца и отсутствие UI у не-владельца покрыты регрессиями.
+- [x] v6-L.3/VALIDATION: добавлены UI/server regression-тесты; пройдены полный `pnpm test`, TypeScript, production build, audit bundle без секретов, свежий runtime-log review и desktop/mobile приёмка. Reusable skill валидирован штатным validator-ом.
+- [x] v6-L.3/DROP-CHECK-1: зафиксирован SQL-лог `SELECT COUNT(*) FROM chat_exports` с результатом 0 перед физическим удалением таблицы.
+- [x] v6-L.3/DROP-CHECK-2: grep-аудит выполнен и задокументирован как FAIL: активный runtime чист, но неизменяемая история миграций содержит законные исторические упоминания; поэтому `DROP TABLE` не запускался.
+- [x] v6-L.3/DROP-CHECK-3: автоматизированная регрессия подтвердила две локальные загрузки без persistent API; browser click-through остался PARTIAL без OAuth-сессии, поэтому `DROP TABLE` не запускался.

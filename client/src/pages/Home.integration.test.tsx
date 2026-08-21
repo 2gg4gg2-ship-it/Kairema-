@@ -11,13 +11,6 @@ const fixtures = vi.hoisted(() => ({
   prepareMarkdown: vi.fn(),
   preparePdf: vi.fn(),
   downloadPrepared: vi.fn(),
-  createExport: vi.fn(),
-  archiveExport: vi.fn(),
-  batchArchiveExports: vi.fn(),
-  deleteExport: vi.fn(),
-  deleteAllExports: vi.fn(),
-  exports: [] as Array<{ id: string; fileName: string; format: "markdown" | "pdf"; createdAt: Date; byteSize?: number }>,
-  invalidateExports: vi.fn(),
   invalidateMessages: vi.fn(),
   invalidateSessions: vi.fn(),
   createChat: vi.fn(),
@@ -27,6 +20,13 @@ const fixtures = vi.hoisted(() => ({
   releaseSecondDelta: null as (() => void) | null,
 }));
 
+Object.defineProperties(HTMLElement.prototype, {
+  hasPointerCapture: { configurable: true, value: () => false },
+  setPointerCapture: { configurable: true, value: () => undefined },
+  releasePointerCapture: { configurable: true, value: () => undefined },
+  scrollIntoView: { configurable: true, value: () => undefined },
+});
+
 vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ isAuthenticated: true, loading: false }) }));
 vi.mock("@/const", () => ({ startLogin: vi.fn() }));
 vi.mock("@/lib/runtime-auth", () => ({ runtimeAuthHeaders: () => ({ Authorization: "Bearer test-session" }) }));
@@ -35,7 +35,6 @@ vi.mock("@/lib/chat-export", () => ({
   prepareChatMarkdown: fixtures.prepareMarkdown,
   prepareChatPdf: fixtures.preparePdf,
   downloadPreparedChatExport: fixtures.downloadPrepared,
-  blobToBase64: vi.fn().mockResolvedValue("dGVzdA=="),
 }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
@@ -45,13 +44,13 @@ vi.mock("@/lib/trpc", () => ({
       { key: "context", modelId: "context", label: "Kairema Context", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
       { key: "flagship", modelId: "flagship", label: "Kairema Apex", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
     ] }) } },
-    settings: { get: { useQuery: () => ({ data: { language: "ru", theme: "dark", responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, defaultRole: "fast", webSearch: 0, healthRefreshSeconds: 30, highContrast: 0, exportSortBy: "createdAt", exportSortDirection: "desc" } }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateSettings }) } },
+    settings: { get: { useQuery: () => ({ data: { language: "ru", theme: "dark", responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, defaultRole: "fast", webSearch: 0, healthRefreshSeconds: 30, highContrast: 0 } }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateSettings }) } },
     memory: { get: { useQuery: () => ({ data: { profile: "", enabled: 1, autoExtract: 1, facts: [] } }) }, update: { useMutation: () => ({ mutateAsync: vi.fn() }) }, addFact: { useMutation: () => ({ mutateAsync: vi.fn() }) }, deleteFact: { useMutation: () => ({ mutateAsync: vi.fn() }) }, clear: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
     webSearch: { status: { useQuery: () => ({ data: { available: false, reason: "Поиск сейчас недоступен", checkedAt: "2026-08-19T00:00:00.000Z", layers: [{ id: "google", state: "limited", retryAt: null }, { id: "tavily", state: "ready", retryAt: null }, { id: "openrouter", state: "ready", retryAt: null }] } }) } },
     knowledge: { status: { useQuery: () => ({ data: { documents: 0, sources: [], lastRun: null } }) }, audit: { useQuery: () => ({ data: { sources: [{ name: "OpenAI News", url: "https://openai.com/news/rss.xml", indexedCount: 12, lastSuccessAt: "2026-08-19T00:00:00.000Z" }], latestRun: { state: "completed", startedAt: "2026-08-19T00:00:00.000Z", finishedAt: "2026-08-19T00:01:00.000Z" } } }) }, refresh: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) } },
     providers: { dashboard: { useQuery: () => ({ data: [{ id: "openrouter", label: "OpenRouter", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }, { id: "google", label: "Google AI Studio", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }, { id: "groq", label: "Groq", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }] }) } },
     owner: { isOwner: { useQuery: () => ({ data: fixtures.isOwner }) }, flashTtft: { useQuery: () => ({ data: fixtures.isOwner ? { last24h: { p50Ms: 220, p95Ms: 440, samples: 2 }, last7d: { p50Ms: 250, p95Ms: 480, samples: 5 } } : null }) }, flashTtftTrend: { useQuery: () => ({ data: fixtures.isOwner ? [{ date: "2026-08-20", p50Ms: 220, p95Ms: 440, samples: 2 }] : [] }) }, searchOutages: { useQuery: () => ({ data: fixtures.isOwner ? { last24h: 1, last7d: 2, recent: [{ layer: "google", errorClass: "http_429", latencyMs: 120, createdAt: "2026-08-20T00:00:00.000Z" }] } : null }) } },
-    search: { query: { useQuery: () => ({ data: [] }) } },
+    search: { query: { useQuery: () => ({ data: [] }) }, qualityPanel: { useQuery: () => ({ data: fixtures.isOwner ? { last24h: { sampleCount: 4, counts: { found: 2, empty: 1, degraded: 1, error: 0 }, verifiedSourceCount: 2, zeroSourceCount: 2, staleBlockedCount: 1, foundRate: 0.5, verificationPassRate: 0.5 }, last7d: { sampleCount: 10, counts: { found: 6, empty: 2, degraded: 1, error: 1 }, verifiedSourceCount: 6, zeroSourceCount: 4, staleBlockedCount: 2, foundRate: 0.6, verificationPassRate: 0.6 } } : null }) } },
     attachments: { list: { useQuery: () => ({ data: [] }) }, upload: { useMutation: () => ({ mutateAsync: vi.fn() }) }, delete: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
     chats: {
       list: { useQuery: () => ({ data: fixtures.sessions, isLoading: false }) },
@@ -59,16 +58,7 @@ vi.mock("@/lib/trpc", () => ({
       create: { useMutation: () => ({ mutateAsync: fixtures.createChat, isPending: false }) },
       delete: { useMutation: () => ({ mutateAsync: fixtures.deleteChat, isPending: false }) },
     },
-    exports: {
-      list: { useQuery: () => ({ data: fixtures.exports, isLoading: false }) },
-      search: { useQuery: (input: { query: string }) => ({ data: input.query.trim().length >= 2 ? fixtures.exports.filter((entry) => entry.fileName.toLocaleLowerCase("ru-RU").includes(input.query.toLocaleLowerCase("ru-RU"))) : [] }) },
-      create: { useMutation: () => ({ mutateAsync: fixtures.createExport }) },
-      archive: { useMutation: () => ({ mutateAsync: fixtures.archiveExport }) },
-      batchArchive: { useMutation: () => ({ mutateAsync: fixtures.batchArchiveExports, isPending: false }) },
-      delete: { useMutation: () => ({ mutateAsync: fixtures.deleteExport }) },
-      deleteAll: { useMutation: () => ({ mutateAsync: fixtures.deleteAllExports }) },
-    },
-    useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, list: { invalidate: fixtures.invalidateSessions } }, exports: { list: { invalidate: fixtures.invalidateExports }, search: { invalidate: vi.fn() }, download: { fetch: vi.fn() } } }),
+    useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, list: { invalidate: fixtures.invalidateSessions } } }),
   },
 }));
 vi.mock("@/components/ui/dialog", () => ({
@@ -95,13 +85,7 @@ function resetFixtures() {
   fixtures.prepareMarkdown.mockReset().mockResolvedValue(markdownFile);
   fixtures.preparePdf.mockReset().mockResolvedValue(pdfFile);
   fixtures.downloadPrepared.mockReset();
-  fixtures.createExport.mockReset().mockResolvedValue({ id: "export-1" });
-  fixtures.archiveExport.mockReset().mockResolvedValue({ success: true });
-  fixtures.deleteExport.mockReset().mockResolvedValue(undefined);
-  fixtures.deleteAllExports.mockReset().mockResolvedValue({ success: true, deletedCount: 1 });
-  fixtures.exports = [];
   fixtures.isOwner = false;
-  fixtures.invalidateExports.mockReset().mockResolvedValue(undefined);
   fixtures.invalidateSessions.mockReset().mockResolvedValue(undefined);
   fixtures.createChat.mockReset().mockResolvedValue({ id: "22222222-2222-4222-8222-222222222222", modelId: "fast", title: "Новый разговор" });
   fixtures.deleteChat.mockReset().mockResolvedValue({ success: true });
@@ -163,7 +147,7 @@ describe("Home integration flows", () => {
     expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId });
   });
 
-  it("exports only the active persisted history through both user-facing controls", async () => {
+  it("downloads only the active persisted history in Markdown and PDF without a server-side export record", async () => {
     const user = userEvent.setup();
     render(<Home />);
 
@@ -173,79 +157,32 @@ describe("Home integration flows", () => {
 
     expect(fixtures.prepareMarkdown).toHaveBeenCalledWith(expect.objectContaining({ title: "Активная история", messages: [expect.objectContaining({ content: "Старое сообщение пользователя" }), expect.objectContaining({ content: "Старый ответ Kairema" })] }));
     await waitFor(() => expect(fixtures.preparePdf).toHaveBeenCalledOnce());
-    expect(fixtures.createExport).toHaveBeenCalledTimes(2);
     expect(fixtures.downloadPrepared).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps exports and files as labelled sidebar sections with readable empty states", () => {
+  it("does not render a persistent exports or files sidebar section", () => {
     render(<Home />);
 
-    const exportsSection = screen.getByRole("region", { name: "Экспорты" });
-    const filesSection = screen.getByRole("region", { name: "Файлы" });
-    expect(exportsSection.querySelector(".kairema-empty")?.textContent).toContain("Экспортов пока нет");
-    expect(filesSection.querySelector(".kairema-empty")?.textContent).toContain("Вложений в этом чате пока нет");
+    expect(screen.queryByRole("region", { name: "Экспорты" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Файлы" })).toBeNull();
   });
 
-  it("queries export history by file name through the server-side contract", async () => {
-    const user = userEvent.setup();
-    fixtures.exports = [
-      { id: "33333333-3333-4333-8333-333333333333", fileName: "Проектный архив.md", format: "markdown", createdAt: new Date("2026-08-19T00:00:00.000Z") },
-      { id: "44444444-4444-4444-8444-444444444444", fileName: "Итоги встречи.pdf", format: "pdf", createdAt: new Date("2026-08-18T00:00:00.000Z") },
-    ];
-    render(<Home />);
-
-    await user.type(screen.getByRole("textbox", { name: "Поиск: Экспорты" }), "архив");
-
-    expect(screen.getByText("Проектный архив.md")).toBeTruthy();
-    expect(screen.queryByText("Итоги встречи.pdf")).toBeNull();
-  });
-
-  it("persists user-scoped export sorting and changes the visible order after existing filters", async () => {
-    const user = userEvent.setup();
-    fixtures.exports = [
-      { id: "33333333-3333-4333-8333-333333333333", fileName: "Малый отчёт.pdf", format: "pdf", createdAt: new Date("2026-08-18T00:00:00.000Z"), byteSize: 1_024 },
-      { id: "44444444-4444-4444-8444-444444444444", fileName: "Большой отчёт.md", format: "markdown", createdAt: new Date("2026-08-19T00:00:00.000Z"), byteSize: 8_192 },
-    ];
-    render(<Home />);
-
-    const exportsRegion = screen.getByRole("region", { name: "Экспорты" });
-    expect(exportsRegion.textContent?.indexOf("Большой отчёт.md")).toBeLessThan(exportsRegion.textContent?.indexOf("Малый отчёт.pdf") ?? -1);
-    await user.selectOptions(screen.getByLabelText("Сортировка"), "byteSize:asc");
-    await waitFor(() => expect(fixtures.updateSettings).toHaveBeenCalledWith({ exportSortBy: "byteSize", exportSortDirection: "asc" }));
-    expect(exportsRegion.textContent?.indexOf("Малый отчёт.pdf")).toBeLessThan(exportsRegion.textContent?.indexOf("Большой отчёт.md") ?? -1);
-  });
-
-  it("keeps Flash TTFT and search-outage aggregates invisible to a non-owner and renders only aggregate owner data", () => {
+  it("keeps owner aggregates invisible to a non-owner and renders only privacy-safe search quality data for the owner", () => {
     const { rerender } = render(<Home />);
     expect(screen.queryByRole("heading", { name: "Flash TTFT" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Сбои поиска" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Качество веб-поиска" })).toBeNull();
 
     fixtures.isOwner = true;
     rerender(<Home />);
 
     expect(screen.getByRole("heading", { name: "Flash TTFT" }).parentElement?.textContent).toContain("p50 220 мс");
     expect(screen.getByRole("heading", { name: "Сбои поиска" }).parentElement?.textContent).toContain("24 часа: 1");
+    expect(screen.getByRole("heading", { name: "Качество веб-поиска" }).parentElement?.textContent).toContain("Проверяемые источники: 6");
+    expect(screen.getByRole("heading", { name: "Качество веб-поиска" }).parentElement?.textContent).not.toMatch(/https?:\/\/|model id|запрос пользователя/i);
     expect(screen.queryByText(/http_429/i)).toBeNull();
   });
 
-  it("confirms before deleting all exports and refreshes the export history after the owned operation succeeds", async () => {
-    const user = userEvent.setup();
-    const confirm = vi.fn().mockReturnValue(true);
-    let finishDeletion: ((value: { success: true; deletedCount: number }) => void) | undefined;
-    vi.stubGlobal("confirm", confirm);
-    fixtures.exports = [{ id: "33333333-3333-4333-8333-333333333333", fileName: "Активная история.md", format: "markdown", createdAt: new Date("2026-08-19T00:00:00.000Z") }];
-    fixtures.deleteAllExports.mockImplementation(() => new Promise((resolve) => { finishDeletion = resolve; }));
-    render(<Home />);
-
-    await user.click(await screen.findByRole("button", { name: "Удалить все экспорты" }));
-
-    expect(confirm).toHaveBeenCalledOnce();
-    await waitFor(() => expect(fixtures.deleteAllExports).toHaveBeenCalledOnce());
-    await screen.findByRole("button", { name: "Удаляем…" });
-    expect(screen.getByRole("button", { name: "Удаляем…" })).toHaveProperty("disabled", true);
-    finishDeletion?.({ success: true, deletedCount: 1 });
-    await waitFor(() => expect(fixtures.invalidateExports).toHaveBeenCalledOnce());
-  });
 
   it("shows a streaming delta, then replaces optimistic content with the persisted final answer", async () => {
     const user = userEvent.setup();
@@ -294,7 +231,7 @@ describe("Home integration flows", () => {
 
     await user.click(screen.getAllByRole("button", { name: "Копировать" })[1]!);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("Старый ответ Kairema"));
-    expect(screen.getByRole("status").textContent).toContain("Сообщение скопировано");
+    expect(screen.getAllByRole("status").some((node) => node.textContent?.includes("Сообщение скопировано"))).toBe(true);
 
     await user.click(screen.getByRole("button", { name: "Ещё вариант" }));
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
@@ -385,16 +322,28 @@ describe("Home integration flows", () => {
     expect(screen.queryByText(/Authorization|Bearer|chain|Llama Fast/i)).toBeNull();
   });
 
-  it("uses named accessible AppSelect controls in settings instead of native selects", async () => {
+  it("uses named accessible AppDropdown controls and a Switch for all five settings", async () => {
     const user = userEvent.setup();
     render(<Home />);
 
     await user.click(screen.getByRole("button", { name: "Открыть настройки" }));
-    const styleSelect = screen.getByRole("combobox", { name: "Стиль" });
-    expect(styleSelect).toBeTruthy();
+    const styleDropdown = screen.getByRole("combobox", { name: "Стиль" });
+    expect(styleDropdown).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "Длина" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Усилия" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "Роль по умолчанию" })).toBeTruthy();
-    expect(styleSelect.closest("label")?.querySelectorAll("select")).toHaveLength(0);
+    expect(screen.getByRole("switch", { name: "Веб-поиск" })).toBeTruthy();
+    expect(styleDropdown.closest("label")?.querySelectorAll("select")).toHaveLength(0);
+  });
+
+  it("does not retain persistent export filters or a permanent files panel", () => {
+    render(<Home />);
+
+    expect(screen.queryByRole("combobox", { name: "Раздел экспортов" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Формат" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Период" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Сортировка" })).toBeNull();
+    expect(screen.queryByText("Файлы")).toBeNull();
   });
 
   it("keeps the role selector to one interactive trigger without an external chevron icon", async () => {

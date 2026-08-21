@@ -6,7 +6,7 @@ import { ChevronDown, Copy, Download, ExternalLink, FileImage, FileText, Loader2
 import React, { useEffect, useRef, useState } from "react";
 
 export type Source = { title: string; url: string; domain?: string; kind?: "web" | "rag"; publishedAt?: string | null; snippet?: string | null };
-export type ChatAttachment = { id: string; fileName: string; mimeType: string; sizeBytes: number; kind: "image" | "document" };
+export type ChatAttachment = { id: string; fileName: string; mimeType: string; sizeBytes: number; kind: "image" | "document"; previewUrl?: string };
 export type Message = {
   id?: string;
   role: "system" | "user" | "assistant";
@@ -18,12 +18,13 @@ export type Message = {
   createdAt?: Date | string;
   sources?: Source[];
   searchStatus?: { state: "found" | "empty" | "degraded" | "error"; verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable"; sourcesCount: number };
+  attachments?: ChatAttachment[];
 };
 
 type Language = "ru" | "en";
 type AIChatBoxProps = {
   messages: Message[];
-  onSendMessage: (content: string, options?: { attachmentIds?: string[]; clientMessageId?: string }) => void;
+  onSendMessage: (content: string, options?: { attachmentIds?: string[]; attachments?: ChatAttachment[]; clientMessageId?: string }) => void;
   onUploadFiles?: (files: File[]) => Promise<ChatAttachment[]>;
   isLoading?: boolean;
   placeholder?: string;
@@ -75,7 +76,7 @@ export function AIChatBox({
     event?.preventDefault();
     const value = currentInput.trim();
     if (!value || isLoading || isUploading) return;
-    onSendMessage(value, { attachmentIds: attachments.map((attachment) => attachment.id), clientMessageId: crypto.randomUUID() });
+    onSendMessage(value, { attachmentIds: attachments.map((attachment) => attachment.id), attachments, clientMessageId: crypto.randomUUID() });
     setComposerInput("");
     setAttachments([]);
     textareaRef.current?.focus();
@@ -98,6 +99,7 @@ export function AIChatBox({
       <div ref={viewportRef} className="min-h-0 flex-1 overflow-y-auto">
         {displayMessages.length === 0 ? <div className="flex min-h-[420px] flex-col items-center justify-center px-6 text-center"><div className="kairema-orb mb-6"><Sparkles className="size-7" /></div><h2 className="text-2xl font-semibold tracking-tight text-foreground">{emptyStateMessage}</h2><p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">{t.fourRoles}</p></div> : <div className="mx-auto flex w-full max-w-4xl flex-col gap-7 px-4 py-7 sm:px-8">{displayMessages.map((message, index) => <article key={message.id ?? `${message.role}-${index}`} className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
           {message.role === "assistant" && <div className="kairema-avatar kairema-avatar-ai"><Sparkles className="size-4" /></div>}<div className={cn("max-w-[86%] sm:max-w-[76%]", message.role === "user" && "flex flex-col items-end")}><div className={cn("kairema-message", message.role === "user" ? "kairema-message-user" : "kairema-message-ai", message.isError && "kairema-message-error")}>{message.role === "assistant" && !message.isError ? <div className="kairema-markdown text-sm leading-6"><InlineMarkdown text={message.content} language={language} /></div> : <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>}</div>
+          {message.role === "user" && Boolean(message.attachments?.length) && <div className="kairema-message-attachments" aria-label={language === "ru" ? "Вложения сообщения" : "Message attachments"}>{message.attachments?.map((attachment) => attachment.kind === "image" && attachment.previewUrl ? <img key={attachment.id} src={attachment.previewUrl} alt={attachment.fileName} className="kairema-message-image" /> : <span key={attachment.id} className="kairema-attachment-chip">{attachment.kind === "image" ? <FileImage className="size-3.5" /> : <FileText className="size-3.5" />}<span>{attachment.fileName}</span></span>)}</div>}
           {message.role === "assistant" && message.providerLabel && <p className="mt-2 px-1 text-xs text-muted-foreground">{message.providerLabel} · {message.model} · {message.status}</p>}
           {message.role === "assistant" && message.searchStatus && <p className="mt-2 inline-flex rounded-full border border-border/70 bg-muted/40 px-2 py-1 text-xs text-muted-foreground" role="status">{message.searchStatus.state === "found" ? `${t.searchVerified}${message.searchStatus.sourcesCount ? ` · ${message.searchStatus.sourcesCount}` : ""}` : message.searchStatus.state === "empty" ? t.searchEmpty : message.searchStatus.state === "degraded" ? t.searchDegraded : t.searchError}</p>}
           {message.role === "assistant" && Boolean(message.sources?.length) && (() => { const sourceKey = String(message.id ?? index); const isExpanded = Boolean(expandedSources[sourceKey]); return <section className="kairema-sources"><button type="button" className="kairema-sources-toggle" aria-expanded={isExpanded} onClick={() => setExpandedSources((current) => ({ ...current, [sourceKey]: !isExpanded }))}><span>{t.sources} ({message.sources?.length ?? 0})</span><ChevronDown className={cn("size-3.5 transition-transform", isExpanded && "rotate-180")} /></button>{isExpanded && <ul>{message.sources?.map((source, sourceIndex) => { let fallbackDomain = ""; try { fallbackDomain = new URL(source.url).hostname.replace(/^www\./i, ""); } catch { /* source URLs are server-validated */ } const domain = source.domain ?? fallbackDomain; return <li key={`${source.kind ?? "web"}-${source.url}-${sourceIndex}`}><a href={source.url} target="_blank" rel="noreferrer" title={source.title}><span className="kairema-source-title"><ExternalLink className="size-3" />{source.title}</span><small>{domain}{source.publishedAt ? ` · ${new Intl.DateTimeFormat(language === "ru" ? "ru-RU" : "en-US", { dateStyle: "short" }).format(new Date(source.publishedAt))}` : ""}</small></a></li>; })}</ul>}</section>; })()}
@@ -106,7 +108,7 @@ export function AIChatBox({
       </div>
       <form onSubmit={submit} className="kairema-composer">
         <div className="kairema-composer-main">
-          {attachments.length > 0 && <div className="kairema-attachment-chips">{attachments.map((attachment) => <span className="kairema-attachment-chip" key={attachment.id}>{attachment.kind === "image" ? <FileImage className="size-3.5" /> : <FileText className="size-3.5" />}<span>{attachment.fileName}</span><button type="button" title={t.remove} aria-label={t.remove} onClick={() => setAttachments((items) => items.filter((item) => item.id !== attachment.id))}><X className="size-3" /></button></span>)}</div>}
+          {attachments.length > 0 && <div className="kairema-attachment-chips">{attachments.map((attachment) => <span className="kairema-attachment-chip" key={attachment.id}>{attachment.kind === "image" && attachment.previewUrl ? <img src={attachment.previewUrl} alt="" className="kairema-attachment-preview" /> : attachment.kind === "image" ? <FileImage className="size-3.5" /> : <FileText className="size-3.5" />}<span>{attachment.fileName}</span><button type="button" title={t.remove} aria-label={t.remove} onClick={() => setAttachments((items) => items.filter((item) => item.id !== attachment.id))}><X className="size-3" /></button></span>)}</div>}
           {uploadStatus && <p className="px-1 pb-2 text-xs text-muted-foreground" role="status" aria-live="polite">{uploadStatus}</p>}<div className="kairema-composer-row"><input ref={fileInputRef} className="sr-only" type="file" multiple accept="image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown,.md" onChange={(event) => void addFiles(event.target.files)} />{onOpenTemplates && <button type="button" onClick={onOpenTemplates} disabled={isLoading} className="kairema-composer-tool" title={language === "ru" ? "Шаблоны промптов" : "Prompt templates"} aria-label={language === "ru" ? "Шаблоны промптов" : "Prompt templates"}><Sparkles className="size-4" /></button>}<button type="button" onClick={() => fileInputRef.current?.click()} disabled={!onUploadFiles || isLoading || isUploading} className="kairema-composer-tool" title={t.attach} aria-label={t.attach}>{isUploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}</button><Textarea ref={textareaRef} value={currentInput} onChange={(event) => setComposerInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={effectivePlaceholder} className="kairema-textarea" rows={1} /></div>
         </div>
         {isLoading && <Button type="button" size="icon" onClick={onCancelStream} className="kairema-cancel" aria-label={t.stop}><Square className="size-3.5 fill-current" /></Button>}<Button type="submit" size="icon" disabled={!currentInput.trim() || isLoading || isUploading} className="kairema-send" aria-label={t.send}>{isLoading || isUploading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}</Button>

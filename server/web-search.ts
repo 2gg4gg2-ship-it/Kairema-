@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { SearchResultState, WebEvidence, WebSource } from "./providers";
-import { getWebSearchStatus as getSavedWebSearchStatus, recordSearchOutage, type SearchOutageInput, upsertWebSearchStatus } from "./db";
+import { getWebSearchStatus as getSavedWebSearchStatus, recordSearchOutage, recordSearchQuality, type SearchOutageInput, upsertWebSearchStatus } from "./db";
 
 export type SearchCascadeUsed = "you" | "serper" | "exa";
 type SearchLayer = SearchCascadeUsed;
@@ -180,6 +180,7 @@ export async function getWebSearchStatus(): Promise<WebSearchStatus> {
 function safeCascadeTelemetry(http: Record<SearchLayer, number | null>, selected: SearchCascadeUsed | null) { console.info("[Kairema search]", JSON.stringify({ event: "search.cascade", youHttp: http.you, serperHttp: http.serper, exaHttp: http.exa, selected })); }
 function outageClass(http: number | null): SearchOutageInput["errorClass"] { if (http === 429) return "rate_limited"; if (http === 401 || http === 403) return "auth"; if (http === 404) return "not_found"; if (http === null) return "network_error"; if (http >= 400) return "http_error"; return "no_sources"; }
 async function runCascade(query: string, options: SearchWebOptions, recordOutages: boolean): Promise<SearchResult | SearchOutcome> {
+  const startedAt = Date.now();
   const checkedAt = new Date().toISOString();
   const previous = await getWebSearchStatus();
   const signal = AbortSignal.timeout(Math.max(100, Math.min(options.timeoutMs ?? 25_000, 25_000)));
@@ -193,6 +194,7 @@ async function runCascade(query: string, options: SearchWebOptions, recordOutage
     if (attempt.result) {
       safeCascadeTelemetry(http, layer);
       await saveStatus({ available: true, reason: layer === "you" ? "Поиск доступен." : "Поиск доступен через резервный слой.", checkedAt, youHttp: http.you ?? previous.youHttp, serperHttp: http.serper ?? previous.serperHttp, exaHttp: http.exa ?? previous.exaHttp, googleHttp: previous.googleHttp, tavilyHttp: previous.tavilyHttp, openrouterHttp: previous.openrouterHttp });
+      if (recordOutages) void recordSearchQuality({ outcome: "found", verification: "verified", verifiedSourceCount: attempt.result.evidence.length, attemptedLayerCount: outcomes.filter((outcome) => outcome !== "skipped").length, staleBlocked: false, latencyMs: Date.now() - startedAt }).catch(() => undefined);
       return attempt.result;
     }
     if (recordOutages) void recordSearchOutage({ layer, errorClass: outageClass(attempt.http), latencyMs: attempt.latencyMs, fellBack: layer !== "exa" && !signal.aborted });
@@ -209,6 +211,7 @@ async function runCascade(query: string, options: SearchWebOptions, recordOutage
     : hasEmpty || hasTemporaryFault
       ? "degraded"
       : "error";
+  if (recordOutages) void recordSearchQuality({ outcome: state, verification: state === "empty" ? "no_results" : state === "degraded" ? "degraded" : "unavailable", verifiedSourceCount: 0, attemptedLayerCount: attempted.length, staleBlocked: signal.aborted, latencyMs: Date.now() - startedAt }).catch(() => undefined);
   return {
     summary: "",
     sources: [],

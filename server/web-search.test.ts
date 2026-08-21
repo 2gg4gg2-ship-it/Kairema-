@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { recordSearchOutage, savedStatus, upsertWebSearchStatus } = vi.hoisted(() => ({
+const { recordSearchOutage, recordSearchQuality, savedStatus, upsertWebSearchStatus } = vi.hoisted(() => ({
   recordSearchOutage: vi.fn().mockResolvedValue(undefined),
+  recordSearchQuality: vi.fn().mockResolvedValue(undefined),
   savedStatus: vi.fn().mockResolvedValue(null),
   upsertWebSearchStatus: vi.fn().mockResolvedValue(undefined),
 }));
@@ -9,6 +10,7 @@ vi.mock("./db", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./db")>()),
   getWebSearchStatus: savedStatus,
   recordSearchOutage,
+  recordSearchQuality,
   upsertWebSearchStatus,
 }));
 
@@ -23,6 +25,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
   recordSearchOutage.mockClear();
+  recordSearchQuality.mockClear();
   upsertWebSearchStatus.mockClear();
   savedStatus.mockResolvedValue(null);
 });
@@ -63,6 +66,14 @@ describe("v6-K SearchProvider", () => {
     expect(new Set(result.evidence.map((entry) => entry.sourceId))).toEqual(new Set(result.sources.map((source) => source.sourceId)));
     expect((await getWebSearchStatus()).available).toBe(true);
     expect(upsertWebSearchStatus).toHaveBeenCalledWith(expect.objectContaining({ youHttp: 200, state: "ready" }));
+    expect(recordSearchQuality).toHaveBeenCalledTimes(1);
+    const [metric] = recordSearchQuality.mock.calls[0] ?? [];
+    expect(metric).toMatchObject({ outcome: "found", verification: "verified", verifiedSourceCount: 2, staleBlocked: false, latencyMs: expect.any(Number) });
+    expect(metric).not.toHaveProperty("query");
+    expect(metric).not.toHaveProperty("url");
+    expect(metric).not.toHaveProperty("userId");
+    expect(metric).not.toHaveProperty("provider");
+    expect(metric).not.toHaveProperty("model");
   });
 
   it("uses Serper only after a You.com failure and records metadata-only failover", async () => {

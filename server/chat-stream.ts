@@ -184,7 +184,9 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
         history = currentHistory.slice(0, targetIndex);
       } else {
         if (idempotencyKey) pendingReplay = createPendingReplay(idempotencyKey);
-        const append = await dependencies.appendChatMessage(user.id, input.sessionId, "user", input.content, input.modelId, undefined, input.clientMessageId);
+        const attachmentIds = Array.from(new Set(input.attachmentIds ?? [])).filter((attachmentId) => typeof attachmentId === "string" && attachmentId.length > 0);
+        const userMetadata = attachmentIds.length > 0 ? JSON.stringify({ attachmentIds }) : undefined;
+        const append = await dependencies.appendChatMessage(user.id, input.sessionId, "user", input.content, input.modelId, userMetadata, input.clientMessageId);
         const isDuplicate = Boolean(input.clientMessageId && append && !append.created);
         if (isDuplicate && idempotencyKey) {
           const completed = getCompletedReplay(idempotencyKey);

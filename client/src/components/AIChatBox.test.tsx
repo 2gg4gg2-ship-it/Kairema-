@@ -97,6 +97,19 @@ describe("AIChatBox user flows", () => {
     expect(screen.queryByText(/https?:\/\//i)).toBeNull();
   });
 
+  it("renders a temporary image thumbnail in the sent user message", () => {
+    render(<AIChatBox messages={[{
+      id: "user-image",
+      role: "user",
+      content: "Проверь это фото",
+      attachments: [{ id: "attachment-1", fileName: "sample.webp", mimeType: "image/webp", sizeBytes: 1234, kind: "image", previewUrl: "https://preview.example.test/sample.webp" }],
+    }]} onSendMessage={vi.fn()} />);
+
+    const preview = screen.getByRole("img", { name: "sample.webp" });
+    expect(preview.getAttribute("src")).toBe("https://preview.example.test/sample.webp");
+    expect(screen.getByLabelText("Вложения сообщения").contains(preview)).toBe(true);
+  });
+
   it("ignores legacy continuation suggestions and does not render quick-prompt chips", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const legacyAssistantMessage = {

@@ -1,0 +1,1 @@
+ALTER TABLE `search_quality_metrics` ADD `staleBlocked` int DEFAULT 0 NOT NULL;

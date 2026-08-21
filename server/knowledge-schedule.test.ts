@@ -1,12 +1,15 @@
 import type { Request, Response } from "express";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { authenticateRequest, refreshKnowledgeBase } = vi.hoisted(() => ({
+const { authenticateRequest, cleanupExpiredChatAttachments, cleanupSearchQualityMetrics, refreshKnowledgeBase } = vi.hoisted(() => ({
   authenticateRequest: vi.fn(),
+  cleanupExpiredChatAttachments: vi.fn(),
+  cleanupSearchQualityMetrics: vi.fn(),
   refreshKnowledgeBase: vi.fn(),
 }));
 
 vi.mock("./_core/sdk", () => ({ sdk: { authenticateRequest } }));
+vi.mock("./db", () => ({ cleanupExpiredChatAttachments, cleanupSearchQualityMetrics }));
 vi.mock("./knowledge", () => ({ refreshKnowledgeBase }));
 
 import { createKnowledgeRefreshScheduleHandler } from "./knowledge-schedule";
@@ -20,13 +23,17 @@ function response() {
 describe("knowledge refresh schedule", () => {
   it("runs the idempotent RAG refresh only for an authenticated cron identity", async () => {
     authenticateRequest.mockResolvedValue({ id: -1, isCron: true, taskUid: "task_knowledge" });
+    cleanupExpiredChatAttachments.mockResolvedValue(3);
+    cleanupSearchQualityMetrics.mockResolvedValue(2);
     refreshKnowledgeBase.mockResolvedValue([{ sourceId: "openai-news", state: "ready", fetchedCount: 2, indexedCount: 1, updatedCount: 0 }]);
     const res = response();
 
     await createKnowledgeRefreshScheduleHandler()({} as Request, res, vi.fn());
 
     expect(refreshKnowledgeBase).toHaveBeenCalledWith("scheduled");
-    expect(res.json).toHaveBeenCalledWith({ ok: true, sources: [{ sourceId: "openai-news", state: "ready", fetchedCount: 2, indexedCount: 1, updatedCount: 0 }] });
+    expect(cleanupExpiredChatAttachments).toHaveBeenCalledOnce();
+    expect(cleanupSearchQualityMetrics).toHaveBeenCalledOnce();
+    expect(res.json).toHaveBeenCalledWith({ ok: true, expiredAttachmentMetadata: 3, expiredSearchQualityMetrics: 2, sources: [{ sourceId: "openai-news", state: "ready", fetchedCount: 2, indexedCount: 1, updatedCount: 0 }] });
   });
 
   it("rejects a non-cron request before RSS fetching starts", async () => {
@@ -38,5 +45,7 @@ describe("knowledge refresh schedule", () => {
     expect(res.status).toHaveBeenCalledWith(403);
     expect(res.json).toHaveBeenCalledWith({ error: "cron-only" });
     expect(refreshKnowledgeBase).not.toHaveBeenCalled();
+    expect(cleanupExpiredChatAttachments).not.toHaveBeenCalled();
+    expect(cleanupSearchQualityMetrics).not.toHaveBeenCalled();
   });
 });

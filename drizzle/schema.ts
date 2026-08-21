@@ -1,4 +1,4 @@
-import { boolean, index, int, mediumtext, mysqlEnum, mysqlTable, primaryKey, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { index, int, mysqlEnum, mysqlTable, primaryKey, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -34,24 +34,6 @@ export const messages = mysqlTable("messages", {
 }, (table) => [
   index("messages_session_created_idx").on(table.sessionId, table.createdAt),
   uniqueIndex("messages_client_message_id_unique").on(table.clientMessageId),
-]);
-
-export const chatExports = mysqlTable("chat_exports", {
-  id: varchar("id", { length: 36 }).primaryKey(),
-  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
-  sessionId: varchar("sessionId", { length: 36 }).notNull().references(() => chatSessions.id, { onDelete: "cascade" }),
-  fileKey: varchar("fileKey", { length: 512 }).notNull(),
-  fileName: varchar("fileName", { length: 255 }).notNull(),
-  format: mysqlEnum("format", ["markdown", "pdf"]).notNull(),
-  contentType: varchar("contentType", { length: 128 }).notNull(),
-  byteSize: int("byteSize").notNull(),
-  archived: boolean("archived").default(false).notNull(),
-  /** Private text snapshot for owner-scoped full-text export search; never sent by list/download DTOs. */
-  searchText: mediumtext("searchText"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-}, (table) => [
-  index("chat_exports_user_created_idx").on(table.userId, table.createdAt),
-	index("chat_exports_session_created_idx").on(table.sessionId, table.createdAt),
 ]);
 
 export const providerHealth = mysqlTable("provider_health", {
@@ -98,6 +80,18 @@ export const searchOutageLogs = mysqlTable("search_outage_logs", {
 	fellBack: int("fellBack").notNull().default(0),
 	createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => [index("search_outage_logs_created_idx").on(table.createdAt)]);
+
+/** Aggregate-ready search outcomes. This anonymous operational log never stores a user, query, URL, source, provider or model. */
+export const searchQualityMetrics = mysqlTable("search_quality_metrics", {
+	id: int("id").autoincrement().primaryKey(),
+	outcome: mysqlEnum("outcome", ["found", "empty", "degraded", "error"]).notNull(),
+	verification: mysqlEnum("verification", ["verified", "no_results", "degraded", "unavailable"]).notNull(),
+	verifiedSourceCount: int("verifiedSourceCount").notNull(),
+	attemptedLayerCount: int("attemptedLayerCount").notNull(),
+	staleBlocked: int("staleBlocked").notNull().default(0),
+	latencyMs: int("latencyMs").notNull(),
+	createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("search_quality_metrics_created_idx").on(table.createdAt)]);
 
 export const roleRuntimeStatus = mysqlTable("role_runtime_status", {
 	roleId: mysqlEnum("roleId", ["fast", "smart", "context", "flagship"]).primaryKey(),
@@ -196,8 +190,6 @@ export const userSettings = mysqlTable("user_settings", {
   toolAccess: int("toolAccess").notNull().default(1),
   healthRefreshSeconds: int("healthRefreshSeconds").notNull().default(30),
   highContrast: int("highContrast").notNull().default(0),
-  exportSortBy: mysqlEnum("exportSortBy", ["createdAt", "byteSize"]).notNull().default("createdAt"),
-  exportSortDirection: mysqlEnum("exportSortDirection", ["asc", "desc"]).notNull().default("desc"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -234,18 +226,23 @@ export const chatAttachments = mysqlTable("chat_attachments", {
   kind: mysqlEnum("kind", ["image", "document"]).notNull(),
   processingStatus: mysqlEnum("processingStatus", ["ready", "unsupported", "failed"]).notNull().default("ready"),
   extractedText: text("extractedText"),
+  /** Temporary chat attachments become inaccessible after their short retention period. */
+  expiresAt: timestamp("expiresAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-}, (table) => [index("chat_attachments_user_session_idx").on(table.userId, table.sessionId, table.createdAt)]);
+}, (table) => [
+  index("chat_attachments_user_session_idx").on(table.userId, table.sessionId, table.createdAt),
+  index("chat_attachments_expires_idx").on(table.expiresAt),
+]);
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type ChatSession = typeof chatSessions.$inferSelect;
 export type ChatMessageRecord = typeof messages.$inferSelect;
-export type ChatExport = typeof chatExports.$inferSelect;
 export type ProviderHealthRecord = typeof providerHealth.$inferSelect;
 export type ProviderDailyUsageRecord = typeof providerDailyUsage.$inferSelect;
 export type FlashTtftMetricRecord = typeof flashTtftMetrics.$inferSelect;
 export type SearchOutageLogRecord = typeof searchOutageLogs.$inferSelect;
+export type SearchQualityMetricRecord = typeof searchQualityMetrics.$inferSelect;
 export type WebSearchStatusRecord = typeof webSearchStatus.$inferSelect;
 export type KnowledgeSource = typeof knowledgeSources.$inferSelect;
 export type KnowledgeDocument = typeof knowledgeDocuments.$inferSelect;

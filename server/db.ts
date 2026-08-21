@@ -1,7 +1,7 @@
-import { and, asc, desc, eq, gt, inArray, isNull, like, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, like, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
-import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryFacts, memoryProfiles, messages, providerDailyUsage, providerHealth, roleRuntimeStatus, searchOutageLogs, userSettings, users, webSearchStatus } from "../drizzle/schema";
+import { ChatAttachment, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryFacts, memoryProfiles, messages, providerDailyUsage, providerHealth, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, userSettings, users, webSearchStatus } from "../drizzle/schema";
 import { providerHealthHistory } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -127,110 +127,6 @@ export async function deleteOwnedChatSession(userId: number, sessionId: string):
   const db = requireDatabase(await getDb());
   const result = await db.delete(chatSessions).where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)));
   return result[0].affectedRows > 0;
-}
-
-export async function createChatExportRecord(userId: number, input: Omit<ChatExport, "userId" | "createdAt" | "archived">): Promise<ChatExport> {
-  const db = requireDatabase(await getDb());
-  requireOwnedSession(userId, await getOwnedChatSession(userId, input.sessionId));
-  const record: ChatExport = { ...input, userId, archived: false, createdAt: new Date() };
-  await db.insert(chatExports).values(record);
-  return record;
-}
-
-export type ChatExportListItem = Omit<ChatExport, "fileKey" | "searchText">;
-
-/** Keeps private storage addressing and indexed export content on the server. */
-export function toChatExportListItem(record: ChatExport): ChatExportListItem {
-  const { fileKey: _fileKey, searchText: _searchText, ...visible } = record;
-  return visible;
-}
-
-export async function listChatExports(userId: number, filter: "all" | "active" | "archived" = "all"): Promise<ChatExportListItem[]> {
-  const db = requireDatabase(await getDb());
-  const visibility = filter === "all" ? undefined : eq(chatExports.archived, filter === "archived");
-  const rows = await db.select().from(chatExports).where(visibility ? and(eq(chatExports.userId, userId), visibility) : eq(chatExports.userId, userId)).orderBy(desc(chatExports.createdAt));
-  return rows.map(toChatExportListItem);
-}
-
-export type ExportSearchResult = ChatExportListItem & { snippet: string };
-
-function exportSearchSnippet(text: string, query: string): string {
-  const compact = text.replace(/\s+/g, " ").trim();
-  const index = compact.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
-  if (index < 0) return compact.slice(0, 180);
-  const start = Math.max(0, index - 72);
-  const end = Math.min(compact.length, index + query.length + 108);
-  return `${start > 0 ? "…" : ""}${compact.slice(start, end)}${end < compact.length ? "…" : ""}`;
-}
-
-/** Searches the private text snapshot and filename of signed-in user's exports; file bytes and storage keys stay private. */
-export async function searchChatExports(userId: number, query: string, filter: "all" | "active" | "archived" = "all"): Promise<ExportSearchResult[]> {
-  const db = requireDatabase(await getDb());
-  const normalized = query.trim().slice(0, 100);
-  if (!normalized) return [];
-  const escaped = normalized.replace(/[\\%_]/g, "\\$&");
-  const visibility = filter === "all" ? undefined : eq(chatExports.archived, filter === "archived");
-  const rows = await db.select().from(chatExports).where(and(
-    eq(chatExports.userId, userId),
-    or(like(chatExports.fileName, `%${escaped}%`), like(chatExports.searchText, `%${escaped}%`)),
-    ...(visibility ? [visibility] : []),
-  )).orderBy(desc(chatExports.createdAt)).limit(40);
-  const legacyRows = await db.select({ exportRecord: chatExports, content: messages.content }).from(chatExports).innerJoin(messages, eq(messages.sessionId, chatExports.sessionId)).where(and(
-    eq(chatExports.userId, userId),
-    isNull(chatExports.searchText),
-    like(messages.content, `%${escaped}%`),
-    ...(visibility ? [visibility] : []),
-  )).orderBy(desc(chatExports.createdAt)).limit(40);
-  const matched = new Map<string, ExportSearchResult>();
-  for (const row of rows) matched.set(row.id, { ...toChatExportListItem(row), snippet: exportSearchSnippet(row.searchText || row.fileName, normalized) });
-  for (const row of legacyRows) {
-    if (!matched.has(row.exportRecord.id)) matched.set(row.exportRecord.id, { ...toChatExportListItem(row.exportRecord), snippet: exportSearchSnippet(row.content, normalized) });
-  }
-  return Array.from(matched.values()).sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime()).slice(0, 40);
-}
-
-export async function getOwnedChatExport(userId: number, exportId: string): Promise<ChatExport | undefined> {
-  const db = requireDatabase(await getDb());
-  const result = await db.select().from(chatExports).where(and(eq(chatExports.id, exportId), eq(chatExports.userId, userId))).limit(1);
-  return result[0];
-}
-
-export function isOwnedChatExport(userId: number, record: Pick<ChatExport, "userId"> | undefined): boolean {
-  return Boolean(record && record.userId === userId);
-}
-
-export async function deleteOwnedChatExport(userId: number, exportId: string): Promise<boolean> {
-  const db = requireDatabase(await getDb());
-  const owned = await getOwnedChatExport(userId, exportId);
-  if (!isOwnedChatExport(userId, owned)) return false;
-  await db.delete(chatExports).where(and(eq(chatExports.id, exportId), eq(chatExports.userId, userId)));
-  return true;
-}
-
-/** Changes archive visibility only when the export belongs to the signed-in user. */
-export async function archiveChatExport(userId: number, exportId: string, archived: boolean): Promise<boolean> {
-  const db = requireDatabase(await getDb());
-  const result = await db.update(chatExports).set({ archived }).where(and(eq(chatExports.id, exportId), eq(chatExports.userId, userId)));
-  return result[0].affectedRows > 0;
-}
-
-/** Changes only records owned by the signed-in user and returns the number whose state actually changed. */
-export async function batchArchiveChatExports(userId: number, exportIds: string[], archived: boolean): Promise<number> {
-  const ids = Array.from(new Set(exportIds)).slice(0, 50);
-  if (!ids.length) return 0;
-  const db = requireDatabase(await getDb());
-  const result = await db.update(chatExports).set({ archived }).where(and(
-    eq(chatExports.userId, userId),
-    inArray(chatExports.id, ids),
-    eq(chatExports.archived, !archived),
-  ));
-  return result[0].affectedRows;
-}
-
-export async function deleteAllOwnedChatExports(userId: number): Promise<number> {
-  const db = requireDatabase(await getDb());
-  const result = await db.delete(chatExports).where(eq(chatExports.userId, userId));
-  return result[0].affectedRows;
 }
 
 export async function listProviderHealth(): Promise<ProviderHealthRecord[]> {
@@ -446,6 +342,91 @@ export async function getSearchOutageSummary(): Promise<SearchOutageSummary> {
   };
 }
 
+export type SearchQualityInput = {
+  outcome: "found" | "empty" | "degraded" | "error";
+  verification: "verified" | "no_results" | "degraded" | "unavailable";
+  verifiedSourceCount: number;
+  attemptedLayerCount: number;
+  staleBlocked: boolean;
+  latencyMs: number;
+};
+
+type SearchQualityPeriod = {
+  sampleCount: number;
+  counts: Record<SearchQualityInput["outcome"], number>;
+  verifiedSourceCount: number;
+  zeroSourceCount: number;
+  staleBlockedCount: number;
+  foundRate: number;
+  verificationPassRate: number;
+};
+
+export type SearchQualityPanel = { last24h: SearchQualityPeriod; last7d: SearchQualityPeriod };
+
+function summarizeSearchQuality(rows: Array<{ outcome: SearchQualityInput["outcome"]; verification: SearchQualityInput["verification"]; verifiedSourceCount: number; staleBlocked: number }>): SearchQualityPeriod {
+  const counts: SearchQualityPeriod["counts"] = { found: 0, empty: 0, degraded: 0, error: 0 };
+  let verifiedSourceCount = 0;
+  let zeroSourceCount = 0;
+  let staleBlockedCount = 0;
+  let verificationPassCount = 0;
+  for (const row of rows) {
+    counts[row.outcome] += 1;
+    verifiedSourceCount += row.verifiedSourceCount;
+    if (row.verifiedSourceCount === 0) zeroSourceCount += 1;
+    if (row.staleBlocked) staleBlockedCount += 1;
+    if (row.verification === "verified") verificationPassCount += 1;
+  }
+  const sampleCount = rows.length;
+  return {
+    sampleCount,
+    counts,
+    verifiedSourceCount,
+    zeroSourceCount,
+    staleBlockedCount,
+    foundRate: sampleCount ? Math.round((counts.found / sampleCount) * 10_000) / 100 : 0,
+    verificationPassRate: sampleCount ? Math.round((verificationPassCount / sampleCount) * 10_000) / 100 : 0,
+  };
+}
+
+/** Stores bounded operational quality metadata only; request text, URLs, source identities, users, providers and models are never persisted. */
+export async function recordSearchQuality(input: SearchQualityInput): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(searchQualityMetrics).values({
+    outcome: input.outcome,
+    verification: input.verification,
+    verifiedSourceCount: Math.max(0, Math.min(Math.round(input.verifiedSourceCount), 5)),
+    attemptedLayerCount: Math.max(0, Math.min(Math.round(input.attemptedLayerCount), 3)),
+    staleBlocked: input.staleBlocked ? 1 : 0,
+    latencyMs: Math.max(0, Math.min(Math.round(input.latencyMs), 30_000)),
+  });
+}
+
+/** Existing daily heartbeat cleanup retains anonymous quality metrics for at most 90 days. */
+export async function cleanupSearchQualityMetrics(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const retention = new Date(Date.now() - 90 * 24 * 60 * 60 * 1_000);
+  const result = await db.delete(searchQualityMetrics).where(sql`${searchQualityMetrics.createdAt} < ${retention}`);
+  return Number((result as { rowsAffected?: number } | undefined)?.rowsAffected ?? 0);
+}
+
+/** Narrow owner-only quality DTO. It contains aggregate numbers only and deliberately omits content, identity and routing data. */
+export async function getSearchQualityPanel(): Promise<SearchQualityPanel> {
+  const db = await getDb();
+  const empty = summarizeSearchQuality([]);
+  if (!db) return { last24h: empty, last7d: empty };
+  const now = Date.now();
+  const since7d = new Date(now - 7 * 24 * 60 * 60 * 1_000);
+  const since24h = now - 24 * 60 * 60 * 1_000;
+  const rows = await db.select({ outcome: searchQualityMetrics.outcome, verification: searchQualityMetrics.verification, verifiedSourceCount: searchQualityMetrics.verifiedSourceCount, staleBlocked: searchQualityMetrics.staleBlocked, createdAt: searchQualityMetrics.createdAt })
+    .from(searchQualityMetrics).where(gt(searchQualityMetrics.createdAt, since7d)).orderBy(desc(searchQualityMetrics.createdAt)).limit(20_000);
+  return {
+    last24h: summarizeSearchQuality(rows.filter((row) => row.createdAt.getTime() >= since24h)),
+    last7d: summarizeSearchQuality(rows),
+  };
+}
+
 export type RoleRuntimeStatusRecord = {
   roleId: "fast" | "smart" | "context" | "flagship";
   state: "ready" | "backup" | "unavailable";
@@ -500,7 +481,7 @@ export async function upsertWebSearchStatus(input: WebSearchStatusInput): Promis
   });
 }
 
-export type UserSettingsPatch = Partial<Pick<UserSettings, "language" | "theme" | "responseStyle" | "responseLength" | "effort" | "thinking" | "defaultRole" | "webSearch" | "toolAccess" | "healthRefreshSeconds" | "highContrast" | "exportSortBy" | "exportSortDirection">>;
+export type UserSettingsPatch = Partial<Pick<UserSettings, "language" | "theme" | "responseStyle" | "responseLength" | "effort" | "thinking" | "defaultRole" | "webSearch" | "toolAccess" | "healthRefreshSeconds" | "highContrast">>;
 export type KnowledgeSourcePatch = Omit<KnowledgeSource, "updatedAt">;
 export type KnowledgeDocumentInput = Omit<KnowledgeDocument, "retrievedAt" | "updatedAt">;
 export type KnowledgeRunInput = Omit<KnowledgeIngestionRun, "startedAt" | "finishedAt">;
@@ -706,10 +687,18 @@ export async function clearMemory(userId: number): Promise<void> {
   await updateMemoryProfile(userId, { profile: "", summary: "" });
 }
 
-export async function createChatAttachment(userId: number, input: Omit<ChatAttachment, "id" | "userId" | "createdAt">): Promise<ChatAttachment> {
+const CHAT_ATTACHMENT_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+export async function createChatAttachment(userId: number, input: Omit<ChatAttachment, "id" | "userId" | "createdAt" | "expiresAt">): Promise<ChatAttachment> {
   const db = requireDatabase(await getDb());
   requireOwnedSession(userId, await getOwnedChatSession(userId, input.sessionId));
-  const record: ChatAttachment = { ...input, id: randomUUID(), userId, createdAt: new Date() };
+  const record: ChatAttachment = {
+    ...input,
+    id: randomUUID(),
+    userId,
+    createdAt: new Date(),
+    expiresAt: new Date(Date.now() + CHAT_ATTACHMENT_RETENTION_MS),
+  };
   await db.insert(chatAttachments).values(record);
   return record;
 }
@@ -717,7 +706,12 @@ export async function createChatAttachment(userId: number, input: Omit<ChatAttac
 export async function listSessionAttachments(userId: number, sessionId: string): Promise<ChatAttachment[]> {
   const db = requireDatabase(await getDb());
   requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
-  return db.select().from(chatAttachments).where(and(eq(chatAttachments.userId, userId), eq(chatAttachments.sessionId, sessionId))).orderBy(asc(chatAttachments.createdAt));
+  const now = new Date();
+  return db.select().from(chatAttachments).where(and(
+    eq(chatAttachments.userId, userId),
+    eq(chatAttachments.sessionId, sessionId),
+    or(isNull(chatAttachments.expiresAt), gt(chatAttachments.expiresAt, now)),
+  )).orderBy(asc(chatAttachments.createdAt));
 }
 
 export async function getOwnedChatAttachments(userId: number, sessionId: string, attachmentIds: string[]): Promise<ChatAttachment[]> {
@@ -730,7 +724,12 @@ export async function getOwnedChatAttachments(userId: number, sessionId: string,
 
 export async function getOwnedChatAttachment(userId: number, attachmentId: string): Promise<ChatAttachment | undefined> {
   const db = requireDatabase(await getDb());
-  const result = await db.select().from(chatAttachments).where(and(eq(chatAttachments.id, attachmentId), eq(chatAttachments.userId, userId))).limit(1);
+  const now = new Date();
+  const result = await db.select().from(chatAttachments).where(and(
+    eq(chatAttachments.id, attachmentId),
+    eq(chatAttachments.userId, userId),
+    or(isNull(chatAttachments.expiresAt), gt(chatAttachments.expiresAt, now)),
+  )).limit(1);
   return result[0];
 }
 
@@ -738,6 +737,13 @@ export async function deleteOwnedChatAttachment(userId: number, attachmentId: st
   const db = requireDatabase(await getDb());
   const result = await db.delete(chatAttachments).where(and(eq(chatAttachments.id, attachmentId), eq(chatAttachments.userId, userId)));
   return Number(result[0]?.affectedRows ?? 0) > 0;
+}
+
+/** Removes only expired attachment metadata. Object-store physical deletion is not available in the project storage API. */
+export async function cleanupExpiredChatAttachments(now = new Date()): Promise<number> {
+  const db = requireDatabase(await getDb());
+  const result = await db.delete(chatAttachments).where(lt(chatAttachments.expiresAt, now));
+  return Number(result[0]?.affectedRows ?? 0);
 }
 
 function searchSnippet(content: string, query: string, maximum = 220) {
@@ -748,21 +754,19 @@ function searchSnippet(content: string, query: string, maximum = 220) {
   return `${start > 0 ? "…" : ""}${raw}${start + maximum < content.length ? "…" : ""}`;
 }
 
-export type SearchResult = { type: "chat" | "message" | "export"; id: string; sessionId?: string; title: string; snippet: string; createdAt: Date };
+export type SearchResult = { type: "chat" | "message"; id: string; sessionId?: string; title: string; snippet: string; createdAt: Date };
 
 export async function searchUserContent(userId: number, query: string): Promise<SearchResult[]> {
   const db = requireDatabase(await getDb());
   const term = query.trim().slice(0, 120);
   if (term.length < 2) return [];
   const pattern = `%${term}%`;
-  const [sessionRows, messageRows, exportRows] = await Promise.all([
+  const [sessionRows, messageRows] = await Promise.all([
     db.select({ id: chatSessions.id, title: chatSessions.title, createdAt: chatSessions.updatedAt }).from(chatSessions).where(and(eq(chatSessions.userId, userId), like(chatSessions.title, pattern))).orderBy(desc(chatSessions.updatedAt)).limit(8),
     db.select({ id: messages.id, sessionId: messages.sessionId, title: chatSessions.title, content: messages.content, createdAt: messages.createdAt }).from(messages).innerJoin(chatSessions, eq(messages.sessionId, chatSessions.id)).where(and(eq(chatSessions.userId, userId), like(messages.content, pattern))).orderBy(desc(messages.createdAt)).limit(12),
-    db.select({ id: chatExports.id, sessionId: chatExports.sessionId, fileName: chatExports.fileName, createdAt: chatExports.createdAt }).from(chatExports).where(and(eq(chatExports.userId, userId), like(chatExports.fileName, pattern))).orderBy(desc(chatExports.createdAt)).limit(8),
   ]);
   return [
     ...sessionRows.map((row) => ({ type: "chat" as const, id: row.id, sessionId: row.id, title: row.title, snippet: row.title, createdAt: row.createdAt })),
     ...messageRows.map((row) => ({ type: "message" as const, id: String(row.id), sessionId: row.sessionId, title: row.title, snippet: searchSnippet(row.content, term), createdAt: row.createdAt })),
-    ...exportRows.map((row) => ({ type: "export" as const, id: row.id, sessionId: row.sessionId, title: row.fileName, snippet: row.fileName, createdAt: row.createdAt })),
   ];
 }
