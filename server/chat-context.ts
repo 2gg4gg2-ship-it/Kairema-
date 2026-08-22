@@ -1,9 +1,9 @@
-import { getAttachmentPromptText, getOwnedAttachmentDownload } from "./attachments";
 import { claimMemoryExtractionJob, completeMemoryExtractionJob, deleteMemoryEntryByKey, deleteMemoryEntryByValue, getMemoryExtractionJobTurn, getMemoryProfile, getMemorySettings, getOwnedChatAttachments, getUserSettings, listMemoryEntries, retryMemoryExtractionJob, upsertMemoryEntry } from "./db";
 import { invokeLLM } from "./_core/llm";
 import type { ChatSettings } from "./providers";
 import { searchWeb } from "./web-search";
 import { retrieveRagContext, type RagRole } from "./knowledge";
+import { getAttachmentPromptText, getOwnedAttachmentVisionDataUrl } from "./attachments";
 
 /** All four public roles may use live research when the user asks for external current facts. */
 export const WEB_RESEARCH_ROLE_POLICY: ReadonlySet<RagRole> = new Set<RagRole>(["fast", "smart", "context", "flagship"]);
@@ -57,7 +57,7 @@ export async function buildChatContext(userId: number, sessionId: string, input:
   const documentContext = getAttachmentPromptText(attachments);
   const imageUrls = (await Promise.all(attachments.filter((attachment) => attachment.kind === "image").map(async (attachment) => {
     try {
-      return (await getOwnedAttachmentDownload(userId, attachment.id)).url;
+      return await getOwnedAttachmentVisionDataUrl(userId, attachment.id);
     } catch {
       return null;
     }

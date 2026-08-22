@@ -25,7 +25,7 @@ vi.mock("./web-search", () => {
 
 vi.mock("./attachments", () => ({
   getAttachmentPromptText: vi.fn().mockReturnValue(""),
-  getOwnedAttachmentDownload: vi.fn(),
+  getOwnedAttachmentVisionDataUrl: vi.fn(),
 }));
 
 vi.mock("./knowledge", () => ({
@@ -38,7 +38,7 @@ import { buildChatContext, extractMemoryFacts, FLASH_WEB_RESEARCH_BUDGET_MS, FRE
 import { claimMemoryExtractionJob, completeMemoryExtractionJob, deleteMemoryEntryByKey, getMemoryExtractionJobTurn, getMemoryProfile, getMemorySettings, getOwnedChatAttachments, getUserSettings, listMemoryEntries, retryMemoryExtractionJob, upsertMemoryEntry } from "./db";
 import { invokeLLM } from "./_core/llm";
 import { WebSearchUnavailableError, searchWeb } from "./web-search";
-import { getOwnedAttachmentDownload } from "./attachments";
+import { getOwnedAttachmentVisionDataUrl } from "./attachments";
 import { retrieveRagContext } from "./knowledge";
 
 const input = { query: "Что нового?", attachmentIds: [] };
@@ -121,7 +121,7 @@ describe("chat context soft web research", () => {
       .resolves.toMatchObject({ webResearch: "Свежие проверяемые данные.", ragResearch: "Проверяемый RAG-контекст.", ragSources: [{ title: "Официальный RSS", url: "https://openai.com/news/release", publishedAt: "2026-08-19T00:00:00.000Z" }] });
   });
 
-  it("passes only a current user-owned temporary image URL into the transient request context", async () => {
+  it("passes only a current user-owned temporary image data URL into the transient request context", async () => {
     vi.mocked(getUserSettings).mockResolvedValueOnce({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, toolAccess: 1 } as never);
     vi.mocked(getOwnedChatAttachments).mockResolvedValueOnce([{
       id: "11111111-1111-4111-8111-111111111112",
@@ -137,16 +137,16 @@ describe("chat context soft web research", () => {
       expiresAt: new Date("2026-08-23T00:00:00.000Z"),
       createdAt: new Date("2026-08-22T00:00:00.000Z"),
     }] as never);
-    vi.mocked(getOwnedAttachmentDownload).mockResolvedValueOnce({ fileName: "neutral.png", url: "https://signed.example.test/temporary-image" });
+    vi.mocked(getOwnedAttachmentVisionDataUrl).mockResolvedValueOnce("data:image/png;base64,c2FmZQ==");
 
     await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", {
       query: "Опиши изображение",
       role: "fast",
       attachmentIds: ["11111111-1111-4111-8111-111111111112"],
-    })).resolves.toMatchObject({ imageUrls: ["https://signed.example.test/temporary-image"] });
+    })).resolves.toMatchObject({ imageUrls: ["data:image/png;base64,c2FmZQ=="] });
 
     expect(getOwnedChatAttachments).toHaveBeenCalledWith(7, "11111111-1111-4111-8111-111111111111", ["11111111-1111-4111-8111-111111111112"]);
-    expect(getOwnedAttachmentDownload).toHaveBeenCalledWith(7, "11111111-1111-4111-8111-111111111112");
+    expect(getOwnedAttachmentVisionDataUrl).toHaveBeenCalledWith(7, "11111111-1111-4111-8111-111111111112");
   });
 
   it("injects only a bounded personal-memory context when the owner enabled memory", async () => {
