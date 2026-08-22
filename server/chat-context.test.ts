@@ -148,7 +148,7 @@ describe("chat context soft web research", () => {
 
     await extractMemoryFacts(7, "Запомни: я предпочитаю русский язык", { assistantText: "Запомнил", role: "fast", sessionId: "11111111-1111-4111-8111-111111111111" });
 
-    expect(invokeLLM).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-5-nano", maxTokens: 450, outputSchema: expect.objectContaining({ name: "kairema_memory_extraction" }) }));
+    expect(invokeLLM).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-5-nano", maxCompletionTokens: 450, outputSchema: expect.objectContaining({ name: "kairema_memory_extraction" }) }));
     expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "fact", "Пользователь предпочитает русский язык", expect.objectContaining({ memoryKey: "language", source: "auto" }));
     expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "dialog_topic", expect.stringContaining("Flash: настройка единой памяти"), expect.objectContaining({ role: "fast", sessionId: "11111111-1111-4111-8111-111111111111", source: "auto" }));
     expect(deleteMemoryEntryByKey).not.toHaveBeenCalled();

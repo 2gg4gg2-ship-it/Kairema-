@@ -178,7 +178,9 @@ async function applyMemoryExtraction(userId: number, userText: string, turn: Ext
   if (!settings.enabled || !settings.autoExtract) return;
     const response = await invokeLLM({
       model: "gpt-5-nano",
-      maxTokens: 450,
+      // GPT-5 requires max_completion_tokens; using max_tokens makes the
+      // structured background worker soft-fail and leaves jobs pending.
+      maxCompletionTokens: 450,
       outputSchema: { name: "kairema_memory_extraction", strict: true, schema: MEMORY_EXTRACTION_SCHEMA },
       messages: [
         {
