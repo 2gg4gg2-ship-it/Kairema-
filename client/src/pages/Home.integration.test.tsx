@@ -20,6 +20,7 @@ const fixtures = vi.hoisted(() => ({
   updateMemory: vi.fn(),
   deleteMemoryEntry: vi.fn(),
   clearMemory: vi.fn(),
+  uploadAttachment: vi.fn(),
   isOwner: false,
   navigate: vi.fn(),
   releaseSecondDelta: null as (() => void) | null,
@@ -57,7 +58,7 @@ vi.mock("@/lib/trpc", () => ({
     providers: { dashboard: { useQuery: () => ({ data: [{ id: "openrouter", label: "OpenRouter", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }, { id: "google", label: "Google AI Studio", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }, { id: "groq", label: "Groq", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }] }) } },
     owner: { isOwner: { useQuery: () => ({ data: fixtures.isOwner }) }, flashTtft: { useQuery: () => ({ data: fixtures.isOwner ? { last24h: { p50Ms: 220, p95Ms: 440, samples: 2 }, last7d: { p50Ms: 250, p95Ms: 480, samples: 5 } } : null }) }, flashTtftTrend: { useQuery: () => ({ data: fixtures.isOwner ? [{ date: "2026-08-20", p50Ms: 220, p95Ms: 440, samples: 2 }] : [] }) }, searchOutages: { useQuery: () => ({ data: fixtures.isOwner ? { last24h: 1, last7d: 2, recent: [{ layer: "google", errorClass: "http_429", latencyMs: 120, createdAt: "2026-08-20T00:00:00.000Z" }] } : null }) } },
     search: { query: { useQuery: () => ({ data: [] }) }, qualityPanel: { useQuery: () => ({ data: fixtures.isOwner ? { last24h: { sampleCount: 4, counts: { found: 2, empty: 1, degraded: 1, error: 0 }, verifiedSourceCount: 2, zeroSourceCount: 2, staleBlockedCount: 1, foundRate: 0.5, verificationPassRate: 0.5 }, last7d: { sampleCount: 10, counts: { found: 6, empty: 2, degraded: 1, error: 1 }, verifiedSourceCount: 6, zeroSourceCount: 4, staleBlockedCount: 2, foundRate: 0.6, verificationPassRate: 0.6 } } : null }) }, qualityChart: { useQuery: () => ({ data: fixtures.isOwner ? { daily: [{ day: "08-15", found: 1, empty: 0, degraded: 0, error: 0 }, { day: "08-21", found: 3, empty: 1, degraded: 0, error: 0 }], hourlyLayers: [{ hour: "09", layer1: 2, layer2: 1, layer3: 0 }, { hour: "10", layer1: 1, layer2: 0, layer3: 1 }] } : null }) } },
-    attachments: { list: { useQuery: () => ({ data: fixtures.attachments }) }, upload: { useMutation: () => ({ mutateAsync: vi.fn() }) }, delete: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
+    attachments: { list: { useQuery: () => ({ data: fixtures.attachments }) }, upload: { useMutation: () => ({ mutateAsync: fixtures.uploadAttachment }) }, delete: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
     chats: {
       list: { useQuery: () => ({ data: fixtures.sessions, isLoading: false }) },
       messages: { useQuery: () => ({ data: fixtures.messages }) },
@@ -97,6 +98,7 @@ function resetFixtures() {
   fixtures.updateMemory.mockReset().mockResolvedValue(undefined);
   fixtures.deleteMemoryEntry.mockReset().mockResolvedValue(undefined);
   fixtures.clearMemory.mockReset().mockResolvedValue(undefined);
+  fixtures.uploadAttachment.mockReset().mockResolvedValue({ id: "55555555-5555-4555-8555-555555555555", fileName: "vision.png", contentType: "image/png", byteSize: 100, kind: "image", previewUrl: "https://preview.example.test/vision.png" });
   fixtures.invalidateSessions.mockReset().mockResolvedValue(undefined);
   fixtures.createChat.mockReset().mockResolvedValue({ id: "22222222-2222-4222-8222-222222222222", modelId: "fast", title: "Новый разговор" });
   fixtures.deleteChat.mockReset().mockResolvedValue({ success: true });
@@ -287,6 +289,23 @@ describe("Home integration flows", () => {
     await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
     await waitFor(() => expect(screen.getByText("Первый фрагмент ответа")).toBeTruthy());
     expect(screen.queryByText("печатает")).toBeNull();
+  });
+
+  it("keeps an optimistic sent-image preview visible when the provider fails after the user message is persisted", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("unavailable", { status: 503, statusText: "Service Unavailable" })));
+    render(<Home />);
+
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).toBeTruthy();
+    await user.upload(input!, new File(["neutral"], "vision.png", { type: "image/png" }));
+    await screen.findByRole("button", { name: "Открыть предпросмотр: vision.png" });
+    await user.type(screen.getByPlaceholderText("Напишите сообщение…"), "Проверь вложение");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(screen.getByText(/Не удалось начать потоковый ответ|Service Unavailable/)).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Открыть предпросмотр: vision.png" })).toBeTruthy();
+    await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
   });
 
   it("copies an assistant reply and regenerates it from the previous user prompt", async () => {
