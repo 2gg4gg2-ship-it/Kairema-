@@ -82,12 +82,18 @@ function statusFromHttp(http: number) {
   if (http === 404) return "Поиск временно недоступен: требуется обновление server-side конфигурации.";
   return "Поиск временно недоступен: основной слой не ответил.";
 }
-function webSource(title: unknown, url: unknown, retrievedAt = new Date().toISOString()): WebSource | null {
+function normaliseSourceDate(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && timestamp <= Date.now() + 24 * 60 * 60_000 ? new Date(timestamp).toISOString() : null;
+}
+function webSource(title: unknown, url: unknown, retrievedAt = new Date().toISOString(), publishedAt?: unknown): WebSource | null {
   if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return null;
   let domain: string | undefined;
   try { domain = new URL(url).hostname.replace(/^www\./i, ""); } catch { /* URL already validated */ }
   const sourceId = createHash("sha256").update(url).digest("hex").slice(0, 16);
-  return { title: typeof title === "string" && title.trim() ? title.trim().slice(0, 240) : domain ?? url, url, sourceId, retrievedAt, ...(domain ? { domain } : {}) };
+  const sourceDate = normaliseSourceDate(publishedAt);
+  return { title: typeof title === "string" && title.trim() ? title.trim().slice(0, 240) : domain ?? url, url, sourceId, retrievedAt, ...(sourceDate ? { publishedAt: sourceDate } : {}), ...(domain ? { domain } : {}) };
 }
 function sourcePriority(source: WebSource) { const domain = source.domain?.toLowerCase() ?? ""; return PREFERRED_GLOBAL_DOMAINS.some((preferred) => domain === preferred || domain.endsWith(preferred)) ? 0 : 1; }
 function uniqueSources(items: Array<WebSource | null>): WebSource[] {
@@ -109,6 +115,7 @@ function evidenceFromEntries(entries: Array<{ source: WebSource; text: string }>
       sourceUrl: source.url,
       sourceTitle: source.title,
       sourceDomain: source.domain ?? null,
+      ...(source.publishedAt ? { publishedAt: source.publishedAt } : {}),
       retrievedAt: source.retrievedAt ?? new Date().toISOString(),
       confidence: sourcePriority(source) === 0 ? "high" as const : "medium" as const,
       sourceId: source.sourceId ?? createHash("sha256").update(source.url).digest("hex").slice(0, 16),
@@ -119,9 +126,9 @@ function sourceSummary(evidence: WebEvidence[]) {
   return evidence.map((entry) => `Подтверждённый фрагмент [${entry.sourceId}]\nИсточник: ${entry.sourceTitle}\nURL: ${entry.sourceUrl}\nПолучен: ${entry.retrievedAt}\nФакт: ${entry.fact}`).join("\n\n");
 }
 function youResult(payload: unknown): Omit<SearchResult, "cascadeUsed" | "state" | "verificationStatus"> | null {
-  const results = (payload as { results?: { web?: Array<{ title?: unknown; url?: unknown; description?: unknown }>; news?: Array<{ title?: unknown; url?: unknown; description?: unknown }> } })?.results;
+  const results = (payload as { results?: { web?: Array<{ title?: unknown; url?: unknown; description?: unknown; date?: unknown; publishedAt?: unknown }>; news?: Array<{ title?: unknown; url?: unknown; description?: unknown; date?: unknown; publishedAt?: unknown }> } })?.results;
   const entries = [...(results?.web ?? []), ...(results?.news ?? [])].flatMap((item) => {
-    const source = webSource(item.title, item.url);
+    const source = webSource(item.title, item.url, undefined, item.publishedAt ?? item.date);
     return source ? [{ source, text: typeof item.description === "string" ? item.description.replace(/\s+/g, " ").trim().slice(0, SNIPPET_LIMIT) : "" }] : [];
   });
   const sources = uniqueSources(entries.map((entry) => entry.source));
@@ -129,8 +136,8 @@ function youResult(payload: unknown): Omit<SearchResult, "cascadeUsed" | "state"
   return sources.length ? { summary: sourceSummary(evidence), sources, evidence } : null;
 }
 function serperResult(payload: unknown): Omit<SearchResult, "cascadeUsed" | "state" | "verificationStatus"> | null {
-  const entries = ((payload as { organic?: Array<{ title?: unknown; link?: unknown; snippet?: unknown }> })?.organic ?? []).flatMap((item) => {
-    const source = webSource(item.title, item.link);
+  const entries = ((payload as { organic?: Array<{ title?: unknown; link?: unknown; snippet?: unknown; date?: unknown; publishedAt?: unknown }> })?.organic ?? []).flatMap((item) => {
+    const source = webSource(item.title, item.link, undefined, item.publishedAt ?? item.date);
     return source ? [{ source, text: typeof item.snippet === "string" ? item.snippet.replace(/\s+/g, " ").trim().slice(0, SNIPPET_LIMIT) : "" }] : [];
   });
   const sources = uniqueSources(entries.map((entry) => entry.source));
@@ -138,8 +145,8 @@ function serperResult(payload: unknown): Omit<SearchResult, "cascadeUsed" | "sta
   return sources.length ? { summary: sourceSummary(evidence), sources, evidence } : null;
 }
 function exaResult(payload: unknown): Omit<SearchResult, "cascadeUsed" | "state" | "verificationStatus"> | null {
-  const entries = ((payload as { results?: Array<{ title?: unknown; url?: unknown; text?: unknown; highlights?: unknown }> })?.results ?? []).flatMap((item) => {
-    const source = webSource(item.title, item.url);
+  const entries = ((payload as { results?: Array<{ title?: unknown; url?: unknown; text?: unknown; highlights?: unknown; publishedDate?: unknown; publishedAt?: unknown }> })?.results ?? []).flatMap((item) => {
+    const source = webSource(item.title, item.url, undefined, item.publishedAt ?? item.publishedDate);
     const highlight = Array.isArray(item.highlights) ? item.highlights.find((value): value is string => typeof value === "string") : null;
     const text = highlight ?? (typeof item.text === "string" ? item.text : "");
     return source ? [{ source, text: text.replace(/\s+/g, " ").trim().slice(0, SNIPPET_LIMIT) }] : [];
@@ -177,7 +184,11 @@ export async function getWebSearchStatus(): Promise<WebSearchStatus> {
   const stored = await getSavedWebSearchStatus();
   return stored ? expandStatus({ available: stored.state === "ready", reason: stored.reason, checkedAt: stored.checkedAt.toISOString(), youHttp: stored.youHttp ?? null, serperHttp: stored.serperHttp ?? null, exaHttp: stored.exaHttp ?? null, googleHttp: stored.googleHttp ?? null, tavilyHttp: stored.tavilyHttp ?? null, openrouterHttp: stored.openrouterHttp ?? null }) : lastStatus;
 }
-function safeCascadeTelemetry(http: Record<SearchLayer, number | null>, selected: SearchCascadeUsed | null) { console.info("[Kairema search]", JSON.stringify({ event: "search.cascade", youHttp: http.you, serperHttp: http.serper, exaHttp: http.exa, selected })); }
+function sourceDateRange(sources: WebSource[]) {
+  const dates = sources.map((source) => source.publishedAt).filter((value): value is string => typeof value === "string").sort();
+  return { sourceDateMin: dates[0] ?? null, sourceDateMax: dates.at(-1) ?? null };
+}
+function safeCascadeTelemetry(http: Record<SearchLayer, number | null>, selected: SearchCascadeUsed | null, sources: WebSource[] = []) { console.info("[Kairema search]", JSON.stringify({ event: "search.cascade", youHttp: http.you, serperHttp: http.serper, exaHttp: http.exa, selected, sourcesCount: sources.length, ...sourceDateRange(sources) })); }
 function outageClass(http: number | null): SearchOutageInput["errorClass"] { if (http === 429) return "rate_limited"; if (http === 401 || http === 403) return "auth"; if (http === 404) return "not_found"; if (http === null) return "network_error"; if (http >= 400) return "http_error"; return "no_sources"; }
 async function runCascade(query: string, options: SearchWebOptions, recordOutages: boolean): Promise<SearchResult | SearchOutcome> {
   const startedAt = Date.now();
@@ -192,7 +203,7 @@ async function runCascade(query: string, options: SearchWebOptions, recordOutage
     http[layer] = attempt.http;
     outcomes.push(attempt.outcome);
     if (attempt.result) {
-      safeCascadeTelemetry(http, layer);
+      safeCascadeTelemetry(http, layer, attempt.result.sources);
       await saveStatus({ available: true, reason: layer === "you" ? "Поиск доступен." : "Поиск доступен через резервный слой.", checkedAt, youHttp: http.you ?? previous.youHttp, serperHttp: http.serper ?? previous.serperHttp, exaHttp: http.exa ?? previous.exaHttp, googleHttp: previous.googleHttp, tavilyHttp: previous.tavilyHttp, openrouterHttp: previous.openrouterHttp });
       if (recordOutages) void recordSearchQuality({ outcome: "found", verification: "verified", verifiedSourceCount: attempt.result.evidence.length, attemptedLayerCount: outcomes.filter((outcome) => outcome !== "skipped").length, staleBlocked: false, latencyMs: Date.now() - startedAt }).catch(() => undefined);
       return attempt.result;

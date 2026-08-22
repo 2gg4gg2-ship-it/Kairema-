@@ -1,0 +1,61 @@
+{
+  "event": "v6-n.live-search-diagnostics",
+  "queryClass": "provided_current_release_query",
+  "checkedAt": "2026-08-22T09:57:27.773Z",
+  "results": [
+    {
+      "layer": "you",
+      "status": "unavailable",
+      "http": null,
+      "latencyMs": 10547,
+      "sourceCount": 0,
+      "reason": "network_or_parse",
+      "retryAfter": false
+    },
+    {
+      "layer": "serper",
+      "status": "unavailable",
+      "http": null,
+      "latencyMs": 12002,
+      "sourceCount": 0,
+      "reason": "timeout",
+      "retryAfter": false
+    },
+    {
+      "layer": "exa",
+      "status": "found",
+      "http": 200,
+      "latencyMs": 2937,
+      "sourceCount": 5,
+      "reason": "sources_returned",
+      "retryAfter": false
+    },
+    {
+      "layer": "tavily",
+      "status": "unavailable",
+      "http": null,
+      "latencyMs": 12001,
+      "sourceCount": 0,
+      "reason": "timeout",
+      "retryAfter": false
+    },
+    {
+      "layer": "google",
+      "status": "unavailable",
+      "http": 404,
+      "latencyMs": 212,
+      "sourceCount": 0,
+      "reason": "not_found",
+      "retryAfter": false
+    },
+    {
+      "layer": "openrouter_online_catalog",
+      "status": "empty",
+      "http": 200,
+      "latencyMs": 2224,
+      "sourceCount": 0,
+      "reason": "no_usable_sources",
+      "retryAfter": false
+    }
+  ]
+}

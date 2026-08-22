@@ -13,6 +13,8 @@ describe("v5.5 server-side role safety", () => {
     for (const role of MODEL_ROLES) {
       const googleCandidate = role.chain.find((candidate) => candidate.provider === "google");
       expect(googleCandidate?.requiresWebResearch).toBe(true);
+      expect(googleCandidate?.vision).toBe(true);
+      expect(googleCandidate?.modelId).toBe("gemini-flash-lite-latest");
       expect(role.chain.some((candidate) => candidate.provider === "orcarouter")).toBe(true);
       expect(role.chain.some((candidate) => candidate.provider === "sambanova" || candidate.provider === "cerebras")).toBe(false);
     }

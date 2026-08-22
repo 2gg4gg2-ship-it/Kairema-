@@ -44,7 +44,7 @@ describe("v6-K SearchProvider", () => {
     process.env.EXA_API_KEY = "";
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: { web: [
       { title: "Коммерческий материал", url: "https://example.com/source", description: "Вторичный фрагмент" },
-      { title: "Официальный материал", url: "https://agency.gov/source", description: "Проверяемый фрагмент" },
+      { title: "Официальный материал", url: "https://agency.gov/source", description: "Проверяемый фрагмент", publishedAt: "2026-08-20T00:00:00.000Z" },
       { title: "Дубликат", url: "https://agency.gov/source", description: "Не должен повториться" },
     ] } }), { status: 200 })));
 
@@ -54,11 +54,11 @@ describe("v6-K SearchProvider", () => {
       verificationStatus: "verified",
       cascadeUsed: "you",
       sources: [
-        { title: "Официальный материал", url: "https://agency.gov/source", domain: "agency.gov", sourceId: expect.stringMatching(/^[a-f0-9]{16}$/), retrievedAt: expect.any(String) },
+        { title: "Официальный материал", url: "https://agency.gov/source", domain: "agency.gov", sourceId: expect.stringMatching(/^[a-f0-9]{16}$/), publishedAt: "2026-08-20T00:00:00.000Z", retrievedAt: expect.any(String) },
         { title: "Коммерческий материал", url: "https://example.com/source", domain: "example.com", sourceId: expect.stringMatching(/^[a-f0-9]{16}$/), retrievedAt: expect.any(String) },
       ],
       evidence: expect.arrayContaining([
-        expect.objectContaining({ fact: "Проверяемый фрагмент", sourceUrl: "https://agency.gov/source", sourceTitle: "Официальный материал", sourceDomain: "agency.gov", retrievedAt: expect.any(String), confidence: "high", sourceId: expect.stringMatching(/^[a-f0-9]{16}$/) }),
+        expect.objectContaining({ fact: "Проверяемый фрагмент", sourceUrl: "https://agency.gov/source", sourceTitle: "Официальный материал", sourceDomain: "agency.gov", publishedAt: "2026-08-20T00:00:00.000Z", retrievedAt: expect.any(String), confidence: "high", sourceId: expect.stringMatching(/^[a-f0-9]{16}$/) }),
         expect.objectContaining({ fact: "Вторичный фрагмент", sourceUrl: "https://example.com/source", sourceTitle: "Коммерческий материал", sourceDomain: "example.com", retrievedAt: expect.any(String), confidence: "medium", sourceId: expect.stringMatching(/^[a-f0-9]{16}$/) }),
       ]),
     });
@@ -74,6 +74,22 @@ describe("v6-K SearchProvider", () => {
     expect(metric).not.toHaveProperty("userId");
     expect(metric).not.toHaveProperty("provider");
     expect(metric).not.toHaveProperty("model");
+  });
+
+  it("normalises provider publication dates without treating invalid or future values as freshness evidence", async () => {
+    process.env.YOU_API_KEY = "test-you";
+    process.env.SERPER_API_KEY = "";
+    process.env.EXA_API_KEY = "";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: { web: [
+      { title: "Valid date", url: "https://example.com/valid", description: "ok", date: "2026-08-01" },
+      { title: "Bad date", url: "https://example.com/bad", description: "ok", date: "not-a-date" },
+      { title: "Future date", url: "https://example.com/future", description: "ok", date: "2999-01-01" },
+    ] } }), { status: 200 })));
+
+    const result = await searchWeb("Проверь дату источника");
+    expect(result).toMatchObject({ state: "found", sources: expect.arrayContaining([expect.objectContaining({ url: "https://example.com/valid", publishedAt: "2026-08-01T00:00:00.000Z" })]) });
+    expect(result.sources.find((source) => source.url === "https://example.com/bad")).not.toHaveProperty("publishedAt");
+    expect(result.sources.find((source) => source.url === "https://example.com/future")).not.toHaveProperty("publishedAt");
   });
 
   it("uses Serper only after a You.com failure and records metadata-only failover", async () => {

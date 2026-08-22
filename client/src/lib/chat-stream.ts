@@ -5,7 +5,7 @@ export type StreamDonePayload = {
   label?: string;
   sources?: StreamSource[];
   ragSources?: StreamSource[];
-  searchStatus?: { state?: "found" | "empty" | "degraded" | "error"; verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable"; sourcesCount?: number };
+  searchStatus?: { state?: "found" | "empty" | "degraded" | "error"; verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable"; sourcesCount?: number; staleRagOnly?: boolean };
 };
 
 export function sseEventFromBlock(block: string) {

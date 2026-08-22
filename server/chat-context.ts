@@ -9,6 +9,7 @@ import { retrieveRagContext, type RagRole } from "./knowledge";
 export const WEB_RESEARCH_ROLE_POLICY: ReadonlySet<RagRole> = new Set<RagRole>(["fast", "smart", "context", "flagship"]);
 export const FLASH_WEB_RESEARCH_BUDGET_MS = 1_500;
 const FRESHNESS_QUERY_PATTERN = /(?:сегодня|сейчас|нынешн|текущ|последн|новост|свеж|актуальн|обновлен|верси[яиюе]|релиз|курс|цен[аы]|погод|врем[яени]|дата|событи|\bnow\b|\btoday\b|\bcurrent\b|\blatest\b|\brecent\b|\bnews\b|\bupdate\b|\bversion\b|\brelease\b|\bprice\b|\bweather\b)/i;
+const STALE_RAG_AGE_MS = 90 * 24 * 60 * 60_000;
 const IDENTITY_QUERY_PATTERN = /^\s*(?:кто\s+ты|что\s+ты\s+(?:такое|за\s+ассистент)|как\s+тебя\s+зовут|ты\s+(?:kairema|кайрема)|who\s+are\s+you|what\s+are\s+you|what(?:'s|\s+is)\s+your\s+name)\s*[?!。.]?\s*$/i;
 export const FRESHNESS_UNAVAILABLE_PROMPT = "Свежие источники сейчас недоступны, поэтому я не могу надёжно подтвердить актуальные сведения.";
 export const FRESHNESS_EMPTY_PROMPT = "По проверенным свежим источникам не найдено достаточных данных для надёжного ответа.";
@@ -109,6 +110,10 @@ export async function buildChatContext(userId: number, sessionId: string, input:
     if (rag) {
       context.ragResearch = rag.context;
       context.ragSources = rag.sources.map(({ title, url, publishedAt }) => ({ title, url, publishedAt }));
+      const newestRagDate = context.ragSources.map((source) => source.publishedAt ? Date.parse(source.publishedAt) : Number.NaN).filter(Number.isFinite).sort((left, right) => right - left)[0];
+      if (context.searchStatus && context.searchStatus.sourcesCount === 0 && Number.isFinite(newestRagDate) && newestRagDate < Date.now() - STALE_RAG_AGE_MS) {
+        context.searchStatus.staleRagOnly = true;
+      }
     }
   } catch {
     // RAG remains optional: a temporary knowledge-base fault never blocks a fresh, sourced chat turn.

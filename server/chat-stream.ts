@@ -19,7 +19,10 @@ type ChatStreamAuditRecord = {
   roleId?: RoleId;
   provider?: Provider;
   searchAttached?: boolean;
+  respondedLayer?: "you" | "serper" | "exa" | "rag" | "none";
   sourcesCount?: number;
+  sourceDateMin?: string | null;
+  sourceDateMax?: string | null;
   timestamp: string;
   retryAfterSeconds?: number;
 };
@@ -259,14 +262,19 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
             pendingReplay?.resolve(result);
             pendingChatStreamReplays.delete(idempotencyKey);
           }
-          const sourcesCount = result.sources?.length ?? 0;
+          const allSources = [...(result.sources ?? []), ...(result.ragSources ?? [])];
+          const sourceDates = allSources.map((source) => source.publishedAt).filter((value): value is string => typeof value === "string").sort();
+          const sourcesCount = allSources.length;
           void Promise.resolve(dependencies.auditChatStream({
             event: "chat_stream.completed",
             userId: user.id,
             roleId: input.modelId,
             provider: result.provider,
-            searchAttached: sourcesCount > 0,
+            searchAttached: Boolean(result.searchStatus) || Boolean(result.sources?.length),
+            respondedLayer: result.searchStatus?.cascadeUsed ?? (result.ragSources?.length ? "rag" : "none"),
             sourcesCount,
+            sourceDateMin: sourceDates[0] ?? null,
+            sourceDateMax: sourceDates.at(-1) ?? null,
             timestamp: new Date().toISOString(),
           })).catch(() => undefined);
           writeEvent(res, "done", {

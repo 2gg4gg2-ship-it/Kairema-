@@ -1,0 +1,21 @@
+{
+  "event": "v6-n.google-vision-probe",
+  "candidate": "gemini-flash-lite-latest",
+  "checkedAt": "2026-08-22T09:58:36.413Z",
+  "results": [
+    {
+      "kind": "text",
+      "status": "pass",
+      "http": 200,
+      "latencyMs": 2871,
+      "answerPresent": true
+    },
+    {
+      "kind": "neutral_png",
+      "status": "pass",
+      "http": 200,
+      "latencyMs": 2007,
+      "answerPresent": true
+    }
+  ]
+}

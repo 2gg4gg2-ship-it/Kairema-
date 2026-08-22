@@ -66,6 +66,14 @@ describe("Kairema v4 role registry", () => {
     ]);
   });
 
+  it("keeps each public role on the tested Google vision candidate without extending its active chain", () => {
+    for (const role of MODEL_ROLES) {
+      const vision = role.chain.find((candidate) => candidate.vision);
+      expect(vision).toMatchObject({ provider: "google", modelId: "gemini-flash-lite-latest", vision: true });
+      expect(role.chain.slice(0, MAX_ATTEMPTS)).toHaveLength(MAX_ATTEMPTS);
+    }
+  });
+
   it("maps role health into the fixed Russian badge set", () => {
     expect(statusLabel(null, "ready")).toBe("Готов");
     expect(statusLabel(null, "fallback")).toBe("Резерв активен");
@@ -257,6 +265,9 @@ describe("Kairema v4 role registry", () => {
       expect(unsourcedPayload).toContain("АКТУАЛЬНАЯ ИНФОРМАЦИЯ");
       expect(unsourcedPayload).toContain("не получены");
       expect(unsourcedPayload).toMatch(/не представляй изменяемые сведения как проверенные факты/i);
+      expect(unsourcedPayload).toContain("УСТОЯВШИЕСЯ ИСТОРИЧЕСКИЕ ФАКТЫ");
+      expect(unsourcedPayload).toContain("Не требуй свежий источник для такого факта");
+      expect(unsourcedPayload).toContain("не могу подтвердить последнюю модель 2026 года");
     }
   });
 

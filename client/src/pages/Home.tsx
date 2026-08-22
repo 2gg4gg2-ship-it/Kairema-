@@ -24,13 +24,13 @@ type PublicRuntime = { state: "ready" | "backup" | "unavailable"; provider: stri
 type PublicRoleLimits = { candidate: "primary" | "backup" | "unavailable"; provider: string | null; quota: "ready" | "limited" | "unavailable"; nextFallback: string | null; lastFallback: boolean };
 type PublicModel = StaticModel & { status?: PublicStatus; runtime?: PublicRuntime | null; limits?: PublicRoleLimits };
 type SearchItem = { type: "chat" | "message"; id: string; sessionId?: string; title: string; snippet: string; createdAt: Date | string };
-type SearchStatus = { state: "found" | "empty" | "degraded" | "error"; verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable"; sourcesCount: number };
+type SearchStatus = { state: "found" | "empty" | "degraded" | "error"; verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable"; sourcesCount: number; staleRagOnly?: boolean };
 
 function safeSearchStatus(value: unknown): SearchStatus | undefined {
   if (!value || typeof value !== "object") return undefined;
-  const status = value as { state?: unknown; verificationStatus?: unknown; sourcesCount?: unknown };
+  const status = value as { state?: unknown; verificationStatus?: unknown; sourcesCount?: unknown; staleRagOnly?: unknown };
   if (!(status.state === "found" || status.state === "empty" || status.state === "degraded" || status.state === "error") || typeof status.sourcesCount !== "number") return undefined;
-  return { state: status.state, ...(status.verificationStatus === "verified" || status.verificationStatus === "no_results" || status.verificationStatus === "degraded" || status.verificationStatus === "unavailable" ? { verificationStatus: status.verificationStatus } : {}), sourcesCount: status.sourcesCount };
+  return { state: status.state, ...(status.verificationStatus === "verified" || status.verificationStatus === "no_results" || status.verificationStatus === "degraded" || status.verificationStatus === "unavailable" ? { verificationStatus: status.verificationStatus } : {}), ...(status.staleRagOnly === true ? { staleRagOnly: true } : {}), sourcesCount: status.sourcesCount };
 }
 
 function metadataAttachmentIds(metadata: unknown): string[] {
@@ -238,7 +238,7 @@ export default function Home() {
           const card = document.createElement("article"); card.className = "kairema-ops-card";
           const heading = document.createElement("h3"); heading.textContent = language === "ru" ? "Поиск" : "Search"; card.append(heading);
           card.append(line(language === "ru" ? "Общее состояние" : "Overall state", searchStatus.available ? (language === "ru" ? "Доступен" : "Available") : (language === "ru" ? "Временно ограничен" : "Temporarily limited")), line(labels.checked, format(searchStatus.checkedAt)));
-          (searchStatus.layers ?? []).forEach((layer) => { const name = layer.id === "google" ? "Google" : layer.id === "tavily" ? "Tavily" : "Online"; const state = layer.state === "ready" ? (language === "ru" ? "Доступен" : "Available") : layer.state === "limited" ? (language === "ru" ? "Ожидает сброса лимита" : "Waiting for limit reset") : layer.state === "unavailable" ? (language === "ru" ? "Временно недоступен" : "Temporarily unavailable") : (language === "ru" ? "Проверяется" : "Checking"); card.append(line(name, layer.retryAt ? `${state} · ${language === "ru" ? "повтор" : "retry"}: ${format(layer.retryAt)}` : state)); });
+          (searchStatus.layers ?? []).forEach((layer) => { const name = layer.id === "you" ? "You.com" : layer.id === "serper" ? "Serper" : layer.id === "exa" ? "Exa" : "Поисковый слой"; const state = layer.state === "ready" ? (language === "ru" ? "Доступен" : "Available") : layer.state === "limited" ? (language === "ru" ? "Ожидает сброса лимита" : "Waiting for limit reset") : layer.state === "unavailable" ? (language === "ru" ? "Временно недоступен" : "Temporarily unavailable") : (language === "ru" ? "Проверяется" : "Checking"); card.append(line(name, layer.retryAt ? `${state} · ${language === "ru" ? "повтор" : "retry"}: ${format(layer.retryAt)}` : state)); });
           list.append(card);
         }
         if (!entries.length && !searchStatus) { const empty = document.createElement("p"); empty.textContent = language === "ru" ? "Статусы пока не получены." : "Statuses are not available yet."; list.append(empty); }
