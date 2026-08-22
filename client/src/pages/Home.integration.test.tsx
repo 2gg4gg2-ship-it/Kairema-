@@ -416,8 +416,8 @@ describe("Home integration flows", () => {
         "theme": "dark",
       }
     `);
-    expect(darkSwitch.className).toContain("group");
-    expect(thumb?.className).toContain("group-data-[state=checked]:translate-x-4");
+    expect(darkSwitch.className).toContain("kairema-switch-root");
+    expect(thumb?.className).toContain("kairema-switch-thumb");
     expect(thumb?.getAttribute("data-state")).toBe("checked");
   });
 
