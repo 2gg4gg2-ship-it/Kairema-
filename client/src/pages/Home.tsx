@@ -7,6 +7,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { useTheme } from "@/contexts/ThemeContext";
 import { startLogin } from "@/const";
 import { downloadPreparedChatExport, prepareChatMarkdown, prepareChatPdf } from "@/lib/chat-export";
+import { memorySearchMatches } from "@/lib/memory-search";
 import { runtimeAuthHeaders } from "@/lib/runtime-auth";
 import { consumeChatStream } from "@/lib/chat-stream";
 import { trpc } from "@/lib/trpc";
@@ -335,8 +336,8 @@ function UnifiedMemoryDialog({ open, onOpenChange, data, language, labels, onUpd
   const ru = language === "ru";
   const [profile, setProfile] = useState(""); const [fact, setFact] = useState(""); const [query, setQuery] = useState(""); const [filter, setFilter] = useState<"all" | "facts" | "topics">("all"); const [saving, setSaving] = useState(false); const [confirmClear, setConfirmClear] = useState(false);
   const facts = data?.facts ?? []; const topics = data?.topics ?? []; const normalizedQuery = query.trim().toLocaleLowerCase();
-  const shownFacts = filter === "topics" ? [] : facts.filter((item) => !normalizedQuery || item.value.toLocaleLowerCase().includes(normalizedQuery));
-  const shownTopics = filter === "facts" ? [] : topics.filter((item) => !normalizedQuery || item.value.toLocaleLowerCase().includes(normalizedQuery));
+  const shownFacts = filter === "topics" ? [] : facts.filter((item) => memorySearchMatches(item.value, query));
+  const shownTopics = filter === "facts" ? [] : topics.filter((item) => memorySearchMatches(item.value, query));
   useEffect(() => { if (open) { setProfile(data?.profile?.profile ?? ""); setFact(""); setQuery(""); setFilter("all"); setConfirmClear(false); } }, [open, data?.profile?.profile]);
   const saveProfile = async () => { setSaving(true); try { await onUpdate({ profile }); onToast(ru ? "Память сохранена" : "Memory saved"); } finally { setSaving(false); } };
   const deleteLabel = ru ? "Удалить запись памяти" : "Delete memory entry";
