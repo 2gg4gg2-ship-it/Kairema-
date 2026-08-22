@@ -255,7 +255,6 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
             pendingReplay?.resolve(result);
             pendingChatStreamReplays.delete(idempotencyKey);
           }
-          if (!input.regenerateMessageId) await dependencies.extractMemoryFacts(user.id, input.content).catch(() => undefined);
           const sourcesCount = result.sources?.length ?? 0;
           void Promise.resolve(dependencies.auditChatStream({
             event: "chat_stream.completed",
@@ -272,6 +271,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
           });
           finished = true;
           res.end();
+          if (!input.regenerateMessageId) void dependencies.extractMemoryFacts(user.id, input.content, { assistantText: result.content, role: input.modelId }).catch(() => undefined);
         } else if (idempotencyKey) {
           pendingReplay?.resolve(null);
           pendingChatStreamReplays.delete(idempotencyKey);

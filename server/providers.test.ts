@@ -230,6 +230,20 @@ describe("Kairema v4 role registry", () => {
     }
   });
 
+  it("sets an honest capability boundary for each of the four public roles", () => {
+    const boundaries = new Map([
+      ["fast", "Возможности Flash"],
+      ["smart", "Возможности Think"],
+      ["context", "Возможности Context"],
+      ["flagship", "Возможности Apex"],
+    ]);
+    for (const role of MODEL_CONFIG) {
+      const payload = JSON.stringify(buildOpenRouterMessages(role, [{ role: "user", content: "Тест" }], {}));
+      expect(payload).toContain(boundaries.get(role.key));
+      expect(payload).toContain("проверяемом Markdown");
+    }
+  });
+
   it("injects a marked source block into every role and honestly signals when fresh sources are unavailable", () => {
     for (const role of MODEL_CONFIG) {
       const sourcedPayload = JSON.stringify(buildOpenRouterMessages(role, [{ role: "user", content: "Проверь факт" }], {

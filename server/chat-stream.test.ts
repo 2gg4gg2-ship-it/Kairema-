@@ -18,16 +18,18 @@ describe("chat stream happy-path", () => {
   it("emits start, incremental delta and done events before persisting the completed assistant reply", async () => {
     const writes: string[] = [];
     const appended: Array<{ role: string; content: string }> = [];
+    const order: string[] = [];
     const streamResponse = Object.assign(new EventEmitter(), {
-      status: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis(), flushHeaders: vi.fn(), write: vi.fn((chunk: string) => writes.push(chunk)), end: vi.fn(), json: vi.fn(),
+      status: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis(), flushHeaders: vi.fn(), write: vi.fn((chunk: string) => { writes.push(chunk); if (chunk.includes("event: done")) order.push("done"); }), end: vi.fn(() => order.push("end")), json: vi.fn(),
     }) as unknown as Response;
     const auditChatStream = vi.fn();
+    const extractMemoryFacts = vi.fn().mockResolvedValue(undefined);
     const handler = createChatStreamHandler({
       authenticateRequest: vi.fn().mockResolvedValue({ id: 42 }),
       getOwnedChatSession: vi.fn().mockResolvedValue({ id: "550e8400-e29b-41d4-a716-446655440000", title: "Новый разговор" }),
-      appendChatMessage: vi.fn(async (_userId, _sessionId, role, content) => { appended.push({ role, content }); }),
+      appendChatMessage: vi.fn(async (_userId, _sessionId, role, content) => { appended.push({ role, content }); if (role === "assistant") order.push("assistant-saved"); }),
       updateChatTitle: vi.fn(), listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
-      buildChatContext: vi.fn().mockResolvedValue(context), extractMemoryFacts: vi.fn().mockResolvedValue(undefined),
+      buildChatContext: vi.fn().mockResolvedValue(context), extractMemoryFacts,
       chatWithRoleStream: vi.fn(async (_modelId, _history, _settings, onDelta) => { onDelta("При"); onDelta("вет"); return { content: "Привет", modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Llama 3.1 8B Instant", sources: [{ title: "Официальный источник", url: "https://example.com/fresh", domain: "example.com" }] }; }),
       auditChatStream,
     });
@@ -43,6 +45,8 @@ describe("chat stream happy-path", () => {
     expect(JSON.stringify(auditChatStream.mock.calls[0][0])).not.toContain("Привет");
     expect(JSON.stringify(auditChatStream.mock.calls[0][0])).not.toContain("example.com");
     expect(streamResponse.end).toHaveBeenCalledOnce();
+    expect(order).toEqual(["assistant-saved", "done", "end"]);
+    expect(extractMemoryFacts).toHaveBeenCalledWith(42, "Привет", { assistantText: "Привет", role: "fast" });
   });
 
   it("does not persist a partially streamed assistant reply after the client cancels", async () => {

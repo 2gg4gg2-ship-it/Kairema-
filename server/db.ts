@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, isNull, like, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
-import { ChatAttachment, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryFact, MemoryProfile, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryFacts, memoryProfiles, messages, providerDailyUsage, providerHealth, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, userSettings, users, webSearchStatus } from "../drizzle/schema";
+import { ChatAttachment, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryFacts, memoryProfiles, memorySettings, messages, providerDailyUsage, providerHealth, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, userSettings, users, webSearchStatus } from "../drizzle/schema";
 import { providerHealthHistory } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -427,6 +427,62 @@ export async function getSearchQualityPanel(): Promise<SearchQualityPanel> {
   };
 }
 
+type SearchQualityOutcomeCounts = Record<SearchQualityInput["outcome"], number>;
+export type SearchQualityChart = {
+  daily: Array<{ day: string } & SearchQualityOutcomeCounts>;
+  hourlyLayers: Array<{ hour: string; layer1: number; layer2: number; layer3: number }>;
+};
+
+function emptyOutcomeCounts(): SearchQualityOutcomeCounts {
+  return { found: 0, empty: 0, degraded: 0, error: 0 };
+}
+
+function utcDay(date: Date) { return date.toISOString().slice(0, 10); }
+function utcHour(date: Date) { return date.toISOString().slice(0, 13); }
+
+/**
+ * Owner chart data is anonymous by construction. "layer1..3" is deliberately
+ * ordinal rather than a provider name, so it exposes cascade quality without
+ * revealing routing topology, user content, source identities or URLs.
+ */
+export async function getSearchQualityChart(now = new Date()): Promise<SearchQualityChart> {
+  const db = await getDb();
+  const dailyMap = new Map<string, SearchQualityOutcomeCounts>();
+  const hourlyMap = new Map<string, { layer1: number; layer2: number; layer3: number }>();
+  const startDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6));
+  for (let offset = 0; offset < 7; offset += 1) {
+    const date = new Date(startDay.getTime() + offset * 86_400_000);
+    dailyMap.set(utcDay(date), emptyOutcomeCounts());
+  }
+  const startHour = new Date(now);
+  startHour.setUTCMinutes(0, 0, 0);
+  startHour.setUTCHours(startHour.getUTCHours() - 23);
+  for (let offset = 0; offset < 24; offset += 1) {
+    const date = new Date(startHour.getTime() + offset * 3_600_000);
+    hourlyMap.set(utcHour(date), { layer1: 0, layer2: 0, layer3: 0 });
+  }
+  if (db) {
+    const since = new Date(Math.min(startDay.getTime(), startHour.getTime()));
+    const rows = await db.select({ outcome: searchQualityMetrics.outcome, attemptedLayerCount: searchQualityMetrics.attemptedLayerCount, createdAt: searchQualityMetrics.createdAt })
+      .from(searchQualityMetrics).where(gt(searchQualityMetrics.createdAt, since)).orderBy(desc(searchQualityMetrics.createdAt)).limit(20_000);
+    for (const row of rows) {
+      const day = dailyMap.get(utcDay(row.createdAt));
+      if (day) day[row.outcome] += 1;
+      const hour = hourlyMap.get(utcHour(row.createdAt));
+      if (hour) {
+        const attempts = Math.max(0, Math.min(3, row.attemptedLayerCount));
+        if (attempts >= 1) hour.layer1 += 1;
+        if (attempts >= 2) hour.layer2 += 1;
+        if (attempts >= 3) hour.layer3 += 1;
+      }
+    }
+  }
+  return {
+    daily: Array.from(dailyMap.entries()).map(([day, counts]) => ({ day: day.slice(5), ...counts })),
+    hourlyLayers: Array.from(hourlyMap.entries()).map(([hour, counts]) => ({ hour: `${hour.slice(11, 13)}:00`, ...counts })),
+  };
+}
+
 export type RoleRuntimeStatusRecord = {
   roleId: "fast" | "smart" | "context" | "flagship";
   state: "ready" | "backup" | "unavailable";
@@ -589,6 +645,11 @@ export async function recordDevApiAudit(input: DevApiAuditInput): Promise<void> 
 }
 
 export type MemoryProfilePatch = Partial<Pick<MemoryProfile, "enabled" | "autoExtract" | "profile" | "summary">>;
+export type MemorySettingsPatch = Partial<Pick<MemorySettings, "enabled" | "autoExtract">>;
+export type MemoryEntryCategory = "profile" | "fact" | "dialog_topic";
+export type MemoryEntryRole = "fast" | "smart" | "context" | "flagship";
+export type MemoryEntrySource = "manual" | "auto";
+const MEMORY_ENTRY_LIMITS: Record<MemoryEntryCategory, number> = { profile: 1, fact: 20, dialog_topic: 50 };
 
 async function ensureUserSettings(userId: number): Promise<void> {
   const db = requireDatabase(await getDb());
@@ -627,7 +688,141 @@ export async function updateMemoryProfile(userId: number, patch: MemoryProfilePa
   const db = requireDatabase(await getDb());
   await ensureMemoryProfile(userId);
   if (Object.keys(patch).length) await db.update(memoryProfiles).set(patch).where(eq(memoryProfiles.userId, userId));
-  return getMemoryProfile(userId);
+  const profile = await getMemoryProfile(userId);
+  if (patch.profile !== undefined) {
+    if (patch.profile.trim()) await upsertMemoryEntry(userId, "profile", patch.profile, { memoryKey: "profile", source: "manual" });
+    else await clearMemoryByCategory(userId, "profile");
+  }
+  return profile;
+}
+
+async function ensureMemorySettings(userId: number): Promise<void> {
+  const db = requireDatabase(await getDb());
+  await db.insert(memorySettings).values({ userId }).onDuplicateKeyUpdate({ set: { userId } });
+}
+
+export async function getMemorySettings(userId: number): Promise<MemorySettings> {
+  const db = requireDatabase(await getDb());
+  await ensureMemorySettings(userId);
+  const record = await db.select().from(memorySettings).where(eq(memorySettings.userId, userId)).limit(1);
+  if (!record[0]) throw new Error("Не удалось подготовить настройки памяти пользователя.");
+  return record[0];
+}
+
+export async function updateMemorySettings(userId: number, patch: MemorySettingsPatch): Promise<MemorySettings> {
+  const db = requireDatabase(await getDb());
+  await ensureMemorySettings(userId);
+  if (Object.keys(patch).length) await db.update(memorySettings).set(patch).where(eq(memorySettings.userId, userId));
+  return getMemorySettings(userId);
+}
+
+function normalizeMemoryEntry(value: string) {
+  return value.trim().replace(/\s+/g, " ").slice(0, 500);
+}
+
+async function trimMemoryEntries(userId: number, category: MemoryEntryCategory): Promise<void> {
+  const db = requireDatabase(await getDb());
+  const limit = MEMORY_ENTRY_LIMITS[category];
+  const rows = await db.select({ id: memoryEntries.id }).from(memoryEntries)
+    .where(and(eq(memoryEntries.userId, userId), eq(memoryEntries.category, category)))
+    .orderBy(asc(memoryEntries.createdAt), asc(memoryEntries.id));
+  const overflow = rows.slice(0, Math.max(0, rows.length - limit)).map((row) => row.id);
+  if (overflow.length) await db.delete(memoryEntries).where(and(eq(memoryEntries.userId, userId), inArray(memoryEntries.id, overflow)));
+}
+
+/** Lists only entries belonging to the authenticated user; topic and fact limits are enforced both on write and read. */
+export async function listMemoryEntries(userId: number, category?: MemoryEntryCategory): Promise<MemoryEntry[]> {
+  const db = requireDatabase(await getDb());
+  const rows = await db.select().from(memoryEntries).where(category
+    ? and(eq(memoryEntries.userId, userId), eq(memoryEntries.category, category))
+    : eq(memoryEntries.userId, userId)).orderBy(desc(memoryEntries.updatedAt), desc(memoryEntries.createdAt));
+  return category ? rows.slice(0, MEMORY_ENTRY_LIMITS[category]) : rows;
+}
+
+/** Inserts or refreshes a canonical entry. Matching is case-insensitive and never crosses user boundaries. */
+export async function upsertMemoryEntry(userId: number, category: MemoryEntryCategory, value: string, options: {
+  memoryKey?: string | null;
+  role?: MemoryEntryRole | null;
+  source?: MemoryEntrySource;
+  sourceMessageId?: number | null;
+} = {}): Promise<MemoryEntry | null> {
+  const db = requireDatabase(await getDb());
+  const normalized = normalizeMemoryEntry(value);
+  if (normalized.length < 3) return null;
+  const existing = await db.select().from(memoryEntries).where(and(eq(memoryEntries.userId, userId), eq(memoryEntries.category, category)));
+  const normalizedKey = options.memoryKey?.trim().slice(0, 160) || null;
+  const match = existing.find((entry) => (normalizedKey && entry.memoryKey === normalizedKey)
+    || entry.value.toLocaleLowerCase("ru-RU") === normalized.toLocaleLowerCase("ru-RU"));
+  if (match) {
+    await db.update(memoryEntries).set({
+      value: normalized,
+      memoryKey: normalizedKey,
+      role: options.role ?? null,
+      source: options.source ?? match.source,
+      sourceMessageId: options.sourceMessageId ?? match.sourceMessageId,
+    }).where(and(eq(memoryEntries.id, match.id), eq(memoryEntries.userId, userId)));
+    const [updated] = await db.select().from(memoryEntries).where(and(eq(memoryEntries.id, match.id), eq(memoryEntries.userId, userId))).limit(1);
+    return updated ?? null;
+  }
+  const record: MemoryEntry = {
+    id: randomUUID(), userId, category, value: normalized, memoryKey: normalizedKey, role: options.role ?? null,
+    source: options.source ?? "manual", sourceMessageId: options.sourceMessageId ?? null, createdAt: new Date(), updatedAt: new Date(),
+  };
+  await db.insert(memoryEntries).values(record);
+  await trimMemoryEntries(userId, category);
+  const [stored] = await db.select().from(memoryEntries).where(and(eq(memoryEntries.id, record.id), eq(memoryEntries.userId, userId))).limit(1);
+  return stored ?? null;
+}
+
+export async function updateMemoryEntry(userId: number, entryId: string, value: string): Promise<MemoryEntry | null> {
+  const db = requireDatabase(await getDb());
+  const normalized = normalizeMemoryEntry(value);
+  if (normalized.length < 3) return null;
+  const [entry] = await db.select().from(memoryEntries).where(and(eq(memoryEntries.id, entryId), eq(memoryEntries.userId, userId))).limit(1);
+  if (!entry) return null;
+  const duplicate = await db.select({ id: memoryEntries.id }).from(memoryEntries).where(and(
+    eq(memoryEntries.userId, userId), eq(memoryEntries.category, entry.category), eq(memoryEntries.value, normalized),
+  )).limit(1);
+  if (duplicate[0] && duplicate[0].id !== entryId) return null;
+  await db.update(memoryEntries).set({ value: normalized }).where(and(eq(memoryEntries.id, entryId), eq(memoryEntries.userId, userId)));
+  const [updated] = await db.select().from(memoryEntries).where(and(eq(memoryEntries.id, entryId), eq(memoryEntries.userId, userId))).limit(1);
+  return updated ?? null;
+}
+
+export async function deleteMemoryEntry(userId: number, entryId: string): Promise<boolean> {
+  const db = requireDatabase(await getDb());
+  const result = await db.delete(memoryEntries).where(and(eq(memoryEntries.id, entryId), eq(memoryEntries.userId, userId)));
+  return Number(result[0]?.affectedRows ?? 0) > 0;
+}
+
+export async function deleteMemoryEntryByValue(userId: number, category: MemoryEntryCategory, value: string): Promise<boolean> {
+  const db = requireDatabase(await getDb());
+  const normalized = normalizeMemoryEntry(value);
+  const rows = await db.select({ id: memoryEntries.id, value: memoryEntries.value }).from(memoryEntries)
+    .where(and(eq(memoryEntries.userId, userId), eq(memoryEntries.category, category)));
+  const match = rows.find((entry) => entry.value.toLocaleLowerCase("ru-RU") === normalized.toLocaleLowerCase("ru-RU"));
+  return match ? deleteMemoryEntry(userId, match.id) : false;
+}
+
+export async function deleteMemoryEntryByKey(userId: number, category: MemoryEntryCategory, memoryKey: string): Promise<boolean> {
+  const db = requireDatabase(await getDb());
+  const result = await db.delete(memoryEntries).where(and(
+    eq(memoryEntries.userId, userId), eq(memoryEntries.category, category), eq(memoryEntries.memoryKey, memoryKey.slice(0, 160)),
+  ));
+  return Number(result[0]?.affectedRows ?? 0) > 0;
+}
+
+export async function clearMemoryByCategory(userId: number, category: MemoryEntryCategory): Promise<void> {
+  const db = requireDatabase(await getDb());
+  await db.delete(memoryEntries).where(and(eq(memoryEntries.userId, userId), eq(memoryEntries.category, category)));
+  if (category === "profile") await updateMemoryProfile(userId, { profile: "", summary: "" });
+}
+
+export async function clearAllMemory(userId: number): Promise<void> {
+  const db = requireDatabase(await getDb());
+  await db.delete(memoryEntries).where(eq(memoryEntries.userId, userId));
+  await db.delete(memoryFacts).where(eq(memoryFacts.userId, userId));
+  await updateMemoryProfile(userId, { profile: "", summary: "" });
 }
 
 export async function listMemoryFacts(userId: number): Promise<MemoryFact[]> {
@@ -682,9 +877,7 @@ export async function deleteMemoryFact(userId: number, factId: string): Promise<
 }
 
 export async function clearMemory(userId: number): Promise<void> {
-  const db = requireDatabase(await getDb());
-  await db.delete(memoryFacts).where(eq(memoryFacts.userId, userId));
-  await updateMemoryProfile(userId, { profile: "", summary: "" });
+  await clearAllMemory(userId);
 }
 
 const CHAT_ATTACHMENT_RETENTION_MS = 24 * 60 * 60 * 1000;

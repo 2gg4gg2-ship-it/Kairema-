@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearMemory, createChatSession, createMemoryFact, deleteMemoryFact, deleteOwnedChatAttachment, deleteOwnedChatSession, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getOwnedChatSession, getSearchOutageSummary, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryFacts, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryFact, updateMemoryProfile, updateUserSettings } from "./db";
+import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, createChatSession, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatSession, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatSession, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -97,31 +97,42 @@ export const appRouter = router({
     }),
   }),
   memory: router({
-    get: protectedProcedure.query(async ({ ctx }) => ({ profile: await getMemoryProfile(ctx.user.id), facts: await listMemoryFacts(ctx.user.id) })),
+    get: protectedProcedure.query(async ({ ctx }) => {
+      const [settings, profile, facts, topics] = await Promise.all([
+        getMemorySettings(ctx.user.id), getMemoryProfile(ctx.user.id), listMemoryEntries(ctx.user.id, "fact"), listMemoryEntries(ctx.user.id, "dialog_topic"),
+      ]);
+      return { settings, profile, facts, topics };
+    }),
     update: protectedProcedure.input(z.object({ enabled: z.boolean().optional(), autoExtract: z.boolean().optional(), profile: z.string().max(5_000).optional() })).mutation(async ({ ctx, input }) => {
       const { enabled, autoExtract, ...rest } = input;
-      return updateMemoryProfile(ctx.user.id, {
-        ...rest,
-        ...(enabled === undefined ? {} : { enabled: enabled ? 1 : 0 }),
-        ...(autoExtract === undefined ? {} : { autoExtract: autoExtract ? 1 : 0 }),
-      });
+      const [settings, profile] = await Promise.all([
+        updateMemorySettings(ctx.user.id, { ...(enabled === undefined ? {} : { enabled: enabled ? 1 : 0 }), ...(autoExtract === undefined ? {} : { autoExtract: autoExtract ? 1 : 0 }) }),
+        updateMemoryProfile(ctx.user.id, rest),
+      ]);
+      return { settings, profile };
     }),
     addFact: protectedProcedure.input(z.object({ fact: z.string().trim().min(3).max(280) })).mutation(async ({ ctx, input }) => {
-      const fact = await createMemoryFact(ctx.user.id, input.fact);
+      const fact = await upsertMemoryEntry(ctx.user.id, "fact", input.fact, { source: "manual" });
       if (!fact) throw new TRPCError({ code: "CONFLICT", message: "Такой факт уже есть в памяти." });
       return fact;
     }),
-    updateFact: protectedProcedure.input(z.object({ factId: z.string().uuid(), fact: z.string().trim().min(3).max(280) })).mutation(async ({ ctx, input }) => {
-      const fact = await updateMemoryFact(ctx.user.id, input.factId, input.fact);
-      if (!fact) throw new TRPCError({ code: "NOT_FOUND", message: "Факт не найден, недоступен или конфликтует с существующим." });
-      return fact;
+    listEntries: protectedProcedure.input(z.object({ category: z.enum(["profile", "fact", "dialog_topic"]) })).query(({ ctx, input }) => listMemoryEntries(ctx.user.id, input.category)),
+    addEntry: protectedProcedure.input(z.object({ category: z.enum(["profile", "fact", "dialog_topic"]), value: z.string().trim().min(3).max(500) })).mutation(async ({ ctx, input }) => {
+      if (input.category === "dialog_topic") throw new TRPCError({ code: "BAD_REQUEST", message: "Темы диалога формируются только после завершённого ответа." });
+      const entry = await upsertMemoryEntry(ctx.user.id, input.category, input.value, { source: "manual" });
+      if (!entry) throw new TRPCError({ code: "CONFLICT", message: "Такая запись уже есть в памяти." });
+      return entry;
     }),
-    deleteFact: protectedProcedure.input(z.object({ factId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
-      if (!await deleteMemoryFact(ctx.user.id, input.factId)) throw new TRPCError({ code: "NOT_FOUND", message: "Факт не найден или недоступен." });
+    deleteEntry: protectedProcedure.input(z.object({ entryId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+      if (!await deleteMemoryEntry(ctx.user.id, input.entryId)) throw new TRPCError({ code: "NOT_FOUND", message: "Запись памяти не найдена или недоступна." });
+      return { success: true } as const;
+    }),
+    clearCategory: protectedProcedure.input(z.object({ category: z.enum(["profile", "fact", "dialog_topic"]) })).mutation(async ({ ctx, input }) => {
+      await clearMemoryByCategory(ctx.user.id, input.category);
       return { success: true } as const;
     }),
     clear: protectedProcedure.mutation(async ({ ctx }) => {
-      await clearMemory(ctx.user.id);
+      await clearAllMemory(ctx.user.id);
       return { success: true } as const;
     }),
   }),
@@ -131,6 +142,10 @@ export const appRouter = router({
       if (!ENV.ownerOpenId || ctx.user.openId !== ENV.ownerOpenId) throw new TRPCError({ code: "FORBIDDEN", message: "Панель качества поиска доступна только владельцу." });
       return getSearchQualityPanel();
     }),
+    qualityChart: protectedProcedure.query(async ({ ctx }) => {
+      if (!ENV.ownerOpenId || ctx.user.openId !== ENV.ownerOpenId) throw new TRPCError({ code: "FORBIDDEN", message: "График качества поиска доступен только владельцу." });
+      return getSearchQualityChart();
+    }),
   }),
   webSearch: router({
     status: protectedProcedure.query(async () => getWebSearchStatus()),
@@ -138,7 +153,7 @@ export const appRouter = router({
   }),
   knowledge: router({
     status: protectedProcedure.query(async () => getKnowledgeStatus()),
-    audit: protectedProcedure.query(async () => getKnowledgeAudit()),
+    audit: protectedProcedure.query(async ({ ctx }) => getKnowledgeAudit(Boolean(ENV.ownerOpenId && ctx.user.openId === ENV.ownerOpenId))),
     refresh: protectedProcedure.mutation(async () => {
       const current = await getKnowledgeStatus();
       const latest = current.runs[0];
@@ -237,7 +252,7 @@ export const appRouter = router({
             })
             : undefined;
           await appendChatMessage(ctx.user.id, input.sessionId, "assistant", result.content, result.modelUsed, sourceMetadata);
-          await extractMemoryFacts(ctx.user.id, input.content).catch(() => undefined);
+          void extractMemoryFacts(ctx.user.id, input.content, { assistantText: result.content, role: input.modelId }).catch(() => undefined);
           return result;
         } catch (error) {
           if (error instanceof Error && /чат|хранилище/i.test(error.message)) {

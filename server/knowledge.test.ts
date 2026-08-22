@@ -14,7 +14,7 @@ const db = vi.hoisted(() => ({
 
 vi.mock("./db", () => db);
 
-import { OFFICIAL_RSS_SOURCES, parseOfficialFeed, refreshKnowledgeBase, retrieveRagContext } from "./knowledge";
+import { getKnowledgeAudit, OFFICIAL_RSS_SOURCES, parseOfficialFeed, refreshKnowledgeBase, retrieveRagContext } from "./knowledge";
 
 describe("Kairema RAG", () => {
   it("содержит только проверенные официальные RSS-источники", () => {
@@ -52,6 +52,26 @@ describe("Kairema RAG", () => {
     expect(result?.sources).toHaveLength(1);
     expect(result?.sources[0]?.url).toBe("https://openai.com/news/fresh-api");
     expect(result?.context.length).toBeLessThanOrEqual(1_400);
+  });
+
+  it("never serializes RSS URLs in the public audit DTO and returns them only after an owner grant", async () => {
+    db.listKnowledgeSources.mockResolvedValue([{
+      displayName: "OpenAI News",
+      feedUrl: "https://openai.com/news/rss.xml",
+      state: "ready",
+      indexedCount: 3,
+      lastFetchedAt: new Date("2026-08-20T00:00:00.000Z"),
+      lastSuccessAt: new Date("2026-08-20T00:00:00.000Z"),
+    }]);
+    db.listKnowledgeRuns.mockResolvedValue([]);
+
+    const publicAudit = await getKnowledgeAudit();
+    expect(publicAudit.sources[0]).toEqual(expect.objectContaining({ name: "OpenAI News", domain: "openai.com" }));
+    expect(publicAudit.sources[0]).not.toHaveProperty("url");
+    expect(JSON.stringify(publicAudit)).not.toContain("https://");
+
+    const ownerAudit = await getKnowledgeAudit(true);
+    expect(ownerAudit.sources[0]).toHaveProperty("url", "https://openai.com/news/rss.xml");
   });
 
   it("создаёт официальный источник до audit run при первом обновлении пустой базы", async () => {

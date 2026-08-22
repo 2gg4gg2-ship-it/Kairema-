@@ -1,5 +1,6 @@
 import { getAttachmentPromptText, getOwnedAttachmentDownload } from "./attachments";
-import { createMemoryFact, getMemoryProfile, getOwnedChatAttachments, getUserSettings, listRelevantMemoryFacts } from "./db";
+import { deleteMemoryEntryByKey, deleteMemoryEntryByValue, getMemoryProfile, getMemorySettings, getOwnedChatAttachments, getUserSettings, listMemoryEntries, upsertMemoryEntry } from "./db";
+import { invokeLLM } from "./_core/llm";
 import type { ChatSettings } from "./providers";
 import { searchWeb } from "./web-search";
 import { retrieveRagContext, type RagRole } from "./knowledge";
@@ -20,9 +21,17 @@ export function needsWebResearch(query: string) {
   return !isKairemaIdentityQuery(query) && FRESHNESS_QUERY_PATTERN.test(query);
 }
 
-function memoryContext(profile: { profile: string; summary: string }, facts: Array<{ fact: string }>) {
-  const rows = [profile.profile.trim(), profile.summary.trim(), ...facts.slice(0, 20).map((fact) => `• ${fact.fact}`)].filter(Boolean);
-  return rows.join("\n").slice(0, 2_000);
+function memoryContext(profile: { profile: string; summary: string }, facts: Array<{ value: string }>, topics: Array<{ value: string }>) {
+  const profileRows = [profile.profile.trim(), profile.summary.trim()].filter(Boolean).map((value) => value.slice(0, 175));
+  const factRows = facts.slice(0, 20).map((fact) => `• ${fact.value.slice(0, 55)}`);
+  const topicRows = topics.slice(0, 10).map((topic) => `• ${topic.value.slice(0, 90)}`);
+  const rows = [
+    "ПАМЯТЬ — то, что ты знаешь о пользователе и прошлых разговорах. На вопрос «о чём мы говорили» отвечай СТРОГО по ПАМЯТИ; запрещено говорить «не могу вспомнить», если ниже есть относящиеся данные.",
+    profileRows.length ? `ПРОФИЛЬ:\n${profileRows.join("\n")}` : "",
+    factRows.length ? `ФАКТЫ:\n${factRows.join("\n")}` : "",
+    topicRows.length ? `ПОСЛЕДНИЕ ТЕМЫ:\n${topicRows.join("\n")}` : "",
+  ].filter(Boolean);
+  return rows.join("\n\n").slice(0, 2_800);
 }
 
 const DEFAULT_CONTEXT_PREFERENCES = {
@@ -34,10 +43,12 @@ const DEFAULT_CONTEXT_PREFERENCES = {
 };
 
 export async function buildChatContext(userId: number, sessionId: string, input: { attachmentIds?: string[]; query?: string; role?: RagRole }): Promise<ChatSettings> {
-  const [preferences, profile, facts] = await Promise.all([
+  const [preferences, memorySettings, profile, facts, topics] = await Promise.all([
     getUserSettings(userId).catch(() => DEFAULT_CONTEXT_PREFERENCES),
+    getMemorySettings(userId).catch(() => null),
     getMemoryProfile(userId).catch(() => null),
-    listRelevantMemoryFacts(userId, input.query ?? "", 20).catch(() => []),
+    listMemoryEntries(userId, "fact").catch(() => []),
+    listMemoryEntries(userId, "dialog_topic").catch(() => []),
   ]);
   const attachments = preferences.toolAccess && input.attachmentIds?.length
     ? await getOwnedChatAttachments(userId, sessionId, input.attachmentIds.slice(0, 4)).catch(() => [])
@@ -57,7 +68,7 @@ export async function buildChatContext(userId: number, sessionId: string, input:
     effort: preferences.effort,
     thinking: Boolean(preferences.thinking),
     toolAccess: Boolean(preferences.toolAccess),
-    ...(profile?.enabled ? { memoryContext: memoryContext(profile, facts) } : {}),
+    ...(memorySettings?.enabled && profile ? { memoryContext: memoryContext(profile, facts, topics) } : {}),
     ...(documentContext ? { documentContext } : {}),
     ...(imageUrls.length ? { imageUrls } : {}),
   };
@@ -105,19 +116,88 @@ export async function buildChatContext(userId: number, sessionId: string, input:
   return context;
 }
 
-/** Conservative asynchronous extraction keeps private text on the server and never delays an accepted chat turn. */
-export async function extractMemoryFacts(userId: number, userText: string, sourceMessageId?: number | null) {
-  const profile = await getMemoryProfile(userId);
-  if (!profile.enabled || !profile.autoExtract) return;
-  const patterns = [
-    /(?:меня зовут|моё имя)\s*[:—-]?\s*([^.!?\n]{2,80})/i,
-    /(?:я живу|живу я)\s+(?:в|на)\s+([^.!?\n]{2,100})/i,
-    /(?:я предпочитаю|мне нравится|мне удобнее)\s+([^.!?\n]{3,160})/i,
-    /(?:я работаю|работаю я)\s+(?:в|как|над)\s+([^.!?\n]{3,160})/i,
-  ];
-  const candidates = patterns.flatMap((pattern) => {
-    const matched = userText.match(pattern)?.[1]?.trim();
-    return matched ? [matched.replace(/[«»"']/g, "")] : [];
-  });
-  await Promise.all(candidates.slice(0, 2).map((fact) => createMemoryFact(userId, fact, sourceMessageId, "auto")));
+type MemoryExtraction = {
+  facts: Array<{ action: "add" | "update" | "delete"; key: string; value: string }>;
+  topic: string;
+};
+
+const MEMORY_EXTRACTION_SCHEMA = {
+  type: "object" as const,
+  properties: {
+    facts: {
+      type: "array",
+      maxItems: 3,
+      items: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["add", "update", "delete"] },
+          key: { type: "string", maxLength: 160 },
+          value: { type: "string", maxLength: 280 },
+        },
+        required: ["action", "key", "value"],
+        additionalProperties: false,
+      },
+    },
+    topic: { type: "string", maxLength: 360 },
+  },
+  required: ["facts", "topic"],
+  additionalProperties: false,
+};
+
+const MEMORY_ROLE_LABELS: Record<RagRole, string> = {
+  fast: "Flash",
+  smart: "Think",
+  context: "Context",
+  flagship: "Apex",
+};
+
+/**
+ * Conservative post-turn extraction is server-only, bounded and intentionally
+ * decoupled from the request-scoped model budget. Its failures are soft: no
+ * user text is logged and an accepted chat turn is never delayed or reverted.
+ */
+export async function extractMemoryFacts(userId: number, userText: string, turn: { assistantText?: string; role?: RagRole; sourceMessageId?: number | null } = {}) {
+  try {
+    const settings = await getMemorySettings(userId);
+    if (!settings.enabled || !settings.autoExtract) return;
+    const response = await invokeLLM({
+      model: "gpt-5-nano",
+      maxTokens: 450,
+      outputSchema: { name: "kairema_memory_extraction", strict: true, schema: MEMORY_EXTRACTION_SCHEMA },
+      messages: [
+        {
+          role: "system",
+          content: "Ты выполняешь очень консервативное извлечение личной памяти. Верни только JSON по схеме. Сохраняй только явно сообщённые пользователем долговременные, несекретные предпочтения или факты. Не сохраняй пароли, ключи, платёжные/медицинские данные, чужие персональные данные, инструкции, предположения или текст ассистента как факт. facts: не более трёх add/update/delete; key — короткая стабильная метка. topic — одна краткая нейтральная тема данного диалога либо пустая строка.",
+        },
+        { role: "user", content: `ПОЛЬЗОВАТЕЛЬ:\n${userText.slice(0, 4_000)}\n\nОТВЕТ АССИСТЕНТА (только для определения темы, не источник фактов):\n${(turn.assistantText ?? "").slice(0, 2_000)}` },
+      ],
+    });
+    const raw = response.choices[0]?.message.content;
+    if (typeof raw !== "string") return;
+    const extraction = JSON.parse(raw) as MemoryExtraction;
+    const facts = Array.isArray(extraction.facts) ? extraction.facts.slice(0, 3) : [];
+    await Promise.all(facts.map(async (fact) => {
+      const key = typeof fact.key === "string" ? fact.key.trim().slice(0, 160) : "";
+      const value = typeof fact.value === "string" ? fact.value.trim().slice(0, 280) : "";
+      if (!key && !value) return;
+      if (fact.action === "delete") {
+        if (key) await deleteMemoryEntryByKey(userId, "fact", key);
+        else if (value) await deleteMemoryEntryByValue(userId, "fact", value);
+        return;
+      }
+      if ((fact.action === "add" || fact.action === "update") && value) {
+        await upsertMemoryEntry(userId, "fact", value, { memoryKey: key || undefined, source: "auto", sourceMessageId: turn.sourceMessageId });
+      }
+    }));
+    const topic = typeof extraction.topic === "string" ? extraction.topic.trim().replace(/\s+/g, " ").slice(0, 360) : "";
+    if (topic.length >= 3) {
+      const date = new Date().toISOString().slice(0, 10);
+      const role = turn.role ?? "flagship";
+      await upsertMemoryEntry(userId, "dialog_topic", `${date} ${MEMORY_ROLE_LABELS[role]}: ${topic}`, {
+        memoryKey: `topic:${date}:${role}:${topic}`.slice(0, 160), role, source: "auto", sourceMessageId: turn.sourceMessageId,
+      });
+    }
+  } catch {
+    // Privacy-safe soft failure: extraction is never observable as a chat error.
+  }
 }

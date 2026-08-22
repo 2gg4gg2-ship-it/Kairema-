@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./db", () => ({
-  createMemoryFact: vi.fn(),
-  getMemoryProfile: vi.fn().mockResolvedValue({ enabled: 0, autoExtract: 0, profile: "", summary: "" }),
+  deleteMemoryEntryByKey: vi.fn(),
+  deleteMemoryEntryByValue: vi.fn(),
+  getMemoryProfile: vi.fn().mockResolvedValue({ profile: "", summary: "" }),
+  getMemorySettings: vi.fn().mockResolvedValue({ enabled: 0, autoExtract: 0 }),
   getOwnedChatAttachments: vi.fn().mockResolvedValue([]),
   getUserSettings: vi.fn().mockResolvedValue({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0 }),
-  listMemoryFacts: vi.fn().mockResolvedValue([]),
-  listRelevantMemoryFacts: vi.fn().mockResolvedValue([]),
+  listMemoryEntries: vi.fn().mockResolvedValue([]),
+  upsertMemoryEntry: vi.fn(),
 }));
 
 vi.mock("./web-search", () => {
@@ -26,16 +28,20 @@ vi.mock("./knowledge", () => ({
   retrieveRagContext: vi.fn().mockResolvedValue({ context: "Проверяемый RAG-контекст.", sources: [{ title: "Официальный RSS", url: "https://openai.com/news/release", publishedAt: "2026-08-19T00:00:00.000Z", sourceId: "openai-news" }] }),
 }));
 
-import { buildChatContext, FLASH_WEB_RESEARCH_BUDGET_MS, FRESHNESS_EMPTY_PROMPT, FRESHNESS_UNAVAILABLE_PROMPT, isKairemaIdentityQuery, needsWebResearch, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
-import { getMemoryProfile, getUserSettings, listRelevantMemoryFacts } from "./db";
+vi.mock("./_core/llm", () => ({ invokeLLM: vi.fn() }));
+
+import { buildChatContext, extractMemoryFacts, FLASH_WEB_RESEARCH_BUDGET_MS, FRESHNESS_EMPTY_PROMPT, FRESHNESS_UNAVAILABLE_PROMPT, isKairemaIdentityQuery, needsWebResearch, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
+import { deleteMemoryEntryByKey, getMemoryProfile, getMemorySettings, getUserSettings, listMemoryEntries, upsertMemoryEntry } from "./db";
+import { invokeLLM } from "./_core/llm";
 import { WebSearchUnavailableError, searchWeb } from "./web-search";
 
 const input = { query: "Что нового?", attachmentIds: [] };
 
 afterEach(() => {
   vi.mocked(getUserSettings).mockResolvedValue({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0 });
-  vi.mocked(getMemoryProfile).mockResolvedValue({ enabled: 0, autoExtract: 0, profile: "", summary: "" });
-  vi.mocked(listRelevantMemoryFacts).mockResolvedValue([]);
+  vi.mocked(getMemorySettings).mockResolvedValue({ enabled: 0, autoExtract: 0 });
+  vi.mocked(getMemoryProfile).mockResolvedValue({ profile: "", summary: "" });
+  vi.mocked(listMemoryEntries).mockResolvedValue([]);
   vi.mocked(searchWeb).mockReset().mockResolvedValue({ summary: "Свежие проверяемые данные.", state: "found", verificationStatus: "verified", cascadeUsed: "you", sources: [{ title: "Официальный источник", url: "https://example.com", domain: "example.com", sourceId: "source-001", retrievedAt: "2026-08-21T00:00:00.000Z" }], evidence: [{ fact: "Проверяемый факт", sourceUrl: "https://example.com", sourceTitle: "Официальный источник", sourceDomain: "example.com", retrievedAt: "2026-08-21T00:00:00.000Z", confidence: "high", sourceId: "source-001" }] });
 });
 
@@ -94,20 +100,25 @@ describe("chat context soft web research", () => {
   });
 
   it("injects only a bounded personal-memory context when the owner enabled memory", async () => {
-    vi.mocked(getMemoryProfile).mockResolvedValueOnce({ enabled: 1, autoExtract: 1, profile: "Профиль владельца", summary: "Краткая сводка" });
-    vi.mocked(listRelevantMemoryFacts).mockResolvedValueOnce(Array.from({ length: 24 }, (_, index) => ({ fact: `Факт ${index + 1}: ${"x".repeat(120)}` })));
+    vi.mocked(getMemorySettings).mockResolvedValueOnce({ enabled: 1, autoExtract: 1 });
+    vi.mocked(getMemoryProfile).mockResolvedValueOnce({ profile: "Профиль владельца", summary: "Краткая сводка" });
+    vi.mocked(listMemoryEntries).mockResolvedValueOnce(Array.from({ length: 24 }, (_, index) => ({ value: `Факт ${index + 1}: ${"x".repeat(120)}` }))).mockResolvedValueOnce(Array.from({ length: 12 }, (_, index) => ({ value: `Тема ${index + 1}` })));
 
     const context = await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Продолжи", role: "flagship" });
 
     expect(context.memoryContext).toContain("Профиль владельца");
-    expect(context.memoryContext).toContain("Факт 15");
-    expect(context.memoryContext).not.toContain("Факт 16");
-    expect(context.memoryContext?.length).toBeLessThanOrEqual(2_000);
+    expect(context.memoryContext).toContain("Факт 20");
+    expect(context.memoryContext).not.toContain("Факт 21");
+    expect(context.memoryContext).toContain("Тема 10");
+    expect(context.memoryContext).not.toContain("Тема 11");
+    expect(context.memoryContext).toContain("ПАМЯТЬ — то, что ты знаешь о пользователе");
+    expect(context.memoryContext?.length).toBeLessThanOrEqual(2_800);
   });
 
   it("shares one bounded user-scoped memory across all four roles and a new chat", async () => {
-    vi.mocked(getMemoryProfile).mockResolvedValue({ enabled: 1, autoExtract: 1, profile: "Предпочтение: русский язык", summary: "Пользователь предпочитает краткие ответы" });
-    vi.mocked(listRelevantMemoryFacts).mockResolvedValue([{ fact: "Рабочий контекст: Kairema" }]);
+    vi.mocked(getMemorySettings).mockResolvedValue({ enabled: 1, autoExtract: 1 });
+    vi.mocked(getMemoryProfile).mockResolvedValue({ profile: "Предпочтение: русский язык", summary: "Пользователь предпочитает краткие ответы" });
+    vi.mocked(listMemoryEntries).mockResolvedValue([{ value: "Рабочий контекст: Kairema" }]);
     const roles = ["fast", "smart", "context", "flagship"] as const;
     const contexts = await Promise.all(roles.map((role, index) => buildChatContext(7, `00000000-0000-4000-8000-00000000000${index}`, { query: "Продолжи работу", role })));
 
@@ -117,17 +128,34 @@ describe("chat context soft web research", () => {
   });
 
   it("omits personal memory after the owner disables it", async () => {
-    vi.mocked(getMemoryProfile).mockResolvedValueOnce({ enabled: 0, autoExtract: 0, profile: "Не должно попасть в контекст", summary: "" });
-    vi.mocked(listRelevantMemoryFacts).mockResolvedValueOnce([{ fact: "Не должен попасть в контекст" }]);
+    vi.mocked(getMemorySettings).mockResolvedValueOnce({ enabled: 0, autoExtract: 0 });
+    vi.mocked(getMemoryProfile).mockResolvedValueOnce({ profile: "Не должно попасть в контекст", summary: "" });
+    vi.mocked(listMemoryEntries).mockResolvedValueOnce([{ value: "Не должен попасть в контекст" }]);
 
     await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Новый чат", role: "flagship" }))
       .resolves.not.toHaveProperty("memoryContext");
   });
 
+  it("extracts at most three user facts and one public-role topic through a server-only structured call", async () => {
+    vi.mocked(getMemorySettings).mockResolvedValueOnce({ enabled: 1, autoExtract: 1 });
+    vi.mocked(invokeLLM).mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({
+      facts: [{ action: "add", key: "language", value: "Пользователь предпочитает русский язык" }],
+      topic: "настройка единой памяти",
+    }) } }] } as never);
+
+    await extractMemoryFacts(7, "Запомни: я предпочитаю русский язык", { assistantText: "Запомнил", role: "fast" });
+
+    expect(invokeLLM).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-5-nano", maxTokens: 450, outputSchema: expect.objectContaining({ name: "kairema_memory_extraction" }) }));
+    expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "fact", "Пользователь предпочитает русский язык", expect.objectContaining({ memoryKey: "language", source: "auto" }));
+    expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "dialog_topic", expect.stringContaining("Flash: настройка единой памяти"), expect.objectContaining({ role: "fast", source: "auto" }));
+    expect(deleteMemoryEntryByKey).not.toHaveBeenCalled();
+  });
+
   it("continues with safe defaults when optional settings and memory context are unavailable", async () => {
     vi.mocked(getUserSettings).mockRejectedValueOnce(new Error("settings unavailable"));
+    vi.mocked(getMemorySettings).mockRejectedValueOnce(new Error("memory settings unavailable"));
     vi.mocked(getMemoryProfile).mockRejectedValueOnce(new Error("memory unavailable"));
-    vi.mocked(listRelevantMemoryFacts).mockRejectedValueOnce(new Error("facts unavailable"));
+    vi.mocked(listMemoryEntries).mockRejectedValueOnce(new Error("facts unavailable"));
 
     await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Обычный вопрос", role: "fast" }))
       .resolves.toMatchObject({ style: "default", responseLength: "balanced", effort: "standard", thinking: false, toolAccess: true });

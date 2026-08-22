@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrpcContext } from "./_core/context";
 
-const { getSearchQualityPanel } = vi.hoisted(() => ({
+const { getSearchQualityChart, getSearchQualityPanel } = vi.hoisted(() => ({
+  getSearchQualityChart: vi.fn(),
   getSearchQualityPanel: vi.fn(),
 }));
 
 vi.mock("./_core/env", () => ({ ENV: { ownerOpenId: "owner-open-id" } }));
 vi.mock("./db", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./db")>()),
+  getSearchQualityChart,
   getSearchQualityPanel,
 }));
 
@@ -38,6 +40,11 @@ describe("search.qualityPanel", () => {
       last24h: { sampleCount: 2, counts: { found: 1, empty: 1, degraded: 0, error: 0 }, verifiedSourceCount: 1, zeroSourceCount: 1, staleBlockedCount: 0, foundRate: 0.5, verificationPassRate: 0.5 },
       last7d: { sampleCount: 4, counts: { found: 2, empty: 1, degraded: 1, error: 0 }, verifiedSourceCount: 2, zeroSourceCount: 2, staleBlockedCount: 1, foundRate: 0.5, verificationPassRate: 0.5 },
     });
+    getSearchQualityChart.mockReset();
+    getSearchQualityChart.mockResolvedValue({
+      daily: [{ day: "08-15", found: 2, empty: 1, degraded: 0, error: 0 }, { day: "08-21", found: 3, empty: 0, degraded: 1, error: 0 }],
+      hourlyLayers: [{ hour: "09", layer1: 2, layer2: 1, layer3: 0 }, { hour: "10", layer1: 1, layer2: 0, layer3: 1 }],
+    });
   });
 
   it("rejects a non-owner before reading aggregates", async () => {
@@ -49,5 +56,17 @@ describe("search.qualityPanel", () => {
     const result = await callerFor("owner-open-id").search.qualityPanel();
     expect(result).toMatchObject({ last7d: { sampleCount: 4, counts: { found: 2, empty: 1, degraded: 1, error: 0 } } });
     expect(JSON.stringify(result)).not.toMatch(/https?:\/\/|query|userId|provider|model/i);
+  });
+
+  it("rejects a non-owner before reading live chart aggregates", async () => {
+    await expect(callerFor("another-user").search.qualityChart()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(getSearchQualityChart).not.toHaveBeenCalled();
+  });
+
+  it("returns anonymized seven-day and 24-hour chart series only to the owner", async () => {
+    const result = await callerFor("owner-open-id").search.qualityChart();
+    expect(result.daily[0]).toMatchObject({ day: "08-15", found: 2 });
+    expect(result.hourlyLayers[0]).toMatchObject({ hour: "09", layer1: 2, layer2: 1, layer3: 0 });
+    expect(JSON.stringify(result)).not.toMatch(/https?:\/\/|query|userId|provider|model|source/i);
   });
 });

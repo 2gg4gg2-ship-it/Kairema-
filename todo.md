@@ -317,3 +317,12 @@
 - [x] v6-L.3/DROP-CHECK-1: зафиксирован SQL-лог `SELECT COUNT(*) FROM chat_exports` с результатом 0 перед физическим удалением таблицы.
 - [x] v6-L.3/DROP-CHECK-2: grep-аудит выполнен и задокументирован как FAIL: активный runtime чист, но неизменяемая история миграций содержит законные исторические упоминания; поэтому `DROP TABLE` не запускался.
 - [x] v6-L.3/DROP-CHECK-3: автоматизированная регрессия подтвердила две локальные загрузки без persistent API; browser click-through остался PARTIAL без OAuth-сессии, поэтому `DROP TABLE` не запускался.
+- [x] v6-L.4/DROPDOWN: закрытые поля показывают только текущее значение; открытые роли отображают полные переносимые описания без обрезания, с accessibility- и mobile-приёмкой.
+- [x] v6-L.4/SWITCH: устранить первопричину промежуточного положения thumb единым transform-only class-toggle для всех переключателей; покрыть off/on и визуальные 0/50/100% обеих тем.
+- [x] v6-L.4/RAG-PRIVACY: скрыть URL от не-владельца, показать ему только безопасные метаданные, а owner details раскрывать по явному действию; покрыть server/UI-тестами.
+- [x] v6-L.4/SELECTIVE-COPY: обеспечить выделение фрагментов в user/assistant bubble без перехвата native touch/context menu; проверить mobile-поток.
+- [x] v6-L.4/MEMORY: реализовать полноценное user-isolated чтение/асинхронное извлечение profile/fact/dialog_topic с лимитами, CRUD/UI и контекстом всех четырёх ролей без export/log leakage.
+- [x] v6-L.4/ROLE-CAPABILITIES: обновить capability prompts Flash/Think/Context/Apex честными границами и структурированным Markdown-правилом; добавить регрессии.
+- [x] v6-L.4/OWNER-CHARTS: добавить owner-only privacy-safe 7-дневные/24-часовые графики search quality с 403 для не-владельца и без содержательных данных.
+- [x] v6-L.4/DROP-GATE: повторить три условия удаления chat_exports, включая авторизованный browser download, и выполнить DROP TABLE только при трёх PASS; иначе зафиксировать блокер и список таблиц. Итог: два PASS, авторизованный download не подтверждён; DROP не выполнялся.
+- [x] v6-L.4/VALIDATION: выполнены полный test/typecheck/build/bundle/runtime/browser smoke и evidence-отчёт с честным статусом НЕ ЗАКРЫТА; checkpoint создаётся без ложного заявления о физическом удалении таблицы.

@@ -354,3 +354,7 @@ body { background:var(--k-bg); color:var(--k-text); }
 .kairema-ttft-chart polyline { stroke:var(--k-text); stroke-width:2.25; stroke-linejoin:round; stroke-linecap:round; }
 .kairema-ttft-table { display:grid; gap:2px; color:var(--k-muted); font-size:9px; }
 .kairema-outage-row { margin:0 7px; color:var(--k-muted); font-size:10px; line-height:1.35; }
+
+/* v6-L.4: native selective-copy remains available inside chat message bubbles. */
+.kairema-message { -webkit-touch-callout:default; -webkit-user-select:text; user-select:text; }
+.kairema-message :is(p,li,pre,code,blockquote,span) { -webkit-user-select:text; user-select:text; }

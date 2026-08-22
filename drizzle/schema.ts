@@ -204,6 +204,32 @@ export const memoryProfiles = mysqlTable("memory_profiles", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+/** Separate per-user controls keep memory enablement independent of profile text. */
+export const memorySettings = mysqlTable("memory_settings", {
+  userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  enabled: int("enabled").notNull().default(1),
+  autoExtract: int("autoExtract").notNull().default(1),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+/** Facts and bounded conversation topics are always isolated by userId. The profile category is reserved for a future structured profile migration. */
+export const memoryEntries = mysqlTable("memory_entries", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  category: mysqlEnum("category", ["profile", "fact", "dialog_topic"]).notNull(),
+  value: varchar("value", { length: 500 }).notNull(),
+  memoryKey: varchar("memoryKey", { length: 160 }),
+  role: mysqlEnum("role", ["fast", "smart", "context", "flagship"]),
+  source: mysqlEnum("source", ["manual", "auto"]).notNull().default("manual"),
+  sourceMessageId: int("sourceMessageId").references(() => messages.id, { onDelete: "set null" }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [
+  index("memory_entries_user_category_created_idx").on(table.userId, table.category, table.createdAt),
+  index("memory_entries_user_category_updated_idx").on(table.userId, table.category, table.updatedAt),
+]);
+
 export const memoryFacts = mysqlTable("memory_facts", {
   id: varchar("id", { length: 36 }).primaryKey(),
   userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -250,5 +276,7 @@ export type KnowledgeIngestionRun = typeof knowledgeIngestionRuns.$inferSelect;
 export type DevApiAuditRecord = typeof devApiAuditRecords.$inferSelect;
 export type UserSettings = typeof userSettings.$inferSelect;
 export type MemoryProfile = typeof memoryProfiles.$inferSelect;
+export type MemorySettings = typeof memorySettings.$inferSelect;
+export type MemoryEntry = typeof memoryEntries.$inferSelect;
 export type MemoryFact = typeof memoryFacts.$inferSelect;
 export type ChatAttachment = typeof chatAttachments.$inferSelect;

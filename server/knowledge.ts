@@ -155,18 +155,19 @@ export async function getKnowledgeStatus() {
   return { sources: await listKnowledgeSources(), runs: await listKnowledgeRuns() };
 }
 
-/** Read-only audit DTO: only official feed metadata and aggregate indexing outcomes reach the client. */
-export async function getKnowledgeAudit() {
+/** Read-only audit DTO: public clients receive safe metadata; feed URLs require a server-derived owner grant. */
+export async function getKnowledgeAudit(includeTechnicalDetails = false) {
   const { sources, runs } = await getKnowledgeStatus();
   const latest = runs[0] ?? null;
   return {
     sources: sources.map((source) => ({
       name: source.displayName,
-      url: source.feedUrl,
+      domain: new URL(source.feedUrl).hostname,
       state: source.state,
       indexedCount: source.indexedCount,
       lastFetchedAt: source.lastFetchedAt?.toISOString() ?? null,
       lastSuccessAt: source.lastSuccessAt?.toISOString() ?? null,
+      ...(includeTechnicalDetails ? { url: source.feedUrl } : {}),
     })),
     latestRun: latest ? {
       trigger: latest.trigger,

@@ -206,11 +206,12 @@ async function runCascade(query: string, options: SearchWebOptions, recordOutage
   const attempted = outcomes.filter((outcome) => outcome !== "skipped");
   const hasEmpty = attempted.includes("empty");
   const hasTemporaryFault = attempted.includes("timeout") || attempted.some((outcome) => outcome === "failed" && http.you === null);
-  const state: SearchOutcome["state"] = hasEmpty && attempted.every((outcome) => outcome === "empty")
-    ? "empty"
-    : hasEmpty || hasTemporaryFault
-      ? "degraded"
-      : "error";
+  let state: SearchOutcome["state"] = "error";
+  if (hasEmpty && attempted.every((outcome) => outcome === "empty")) {
+    state = "empty";
+  } else if (hasEmpty || hasTemporaryFault) {
+    state = "degraded";
+  }
   if (recordOutages) void recordSearchQuality({ outcome: state, verification: state === "empty" ? "no_results" : state === "degraded" ? "degraded" : "unavailable", verifiedSourceCount: 0, attemptedLayerCount: attempted.length, staleBlocked: signal.aborted, latencyMs: Date.now() - startedAt }).catch(() => undefined);
   return {
     summary: "",
