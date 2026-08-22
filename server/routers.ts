@@ -11,6 +11,7 @@ import { getOwnedAttachmentDownload, uploadOwnedChatAttachment } from "./attachm
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
 import { getWebSearchStatus, probeWebSearchStatus } from "./web-search";
 import { getKnowledgeAudit, getKnowledgeStatus, refreshKnowledgeBase } from "./knowledge";
+import { ownerClaimFingerprint } from "./owner-claim";
 
 const settingsSchema = z.object({
   style: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional(),
@@ -67,6 +68,13 @@ export const appRouter = router({
   }),
   owner: router({
     isOwner: protectedProcedure.query(({ ctx }) => Boolean(ENV.ownerOpenId && ctx.user.openId === ENV.ownerOpenId)),
+    claimDiagnostic: protectedProcedure.query(({ ctx }) => ({
+      comparedClaim: "openId" as const,
+      configured: Boolean(ENV.ownerOpenId),
+      expectedFingerprint: ownerClaimFingerprint(ENV.ownerOpenId),
+      sessionFingerprint: ownerClaimFingerprint(ctx.user.openId),
+      matches: Boolean(ENV.ownerOpenId && ctx.user.openId === ENV.ownerOpenId),
+    })),
     flashTtft: protectedProcedure.query(async ({ ctx }) => {
       if (!ENV.ownerOpenId || ctx.user.openId !== ENV.ownerOpenId) throw new TRPCError({ code: "FORBIDDEN", message: "Панель производительности доступна только владельцу." });
       return getFlashTtftStats();

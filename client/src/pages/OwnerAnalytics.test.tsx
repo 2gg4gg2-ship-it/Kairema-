@@ -9,13 +9,17 @@ const fixtures = vi.hoisted(() => ({
   navigate: vi.fn(),
   qualityPanel: vi.fn(),
   qualityChart: vi.fn(),
+  claimDiagnostic: vi.fn(),
 }));
 
 vi.mock("wouter", () => ({ useLocation: () => ["/owner-analytics", fixtures.navigate] }));
 vi.mock("@/lib/chat-export", () => ({ downloadPreparedChatExport: fixtures.download }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
-    owner: { isOwner: { useQuery: () => ({ data: fixtures.isOwner, isLoading: false }) } },
+    owner: {
+      isOwner: { useQuery: () => ({ data: fixtures.isOwner, isLoading: false, isSuccess: true }) },
+      claimDiagnostic: { useQuery: (input: unknown, options: unknown) => { fixtures.claimDiagnostic(options); return { data: fixtures.isOwner ? null : { comparedClaim: "openId", configured: true, expectedFingerprint: "sha256:expected", sessionFingerprint: "sha256:session", matches: false } }; } },
+    },
     search: {
       qualityPanel: { useQuery: (input: unknown, options: unknown) => { fixtures.qualityPanel(options); return { data: null }; } },
       qualityChart: { useQuery: (input: unknown, options: unknown) => { fixtures.qualityChart(options); return { data: fixtures.isOwner ? { daily: [{ date: "2026-08-20", requests: 3, success: 2, failures_by_layer: { layer_1: 1, layer_2: 1, layer_3: 0 }, p50: 120, p95: 240 }], hourlyLayers: [{ hour: "10", layer1: 1, layer2: 1, layer3: 0 }] } : null }; } },
@@ -25,7 +29,7 @@ vi.mock("@/lib/trpc", () => ({
 
 import OwnerAnalytics from "./OwnerAnalytics";
 
-beforeEach(() => { fixtures.isOwner = false; fixtures.download.mockReset(); fixtures.navigate.mockReset(); fixtures.qualityPanel.mockReset(); fixtures.qualityChart.mockReset(); });
+beforeEach(() => { fixtures.isOwner = false; fixtures.download.mockReset(); fixtures.navigate.mockReset(); fixtures.qualityPanel.mockReset(); fixtures.qualityChart.mockReset(); fixtures.claimDiagnostic.mockReset(); });
 afterEach(() => cleanup());
 
 describe("owner analytics", () => {
@@ -34,6 +38,7 @@ describe("owner analytics", () => {
     expect(screen.getByText("Аналитика недоступна")).toBeTruthy();
     expect(screen.queryByText("Качество поиска")).toBeNull();
     expect(fixtures.qualityChart).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+    expect(fixtures.claimDiagnostic).toHaveBeenCalledWith(expect.objectContaining({ enabled: true }));
   });
 
   it("renders aggregate-only 7d/24h charts and downloads local CSV/JSON", async () => {
