@@ -295,9 +295,9 @@
 - [x] v6-MEM/BUG-SENT-ATTACHMENT-FAILURE-PREVIEW: source-level regression дополнена hydration-race coverage; опубликованная browser-приёмка `bd263b3c` подтвердила preview в user bubble после provider failure. Ownership, temporary URLs и retry semantics не изменены.
 - [ ] v6-MEM/OWNER-PLATFORM-BLOCKER: сохранить owner analytics, export metrics и DROP gate как blocked до восстановления системного OWNER_OPEN_ID платформой; не выполнять DROP TABLE chat_exports.
 - [ ] v6-MEM/USER-T1-T6: отдельно подтвердить profile save, facts/dialog topics, search/filters, shared memory across four roles и user-scope isolation; не выдавать server-only proof за second-account browser acceptance.
-- [ ] v6-MEM/USER-CAPABILITIES-AND-CONTROLS: browser-приёмка честных role capabilities, text selection, завершения switch анимации и closed/open dropdown descriptions без обрезки.
-- [ ] v6-MEM/BUG-SWITCH-THUMB-STATE: передать фактическое checked state на switch thumb или применить parent-state selector, чтобы transform гарантированно доходил до конечной позиции.
-- [ ] v6-MEM/USER-RAG-NON-OWNER: подтвердить, что обычный пользователь видит только privacy-safe RAG audit без источников, ссылок и owner aggregate exports.
+- [x] v6-MEM/USER-CAPABILITIES-AND-CONTROLS: published browser-приёмка подтвердила честные четыре role capabilities, native text selection, closed/open dropdown descriptions без обрезки и конечную checked-позицию switch thumb (`translate: 16px`) после explicit CSS hotfix.
+- [x] v6-MEM/BUG-SWITCH-THUMB-STATE: explicit root-state → thumb CSS contract опубликован в `eecdb55b`; browser подтвердил конечный checked CSS translate и восстановление исходного состояния.
+- [x] v6-MEM/USER-RAG-NON-OWNER: опубликованный обычный RAG audit подтверждён privacy-safe: без кликабельных URL, raw links, query/answer content и owner aggregate export controls.
 
 - [x] v6-K/A: изучить и зафиксировать текущие контракты поиска, источников, памяти, chatId, сообщений, шаблонов и архивов; сохранить четыре роли, slug/active chains, лимиты, owner scope, presigned exports и существующие Heartbeat-задачи.
 - [x] v6-K/B: проверить You.com и кандидатов Serper.dev, Exa AI, Firecrawl и Keirolabs только по официальной документации и живому ответу; запросить и применить server-side ключи лишь для сервисов с подтверждённым доступным тарифом и HTTP 200, без Bright Data и без имитации.
