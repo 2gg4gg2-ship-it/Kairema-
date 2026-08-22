@@ -222,12 +222,42 @@ export const memoryEntries = mysqlTable("memory_entries", {
   memoryKey: varchar("memoryKey", { length: 160 }),
   role: mysqlEnum("role", ["fast", "smart", "context", "flagship"]),
   source: mysqlEnum("source", ["manual", "auto"]).notNull().default("manual"),
+  /** Topics are scoped to the originating chat for 24-hour deduplication. */
+  sessionId: varchar("sessionId", { length: 36 }).references(() => chatSessions.id, { onDelete: "set null" }),
   sourceMessageId: int("sourceMessageId").references(() => messages.id, { onDelete: "set null" }),
+  /** FIFO and context recency are driven by refreshes, not initial creation. */
+  lastSeenAt: timestamp("lastSeenAt").defaultNow().notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, (table) => [
   index("memory_entries_user_category_created_idx").on(table.userId, table.category, table.createdAt),
   index("memory_entries_user_category_updated_idx").on(table.userId, table.category, table.updatedAt),
+  index("memory_entries_user_category_seen_idx").on(table.userId, table.category, table.lastSeenAt),
+  index("memory_entries_topic_session_seen_idx").on(table.userId, table.sessionId, table.lastSeenAt),
+]);
+
+/**
+ * Short-lived, text-free work queue for post-turn memory extraction. The job
+ * points to the already-owned chat messages, so retries never duplicate the
+ * turn and no prompt/response is copied into logs or task payloads.
+ */
+export const memoryExtractionJobs = mysqlTable("memory_extraction_jobs", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  sessionId: varchar("sessionId", { length: 36 }).notNull().references(() => chatSessions.id, { onDelete: "cascade" }),
+  userMessageId: int("userMessageId").notNull().references(() => messages.id, { onDelete: "cascade" }),
+  assistantMessageId: int("assistantMessageId").notNull().references(() => messages.id, { onDelete: "cascade" }).unique(),
+  role: mysqlEnum("role", ["fast", "smart", "context", "flagship"]).notNull(),
+  status: mysqlEnum("status", ["pending", "processing", "completed", "failed"]).notNull().default("pending"),
+  attempts: int("attempts").notNull().default(0),
+  runAfter: timestamp("runAfter").defaultNow().notNull(),
+  lastErrorClass: varchar("lastErrorClass", { length: 64 }),
+  completedAt: timestamp("completedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [
+  index("memory_jobs_user_status_due_idx").on(table.userId, table.status, table.runAfter),
+  index("memory_jobs_session_created_idx").on(table.sessionId, table.createdAt),
 ]);
 
 export const memoryFacts = mysqlTable("memory_facts", {
@@ -278,5 +308,6 @@ export type UserSettings = typeof userSettings.$inferSelect;
 export type MemoryProfile = typeof memoryProfiles.$inferSelect;
 export type MemorySettings = typeof memorySettings.$inferSelect;
 export type MemoryEntry = typeof memoryEntries.$inferSelect;
+export type MemoryExtractionJob = typeof memoryExtractionJobs.$inferSelect;
 export type MemoryFact = typeof memoryFacts.$inferSelect;
 export type ChatAttachment = typeof chatAttachments.$inferSelect;

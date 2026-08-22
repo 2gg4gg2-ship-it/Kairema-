@@ -260,6 +260,20 @@ describe("Kairema v4 role registry", () => {
     }
   });
 
+  it("places memory before current information while preserving verified web-evidence priority", () => {
+    const system = buildOpenRouterMessages(MODEL_ROLES[0]!, [{ role: "user", content: "Какая актуальная версия?" }], {
+      memoryContext: "Пользователь просит короткие ответы; память не подтверждает версии.",
+      webResearch: "Официально подтверждённая актуальная версия: 1.2.3.",
+      webSources: [{ title: "Официальный релиз", domain: "example.com", sourceId: "source-1", retrievedAt: "2026-08-22T10:00:00.000Z", url: "https://example.com/release" }],
+      searchStatus: { state: "found", verificationStatus: "verified", sourcesCount: 1, cascadeUsed: "you" },
+    })[0]?.content as string;
+
+    expect(system.indexOf("<ПАМЯТЬ>")).toBeGreaterThan(-1);
+    expect(system.indexOf("<АКТУАЛЬНАЯ ИНФОРМАЦИЯ>")).toBeGreaterThan(system.indexOf("<ПАМЯТЬ>"));
+    expect(system).toContain("Для актуальных внешних фактов опирайся только на этот блок.");
+    expect(system.indexOf("Официально подтверждённая актуальная версия: 1.2.3.")).toBeGreaterThan(system.indexOf("<АКТУАЛЬНАЯ ИНФОРМАЦИЯ>"));
+  });
+
   it("uses a compact first-response instruction for Flash without overriding an explicit detailed answer", () => {
     const flash = MODEL_CONFIG.find((role) => role.key === "fast")!;
     expect(JSON.stringify(buildOpenRouterMessages(flash, [{ role: "user", content: "Тест" }], {}))).toContain("Режим Flash");

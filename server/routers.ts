@@ -1,14 +1,14 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, createChatSession, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatSession, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatSession, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry } from "./db";
+import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, createChatSession, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatSession, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { ENV } from "./_core/env";
 import { MODEL_IDS, chatWithRole, getModelViews, getPublicProviderDashboard, publicChatError } from "./providers";
 import { getOwnedAttachmentDownload, uploadOwnedChatAttachment } from "./attachments";
-import { buildChatContext, extractMemoryFacts } from "./chat-context";
+import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
 import { getWebSearchStatus, probeWebSearchStatus } from "./web-search";
 import { getKnowledgeAudit, getKnowledgeStatus, refreshKnowledgeBase } from "./knowledge";
 
@@ -166,13 +166,15 @@ export const appRouter = router({
   attachments: router({
     list: protectedProcedure.input(z.object({ sessionId: z.string().uuid() })).query(async ({ ctx, input }) => {
       const attachments = await listSessionAttachments(ctx.user.id, input.sessionId);
-      return Promise.all(attachments.map(async (attachment) => attachment.kind === "image"
-        ? { ...attachment, previewUrl: (await getOwnedAttachmentDownload(ctx.user.id, attachment.id)).url }
-        : attachment));
+      return Promise.all(attachments.map(async (attachment) => ({
+        ...attachment,
+        previewUrl: (await getOwnedAttachmentDownload(ctx.user.id, attachment.id)).url,
+      })));
     }),
     upload: protectedProcedure.input(attachmentInputSchema).mutation(async ({ ctx, input }) => {
       try {
-        return await uploadOwnedChatAttachment(ctx.user.id, input);
+        const attachment = await uploadOwnedChatAttachment(ctx.user.id, input);
+        return { ...attachment, previewUrl: (await getOwnedAttachmentDownload(ctx.user.id, attachment.id)).url };
       } catch (error) {
         throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Не удалось загрузить вложение." });
       }
@@ -238,7 +240,7 @@ export const appRouter = router({
           const session = await getOwnedChatSession(ctx.user.id, input.sessionId);
           if (!session) throw new Error("Чат не найден или недоступен.");
           const attachmentMetadata = input.attachmentIds?.length ? JSON.stringify({ attachmentIds: Array.from(new Set(input.attachmentIds)) }) : undefined;
-          await appendChatMessage(ctx.user.id, input.sessionId, "user", input.content, input.modelId, attachmentMetadata);
+          const savedUser = await appendChatMessage(ctx.user.id, input.sessionId, "user", input.content, input.modelId, attachmentMetadata);
           if (session.title === "Новый разговор") await updateChatTitle(ctx.user.id, input.sessionId, input.content.slice(0, 72));
           const history = await listSessionMessages(ctx.user.id, input.sessionId);
           const storedSettings = await buildChatContext(ctx.user.id, input.sessionId, { attachmentIds: input.attachmentIds, query: input.content, role: input.modelId });
@@ -251,8 +253,9 @@ export const appRouter = router({
               ...(result.searchStatus ? { searchStatus: result.searchStatus } : {}),
             })
             : undefined;
-          await appendChatMessage(ctx.user.id, input.sessionId, "assistant", result.content, result.modelUsed, sourceMetadata);
-          void extractMemoryFacts(ctx.user.id, input.content, { assistantText: result.content, role: input.modelId }).catch(() => undefined);
+          const savedAssistant = await appendChatMessage(ctx.user.id, input.sessionId, "assistant", result.content, result.modelUsed, sourceMetadata);
+          void enqueueMemoryExtractionJob({ userId: ctx.user.id, sessionId: input.sessionId, userMessageId: savedUser.id, assistantMessageId: savedAssistant.id, role: input.modelId })
+            .then(() => processMemoryExtractionJob(ctx.user.id, savedAssistant.id)).catch(() => undefined);
           return result;
         } catch (error) {
           if (error instanceof Error && /чат|хранилище/i.test(error.message)) {

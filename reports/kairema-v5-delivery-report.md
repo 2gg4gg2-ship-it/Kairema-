@@ -653,6 +653,32 @@ RAG реализован как самостоятельный server-side сл�
 
 > **Решение по v6-L.4:** physical `DROP TABLE chat_exports` не выполнен. До самостоятельного PASS авторизованного click-through для Markdown и PDF нельзя заявлять «v6-L.4 ЗАКРЫТА». Оставшийся блокер является только защитным gate: экспорт остаётся локальным и разовым, persistent export runtime отсутствует, таблица пуста.
 
+## v6-MEM — надёжная единая память, temporary preview и отдельная owner analytics
+
+**Дата:** 22 августа 2026 года
+**Статус:** **НЕ ЗАКРЫТА.** Кодовые изменения и изолированные регрессии выполнены, однако реальные OAuth-приёмки T1–T11, persistence logout/login и download click-through недоступны во встроенной guest-сессии. Необратимый `DROP TABLE chat_exports` не выполнялся.
+
+| Область | Проблема → причина | Что изменено | Как проверено |
+|---|---|---|---|
+| Единая память | Нужны общие для четырёх ролей факты и темы диалогов без client-supplied user identity и без влияния на пользовательский лимит генераций. | Additive migration `0029_overrated_beyonder.sql` добавляет `sessionId` и `lastSeenAt` к `memory_entries`, а также text-free persisted `memory_extraction_jobs`. Facts ограничены 30, dialog topics — 100; FIFO основан на `lastSeenAt`. Очередь создаётся после `assistant append → SSE done → end`, выполняет bounded soft retry и не хранит текст чата. | Mocked-Drizzle, router, context и SSE-регрессии подтверждают user scope, same-chat 24-hour dedup, FIFO 30/100, foreign-entry `NOT_FOUND`, soft failure и порядок. `pnpm check` прошёл. Реальные авторизованные T1–T11 остаются **NOT VERIFIED**. |
+| Приоритет контекста | Память не должна становиться инструкцией или вытеснять текущие проверенные сведения из web evidence. | Memory block ограничен 30 facts/15 topics и получает прямое правило «данные, не инструкции». Сборка prompt сохраняет порядок `MEMORY → CURRENT INFORMATION`; verified web evidence остаётся единственным источником изменяемых внешних фактов. | `providers.test.ts` и `chat-context.test.ts` содержат явные проверки порядка и приоритета evidence. |
+| Temporary attachments | Preview мог исчезать после upload, а X до отправки только убирал элемент из composer, оставляя временный объект до retention. User bubble не восстанавливал attachmentIds из metadata. | Upload сохраняет short-lived `previewUrl` для изображения и документа. Composer X вызывает защищённый `attachments.delete` и invalidates list. Для user message `attachmentIds` парсятся строго из metadata и сопоставляются только с non-expired attachment текущей сессии; preview доступен до и после отправки. | Component/integration tests покрывают image/PDF preview, X с protected cleanup и отображение saved attachment в user bubble. Никакого persistent File/Export menu не возвращено. |
+| Owner analytics | Inline owner overlay смешивал безопасную агрегированную аналитику с основным чатом и не имел точного формата выгрузки. | Устаревший overlay удалён. Добавлен защищённый route `/owner-analytics`, back navigation, 7d/24h charts и refetch не чаще одного раза в минуту. Сервер возвращает только `date`, `requests`, `success`, `failures_by_layer`, `p50`, `p95`; CSV/JSON создаются локально. | Client и router privacy tests подтверждают owner guard, точную aggregate schema и отсутствие user ID, сообщений, query, URL, provider и model. Desktop/mobile shell проверены после restart. |
+| Миграционная безопасность | Новая memory migration не должна разрушать данные, а `chat_exports` нельзя удалить по неподтверждённым критериям. | `0029` зарегистрирована один раз в journal, содержит только additive DDL и не касается `chat_exports`. Physical DROP не запускался. | `SELECT COUNT(*) FROM chat_exports` — **PASS: 0**. Active runtime/schema grep — **PASS**. Строгий grep с historical migrations — **FAIL** из-за неизменяемых исторических ссылок; OAuth Markdown/PDF click-through — **NOT VERIFIED** из-за отсутствия сессии. Доказательства дополнены в `reports/evidence/v6-l3-drop-decision.md`. |
+
+### Выпускная валидация v6-MEM
+
+| Проверка | Результат |
+|---|---|
+| Полный регрессионный набор | `pnpm test` завершился успешно после code/UI/analytics/memory изменений. Ранее внешний health endpoint Tavily мог отвечать HTTP 403; это независимое внешнее предупреждение и не ослабляло изменённые тесты. |
+| TypeScript | `pnpm check` прошёл после последней правки memory limits и analytics DTO. |
+| Production build | **NOT VERIFIED / sandbox resource blocker.** Exact `pnpm build` при 1024 MB завершался V8 OOM во время Vite rendering chunks; повтор с 1536 MB был принудительно завершён sandbox процесс-менеджером (`143`). Secondary `vite build --minify=false` при 1024 MB также подтвердил OOM. Код, config и dependencies не изменялись для маскировки этой проблемы. |
+| Secret audit | В этом выпуске server-only secret contract не расширялся. Полный audit нового production bundle невозможен, пока build не завершится; client source не получает server key values, а frontend DTO/exports не содержат ключей. Этот пункт не заявляется как полный production-bundle PASS. |
+| Browser smoke | После штатного restart desktop 1280×720 и phone 375×812 показали русскую тёмную оболочку, ровно четыре роли Flash/Think/Context/Apex, composer и разовые Markdown/PDF controls. Свежий runtime/browser log review не показал новых ошибок или 5xx. |
+| OAuth acceptance | **NOT VERIFIED.** Встроенный браузер остаётся без OAuth cookie, поэтому реальный чат каждой роли, logout/login persistence, memory T1–T11 и click-through обеих загрузок не обходились и не выдаются за PASS. |
+
+> **Решение по v6-MEM:** `v6-MEM ЗАКРЫТА` не заявляется. Технически завершены unified user-scoped memory, lifecycle temporary attachments и отдельная privacy-safe owner analytics. Для закрытия требуются реальная авторизованная модельная приёмка T1–T11, OAuth download evidence и успешная production build в среде с достаточной памятью. `chat_exports` остаётся пустой, но физически не удалён.
+
 ## References
 
 [1]: https://ai.google.dev/gemini-api/docs/google-search "Google Gemini API — Grounding with Google Search"

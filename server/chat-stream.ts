@@ -1,9 +1,9 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
-import { appendChatMessage, getOwnedChatSession, getStoredAssistantForClientMessage, listSessionMessages, updateChatTitle } from "./db";
+import { appendChatMessage, enqueueMemoryExtractionJob, getOwnedChatSession, getStoredAssistantForClientMessage, listSessionMessages, updateChatTitle } from "./db";
 import { sdk } from "./_core/sdk";
 import { MODEL_IDS, chatWithRoleStream, publicChatError, type Provider, type RoleId } from "./providers";
-import { buildChatContext, extractMemoryFacts } from "./chat-context";
+import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
 
 export const CHAT_STREAM_RATE_LIMIT = 60;
 const CHAT_STREAM_RATE_WINDOW_MS = 60_000;
@@ -116,7 +116,8 @@ type StreamDependencies = {
   listSessionMessages: typeof listSessionMessages;
   chatWithRoleStream: typeof chatWithRoleStream;
   buildChatContext: typeof buildChatContext;
-  extractMemoryFacts: typeof extractMemoryFacts;
+  enqueueMemoryExtractionJob: typeof enqueueMemoryExtractionJob;
+  processMemoryExtractionJob: typeof processMemoryExtractionJob;
   auditChatStream: (record: ChatStreamAuditRecord) => void | Promise<void>;
 };
 
@@ -129,7 +130,8 @@ const defaultDependencies: StreamDependencies = {
   listSessionMessages,
   chatWithRoleStream,
   buildChatContext,
-  extractMemoryFacts,
+  enqueueMemoryExtractionJob,
+  processMemoryExtractionJob,
   auditChatStream: recordChatStreamAudit,
 };
 
@@ -151,6 +153,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
     const input = parsed.data;
     let pendingReplay: PendingReplay | undefined;
     let activeIdempotencyKey: string | undefined;
+    let savedUserMessageId: number | undefined;
     try {
       const session = await dependencies.getOwnedChatSession(user.id, input.sessionId);
       if (!session) throw new Error("Чат не найден или недоступен.");
@@ -187,6 +190,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
         const attachmentIds = Array.from(new Set(input.attachmentIds ?? [])).filter((attachmentId) => typeof attachmentId === "string" && attachmentId.length > 0);
         const userMetadata = attachmentIds.length > 0 ? JSON.stringify({ attachmentIds }) : undefined;
         const append = await dependencies.appendChatMessage(user.id, input.sessionId, "user", input.content, input.modelId, userMetadata, input.clientMessageId);
+        savedUserMessageId = append.id;
         const isDuplicate = Boolean(input.clientMessageId && append && !append.created);
         if (isDuplicate && idempotencyKey) {
           const completed = getCompletedReplay(idempotencyKey);
@@ -249,7 +253,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
           const sourceMetadata = result.sources?.length || result.evidence?.length || result.ragSources?.length || result.searchStatus
             ? JSON.stringify({ ...(result.sources?.length ? { sources: result.sources } : {}), ...(result.evidence?.length ? { evidence: result.evidence } : {}), ...(result.ragSources?.length ? { ragSources: result.ragSources } : {}), ...(result.searchStatus ? { searchStatus: result.searchStatus } : {}) })
             : undefined;
-          await dependencies.appendChatMessage(user.id, input.sessionId, "assistant", result.content, result.modelUsed, sourceMetadata);
+          const savedAssistant = await dependencies.appendChatMessage(user.id, input.sessionId, "assistant", result.content, result.modelUsed, sourceMetadata);
           if (idempotencyKey) {
             completedChatStreamReplays.set(idempotencyKey, { result, expiresAt: Date.now() + CHAT_STREAM_REPLAY_TTL_MS });
             pendingReplay?.resolve(result);
@@ -271,7 +275,15 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
           });
           finished = true;
           res.end();
-          if (!input.regenerateMessageId) void dependencies.extractMemoryFacts(user.id, input.content, { assistantText: result.content, role: input.modelId }).catch(() => undefined);
+          if (!input.regenerateMessageId && savedUserMessageId && savedAssistant.id) {
+            void dependencies.enqueueMemoryExtractionJob({
+              userId: user.id,
+              sessionId: input.sessionId,
+              userMessageId: savedUserMessageId,
+              assistantMessageId: savedAssistant.id,
+              role: input.modelId,
+            }).then(() => dependencies.processMemoryExtractionJob(user.id, savedAssistant.id)).catch(() => undefined);
+          }
         } else if (idempotencyKey) {
           pendingReplay?.resolve(null);
           pendingChatStreamReplays.delete(idempotencyKey);

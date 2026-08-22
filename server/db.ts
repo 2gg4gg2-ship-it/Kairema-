@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, isNull, like, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
-import { ChatAttachment, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryFacts, memoryProfiles, memorySettings, messages, providerDailyUsage, providerHealth, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, userSettings, users, webSearchStatus } from "../drizzle/schema";
+import { ChatAttachment, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryExtractionJob, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryExtractionJobs, memoryFacts, memoryProfiles, memorySettings, messages, providerDailyUsage, providerHealth, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, userSettings, users, webSearchStatus } from "../drizzle/schema";
 import { providerHealthHistory } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -86,7 +86,7 @@ export async function listSessionMessages(userId: number, sessionId: string): Pr
  * Appends a message once. A client UUID is accepted only for original user
  * messages; retries return `created: false` without creating another record.
  */
-export async function appendChatMessage(userId: number, sessionId: string, role: "user" | "assistant", content: string, modelId?: string, metadata?: string, clientMessageId?: string): Promise<{ created: boolean }> {
+export async function appendChatMessage(userId: number, sessionId: string, role: "user" | "assistant", content: string, modelId?: string, metadata?: string, clientMessageId?: string): Promise<{ created: boolean; id: number }> {
   const db = requireDatabase(await getDb());
   requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
   const safeClientMessageId = role === "user" ? clientMessageId : undefined;
@@ -94,20 +94,22 @@ export async function appendChatMessage(userId: number, sessionId: string, role:
     const [existing] = await db.select({ id: messages.id }).from(messages)
       .where(and(eq(messages.sessionId, sessionId), eq(messages.clientMessageId, safeClientMessageId)))
       .limit(1);
-    if (existing) return { created: false };
+    if (existing) return { created: false, id: existing.id };
   }
   try {
-    await db.insert(messages).values({ sessionId, role, content, modelId: modelId ?? null, metadata: metadata ?? null, clientMessageId: safeClientMessageId ?? null });
+    const inserted = await db.insert(messages).values({ sessionId, role, content, modelId: modelId ?? null, metadata: metadata ?? null, clientMessageId: safeClientMessageId ?? null });
+    const id = Number(inserted[0]?.insertId ?? 0);
+    if (!Number.isInteger(id) || id <= 0) throw new Error("Не удалось сохранить сообщение.");
+    await db.update(chatSessions).set({ updatedAt: new Date(), ...(modelId ? { modelId } : {}) }).where(eq(chatSessions.id, sessionId));
+    return { created: true, id };
   } catch (error) {
     if (!safeClientMessageId) throw error;
     const [existing] = await db.select({ id: messages.id }).from(messages)
       .where(and(eq(messages.sessionId, sessionId), eq(messages.clientMessageId, safeClientMessageId)))
       .limit(1);
-    if (existing) return { created: false };
+    if (existing) return { created: false, id: existing.id };
     throw error;
   }
-  await db.update(chatSessions).set({ updatedAt: new Date(), ...(modelId ? { modelId } : {}) }).where(eq(chatSessions.id, sessionId));
-  return { created: true };
 }
 
 /** Retrieves only the assistant message immediately following an idempotent user send. */
@@ -429,7 +431,7 @@ export async function getSearchQualityPanel(): Promise<SearchQualityPanel> {
 
 type SearchQualityOutcomeCounts = Record<SearchQualityInput["outcome"], number>;
 export type SearchQualityChart = {
-  daily: Array<{ day: string } & SearchQualityOutcomeCounts>;
+  daily: Array<{ date: string; requests: number; success: number; failures_by_layer: { layer_1: number; layer_2: number; layer_3: number }; p50: number; p95: number }>;
   hourlyLayers: Array<{ hour: string; layer1: number; layer2: number; layer3: number }>;
 };
 
@@ -440,6 +442,18 @@ function emptyOutcomeCounts(): SearchQualityOutcomeCounts {
 function utcDay(date: Date) { return date.toISOString().slice(0, 10); }
 function utcHour(date: Date) { return date.toISOString().slice(0, 13); }
 
+function emptyFailureLayers() { return { layer_1: 0, layer_2: 0, layer_3: 0 }; }
+function percentile(values: number[], fraction: number) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * fraction) - 1))]!;
+}
+function recordAnonymousLayerFailures(target: { layer1: number; layer2: number; layer3: number }, outcome: SearchQualityInput["outcome"], attemptedLayerCount: number) {
+  const attempts = Math.max(0, Math.min(3, attemptedLayerCount));
+  for (let layer = 1; layer < attempts; layer += 1) target[`layer${layer}` as "layer1" | "layer2" | "layer3"] += 1;
+  if ((outcome === "degraded" || outcome === "error") && attempts > 0) target[`layer${attempts}` as "layer1" | "layer2" | "layer3"] += 1;
+}
+
 /**
  * Owner chart data is anonymous by construction. "layer1..3" is deliberately
  * ordinal rather than a provider name, so it exposes cascade quality without
@@ -447,12 +461,12 @@ function utcHour(date: Date) { return date.toISOString().slice(0, 13); }
  */
 export async function getSearchQualityChart(now = new Date()): Promise<SearchQualityChart> {
   const db = await getDb();
-  const dailyMap = new Map<string, SearchQualityOutcomeCounts>();
+  const dailyMap = new Map<string, { requests: number; success: number; failures: { layer1: number; layer2: number; layer3: number }; latencies: number[] }>();
   const hourlyMap = new Map<string, { layer1: number; layer2: number; layer3: number }>();
   const startDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6));
   for (let offset = 0; offset < 7; offset += 1) {
     const date = new Date(startDay.getTime() + offset * 86_400_000);
-    dailyMap.set(utcDay(date), emptyOutcomeCounts());
+    dailyMap.set(utcDay(date), { requests: 0, success: 0, failures: { layer1: 0, layer2: 0, layer3: 0 }, latencies: [] });
   }
   const startHour = new Date(now);
   startHour.setUTCMinutes(0, 0, 0);
@@ -463,22 +477,22 @@ export async function getSearchQualityChart(now = new Date()): Promise<SearchQua
   }
   if (db) {
     const since = new Date(Math.min(startDay.getTime(), startHour.getTime()));
-    const rows = await db.select({ outcome: searchQualityMetrics.outcome, attemptedLayerCount: searchQualityMetrics.attemptedLayerCount, createdAt: searchQualityMetrics.createdAt })
+    const rows = await db.select({ outcome: searchQualityMetrics.outcome, attemptedLayerCount: searchQualityMetrics.attemptedLayerCount, latencyMs: searchQualityMetrics.latencyMs, createdAt: searchQualityMetrics.createdAt })
       .from(searchQualityMetrics).where(gt(searchQualityMetrics.createdAt, since)).orderBy(desc(searchQualityMetrics.createdAt)).limit(20_000);
     for (const row of rows) {
       const day = dailyMap.get(utcDay(row.createdAt));
-      if (day) day[row.outcome] += 1;
-      const hour = hourlyMap.get(utcHour(row.createdAt));
-      if (hour) {
-        const attempts = Math.max(0, Math.min(3, row.attemptedLayerCount));
-        if (attempts >= 1) hour.layer1 += 1;
-        if (attempts >= 2) hour.layer2 += 1;
-        if (attempts >= 3) hour.layer3 += 1;
+      if (day) {
+        day.requests += 1;
+        if (row.outcome === "found") day.success += 1;
+        day.latencies.push(Math.max(0, row.latencyMs));
+        recordAnonymousLayerFailures(day.failures, row.outcome, row.attemptedLayerCount);
       }
+      const hour = hourlyMap.get(utcHour(row.createdAt));
+      if (hour) recordAnonymousLayerFailures(hour, row.outcome, row.attemptedLayerCount);
     }
   }
   return {
-    daily: Array.from(dailyMap.entries()).map(([day, counts]) => ({ day: day.slice(5), ...counts })),
+    daily: Array.from(dailyMap.entries()).map(([date, aggregate]) => ({ date, requests: aggregate.requests, success: aggregate.success, failures_by_layer: { layer_1: aggregate.failures.layer1, layer_2: aggregate.failures.layer2, layer_3: aggregate.failures.layer3 }, p50: percentile(aggregate.latencies, 0.5), p95: percentile(aggregate.latencies, 0.95) })),
     hourlyLayers: Array.from(hourlyMap.entries()).map(([hour, counts]) => ({ hour: `${hour.slice(11, 13)}:00`, ...counts })),
   };
 }
@@ -649,7 +663,7 @@ export type MemorySettingsPatch = Partial<Pick<MemorySettings, "enabled" | "auto
 export type MemoryEntryCategory = "profile" | "fact" | "dialog_topic";
 export type MemoryEntryRole = "fast" | "smart" | "context" | "flagship";
 export type MemoryEntrySource = "manual" | "auto";
-const MEMORY_ENTRY_LIMITS: Record<MemoryEntryCategory, number> = { profile: 1, fact: 20, dialog_topic: 50 };
+const MEMORY_ENTRY_LIMITS: Record<MemoryEntryCategory, number> = { profile: 1, fact: 30, dialog_topic: 100 };
 
 async function ensureUserSettings(userId: number): Promise<void> {
   const db = requireDatabase(await getDb());
@@ -725,7 +739,7 @@ async function trimMemoryEntries(userId: number, category: MemoryEntryCategory):
   const limit = MEMORY_ENTRY_LIMITS[category];
   const rows = await db.select({ id: memoryEntries.id }).from(memoryEntries)
     .where(and(eq(memoryEntries.userId, userId), eq(memoryEntries.category, category)))
-    .orderBy(asc(memoryEntries.createdAt), asc(memoryEntries.id));
+    .orderBy(asc(memoryEntries.lastSeenAt), asc(memoryEntries.id));
   const overflow = rows.slice(0, Math.max(0, rows.length - limit)).map((row) => row.id);
   if (overflow.length) await db.delete(memoryEntries).where(and(eq(memoryEntries.userId, userId), inArray(memoryEntries.id, overflow)));
 }
@@ -735,7 +749,7 @@ export async function listMemoryEntries(userId: number, category?: MemoryEntryCa
   const db = requireDatabase(await getDb());
   const rows = await db.select().from(memoryEntries).where(category
     ? and(eq(memoryEntries.userId, userId), eq(memoryEntries.category, category))
-    : eq(memoryEntries.userId, userId)).orderBy(desc(memoryEntries.updatedAt), desc(memoryEntries.createdAt));
+    : eq(memoryEntries.userId, userId)).orderBy(desc(memoryEntries.lastSeenAt), desc(memoryEntries.updatedAt), desc(memoryEntries.createdAt));
   return category ? rows.slice(0, MEMORY_ENTRY_LIMITS[category]) : rows;
 }
 
@@ -745,14 +759,22 @@ export async function upsertMemoryEntry(userId: number, category: MemoryEntryCat
   role?: MemoryEntryRole | null;
   source?: MemoryEntrySource;
   sourceMessageId?: number | null;
+  sessionId?: string | null;
 } = {}): Promise<MemoryEntry | null> {
   const db = requireDatabase(await getDb());
   const normalized = normalizeMemoryEntry(value);
   if (normalized.length < 3) return null;
   const existing = await db.select().from(memoryEntries).where(and(eq(memoryEntries.userId, userId), eq(memoryEntries.category, category)));
   const normalizedKey = options.memoryKey?.trim().slice(0, 160) || null;
-  const match = existing.find((entry) => (normalizedKey && entry.memoryKey === normalizedKey)
-    || entry.value.toLocaleLowerCase("ru-RU") === normalized.toLocaleLowerCase("ru-RU"));
+  const now = new Date();
+  const recentTopicCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1_000);
+  const match = existing.find((entry) => {
+    const sameValue = entry.value.toLocaleLowerCase("ru-RU") === normalized.toLocaleLowerCase("ru-RU");
+    if (category !== "dialog_topic") return (normalizedKey && entry.memoryKey === normalizedKey) || sameValue;
+    const sameChat = Boolean(options.sessionId && entry.sessionId === options.sessionId);
+    const sameTopic = Boolean(normalizedKey && entry.memoryKey === normalizedKey) || sameValue;
+    return sameChat && sameTopic && entry.lastSeenAt >= recentTopicCutoff;
+  });
   if (match) {
     await db.update(memoryEntries).set({
       value: normalized,
@@ -760,13 +782,16 @@ export async function upsertMemoryEntry(userId: number, category: MemoryEntryCat
       role: options.role ?? null,
       source: options.source ?? match.source,
       sourceMessageId: options.sourceMessageId ?? match.sourceMessageId,
+      sessionId: options.sessionId ?? match.sessionId,
+      lastSeenAt: now,
     }).where(and(eq(memoryEntries.id, match.id), eq(memoryEntries.userId, userId)));
     const [updated] = await db.select().from(memoryEntries).where(and(eq(memoryEntries.id, match.id), eq(memoryEntries.userId, userId))).limit(1);
     return updated ?? null;
   }
   const record: MemoryEntry = {
     id: randomUUID(), userId, category, value: normalized, memoryKey: normalizedKey, role: options.role ?? null,
-    source: options.source ?? "manual", sourceMessageId: options.sourceMessageId ?? null, createdAt: new Date(), updatedAt: new Date(),
+    source: options.source ?? "manual", sessionId: options.sessionId ?? null, sourceMessageId: options.sourceMessageId ?? null,
+    lastSeenAt: now, createdAt: now, updatedAt: now,
   };
   await db.insert(memoryEntries).values(record);
   await trimMemoryEntries(userId, category);
@@ -823,6 +848,70 @@ export async function clearAllMemory(userId: number): Promise<void> {
   await db.delete(memoryEntries).where(eq(memoryEntries.userId, userId));
   await db.delete(memoryFacts).where(eq(memoryFacts.userId, userId));
   await updateMemoryProfile(userId, { profile: "", summary: "" });
+}
+
+export type MemoryExtractionJobInput = {
+  userId: number;
+  sessionId: string;
+  userMessageId: number;
+  assistantMessageId: number;
+  role: MemoryEntryRole;
+};
+
+/** Queue writes no chat text. The unique assistant message is the restart-safe idempotency key. */
+export async function enqueueMemoryExtractionJob(input: MemoryExtractionJobInput): Promise<void> {
+  const db = requireDatabase(await getDb());
+  const now = new Date();
+  try {
+    await db.insert(memoryExtractionJobs).values({
+      id: randomUUID(), ...input, status: "pending", attempts: 0, runAfter: now, lastErrorClass: null, completedAt: null, createdAt: now, updatedAt: now,
+    });
+  } catch {
+    // Duplicate assistantMessageId denotes an already enqueued or processed turn.
+  }
+}
+
+/** Claims pending work, or processing work stale for five minutes. No chat text is selected here. */
+export async function claimMemoryExtractionJob(userId: number, assistantMessageId?: number): Promise<MemoryExtractionJob | null> {
+  const db = requireDatabase(await getDb());
+  const now = new Date();
+  const staleAt = new Date(now.getTime() - 5 * 60 * 1_000);
+  const rows = await db.select().from(memoryExtractionJobs).where(eq(memoryExtractionJobs.userId, userId))
+    .orderBy(asc(memoryExtractionJobs.runAfter), asc(memoryExtractionJobs.createdAt));
+  const candidate = rows.find((job) => (!assistantMessageId || job.assistantMessageId === assistantMessageId)
+    && ((job.status === "pending" && job.runAfter <= now) || (job.status === "processing" && job.updatedAt <= staleAt)));
+  if (!candidate) return null;
+  const claimed = await db.update(memoryExtractionJobs).set({ status: "processing", attempts: candidate.attempts + 1, lastErrorClass: null, updatedAt: now })
+    .where(and(eq(memoryExtractionJobs.id, candidate.id), eq(memoryExtractionJobs.userId, userId), eq(memoryExtractionJobs.status, candidate.status)));
+  if (!Number(claimed[0]?.affectedRows ?? 0)) return null;
+  return { ...candidate, status: "processing", attempts: candidate.attempts + 1, lastErrorClass: null, updatedAt: now };
+}
+
+/** Reads the pair only after user/session ownership has been confirmed; payload is not logged or exported. */
+export async function getMemoryExtractionJobTurn(userId: number, job: MemoryExtractionJob): Promise<{ userText: string; assistantText: string } | null> {
+  const db = requireDatabase(await getDb());
+  const session = await getOwnedChatSession(userId, job.sessionId);
+  if (!session) return null;
+  const rows = await db.select().from(messages).where(eq(messages.sessionId, job.sessionId));
+  const userMessage = rows.find((message) => message.id === job.userMessageId && message.role === "user");
+  const assistantMessage = rows.find((message) => message.id === job.assistantMessageId && message.role === "assistant");
+  return userMessage && assistantMessage ? { userText: userMessage.content, assistantText: assistantMessage.content } : null;
+}
+
+export async function completeMemoryExtractionJob(userId: number, jobId: string): Promise<void> {
+  const db = requireDatabase(await getDb());
+  const now = new Date();
+  await db.update(memoryExtractionJobs).set({ status: "completed", completedAt: now, lastErrorClass: null, updatedAt: now }).where(and(eq(memoryExtractionJobs.id, jobId), eq(memoryExtractionJobs.userId, userId)));
+}
+
+/** Retry metadata is a bounded error class, never a message, model response, URL or API key. */
+export async function retryMemoryExtractionJob(userId: number, job: MemoryExtractionJob, error: unknown): Promise<void> {
+  const db = requireDatabase(await getDb());
+  const exhausted = job.attempts >= 3;
+  const delayMs = Math.min(5_000, 250 * 2 ** Math.max(0, job.attempts - 1));
+  const errorClass = error instanceof Error && error.name ? error.name.slice(0, 64) : "ExtractionError";
+  await db.update(memoryExtractionJobs).set({ status: exhausted ? "failed" : "pending", runAfter: new Date(Date.now() + delayMs), lastErrorClass: errorClass, updatedAt: new Date() })
+    .where(and(eq(memoryExtractionJobs.id, job.id), eq(memoryExtractionJobs.userId, userId)));
 }
 
 export async function listMemoryFacts(userId: number): Promise<MemoryFact[]> {

@@ -97,17 +97,47 @@ describe("AIChatBox user flows", () => {
     expect(screen.queryByText(/https?:\/\//i)).toBeNull();
   });
 
-  it("renders a temporary image thumbnail in the sent user message", () => {
+  it("opens temporary image and document previews from a sent user message", async () => {
+    const user = userEvent.setup();
     render(<AIChatBox messages={[{
       id: "user-image",
       role: "user",
       content: "Проверь это фото",
-      attachments: [{ id: "attachment-1", fileName: "sample.webp", mimeType: "image/webp", sizeBytes: 1234, kind: "image", previewUrl: "https://preview.example.test/sample.webp" }],
+      attachments: [
+        { id: "attachment-1", fileName: "sample.webp", mimeType: "image/webp", sizeBytes: 1234, kind: "image", previewUrl: "https://preview.example.test/sample.webp" },
+        { id: "attachment-2", fileName: "notes.pdf", mimeType: "application/pdf", sizeBytes: 4567, kind: "document", previewUrl: "https://preview.example.test/notes.pdf" },
+      ],
     }]} onSendMessage={vi.fn()} />);
 
-    const preview = screen.getByRole("img", { name: "sample.webp" });
-    expect(preview.getAttribute("src")).toBe("https://preview.example.test/sample.webp");
-    expect(screen.getByLabelText("Вложения сообщения").contains(preview)).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Открыть предпросмотр: sample.webp" }));
+    const imagePreview = screen.getByRole("img", { name: "sample.webp" });
+    expect(imagePreview.getAttribute("src")).toBe("https://preview.example.test/sample.webp");
+    expect(screen.getByRole("dialog").textContent).toContain("sample.webp");
+
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Открыть предпросмотр: notes.pdf" }));
+    const documentPreview = screen.getByTitle("notes.pdf");
+    expect(documentPreview.getAttribute("src")).toBe("https://preview.example.test/notes.pdf");
+    expect(screen.getByRole("dialog").textContent).toContain("notes.pdf");
+  });
+
+  it("keeps the temporary preview URL in the composer and deletes the temporary attachment on X", async () => {
+    const user = userEvent.setup();
+    const attachment = { id: "attachment-3", fileName: "draft.png", mimeType: "image/png", sizeBytes: 1024, kind: "image" as const, previewUrl: "https://preview.example.test/draft.png" };
+    const onUploadFiles = vi.fn().mockResolvedValue([attachment]);
+    const onRemoveAttachment = vi.fn().mockResolvedValue(undefined);
+    const { container } = render(<AIChatBox messages={[]} onSendMessage={vi.fn()} onUploadFiles={onUploadFiles} onRemoveAttachment={onRemoveAttachment} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    if (!input) throw new Error("Attachment input is missing");
+
+    await user.upload(input, new File(["image"], "draft.png", { type: "image/png" }));
+    await user.click(screen.getByRole("button", { name: "Открыть предпросмотр: draft.png" }));
+    expect(screen.getByRole("img", { name: "draft.png" }).getAttribute("src")).toBe("https://preview.example.test/draft.png");
+
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Убрать вложение: draft.png" }));
+    await waitFor(() => expect(onRemoveAttachment).toHaveBeenCalledWith(attachment));
+    expect(screen.queryByText("draft.png")).toBeNull();
   });
 
   it("ignores legacy continuation suggestions and does not render quick-prompt chips", () => {

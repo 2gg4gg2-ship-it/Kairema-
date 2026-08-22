@@ -23,13 +23,14 @@ describe("chat stream happy-path", () => {
       status: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis(), flushHeaders: vi.fn(), write: vi.fn((chunk: string) => { writes.push(chunk); if (chunk.includes("event: done")) order.push("done"); }), end: vi.fn(() => order.push("end")), json: vi.fn(),
     }) as unknown as Response;
     const auditChatStream = vi.fn();
-    const extractMemoryFacts = vi.fn().mockResolvedValue(undefined);
+    const enqueueMemoryExtractionJob = vi.fn().mockImplementation(async () => { order.push("memory-enqueued"); return { created: true }; });
+    const processMemoryExtractionJob = vi.fn().mockImplementation(async () => { order.push("memory-processed"); });
     const handler = createChatStreamHandler({
       authenticateRequest: vi.fn().mockResolvedValue({ id: 42 }),
       getOwnedChatSession: vi.fn().mockResolvedValue({ id: "550e8400-e29b-41d4-a716-446655440000", title: "Новый разговор" }),
-      appendChatMessage: vi.fn(async (_userId, _sessionId, role, content) => { appended.push({ role, content }); if (role === "assistant") order.push("assistant-saved"); }),
+      appendChatMessage: vi.fn(async (_userId, _sessionId, role, content) => { appended.push({ role, content }); if (role === "assistant") order.push("assistant-saved"); return { id: appended.length, created: true }; }),
       updateChatTitle: vi.fn(), listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
-      buildChatContext: vi.fn().mockResolvedValue(context), extractMemoryFacts,
+      buildChatContext: vi.fn().mockResolvedValue(context), enqueueMemoryExtractionJob, processMemoryExtractionJob,
       chatWithRoleStream: vi.fn(async (_modelId, _history, _settings, onDelta) => { onDelta("При"); onDelta("вет"); return { content: "Привет", modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Llama 3.1 8B Instant", sources: [{ title: "Официальный источник", url: "https://example.com/fresh", domain: "example.com" }] }; }),
       auditChatStream,
     });
@@ -45,8 +46,9 @@ describe("chat stream happy-path", () => {
     expect(JSON.stringify(auditChatStream.mock.calls[0][0])).not.toContain("Привет");
     expect(JSON.stringify(auditChatStream.mock.calls[0][0])).not.toContain("example.com");
     expect(streamResponse.end).toHaveBeenCalledOnce();
-    expect(order).toEqual(["assistant-saved", "done", "end"]);
-    expect(extractMemoryFacts).toHaveBeenCalledWith(42, "Привет", { assistantText: "Привет", role: "fast" });
+    expect(order).toEqual(["assistant-saved", "done", "end", "memory-enqueued", "memory-processed"]);
+    expect(enqueueMemoryExtractionJob).toHaveBeenCalledWith(expect.objectContaining({ userId: 42, sessionId: validRequestBody.sessionId, userMessageId: 1, assistantMessageId: 2, role: "fast" }));
+    expect(processMemoryExtractionJob).toHaveBeenCalledWith(42, 2);
   });
 
   it("does not persist a partially streamed assistant reply after the client cancels", async () => {
@@ -81,9 +83,9 @@ describe("chat stream happy-path", () => {
   it("replays a completed idempotent send without a second model invocation", async () => {
     const request = { ...validRequestBody, clientMessageId: "3b6a41a8-dfb4-4e6b-92ab-0395af0ed1fb" };
     const appendChatMessage = vi.fn()
-      .mockResolvedValueOnce({ created: true })
-      .mockResolvedValueOnce({ created: true })
-      .mockResolvedValueOnce({ created: false });
+      .mockResolvedValueOnce({ id: 1, created: true })
+      .mockResolvedValueOnce({ id: 2, created: true })
+      .mockResolvedValueOnce({ id: 1, created: false });
     const chatWithRoleStream = vi.fn().mockResolvedValue({ content: "Готовый ответ", modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Llama 3.1 8B Instant" });
     const handler = createChatStreamHandler({
       authenticateRequest: vi.fn().mockResolvedValue({ id: 42 }),
@@ -92,7 +94,8 @@ describe("chat stream happy-path", () => {
       listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
       buildChatContext: vi.fn().mockResolvedValue(context),
       chatWithRoleStream,
-      extractMemoryFacts: vi.fn().mockResolvedValue(undefined),
+      enqueueMemoryExtractionJob: vi.fn().mockResolvedValue({ created: true }),
+      processMemoryExtractionJob: vi.fn().mockResolvedValue(undefined),
       auditChatStream: vi.fn(),
     });
 
@@ -121,7 +124,7 @@ describe("chat stream happy-path", () => {
     const streamResponse = Object.assign(new EventEmitter(), {
       status: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis(), flushHeaders: vi.fn(), write: vi.fn((chunk: string) => writes.push(chunk)), end: vi.fn(), json: vi.fn(),
     }) as unknown as Response;
-    const appendChatMessage = vi.fn();
+    const appendChatMessage = vi.fn().mockResolvedValue({ id: 1, created: true });
     const chatWithRoleStream = vi.fn(async (_modelId, _history, settings) => {
       expect(settings).toMatchObject({ freshnessWarning: "Свежие источники сейчас недоступны, поэтому я не могу надёжно подтвердить актуальные сведения." });
       return { content: "Свежие источники сейчас недоступны, поэтому я не могу надёжно подтвердить актуальные сведения.", modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Llama 3.1 8B Instant" };
@@ -135,7 +138,8 @@ describe("chat stream happy-path", () => {
       listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
       buildChatContext,
       chatWithRoleStream,
-      extractMemoryFacts: vi.fn().mockResolvedValue(undefined),
+      enqueueMemoryExtractionJob: vi.fn().mockResolvedValue({ created: true }),
+      processMemoryExtractionJob: vi.fn().mockResolvedValue(undefined),
       auditChatStream: vi.fn(),
     });
 
@@ -153,9 +157,9 @@ describe("chat stream happy-path", () => {
     const handler = createChatStreamHandler({
       authenticateRequest: vi.fn().mockResolvedValue({ id: 73 }),
       getOwnedChatSession: vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Обычный разговор" }),
-      appendChatMessage: vi.fn(), updateChatTitle: vi.fn(),
+      appendChatMessage: vi.fn().mockResolvedValue({ id: 1, created: true }), updateChatTitle: vi.fn(),
       listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
-      buildChatContext: vi.fn().mockResolvedValue(context), extractMemoryFacts: vi.fn().mockResolvedValue(undefined),
+      buildChatContext: vi.fn().mockResolvedValue(context), enqueueMemoryExtractionJob: vi.fn().mockResolvedValue({ created: true }), processMemoryExtractionJob: vi.fn().mockResolvedValue(undefined),
       chatWithRoleStream: vi.fn().mockResolvedValue({ content: "Готово", modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Llama 3.1 8B Instant" }),
       auditChatStream,
     });
@@ -178,9 +182,9 @@ describe("chat stream happy-path", () => {
     const handler = createChatStreamHandler({
       authenticateRequest,
       getOwnedChatSession: vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Обычный разговор" }),
-      appendChatMessage: vi.fn(), updateChatTitle: vi.fn(),
+      appendChatMessage: vi.fn().mockResolvedValue({ id: 1, created: true }), updateChatTitle: vi.fn(),
       listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
-      buildChatContext: vi.fn().mockResolvedValue(context), extractMemoryFacts: vi.fn().mockResolvedValue(undefined),
+      buildChatContext: vi.fn().mockResolvedValue(context), enqueueMemoryExtractionJob: vi.fn().mockResolvedValue({ created: true }), processMemoryExtractionJob: vi.fn().mockResolvedValue(undefined),
       chatWithRoleStream,
       auditChatStream: vi.fn(),
     });

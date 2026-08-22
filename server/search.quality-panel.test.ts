@@ -42,7 +42,7 @@ describe("search.qualityPanel", () => {
     });
     getSearchQualityChart.mockReset();
     getSearchQualityChart.mockResolvedValue({
-      daily: [{ day: "08-15", found: 2, empty: 1, degraded: 0, error: 0 }, { day: "08-21", found: 3, empty: 0, degraded: 1, error: 0 }],
+      daily: [{ date: "2026-08-15", requests: 3, success: 2, failures_by_layer: { layer_1: 1, layer_2: 0, layer_3: 0 }, p50: 110, p95: 210 }, { date: "2026-08-21", requests: 4, success: 3, failures_by_layer: { layer_1: 1, layer_2: 1, layer_3: 0 }, p50: 130, p95: 260 }],
       hourlyLayers: [{ hour: "09", layer1: 2, layer2: 1, layer3: 0 }, { hour: "10", layer1: 1, layer2: 0, layer3: 1 }],
     });
   });
@@ -65,8 +65,8 @@ describe("search.qualityPanel", () => {
 
   it("returns anonymized seven-day and 24-hour chart series only to the owner", async () => {
     const result = await callerFor("owner-open-id").search.qualityChart();
-    expect(result.daily[0]).toMatchObject({ day: "08-15", found: 2 });
+    expect(result.daily[0]).toEqual({ date: "2026-08-15", requests: 3, success: 2, failures_by_layer: { layer_1: 1, layer_2: 0, layer_3: 0 }, p50: 110, p95: 210 });
     expect(result.hourlyLayers[0]).toMatchObject({ hour: "09", layer1: 2, layer2: 1, layer3: 0 });
-    expect(JSON.stringify(result)).not.toMatch(/https?:\/\/|query|userId|provider|model|source/i);
+    expect(JSON.stringify(result)).not.toMatch(/https?:\/\/|query|userId|message|memory|chatId|attachment|provider|model|source/i);
   });
 });

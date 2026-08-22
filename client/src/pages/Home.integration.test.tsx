@@ -1,5 +1,5 @@
 /* @vitest-environment jsdom */
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -7,7 +7,8 @@ const fixtures = vi.hoisted(() => ({
   modelId: "fast",
   sessionId: "11111111-1111-4111-8111-111111111111",
   sessions: [] as Array<{ id: string; modelId: string; title: string }>,
-  messages: [] as Array<{ id: number; role: "user" | "assistant"; content: string; modelId: string | null; createdAt: Date }>,
+  messages: [] as Array<{ id: number; role: "user" | "assistant"; content: string; modelId: string | null; createdAt: Date; metadata?: string }>,
+  attachments: [] as Array<{ id: string; fileName: string; contentType: string; byteSize: number; kind: "image" | "document"; previewUrl: string }>,
   prepareMarkdown: vi.fn(),
   preparePdf: vi.fn(),
   downloadPrepared: vi.fn(),
@@ -18,7 +19,9 @@ const fixtures = vi.hoisted(() => ({
   updateSettings: vi.fn(),
   updateMemory: vi.fn(),
   deleteMemoryEntry: vi.fn(),
+  clearMemory: vi.fn(),
   isOwner: false,
+  navigate: vi.fn(),
   releaseSecondDelta: null as (() => void) | null,
 }));
 
@@ -38,6 +41,7 @@ vi.mock("@/lib/chat-export", () => ({
   prepareChatPdf: fixtures.preparePdf,
   downloadPreparedChatExport: fixtures.downloadPrepared,
 }));
+vi.mock("wouter", () => ({ useLocation: () => ["/", fixtures.navigate] }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     models: { list: { useQuery: () => ({ data: [
@@ -47,13 +51,13 @@ vi.mock("@/lib/trpc", () => ({
       { key: "flagship", modelId: "flagship", label: "Kairema Apex", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
     ] }) } },
     settings: { get: { useQuery: () => ({ data: { language: "ru", theme: "dark", responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, defaultRole: "fast", webSearch: 0, healthRefreshSeconds: 30, highContrast: 0 } }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateSettings }) } },
-    memory: { get: { useQuery: () => ({ data: { settings: { enabled: 1, autoExtract: 1 }, profile: { profile: "" }, facts: [{ id: "11111111-1111-4111-8111-111111111112", value: "Предпочитает русский язык" }], topics: [{ id: "11111111-1111-4111-8111-111111111113", value: "2026-08-21 Flash: настройка профиля", role: "fast" }] } }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateMemory }) }, addFact: { useMutation: () => ({ mutateAsync: vi.fn() }) }, deleteEntry: { useMutation: () => ({ mutateAsync: fixtures.deleteMemoryEntry }) }, clear: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
+    memory: { get: { useQuery: () => ({ data: { settings: { enabled: 1, autoExtract: 1 }, profile: { profile: "" }, facts: [{ id: "11111111-1111-4111-8111-111111111112", value: "Предпочитает русский язык" }], topics: [{ id: "11111111-1111-4111-8111-111111111113", value: "2026-08-21 Flash: настройка профиля", role: "fast" }] } }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateMemory }) }, addFact: { useMutation: () => ({ mutateAsync: vi.fn() }) }, deleteEntry: { useMutation: () => ({ mutateAsync: fixtures.deleteMemoryEntry }) }, clear: { useMutation: () => ({ mutateAsync: fixtures.clearMemory }) } },
     webSearch: { status: { useQuery: () => ({ data: { available: false, reason: "Поиск сейчас недоступен", checkedAt: "2026-08-19T00:00:00.000Z", layers: [{ id: "google", state: "limited", retryAt: null }, { id: "tavily", state: "ready", retryAt: null }, { id: "openrouter", state: "ready", retryAt: null }] } }) } },
     knowledge: { status: { useQuery: () => ({ data: { documents: 0, sources: [], lastRun: null } }) }, audit: { useQuery: () => ({ data: { sources: [{ name: "OpenAI News", domain: "openai.com", ...(fixtures.isOwner ? { url: "https://openai.com/news/rss.xml" } : {}), indexedCount: 12, lastSuccessAt: "2026-08-19T00:00:00.000Z" }], latestRun: { state: "completed", startedAt: "2026-08-19T00:00:00.000Z", finishedAt: "2026-08-19T00:01:00.000Z" } } }) }, refresh: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) } },
     providers: { dashboard: { useQuery: () => ({ data: [{ id: "openrouter", label: "OpenRouter", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }, { id: "google", label: "Google AI Studio", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }, { id: "groq", label: "Groq", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }] }) } },
     owner: { isOwner: { useQuery: () => ({ data: fixtures.isOwner }) }, flashTtft: { useQuery: () => ({ data: fixtures.isOwner ? { last24h: { p50Ms: 220, p95Ms: 440, samples: 2 }, last7d: { p50Ms: 250, p95Ms: 480, samples: 5 } } : null }) }, flashTtftTrend: { useQuery: () => ({ data: fixtures.isOwner ? [{ date: "2026-08-20", p50Ms: 220, p95Ms: 440, samples: 2 }] : [] }) }, searchOutages: { useQuery: () => ({ data: fixtures.isOwner ? { last24h: 1, last7d: 2, recent: [{ layer: "google", errorClass: "http_429", latencyMs: 120, createdAt: "2026-08-20T00:00:00.000Z" }] } : null }) } },
     search: { query: { useQuery: () => ({ data: [] }) }, qualityPanel: { useQuery: () => ({ data: fixtures.isOwner ? { last24h: { sampleCount: 4, counts: { found: 2, empty: 1, degraded: 1, error: 0 }, verifiedSourceCount: 2, zeroSourceCount: 2, staleBlockedCount: 1, foundRate: 0.5, verificationPassRate: 0.5 }, last7d: { sampleCount: 10, counts: { found: 6, empty: 2, degraded: 1, error: 1 }, verifiedSourceCount: 6, zeroSourceCount: 4, staleBlockedCount: 2, foundRate: 0.6, verificationPassRate: 0.6 } } : null }) }, qualityChart: { useQuery: () => ({ data: fixtures.isOwner ? { daily: [{ day: "08-15", found: 1, empty: 0, degraded: 0, error: 0 }, { day: "08-21", found: 3, empty: 1, degraded: 0, error: 0 }], hourlyLayers: [{ hour: "09", layer1: 2, layer2: 1, layer3: 0 }, { hour: "10", layer1: 1, layer2: 0, layer3: 1 }] } : null }) } },
-    attachments: { list: { useQuery: () => ({ data: [] }) }, upload: { useMutation: () => ({ mutateAsync: vi.fn() }) }, delete: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
+    attachments: { list: { useQuery: () => ({ data: fixtures.attachments }) }, upload: { useMutation: () => ({ mutateAsync: vi.fn() }) }, delete: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
     chats: {
       list: { useQuery: () => ({ data: fixtures.sessions, isLoading: false }) },
       messages: { useQuery: () => ({ data: fixtures.messages }) },
@@ -82,14 +86,17 @@ function resetFixtures() {
     { id: 1, role: "user", content: "Старое сообщение пользователя", modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:00:00.000Z") },
     { id: 2, role: "assistant", content: "Старый ответ Kairema", modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:01:00.000Z") },
   ];
+  fixtures.attachments = [];
   const markdownFile = { fileName: "Активная история.md", contentType: "text/markdown", blob: new Blob(["markdown"]) };
   const pdfFile = { fileName: "Активная история.pdf", contentType: "application/pdf", blob: new Blob(["pdf"]) };
   fixtures.prepareMarkdown.mockReset().mockResolvedValue(markdownFile);
   fixtures.preparePdf.mockReset().mockResolvedValue(pdfFile);
   fixtures.downloadPrepared.mockReset();
   fixtures.isOwner = false;
+  fixtures.navigate.mockReset();
   fixtures.updateMemory.mockReset().mockResolvedValue(undefined);
   fixtures.deleteMemoryEntry.mockReset().mockResolvedValue(undefined);
+  fixtures.clearMemory.mockReset().mockResolvedValue(undefined);
   fixtures.invalidateSessions.mockReset().mockResolvedValue(undefined);
   fixtures.createChat.mockReset().mockResolvedValue({ id: "22222222-2222-4222-8222-222222222222", modelId: "fast", title: "Новый разговор" });
   fixtures.deleteChat.mockReset().mockResolvedValue({ success: true });
@@ -114,6 +121,15 @@ describe("Home integration flows", () => {
     const visibleRoleCards = document.querySelectorAll(".kairema-provider");
     expect(visibleRoleCards).toHaveLength(4);
     expect(screen.queryByText("Kairema Код")).toBeNull();
+  });
+
+  it("renders an owned temporary attachment only inside the saved user bubble that references it", () => {
+    fixtures.messages = [{ id: 1, role: "user", content: "Посмотри изображение", modelId: "fast", createdAt: new Date("2026-08-19T00:00:00.000Z"), metadata: JSON.stringify({ attachmentIds: ["44444444-4444-4444-8444-444444444444"] }) }];
+    fixtures.attachments = [{ id: "44444444-4444-4444-8444-444444444444", fileName: "owned.png", contentType: "image/png", byteSize: 100, kind: "image", previewUrl: "https://preview.example.test/owned.png" }];
+    render(<Home />);
+
+    expect(screen.getByRole("button", { name: "Открыть предпросмотр: owned.png" })).toBeTruthy();
+    expect(screen.getByText("Посмотри изображение")).toBeTruthy();
   });
 
   it("creates an allowed new chat when an old history item still has the removed Code role", async () => {
@@ -171,32 +187,24 @@ describe("Home integration flows", () => {
     expect(screen.queryByRole("region", { name: "Файлы" })).toBeNull();
   });
 
-  it("keeps owner aggregates invisible to a non-owner and renders only privacy-safe search quality data for the owner", () => {
-    const { rerender } = render(<Home />);
-    expect(screen.queryByRole("heading", { name: "Flash TTFT" })).toBeNull();
-    expect(screen.queryByRole("heading", { name: "Сбои поиска" })).toBeNull();
+  it("keeps the owner analytics entry and inline charts hidden from a non-owner", () => {
+    render(<Home />);
+
+    expect(screen.queryByRole("button", { name: "Аналитика владельца" })).toBeNull();
+    expect(screen.queryByLabelText("Графики качества поиска владельца")).toBeNull();
     expect(screen.queryByRole("heading", { name: "Качество веб-поиска" })).toBeNull();
-
-    fixtures.isOwner = true;
-    rerender(<Home />);
-
-    expect(screen.getByRole("heading", { name: "Flash TTFT" }).parentElement?.textContent).toContain("p50 220 мс");
-    expect(screen.getByRole("heading", { name: "Сбои поиска" }).parentElement?.textContent).toContain("24 часа: 1");
-    expect(screen.getByRole("heading", { name: "Качество веб-поиска" }).parentElement?.textContent).toContain("Проверяемые источники: 6");
-    expect(screen.getByRole("heading", { name: "Качество веб-поиска" }).parentElement?.textContent).not.toMatch(/https?:\/\/|model id|запрос пользователя/i);
-    expect(screen.queryByText(/http_429/i)).toBeNull();
   });
 
-  it("renders the 7-day line and 24-hour stacked layer chart only for the owner", () => {
-    const { rerender } = render(<Home />);
-    expect(screen.queryByLabelText("Графики качества поиска владельца")).toBeNull();
-
+  it("routes an owner to the dedicated analytics page instead of rendering inline metrics", async () => {
+    const user = userEvent.setup();
     fixtures.isOwner = true;
-    rerender(<Home />);
-    expect(screen.getByLabelText("Графики качества поиска владельца").textContent).toContain("Качество поиска: 7 дней / 24 часа");
-    expect(screen.getByLabelText("Найденные результаты за семь дней")).toBeTruthy();
-    expect(screen.getByLabelText("Использование трёх анонимных слоёв поиска")).toBeTruthy();
-    expect(screen.getByLabelText("Графики качества поиска владельца").textContent).not.toMatch(/https?:\/\/|model id|запрос пользователя/i);
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Аналитика владельца" }));
+
+    expect(fixtures.navigate).toHaveBeenCalledWith("/owner-analytics");
+    expect(screen.queryByLabelText("Графики качества поиска владельца")).toBeNull();
+    expect(screen.queryByText(/http_429/i)).toBeNull();
   });
 
   it("shows unified private memory lists and saves the profile explicitly", async () => {
@@ -210,6 +218,25 @@ describe("Home integration flows", () => {
     const deleteButtons = screen.getAllByRole("button", { name: "Удалить запись памяти" });
     await user.click(deleteButtons[0]!);
     await waitFor(() => expect(fixtures.deleteMemoryEntry).toHaveBeenCalledWith({ entryId: "11111111-1111-4111-8111-111111111112" }));
+  });
+
+  it("filters bounded memory entries, keeps auto-extraction independent and requires a clear confirmation", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click(screen.getByRole("button", { name: "Память" }));
+
+    expect(screen.getByText("1/30")).toBeTruthy();
+    expect(screen.getByText("1/100")).toBeTruthy();
+    await user.type(screen.getByLabelText("Поиск по памяти"), "профиля");
+    expect(screen.getByText("2026-08-21 Flash: настройка профиля")).toBeTruthy();
+    await user.click(within(screen.getByRole("group", { name: "Фильтр памяти" })).getByRole("button", { name: "Факты памяти" }));
+    expect(screen.queryByText("2026-08-21 Flash: настройка профиля")).toBeNull();
+    await user.click(screen.getByRole("switch", { name: "Автоматически извлекать новые факты" }));
+    await waitFor(() => expect(fixtures.updateMemory).toHaveBeenCalledWith({ autoExtract: false }));
+    await user.click(screen.getByRole("button", { name: "Очистить память" }));
+    expect(fixtures.clearMemory).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Подтвердить очистку" }));
+    await waitFor(() => expect(fixtures.clearMemory).toHaveBeenCalledOnce());
   });
 
   it("keeps RAG feed URLs out of the public audit and reveals an owner URL only after an explicit action", async () => {
