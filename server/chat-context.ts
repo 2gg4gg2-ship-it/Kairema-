@@ -158,25 +158,66 @@ const MEMORY_ROLE_LABELS: Record<RagRole, string> = {
  */
 type ExtractionTurn = { assistantText?: string; role?: RagRole; sourceMessageId?: number | null; sessionId?: string | null };
 
+type MemoryExtractionPhase = "settings_read" | "turn_read" | "llm_invoke" | "content_shape" | "json_invalid" | "memory_write" | "completion_write" | "worker_unknown";
+
+/**
+ * The phase name is safe to persist as job metadata. It deliberately excludes
+ * prompts, replies, provider output, identifiers, URLs and raw error messages.
+ */
+class MemoryExtractionPhaseError extends Error {
+  constructor(phase: MemoryExtractionPhase) {
+    super(phase);
+    this.name = phase;
+  }
+}
+
+function asMemoryExtractionPhaseError(error: unknown, fallback: MemoryExtractionPhase) {
+  return error instanceof MemoryExtractionPhaseError ? error : new MemoryExtractionPhaseError(fallback);
+}
+
+/** Accept only ordinary text output; structured extraction never consumes tool/image parts. */
+function memoryExtractionContentToText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const text = content
+      .filter((part): part is { type: "text"; text: string } => Boolean(part) && typeof part === "object" && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string")
+      .map((part) => part.text)
+      .join("\n");
+    if (text) return text;
+  }
+  throw new MemoryExtractionPhaseError("content_shape");
+}
+
 function parseMemoryExtraction(raw: string): MemoryExtraction {
-  const candidate = JSON.parse(raw) as unknown;
-  if (!candidate || typeof candidate !== "object") throw new Error("InvalidMemoryJSON");
-  const object = candidate as Record<string, unknown>;
-  if (!Array.isArray(object.facts) || typeof object.topic !== "string") throw new Error("InvalidMemoryJSON");
-  const facts = object.facts.slice(0, 3).map((fact) => {
-    if (!fact || typeof fact !== "object") throw new Error("InvalidMemoryJSON");
-    const item = fact as Record<string, unknown>;
-    if (!(["add", "update", "delete"] as const).includes(item.action as "add" | "update" | "delete")
-      || typeof item.key !== "string" || typeof item.value !== "string") throw new Error("InvalidMemoryJSON");
-    return { action: item.action as "add" | "update" | "delete", key: item.key.slice(0, 160), value: item.value.slice(0, 280) };
-  });
-  return { facts, topic: object.topic.slice(0, 360) };
+  try {
+    const candidate = JSON.parse(raw) as unknown;
+    if (!candidate || typeof candidate !== "object") throw new Error();
+    const object = candidate as Record<string, unknown>;
+    if (!Array.isArray(object.facts) || typeof object.topic !== "string") throw new Error();
+    const facts = object.facts.slice(0, 3).map((fact) => {
+      if (!fact || typeof fact !== "object") throw new Error();
+      const item = fact as Record<string, unknown>;
+      if (!(["add", "update", "delete"] as const).includes(item.action as "add" | "update" | "delete")
+        || typeof item.key !== "string" || typeof item.value !== "string") throw new Error();
+      return { action: item.action as "add" | "update" | "delete", key: item.key.slice(0, 160), value: item.value.slice(0, 280) };
+    });
+    return { facts, topic: object.topic.slice(0, 360) };
+  } catch {
+    throw new MemoryExtractionPhaseError("json_invalid");
+  }
 }
 
 async function applyMemoryExtraction(userId: number, userText: string, turn: ExtractionTurn = {}) {
-  const settings = await getMemorySettings(userId);
+  let settings;
+  try {
+    settings = await getMemorySettings(userId);
+  } catch (error) {
+    throw asMemoryExtractionPhaseError(error, "settings_read");
+  }
   if (!settings.enabled || !settings.autoExtract) return;
-    const response = await invokeLLM({
+  let response;
+  try {
+    response = await invokeLLM({
       model: "gpt-5-nano",
       // GPT-5 requires max_completion_tokens; using max_tokens makes the
       // structured background worker soft-fail and leaves jobs pending.
@@ -190,10 +231,18 @@ async function applyMemoryExtraction(userId: number, userText: string, turn: Ext
         { role: "user", content: `ПОЛЬЗОВАТЕЛЬ:\n${userText.slice(0, 4_000)}\n\nОТВЕТ АССИСТЕНТА (только для определения темы, не источник фактов):\n${(turn.assistantText ?? "").slice(0, 2_000)}` },
       ],
     });
-  const raw = response.choices[0]?.message.content;
-  if (typeof raw !== "string") throw new Error("InvalidMemoryJSON");
+  } catch (error) {
+    throw asMemoryExtractionPhaseError(error, "llm_invoke");
+  }
+  let raw: string;
+  try {
+    raw = memoryExtractionContentToText(response.choices[0]?.message.content);
+  } catch (error) {
+    throw asMemoryExtractionPhaseError(error, "content_shape");
+  }
   const extraction = parseMemoryExtraction(raw);
   const facts = extraction.facts;
+  try {
     await Promise.all(facts.map(async (fact) => {
       const key = typeof fact.key === "string" ? fact.key.trim().slice(0, 160) : "";
       const value = typeof fact.value === "string" ? fact.value.trim().slice(0, 280) : "";
@@ -215,6 +264,9 @@ async function applyMemoryExtraction(userId: number, userText: string, turn: Ext
         memoryKey: `topic:${role}:${topic.toLocaleLowerCase("ru-RU")}`.slice(0, 160), role, source: "auto", sourceMessageId: turn.sourceMessageId, sessionId: turn.sessionId,
       });
     }
+  } catch (error) {
+    throw asMemoryExtractionPhaseError(error, "memory_write");
+  }
 }
 
 /** Legacy public helper remains soft for request paths and direct unit coverage. */
@@ -231,14 +283,27 @@ export async function processMemoryExtractionJob(userId: number, assistantMessag
   const job = await claimMemoryExtractionJob(userId, assistantMessageId);
   if (!job) return;
   try {
-    const turn = await getMemoryExtractionJobTurn(userId, job);
+    let turn;
+    try {
+      turn = await getMemoryExtractionJobTurn(userId, job);
+    } catch (error) {
+      throw asMemoryExtractionPhaseError(error, "turn_read");
+    }
     if (!turn) {
-      await completeMemoryExtractionJob(userId, job.id);
+      try {
+        await completeMemoryExtractionJob(userId, job.id);
+      } catch (error) {
+        throw asMemoryExtractionPhaseError(error, "completion_write");
+      }
       return;
     }
     await applyMemoryExtraction(userId, turn.userText, { assistantText: turn.assistantText, role: job.role, sourceMessageId: job.assistantMessageId, sessionId: job.sessionId });
-    await completeMemoryExtractionJob(userId, job.id);
+    try {
+      await completeMemoryExtractionJob(userId, job.id);
+    } catch (error) {
+      throw asMemoryExtractionPhaseError(error, "completion_write");
+    }
   } catch (error) {
-    await retryMemoryExtractionJob(userId, job, error).catch(() => undefined);
+    await retryMemoryExtractionJob(userId, job, asMemoryExtractionPhaseError(error, "worker_unknown")).catch(() => undefined);
   }
 }

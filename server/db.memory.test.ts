@@ -30,7 +30,7 @@ const mockDb = vi.hoisted(() => ({
 
 vi.mock("drizzle-orm/mysql2", () => ({ drizzle: () => mockDb }));
 
-import { deleteMemoryEntry, listMemoryEntries, upsertMemoryEntry } from "./db";
+import { deleteMemoryEntry, listDueMemoryExtractionJobReferences, listMemoryEntries, upsertMemoryEntry } from "./db";
 
 const now = new Date("2026-08-22T10:00:00.000Z");
 function row(overrides: Partial<MemoryRow> = {}): MemoryRow {
@@ -86,5 +86,14 @@ describe("memory database helper invariants", () => {
     expect(listed[0]?.id).toBe("fact-0");
     expect(listed[29]?.id).toBe("fact-29");
     expect(deleted).toBe(true);
+  });
+
+  it("returns only bounded text-free references for due extraction jobs", async () => {
+    state.selectRows = [[{ userId: 7, assistantMessageId: 101 }, { userId: 8, assistantMessageId: 202 }]];
+
+    const references = await listDueMemoryExtractionJobReferences(99);
+
+    expect(references.map(({ userId, assistantMessageId }) => ({ userId, assistantMessageId }))).toEqual([{ userId: 7, assistantMessageId: 101 }, { userId: 8, assistantMessageId: 202 }]);
+    expect(mockDb.select).toHaveBeenCalledWith(expect.objectContaining({ userId: expect.anything(), assistantMessageId: expect.anything() }));
   });
 });

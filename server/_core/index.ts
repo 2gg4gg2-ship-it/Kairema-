@@ -9,6 +9,7 @@ import { appRouter } from "../routers";
 import { registerChatStreamRoute } from "../chat-stream";
 import { registerProviderHealthScheduleRoute } from "../provider-health-schedule";
 import { registerKnowledgeScheduleRoute } from "../knowledge-schedule";
+import { registerMemoryExtractionScheduleRoute } from "../memory-extraction-schedule";
 import { registerDevRoute } from "../dev-api";
 import { refreshProviderHealth } from "../providers";
 import { createContext } from "./context";
@@ -44,6 +45,7 @@ async function startServer() {
   registerChatStreamRoute(app);
   registerProviderHealthScheduleRoute(app);
   registerKnowledgeScheduleRoute(app);
+  registerMemoryExtractionScheduleRoute(app);
   registerDevRoute(app);
   // tRPC API
   app.use(

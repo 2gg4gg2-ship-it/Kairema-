@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, like, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, like, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
 import { ChatAttachment, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryExtractionJob, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryExtractionJobs, memoryFacts, memoryProfiles, memorySettings, messages, providerDailyUsage, providerHealth, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, userSettings, users, webSearchStatus } from "../drizzle/schema";
@@ -887,6 +887,27 @@ export async function claimMemoryExtractionJob(userId: number, assistantMessageI
   return { ...candidate, status: "processing", attempts: candidate.attempts + 1, lastErrorClass: null, updatedAt: now };
 }
 
+export type MemoryExtractionJobReference = Pick<MemoryExtractionJob, "userId" | "assistantMessageId">;
+
+/**
+ * Returns a tiny text-free batch for the project-level retry launcher. Each
+ * worker call still performs its own atomic claim, so overlap remains safe.
+ */
+export async function listDueMemoryExtractionJobReferences(limit = 8): Promise<MemoryExtractionJobReference[]> {
+  const db = requireDatabase(await getDb());
+  const now = new Date();
+  const staleAt = new Date(now.getTime() - 5 * 60 * 1_000);
+  const safeLimit = Math.min(12, Math.max(1, Math.floor(limit)));
+  return db.select({ userId: memoryExtractionJobs.userId, assistantMessageId: memoryExtractionJobs.assistantMessageId })
+    .from(memoryExtractionJobs)
+    .where(or(
+      and(eq(memoryExtractionJobs.status, "pending"), lte(memoryExtractionJobs.runAfter, now)),
+      and(eq(memoryExtractionJobs.status, "processing"), lte(memoryExtractionJobs.updatedAt, staleAt)),
+    ))
+    .orderBy(asc(memoryExtractionJobs.runAfter), asc(memoryExtractionJobs.createdAt))
+    .limit(safeLimit);
+}
+
 /** Reads the pair only after user/session ownership has been confirmed; payload is not logged or exported. */
 export async function getMemoryExtractionJobTurn(userId: number, job: MemoryExtractionJob): Promise<{ userText: string; assistantText: string } | null> {
   const db = requireDatabase(await getDb());
@@ -909,7 +930,8 @@ export async function retryMemoryExtractionJob(userId: number, job: MemoryExtrac
   const db = requireDatabase(await getDb());
   const exhausted = job.attempts >= 3;
   const delayMs = Math.min(5_000, 250 * 2 ** Math.max(0, job.attempts - 1));
-  const errorClass = error instanceof Error && error.name ? error.name.slice(0, 64) : "ExtractionError";
+  const safeClasses = new Set(["settings_read", "turn_read", "llm_invoke", "content_shape", "json_invalid", "memory_write", "completion_write", "worker_unknown"]);
+  const errorClass = error instanceof Error && safeClasses.has(error.name) ? error.name : "worker_unknown";
   await db.update(memoryExtractionJobs).set({ status: exhausted ? "failed" : "pending", runAfter: new Date(Date.now() + delayMs), lastErrorClass: errorClass, updatedAt: new Date() })
     .where(and(eq(memoryExtractionJobs.id, job.id), eq(memoryExtractionJobs.userId, userId)));
 }

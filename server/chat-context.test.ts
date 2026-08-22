@@ -35,7 +35,7 @@ vi.mock("./knowledge", () => ({
 vi.mock("./_core/llm", () => ({ invokeLLM: vi.fn() }));
 
 import { buildChatContext, extractMemoryFacts, FLASH_WEB_RESEARCH_BUDGET_MS, FRESHNESS_EMPTY_PROMPT, FRESHNESS_UNAVAILABLE_PROMPT, isKairemaIdentityQuery, needsWebResearch, processMemoryExtractionJob, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
-import { claimMemoryExtractionJob, deleteMemoryEntryByKey, getMemoryExtractionJobTurn, getMemoryProfile, getMemorySettings, getUserSettings, listMemoryEntries, retryMemoryExtractionJob, upsertMemoryEntry } from "./db";
+import { claimMemoryExtractionJob, completeMemoryExtractionJob, deleteMemoryEntryByKey, getMemoryExtractionJobTurn, getMemoryProfile, getMemorySettings, getUserSettings, listMemoryEntries, retryMemoryExtractionJob, upsertMemoryEntry } from "./db";
 import { invokeLLM } from "./_core/llm";
 import { WebSearchUnavailableError, searchWeb } from "./web-search";
 
@@ -182,6 +182,21 @@ describe("chat context soft web research", () => {
     await expect(processMemoryExtractionJob(7, 101)).resolves.toBeUndefined();
 
     expect(retryMemoryExtractionJob).toHaveBeenCalledWith(7, job, expect.any(Error));
+  });
+
+  it("completes a claimed persisted job after applying a text-part structured response", async () => {
+    const job = { id: "job-complete", userId: 7, sessionId: "11111111-1111-4111-8111-111111111111", userMessageId: 100, assistantMessageId: 101, role: "fast", attempts: 1 } as never;
+    vi.mocked(claimMemoryExtractionJob).mockResolvedValueOnce(job);
+    vi.mocked(getMemoryExtractionJobTurn).mockResolvedValueOnce({ userText: "Я предпочитаю русский язык", assistantText: "Принято" });
+    vi.mocked(getMemorySettings).mockResolvedValueOnce({ enabled: 1, autoExtract: 1 });
+    vi.mocked(invokeLLM).mockResolvedValueOnce({ choices: [{ message: { content: [{ type: "text", text: JSON.stringify({ facts: [{ action: "add", key: "language", value: "Пользователь предпочитает русский язык" }], topic: "обсуждение языковых предпочтений" }) }] } }] } as never);
+
+    await processMemoryExtractionJob(7, 101);
+
+    expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "fact", "Пользователь предпочитает русский язык", expect.objectContaining({ memoryKey: "language", source: "auto", sourceMessageId: 101 }));
+    expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "dialog_topic", expect.stringContaining("Flash: обсуждение языковых предпочтений"), expect.objectContaining({ role: "fast", sessionId: job.sessionId, sourceMessageId: 101 }));
+    expect(completeMemoryExtractionJob).toHaveBeenCalledWith(7, "job-complete");
+    expect(retryMemoryExtractionJob).not.toHaveBeenCalled();
   });
 
   it("continues with safe defaults when optional settings and memory context are unavailable", async () => {

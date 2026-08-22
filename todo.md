@@ -281,6 +281,10 @@
 
 ## v6-K v2 — You.com, источники, общая история и устойчивый интерфейс
 
+- [x] v6-MEM/BUG-EXTRACTION-PHASES: добавить privacy-safe phase class для ошибок persisted extraction worker без текста чата, идентификаторов, URL или секретов.
+- [x] v6-MEM/BUG-PERSISTED-WORKER-SUCCESS: покрыть claim → owned turn → structured text/content parts → memory write → complete regression-тестом.
+- [ ] v6-MEM/BUG-EXTRACTION-RETRY-RUNNER: добавить bounded durable cron-only sweep due/stale persisted jobs, с idempotent ownership scope и отдельным route test.
+
 - [x] v6-K/A: изучить и зафиксировать текущие контракты поиска, источников, памяти, chatId, сообщений, шаблонов и архивов; сохранить четыре роли, slug/active chains, лимиты, owner scope, presigned exports и существующие Heartbeat-задачи.
 - [x] v6-K/B: проверить You.com и кандидатов Serper.dev, Exa AI, Firecrawl и Keirolabs только по официальной документации и живому ответу; запросить и применить server-side ключи лишь для сервисов с подтверждённым доступным тарифом и HTTP 200, без Bright Data и без имитации.
 - [x] v6-K/C: реализовать единый server-side SearchProvider, безопасный каскад максимум из трёх search-попыток, общий health/failover audit и owner-only счётчики кредитных поисковых вызовов без раскрытия URL, ключей, цепей или model ID в публичных DTO.
@@ -341,3 +345,4 @@
 - [ ] v6-MEM/OAUTH-SESSION-ISOLATION: очистить или изолировать неверную browser OAuth-сессию и повторно открыть официальный вход с выбором другого аккаунта; затем ждать точную фразу пользователя «ВОШЁЛ КАК ВЛАДЕЛЕЦ».
 - [ ] v6-MEM/OWNER-ACCEPTANCE-RUN: после подтверждения owner-сессии проверить T1–T11, сохранение memory profile, image/document preview и vision, Markdown/PDF, отдельный экран owner analytics и Export metrics; зафиксировать PASS/FAIL/NOT VERIFIED со screenshots и не выполнять DROP при любом непрошедшем gate.
 - [ ] v6-MEM/BUG-AUTO-TOPIC-EXTRACTION: owner T1 выявил отсутствие `dialog_topic` после успешного Flash turn (`Темы диалогов 0/100`, Think retrieval отрицает прошлый чат); диагностировать persisted extraction job, устранить причину и повторить T1 только после регрессий.
+- [ ] v6-MEM/BUG-EXTRACTION-RETRY-RUNNER: durable jobs переходят в `pending` после soft-failure, но до сих пор не имели гарантированного launcher для наступившего `runAfter`; добавить bounded запуск due retry без нового постоянного процесса и покрыть его тестом.
