@@ -308,6 +308,33 @@ describe("Home integration flows", () => {
     await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
   });
 
+  it("keeps a sent-image preview while persisted message hydration leads the attachment query", async () => {
+    const user = userEvent.setup();
+    fixtures.invalidateMessages.mockImplementation(async () => {
+      fixtures.messages = [...fixtures.messages,
+        { id: 3, role: "user", content: "Проверь вложение", modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:02:00.000Z"), metadata: JSON.stringify({ attachmentIds: ["55555555-5555-4555-8555-555555555555"] }) },
+        { id: 4, role: "assistant", content: "Готово", modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:03:00.000Z") },
+      ];
+      fixtures.attachments = [];
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: done\ndata: {"content":"Готово","modelUsed":"fast","label":"Kairema Flash"}\n\n'));
+        controller.close();
+      },
+    }))));
+    render(<Home />);
+
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).toBeTruthy();
+    await user.upload(input!, new File(["neutral"], "vision.png", { type: "image/png" }));
+    await user.type(screen.getByPlaceholderText("Напишите сообщение…"), "Проверь вложение");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
+    expect(screen.getByRole("button", { name: "Открыть предпросмотр: vision.png" })).toBeTruthy();
+  });
+
   it("copies an assistant reply and regenerates it from the previous user prompt", async () => {
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
