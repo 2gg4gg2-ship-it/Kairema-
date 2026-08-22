@@ -292,10 +292,11 @@
 - [ ] v6-MEM/BUG-OWNER-CLAIM-PRODUCTION-CONFIG: восстановить configured owner claim в опубликованном runtime только через поддерживаемую конфигурацию платформы; не получать и не сохранять raw OAuth claim в коде, БД, логах или evidence.
 - [ ] v6-MEM/USER-ACCEPTANCE: повторно подтвердить без owner-прав memory profile/facts/dialog_topics, локальный поиск/фильтры, role capabilities, выборочное копирование, switch/dropdown и non-owner RAG privacy в тестах и браузере.
 - [ ] v6-MEM/USER-ATTACHMENTS: подтвердить для обычного пользователя composer thumbnail, temporary delete, sent-bubble thumbnail и live vision-response; provider failure фиксировать как FAIL, а не как PASS.
-- [ ] v6-MEM/BUG-SENT-ATTACHMENT-FAILURE-PREVIEW: source-level regression прошла, но опубликованная browser-приёмка после provider failure показала отсутствие sent-bubble preview. Диагностировать расхождение runtime state/UI и исправить без изменения ownership, temporary URLs или retry semantics.
+- [x] v6-MEM/BUG-SENT-ATTACHMENT-FAILURE-PREVIEW: source-level regression дополнена hydration-race coverage; опубликованная browser-приёмка `bd263b3c` подтвердила preview в user bubble после provider failure. Ownership, temporary URLs и retry semantics не изменены.
 - [ ] v6-MEM/OWNER-PLATFORM-BLOCKER: сохранить owner analytics, export metrics и DROP gate как blocked до восстановления системного OWNER_OPEN_ID платформой; не выполнять DROP TABLE chat_exports.
 - [ ] v6-MEM/USER-T1-T6: отдельно подтвердить profile save, facts/dialog topics, search/filters, shared memory across four roles и user-scope isolation; не выдавать server-only proof за second-account browser acceptance.
 - [ ] v6-MEM/USER-CAPABILITIES-AND-CONTROLS: browser-приёмка честных role capabilities, text selection, завершения switch анимации и closed/open dropdown descriptions без обрезки.
+- [ ] v6-MEM/BUG-SWITCH-THUMB-STATE: передать фактическое checked state на switch thumb или применить parent-state selector, чтобы transform гарантированно доходил до конечной позиции.
 - [ ] v6-MEM/USER-RAG-NON-OWNER: подтвердить, что обычный пользователь видит только privacy-safe RAG audit без источников, ссылок и owner aggregate exports.
 
 - [x] v6-K/A: изучить и зафиксировать текущие контракты поиска, источников, памяти, chatId, сообщений, шаблонов и архивов; сохранить четыре роли, slug/active chains, лимиты, owner scope, presigned exports и существующие Heartbeat-задачи.

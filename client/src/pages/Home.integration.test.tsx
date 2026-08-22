@@ -407,6 +407,7 @@ describe("Home integration flows", () => {
 
     rerender(<div className="dark" data-theme="dark"><SettingSwitch label="Тестовый переключатель" help="Подсказка" checked onChange={onChange} /></div>);
     const darkSwitch = screen.getByRole("switch", { name: "Тестовый переключатель" });
+    const thumb = darkSwitch.querySelector('[data-slot="switch-thumb"]');
     expect({ theme: darkSwitch.parentElement?.parentElement?.getAttribute("data-theme"), role: darkSwitch.getAttribute("role"), checked: darkSwitch.getAttribute("aria-checked"), state: darkSwitch.getAttribute("data-state") }).toMatchInlineSnapshot(`
       {
         "checked": "true",
@@ -415,6 +416,9 @@ describe("Home integration flows", () => {
         "theme": "dark",
       }
     `);
+    expect(darkSwitch.className).toContain("group");
+    expect(thumb?.className).toContain("group-data-[state=checked]:translate-x-4");
+    expect(thumb?.getAttribute("data-state")).toBe("checked");
   });
 
   it("filters template cards by category while preserving visible tokenized text and separate actions", async () => {
