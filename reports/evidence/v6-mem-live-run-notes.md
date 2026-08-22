@@ -79,3 +79,11 @@
 |---|---|---|---|---|
 | 2026-08-22 08:31 | Открыт прямой published route `/owner-analytics` | Страница показала `Аналитика недоступна` и owner guard вместо 7d/24h графиков и кнопок CSV/JSON. | FAIL: owner analytics acceptance | `kairema-ai-gxujplkn__2026-08-22_08-31-09_6975.webp` |
 | 2026-08-22 08:33 | Выполнена privacy-safe same-session проверка auth/owner flags | `authHttp: 200`, `authenticated: true`, `ownerHttp: 200`, `owner: false`; идентификаторы, тексты чатов и токены не читались и не сохранялись. | FAIL: owner authorization не установлена; guard намеренно не ослаблялся | `console_outputs/exec_result_2026-08-22_08-33-34_242.txt` |
+
+### Published owner claim diagnostic after current OAuth login
+
+| Время (GMT+3) | Действие | Наблюдение | Статус | Скриншот |
+|---|---|---|---|---|
+| 2026-08-22 09:00 | После подтверждённого OAuth-входа открыт published `/owner-analytics` версии `6bcd28d3` | Self-scoped diagnostic сравнил claim `openId`; configured mapping отсутствует, expected fingerprint `not-configured`, fingerprint текущей сессии `sha256:048f7ce8deb5`, `matches: false`. Реальные IDs, JWT, токены, сообщения и метрики не отображались. | **FAIL: production owner mapping не настроен**; это не client cache и не основание ослаблять guard | `kairema-ai-gxujplkn__2026-08-22_09-00-45_2420.webp` |
+
+> Причина отказа установлена на server-authoritative published path: `OWNER_OPEN_ID` не доступен production runtime. Код сравнения `ctx.user.openId === ENV.ownerOpenId` не изменён. Исправление требует поддерживаемой настройки системного owner claim на платформе; нельзя безопасно вывести raw OAuth claim в UI, evidence, БД или логи и нельзя заменить guard на роль `admin`.

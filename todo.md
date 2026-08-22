@@ -289,6 +289,10 @@
 - [ ] v6-MEM/BUG-ATTACHMENT-CHAT-STATE: после смены чата temporary upload status не должен оставаться без preview/removal control; attachment IDs обязаны быть scoped к current composer chat.
 - [ ] v6-MEM/BUG-OWNER-ANALYTICS-GUARD: отдельный `/owner-analytics` route должен распознавать того же OAuth owner, который имеет доступ к Memory UI и owner navigation.
 - [ ] v6-MEM/BUG-OWNER-CLAIM-MAPPING: безопасно сопоставить expected owner claim с claim текущей OAuth-сессии в маскированном диагностическом DTO; исправлять только подтверждённое устаревшее или неверное claim comparison.
+- [ ] v6-MEM/BUG-OWNER-CLAIM-PRODUCTION-CONFIG: восстановить configured owner claim в опубликованном runtime только через поддерживаемую конфигурацию платформы; не получать и не сохранять raw OAuth claim в коде, БД, логах или evidence.
+- [ ] v6-MEM/USER-ACCEPTANCE: повторно подтвердить без owner-прав memory profile/facts/dialog_topics, локальный поиск/фильтры, role capabilities, выборочное копирование, switch/dropdown и non-owner RAG privacy в тестах и браузере.
+- [ ] v6-MEM/USER-ATTACHMENTS: подтвердить для обычного пользователя composer thumbnail, temporary delete, sent-bubble thumbnail и live vision-response; provider failure фиксировать как FAIL, а не как PASS.
+- [ ] v6-MEM/OWNER-PLATFORM-BLOCKER: сохранить owner analytics, export metrics и DROP gate как blocked до восстановления системного OWNER_OPEN_ID платформой; не выполнять DROP TABLE chat_exports.
 
 - [x] v6-K/A: изучить и зафиксировать текущие контракты поиска, источников, памяти, chatId, сообщений, шаблонов и архивов; сохранить четыре роли, slug/active chains, лимиты, owner scope, presigned exports и существующие Heartbeat-задачи.
 - [x] v6-K/B: проверить You.com и кандидатов Serper.dev, Exa AI, Firecrawl и Keirolabs только по официальной документации и живому ответу; запросить и применить server-side ключи лишь для сервисов с подтверждённым доступным тарифом и HTTP 200, без Bright Data и без имитации.

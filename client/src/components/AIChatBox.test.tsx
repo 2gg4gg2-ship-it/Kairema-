@@ -124,7 +124,7 @@ describe("AIChatBox user flows", () => {
   it("keeps the temporary preview URL in the composer and deletes the temporary attachment on X", async () => {
     const user = userEvent.setup();
     const attachment = { id: "attachment-3", fileName: "draft.png", mimeType: "image/png", sizeBytes: 1024, kind: "image" as const, previewUrl: "https://preview.example.test/draft.png" };
-    const onUploadFiles = vi.fn().mockResolvedValue([attachment]);
+    const onUploadFiles = vi.fn().mockResolvedValue({ attachments: [attachment], sessionId: "new-composer" });
     const onRemoveAttachment = vi.fn().mockResolvedValue(undefined);
     const { container } = render(<AIChatBox messages={[]} onSendMessage={vi.fn()} onUploadFiles={onUploadFiles} onRemoveAttachment={onRemoveAttachment} />);
     const input = container.querySelector('input[type="file"]') as HTMLInputElement | null;
@@ -138,6 +138,23 @@ describe("AIChatBox user flows", () => {
     await user.click(screen.getByRole("button", { name: "Убрать вложение: draft.png" }));
     await waitFor(() => expect(onRemoveAttachment).toHaveBeenCalledWith(attachment));
     expect(screen.queryByText("draft.png")).toBeNull();
+  });
+
+  it("does not move a completed temporary upload into a composer after the user changes chat", async () => {
+    const user = userEvent.setup();
+    const attachment = { id: "attachment-race", fileName: "old-chat.png", mimeType: "image/png", sizeBytes: 1024, kind: "image" as const, previewUrl: "https://preview.example.test/old-chat.png" };
+    let resolveUpload: ((value: { attachments: typeof attachment[]; sessionId: string }) => void) | undefined;
+    const onUploadFiles = vi.fn(() => new Promise<{ attachments: typeof attachment[]; sessionId: string }>((resolve) => { resolveUpload = resolve; }));
+    const { container, rerender } = render(<AIChatBox messages={[]} onSendMessage={vi.fn()} onUploadFiles={onUploadFiles} composerSessionId="chat-a" />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    if (!input) throw new Error("Attachment input is missing");
+
+    await user.upload(input, new File(["image"], "old-chat.png", { type: "image/png" }));
+    await waitFor(() => expect(onUploadFiles).toHaveBeenCalledOnce());
+    rerender(<AIChatBox messages={[]} onSendMessage={vi.fn()} onUploadFiles={onUploadFiles} composerSessionId="chat-b" />);
+    resolveUpload?.({ attachments: [attachment], sessionId: "chat-a" });
+
+    await waitFor(() => expect(screen.queryByText("old-chat.png")).toBeNull());
   });
 
   it("ignores legacy continuation suggestions and does not render quick-prompt chips", () => {

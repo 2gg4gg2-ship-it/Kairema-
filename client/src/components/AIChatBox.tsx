@@ -8,6 +8,7 @@ import React, { useEffect, useRef, useState } from "react";
 
 export type Source = { title: string; url: string; domain?: string; kind?: "web" | "rag"; publishedAt?: string | null; snippet?: string | null };
 export type ChatAttachment = { id: string; fileName: string; mimeType: string; sizeBytes: number; kind: "image" | "document"; previewUrl?: string };
+export type ComposerUploadResult = { attachments: ChatAttachment[]; sessionId: string };
 export type Message = {
   id?: string;
   role: "system" | "user" | "assistant";
@@ -26,7 +27,7 @@ type Language = "ru" | "en";
 type AIChatBoxProps = {
   messages: Message[];
   onSendMessage: (content: string, options?: { attachmentIds?: string[]; attachments?: ChatAttachment[]; clientMessageId?: string }) => void;
-  onUploadFiles?: (files: File[]) => Promise<ChatAttachment[]>;
+  onUploadFiles?: (files: File[]) => Promise<ComposerUploadResult>;
   onRemoveAttachment?: (attachment: ChatAttachment) => Promise<void> | void;
   isLoading?: boolean;
   placeholder?: string;
@@ -46,6 +47,7 @@ type AIChatBoxProps = {
   onComposerValueChange?: (value: string) => void;
   onOpenTemplates?: () => void;
   uploadStatus?: string;
+  composerSessionId?: string;
   language?: Language;
 };
 
@@ -57,7 +59,7 @@ const copy = {
 export function AIChatBox({
   messages, onSendMessage, onUploadFiles, isLoading = false, placeholder, className, height, emptyStateMessage,
   onExportMarkdown, onExportPdf, canExport = false, exportBusy = null, exportError = "",
-  onCopyAssistant, onCopyUser, onRegenerate, onCancelStream, composerValue, onComposerValueChange, onOpenTemplates, uploadStatus = "", language = "ru", onRemoveAttachment,
+  onCopyAssistant, onCopyUser, onRegenerate, onCancelStream, composerValue, onComposerValueChange, onOpenTemplates, uploadStatus = "", composerSessionId = "new-composer", language = "ru", onRemoveAttachment,
 }: AIChatBoxProps) {
   const t = copy[language];
   const [input, setInput] = useState("");
@@ -68,12 +70,15 @@ export function AIChatBox({
   const viewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const composerSessionRef = useRef(composerSessionId);
+  composerSessionRef.current = composerSessionId;
   const displayMessages = messages.filter((message) => message.role !== "system");
   const effectivePlaceholder = placeholder ?? (language === "ru" ? "Напишите сообщение…" : "Write a message…");
   const currentInput = composerValue ?? input;
   const setComposerInput = (value: string) => { setInput(value); onComposerValueChange?.(value); };
 
   useEffect(() => { viewportRef.current?.scrollTo?.({ top: viewportRef.current.scrollHeight, behavior: "smooth" }); }, [displayMessages.length, isLoading]);
+  useEffect(() => { setAttachments([]); setPreviewAttachment(null); setIsUploading(false); if (fileInputRef.current) fileInputRef.current.value = ""; }, [composerSessionId]);
 
   const submit = (event?: React.FormEvent) => {
     event?.preventDefault();
@@ -88,11 +93,12 @@ export function AIChatBox({
   const addFiles = async (files: FileList | null) => {
     if (!files?.length || !onUploadFiles || isLoading) return;
     setIsUploading(true);
+    const expectedSessionId = composerSessionId;
     try {
-      const uploaded = await onUploadFiles(Array.from(files));
-      setAttachments((current) => [...current, ...uploaded]);
+      const result = await onUploadFiles(Array.from(files));
+      if (composerSessionRef.current === expectedSessionId && result.sessionId === expectedSessionId) setAttachments((current) => [...current, ...result.attachments]);
     }
-    finally { setIsUploading(false); if (fileInputRef.current) fileInputRef.current.value = ""; }
+    finally { if (composerSessionRef.current === expectedSessionId) { setIsUploading(false); if (fileInputRef.current) fileInputRef.current.value = ""; } }
   };
   const removeAttachment = async (attachment: ChatAttachment) => {
     await onRemoveAttachment?.(attachment);
