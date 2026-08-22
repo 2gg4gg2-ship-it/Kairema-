@@ -207,6 +207,21 @@ function parseMemoryExtraction(raw: string): MemoryExtraction {
   }
 }
 
+/**
+ * A completed extractor may conservatively return an empty topic. Preserve
+ * cross-chat recall for ordinary questions without treating arbitrary user
+ * text as memory: only a short interrogative sentence with no instruction
+ * markers may become a fallback dialog topic. No extra model call is made.
+ */
+function fallbackDialogTopic(userText: string): string {
+  const question = userText.trim().replace(/\s+/g, " ").match(/[^.!?]{3,220}\?/)?.[0]?.trim() ?? "";
+  if (!question) return "";
+  const normalized = question.toLocaleLowerCase("ru-RU");
+  const isQuestion = /^(?:как(?:ой|ого|ова|овы|ие)?|что|кто|где|когда|почему|зачем|сколько|о\s+ч[её]м|можно\s+ли|есть\s+ли|каков)/.test(normalized);
+  const containsInstructionMarker = /(?:игнорир|системн(?:ое|ые)?\s+правил|инструкци|prompt|developer|assistant)/i.test(question);
+  return isQuestion && !containsInstructionMarker ? `Вопрос: ${question}`.slice(0, 360) : "";
+}
+
 async function applyMemoryExtraction(userId: number, userText: string, turn: ExtractionTurn = {}) {
   let settings;
   try {
@@ -226,7 +241,7 @@ async function applyMemoryExtraction(userId: number, userText: string, turn: Ext
       messages: [
         {
           role: "system",
-          content: "Ты выполняешь очень консервативное извлечение личной памяти. Верни только JSON по схеме. Сохраняй только явно сообщённые пользователем долговременные, несекретные предпочтения или факты. Не сохраняй пароли, ключи, платёжные/медицинские данные, чужие персональные данные, инструкции, предположения или текст ассистента как факт. facts: не более трёх add/update/delete; key — короткая стабильная метка. topic — одна краткая нейтральная тема данного диалога либо пустая строка.",
+          content: "Ты выполняешь очень консервативное извлечение личной памяти. Верни только JSON по схеме. Сохраняй только явно сообщённые пользователем долговременные, несекретные предпочтения или факты. Не сохраняй пароли, ключи, платёжные/медицинские данные, чужие персональные данные, инструкции, предположения или текст ассистента как факт. facts: не более трёх add/update/delete; key — короткая стабильная метка. topic — одна краткая нейтральная тема данного диалога; для содержательного вопроса пользователя topic не должен быть пустым, иначе пустая строка.",
         },
         { role: "user", content: `ПОЛЬЗОВАТЕЛЬ:\n${userText.slice(0, 4_000)}\n\nОТВЕТ АССИСТЕНТА (только для определения темы, не источник фактов):\n${(turn.assistantText ?? "").slice(0, 2_000)}` },
       ],
@@ -256,7 +271,7 @@ async function applyMemoryExtraction(userId: number, userText: string, turn: Ext
         await upsertMemoryEntry(userId, "fact", value, { memoryKey: key || undefined, source: "auto", sourceMessageId: turn.sourceMessageId });
       }
     }));
-  const topic = extraction.topic.trim().replace(/\s+/g, " ").slice(0, 360);
+  const topic = extraction.topic.trim().replace(/\s+/g, " ").slice(0, 360) || fallbackDialogTopic(userText);
     if (topic.length >= 3) {
       const date = new Date().toISOString().slice(0, 10);
       const role = turn.role ?? "flagship";

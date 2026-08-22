@@ -284,6 +284,7 @@
 - [x] v6-MEM/BUG-EXTRACTION-PHASES: добавить privacy-safe phase class для ошибок persisted extraction worker без текста чата, идентификаторов, URL или секретов.
 - [x] v6-MEM/BUG-PERSISTED-WORKER-SUCCESS: покрыть claim → owned turn → structured text/content parts → memory write → complete regression-тестом.
 - [ ] v6-MEM/BUG-EXTRACTION-RETRY-RUNNER: добавить bounded durable cron-only sweep due/stale persisted jobs, с idempotent ownership scope и отдельным route test.
+- [x] v6-MEM/BUG-EMPTY-TOPIC-FALLBACK: при успешном structured job с пустым `topic` создавать только краткую, неинструктивную тему вопроса без вызова второй модели.
 
 - [x] v6-K/A: изучить и зафиксировать текущие контракты поиска, источников, памяти, chatId, сообщений, шаблонов и архивов; сохранить четыре роли, slug/active chains, лимиты, owner scope, presigned exports и существующие Heartbeat-задачи.
 - [x] v6-K/B: проверить You.com и кандидатов Serper.dev, Exa AI, Firecrawl и Keirolabs только по официальной документации и живому ответу; запросить и применить server-side ключи лишь для сервисов с подтверждённым доступным тарифом и HTTP 200, без Bright Data и без имитации.
