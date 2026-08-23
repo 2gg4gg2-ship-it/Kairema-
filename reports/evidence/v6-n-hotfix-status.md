@@ -26,6 +26,7 @@
 | Реальный server-stream vision probe | PASS | 2026-08-23: ответ присутствует, streaming delta получена, fallback path допустим; provider/model/payload не фиксируются в evidence. |
 | Published composer thumbnail и sent-bubble thumbnail | PASS | 2026-08-23 authenticated published acceptance: контролируемый neutral PNG появился в composer и сохранился в отправленном user bubble. Evidence намеренно не содержит image/file URL, attachment URL или содержимого. |
 | Published neutral-image answer | PASS | 2026-08-23 authenticated published acceptance: обычный Flash role path вернул image-aware ответ для того же neutral PNG. Это browser-user-flow факт, а не замена server probe; provider payload и текст ответа не сохраняются в evidence. |
+| Legacy source-object redaction | NOT VERIFIED (2026-08-23) | Сразу после checkpoint `cef3d3a2` уже загруженный pre-refresh browser document визуализировал old source control. Cache-busted fresh document больше не имел OAuth session, поэтому факт нельзя приписывать текущему deployed bundle. В этот отчёт не переносятся URL, titles, domains, snippets или content. Новый safe SSE/persisted DTO покрыт regression; для итогового статуса нужен fresh authenticated published recheck legacy record. |
 
 ### Устранённая причина
 
