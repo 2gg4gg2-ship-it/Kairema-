@@ -31,6 +31,9 @@ export type SafeSearchStatus = {
   verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable";
   /** RAG was the only available source and its newest dated item is older than 90 days. */
   staleRagOnly?: boolean;
+  /** Normalized source-date bounds for an ordinary-user freshness indicator; no source objects are exposed. */
+  sourceDateMin?: string | null;
+  sourceDateMax?: string | null;
 };
 export type ChatSettings = {
   style?: "default" | "professional" | "friendly" | "concise" | "steps";

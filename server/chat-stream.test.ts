@@ -17,7 +17,7 @@ describe("chat stream happy-path", () => {
 
   it("emits start, incremental delta and done events before persisting the completed assistant reply", async () => {
     const writes: string[] = [];
-    const appended: Array<{ role: string; content: string }> = [];
+    const appended: Array<{ role: string; content: string; metadata?: string }> = [];
     const order: string[] = [];
     const streamResponse = Object.assign(new EventEmitter(), {
       status: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis(), flushHeaders: vi.fn(), write: vi.fn((chunk: string) => { writes.push(chunk); if (chunk.includes("event: done")) order.push("done"); }), end: vi.fn(() => order.push("end")), json: vi.fn(),
@@ -28,10 +28,10 @@ describe("chat stream happy-path", () => {
     const handler = createChatStreamHandler({
       authenticateRequest: vi.fn().mockResolvedValue({ id: 42 }),
       getOwnedChatSession: vi.fn().mockResolvedValue({ id: "550e8400-e29b-41d4-a716-446655440000", title: "Новый разговор" }),
-      appendChatMessage: vi.fn(async (_userId, _sessionId, role, content) => { appended.push({ role, content }); if (role === "assistant") order.push("assistant-saved"); return { id: appended.length, created: true }; }),
+      appendChatMessage: vi.fn(async (_userId, _sessionId, role, content, _modelId, metadata) => { appended.push({ role, content, metadata }); if (role === "assistant") order.push("assistant-saved"); return { id: appended.length, created: true }; }),
       updateChatTitle: vi.fn(), listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
       buildChatContext: vi.fn().mockResolvedValue(context), enqueueMemoryExtractionJob, processMemoryExtractionJob,
-      chatWithRoleStream: vi.fn(async (_modelId, _history, _settings, onDelta) => { onDelta("При"); onDelta("вет"); return { content: "Привет", modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Llama 3.1 8B Instant", sources: [{ title: "Официальный источник", url: "https://example.com/fresh", domain: "example.com" }] }; }),
+      chatWithRoleStream: vi.fn(async (_modelId, _history, _settings, onDelta) => { onDelta("При"); onDelta("вет"); return { content: "Привет", modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Llama 3.1 8B Instant", sources: [{ title: "Официальный источник", url: "https://example.com/fresh", domain: "example.com", publishedAt: "2026-08-23T00:00:00.000Z" }], evidence: [{ sourceUrl: "https://example.com/evidence", excerpt: "private snippet" }], ragSources: [{ title: "Private RAG", url: "https://example.com/rag", publishedAt: "2026-08-19T00:00:00.000Z" }], searchStatus: { cascadeUsed: "you", state: "found", verificationStatus: "verified", sourcesCount: 2 } }; }),
       auditChatStream,
     });
 
@@ -41,8 +41,18 @@ describe("chat stream happy-path", () => {
     expect(writes.join("")).toContain('event: delta\ndata: {"content":"При"}');
     expect(writes.join("")).toContain('event: delta\ndata: {"content":"вет"}');
     expect(writes.join("")).toContain("event: done");
-    expect(appended).toEqual([{ role: "user", content: "Привет" }, { role: "assistant", content: "Привет" }]);
-    expect(auditChatStream).toHaveBeenCalledWith(expect.objectContaining({ event: "chat_stream.completed", userId: 42, roleId: "fast", provider: "groq", searchAttached: true, sourcesCount: 1 }));
+    const doneChunk = String((streamResponse.write as ReturnType<typeof vi.fn>).mock.calls.find(([chunk]) => String(chunk).includes("event: done"))![0]);
+    const donePayload = JSON.parse(doneChunk.match(/data: (.+)\n/)?.[1] ?? "{}");
+    const persistedMetadata = JSON.parse(appended[1]?.metadata ?? "{}");
+    expect(writes.join("")).toContain('"sourceDateMin":"2026-08-19T00:00:00.000Z"');
+    expect(writes.join("")).toContain('"sourceDateMax":"2026-08-23T00:00:00.000Z"');
+    expect(writes.join("")).not.toMatch(/example\.com|Официальный источник|Private RAG|private snippet|cascadeUsed/);
+    expect(donePayload).toEqual({ content: "Привет", modelUsed: "llama-3.1-8b-instant", label: "Llama 3.1 8B Instant", searchStatus: { state: "found", verificationStatus: "verified", sourcesCount: 2, sourceDateMin: "2026-08-19T00:00:00.000Z", sourceDateMax: "2026-08-23T00:00:00.000Z" } });
+    expect(donePayload).not.toHaveProperty("sources");
+    expect(persistedMetadata).toEqual({ searchStatus: donePayload.searchStatus });
+    expect(JSON.stringify(persistedMetadata)).not.toMatch(/example\.com|Официальный источник|Private RAG|private snippet|cascadeUsed/);
+    expect(appended.map(({ role, content }) => ({ role, content }))).toEqual([{ role: "user", content: "Привет" }, { role: "assistant", content: "Привет" }]);
+    expect(auditChatStream).toHaveBeenCalledWith(expect.objectContaining({ event: "chat_stream.completed", userId: 42, roleId: "fast", provider: "groq", searchAttached: true, sourcesCount: 2 }));
     expect(JSON.stringify(auditChatStream.mock.calls[0][0])).not.toContain("Привет");
     expect(JSON.stringify(auditChatStream.mock.calls[0][0])).not.toContain("example.com");
     expect(streamResponse.end).toHaveBeenCalledOnce();

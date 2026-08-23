@@ -9,7 +9,7 @@ export const CHAT_STREAM_RATE_LIMIT = 60;
 const CHAT_STREAM_RATE_WINDOW_MS = 60_000;
 const CHAT_STREAM_REPLAY_TTL_MS = 5 * 60_000;
 type StreamResult = Awaited<ReturnType<typeof chatWithRoleStream>>;
-type StoredReplay = Pick<StreamResult, "content" | "modelUsed" | "label" | "searchStatus"> & { sources?: unknown[]; evidence?: unknown[]; ragSources?: unknown[] };
+type StoredReplay = Pick<StreamResult, "content" | "modelUsed" | "label" | "searchStatus">;
 type PendingReplay = { promise: Promise<StreamResult | null>; resolve: (result: StreamResult | null) => void };
 
 type RateWindow = { count: number; windowStart: number };
@@ -110,6 +110,36 @@ function historyError(error: unknown) {
   return "Этап «подготовка сообщения»: не удалось собрать приватный контекст. Повторите попытку позже.";
 }
 
+function normalizedDate(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+/** The ordinary-user SSE boundary exposes freshness metadata only, never source objects or their contents. */
+function publicSearchStatus(status: StreamResult["searchStatus"]) {
+  if (!status) return undefined;
+  const sourceDateMin = normalizedDate(status.sourceDateMin);
+  const sourceDateMax = normalizedDate(status.sourceDateMax);
+  return {
+    state: status.state,
+    verificationStatus: status.verificationStatus,
+    sourcesCount: Math.max(0, Math.floor(status.sourcesCount)),
+    ...(status.staleRagOnly ? { staleRagOnly: true } : {}),
+    ...(sourceDateMin ? { sourceDateMin } : {}),
+    ...(sourceDateMax ? { sourceDateMax } : {}),
+  };
+}
+
+function publicStreamResult(result: Pick<StreamResult, "content" | "modelUsed" | "label" | "searchStatus">) {
+  return {
+    content: result.content,
+    modelUsed: result.modelUsed,
+    label: result.label,
+    ...(result.searchStatus ? { searchStatus: publicSearchStatus(result.searchStatus) } : {}),
+  };
+}
+
 type StreamDependencies = {
   authenticateRequest: (request: Request) => Promise<{ id: number } | null>;
   getOwnedChatSession: typeof getOwnedChatSession;
@@ -171,7 +201,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
         res.set({ "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
         res.flushHeaders();
         writeEvent(res, "start", { sessionId: input.sessionId, replayed: true });
-        writeEvent(res, "done", replay);
+        writeEvent(res, "done", publicStreamResult(replay));
         res.end();
         return;
       }
@@ -204,14 +234,14 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
             content: stored.content,
             modelUsed: stored.modelId ?? input.modelId,
             label: "Kairema",
-            ...(stored.metadata ? (() => { try { return JSON.parse(stored.metadata) as Pick<StoredReplay, "sources" | "evidence" | "ragSources" | "searchStatus">; } catch { return {}; } })() : {}),
+            ...(stored.metadata ? (() => { try { return JSON.parse(stored.metadata) as Pick<StoredReplay, "searchStatus">; } catch { return {}; } })() : {}),
           } : null);
           if (!replay) throw new Error("Предыдущее сообщение ещё не дало готового ответа. Повторите отправку через несколько секунд.");
           res.status(200);
           res.set({ "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
           res.flushHeaders();
           writeEvent(res, "start", { sessionId: input.sessionId, replayed: true });
-          writeEvent(res, "done", replay);
+          writeEvent(res, "done", publicStreamResult(replay));
           res.end();
           return;
         }
@@ -253,17 +283,21 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
           controller.signal,
         );
         if (!closed) {
-          const sourceMetadata = result.sources?.length || result.evidence?.length || result.ragSources?.length || result.searchStatus
-            ? JSON.stringify({ ...(result.sources?.length ? { sources: result.sources } : {}), ...(result.evidence?.length ? { evidence: result.evidence } : {}), ...(result.ragSources?.length ? { ragSources: result.ragSources } : {}), ...(result.searchStatus ? { searchStatus: result.searchStatus } : {}) })
-            : undefined;
+          const allSources = [...(result.sources ?? []), ...(result.ragSources ?? [])];
+          const sourceDates = allSources.map((source) => normalizedDate(source.publishedAt) ?? ("retrievedAt" in source ? normalizedDate(source.retrievedAt) : null)).filter((value): value is string => Boolean(value)).sort();
+          const normalizedSearchStatus = result.searchStatus ? {
+            ...result.searchStatus,
+            sourceDateMin: result.searchStatus.sourceDateMin ?? sourceDates[0] ?? null,
+            sourceDateMax: result.searchStatus.sourceDateMax ?? sourceDates.at(-1) ?? null,
+          } : undefined;
+          const safeSearchStatus = publicSearchStatus(normalizedSearchStatus);
+          const sourceMetadata = safeSearchStatus ? JSON.stringify({ searchStatus: safeSearchStatus }) : undefined;
           const savedAssistant = await dependencies.appendChatMessage(user.id, input.sessionId, "assistant", result.content, result.modelUsed, sourceMetadata);
           if (idempotencyKey) {
             completedChatStreamReplays.set(idempotencyKey, { result, expiresAt: Date.now() + CHAT_STREAM_REPLAY_TTL_MS });
             pendingReplay?.resolve(result);
             pendingChatStreamReplays.delete(idempotencyKey);
           }
-          const allSources = [...(result.sources ?? []), ...(result.ragSources ?? [])];
-          const sourceDates = allSources.map((source) => source.publishedAt).filter((value): value is string => typeof value === "string").sort();
           const sourcesCount = allSources.length;
           void Promise.resolve(dependencies.auditChatStream({
             event: "chat_stream.completed",
@@ -277,10 +311,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
             sourceDateMax: sourceDates.at(-1) ?? null,
             timestamp: new Date().toISOString(),
           })).catch(() => undefined);
-          writeEvent(res, "done", {
-            ...result,
-            ...(result.searchStatus ? { searchStatus: result.searchStatus } : {}),
-          });
+          writeEvent(res, "done", publicStreamResult({ ...result, searchStatus: normalizedSearchStatus }));
           finished = true;
           res.end();
           if (!input.regenerateMessageId && savedUserMessageId && savedAssistant.id) {
