@@ -138,6 +138,22 @@ describe("Home integration flows", () => {
     ]);
   });
 
+  it("collapses and reopens the desktop sidebar with an accessible stateful control", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    const sidebar = document.querySelector(".kairema-sidebar");
+    expect(sidebar?.classList.contains("kairema-sidebar-collapsed")).toBe(true);
+    expect(sidebar?.hasAttribute("inert")).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "Показать боковую панель" }));
+    expect(sidebar?.classList.contains("kairema-sidebar-open")).toBe(true);
+    expect(sidebar?.hasAttribute("inert")).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "Скрыть боковую панель" }));
+    expect(sidebar?.classList.contains("kairema-sidebar-collapsed")).toBe(true);
+  });
+
   it("renders an owned temporary attachment only inside the saved user bubble that references it", () => {
     fixtures.messages = [{ id: 1, role: "user", content: "Посмотри изображение", modelId: "fast", createdAt: new Date("2026-08-19T00:00:00.000Z"), metadata: JSON.stringify({ attachmentIds: ["44444444-4444-4444-8444-444444444444"] }) }];
     fixtures.attachments = [{ id: "44444444-4444-4444-8444-444444444444", fileName: "owned.png", contentType: "image/png", byteSize: 100, kind: "image", previewUrl: "https://preview.example.test/owned.png" }];

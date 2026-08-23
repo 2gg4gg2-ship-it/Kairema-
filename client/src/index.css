@@ -251,6 +251,9 @@ body { margin: 0; min-width: 320px; background: #070912; color: #e8edf8; }
 
 /* Model cards preserve the entire required Russian model name; status sits below the role. */
 .kairema-sidebar { width: 320px; flex-basis: 320px; overflow-y: auto; }
+.kairema-sidebar > * { transition: opacity 140ms ease; }
+@media (min-width:768px){.kairema-sidebar{overflow-x:hidden;transition:width 220ms cubic-bezier(.23,1,.32,1),flex-basis 220ms cubic-bezier(.23,1,.32,1),padding 220ms cubic-bezier(.23,1,.32,1),border-color 160ms ease}.kairema-sidebar-collapsed{width:0;flex-basis:0;padding-left:0;padding-right:0;border-right-color:transparent;pointer-events:none}.kairema-sidebar-collapsed>*{opacity:0;visibility:hidden}}
+@media (prefers-reduced-motion:reduce){.kairema-sidebar,.kairema-sidebar>*{transition-duration:0ms}}
 .kairema-provider { align-items: flex-start; }
 .kairema-provider-icon { margin-top: 1px; }
 .kairema-provider-copy { display: block; min-width: 0; flex: 1; text-align: left; }

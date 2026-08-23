@@ -11,7 +11,7 @@ import { memorySearchMatches } from "@/lib/memory-search";
 import { runtimeAuthHeaders } from "@/lib/runtime-auth";
 import { consumeChatStream } from "@/lib/chat-stream";
 import { trpc } from "@/lib/trpc";
-import { Archive, Bot, CircleCheck, CircleDot, Clock3, Copy, FileImage, Gauge, Globe2, Languages, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Moon, PanelLeftClose, Search, Settings2, SlidersHorizontal, Sparkles, Sun, Trash2, TriangleAlert, X } from "lucide-react";
+import { Archive, Bot, CircleCheck, CircleDot, Clock3, Copy, FileImage, Gauge, Globe2, Languages, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Moon, PanelLeftClose, PanelLeftOpen, Search, Settings2, SlidersHorizontal, Sparkles, Sun, Trash2, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 
@@ -259,7 +259,7 @@ export default function Home() {
 
   return (
     <main className="kairema-shell">
-      <aside className={`kairema-sidebar ${sidebarOpen ? "kairema-sidebar-open" : ""}`}>
+      <aside className={`kairema-sidebar ${sidebarOpen ? "kairema-sidebar-open" : "kairema-sidebar-collapsed"}`} aria-label={language === "ru" ? "Боковая навигация" : "Sidebar navigation"} inert={!sidebarOpen}>
         <div className="kairema-brand-row"><span className="kairema-logo"><Sparkles className="size-4" /></span><span>Kairema</span><button className="kairema-icon-btn md:hidden" onClick={() => setSidebarOpen(false)} aria-label="Close"><X className="size-4" /></button></div>
         <button onClick={() => void createChat()} className="kairema-new-chat" disabled={authLoading || createMutation.isPending}><MessageSquarePlus className="size-4" />{t.newChat}</button>
         <div className="kairema-sidebar-label"><CircleDot className="size-3" />{t.models}</div>
@@ -272,7 +272,7 @@ export default function Home() {
       {sidebarOpen && <button className="kairema-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Close" />}
       <section className="kairema-main">
         <header className="kairema-topbar">
-          <div className="kairema-topbar-left"><button className="kairema-icon-btn md:hidden" onClick={() => setSidebarOpen(true)} aria-label="Menu"><Menu className="size-5" /></button><button className="kairema-icon-btn hidden md:grid" onClick={() => setSidebarOpen((value) => !value)} aria-label="Sidebar"><PanelLeftClose className="size-4" /></button><span className="kairema-topbar-title">{activeSession?.title ?? t.newConversation}</span></div>
+          <div className="kairema-topbar-left"><button className="kairema-icon-btn md:hidden" onClick={() => setSidebarOpen(true)} aria-label="Menu"><Menu className="size-5" /></button><button className="kairema-icon-btn hidden md:grid" onClick={() => setSidebarOpen((value) => !value)} aria-label={sidebarOpen ? (language === "ru" ? "Скрыть боковую панель" : "Hide sidebar") : (language === "ru" ? "Показать боковую панель" : "Show sidebar")} aria-expanded={sidebarOpen}>{sidebarOpen ? <PanelLeftClose className="size-4" /> : <PanelLeftOpen className="size-4" />}</button><span className="kairema-topbar-title">{activeSession?.title ?? t.newConversation}</span></div>
           <div className="kairema-topbar-controls"><button className="kairema-icon-btn" onClick={() => { toggleTheme?.(); void persistSettings({ theme: theme === "dark" ? "light" : "dark" }); }} title={theme === "dark" ? t.light : t.dark}>{theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}</button><button className="kairema-icon-btn" onClick={() => void persistSettings({ language: language === "ru" ? "en" : "ru" })} title={t.language}><Languages className="size-4" /></button><div className="kairema-select-wrap"><select value={modelId} onChange={(event) => setModelId(event.target.value as ModelId)} aria-label={t.models}>{modelViews.map((model) => <option key={model.modelId} value={model.modelId}>{model.label[language]}</option>)}</select></div><button className="kairema-icon-btn" onClick={() => setSettingsOpen(true)} title={t.openSettings}><Settings2 className="size-4" /></button></div>
         </header>
         <AIChatBox messages={visibleMessages} onSendMessage={send} onUploadFiles={uploadFiles} onRemoveAttachment={removeTemporaryAttachment} isLoading={isStreaming} onExportMarkdown={() => void exportCurrentChat("markdown")} onExportPdf={() => void exportCurrentChat("pdf")} canExport={Boolean(activeSession && dbMessages.length)} exportBusy={isExporting} exportError={notice} onCopyAssistant={(message) => void copyMessage(message)} onCopyUser={(message) => void copyMessage(message)} onRegenerate={regenerate} onCancelStream={cancelStream} composerValue={composerDraft} onComposerValueChange={setComposerDraft} onOpenTemplates={() => setTemplatesOpen(true)} composerSessionId={activeId || "new-composer"} uploadStatus={uploadStatus?.sessionId === activeId ? uploadStatus.message : ""} language={language} emptyStateMessage={isAuthenticated ? `${t.start} ${selectedModel.label[language]}` : t.loginChat} />

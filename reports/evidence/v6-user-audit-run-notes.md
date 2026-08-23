@@ -261,3 +261,14 @@ The fresh browser confirmation will use only a newly created neutral chat after 
 | Raw-link rendering | PASS | The same current assistant-message region exposed no raw HTTP(S) URL. The completion control had cleared before the observation. |
 
 This is a binary verification only. It retains no query or reply text, identifier value, history title, source URL/title/snippet, attachment data, account/session material, provider detail, raw error or secret. The broader all-role live-search matrix remains open.
+
+## 2026-08-23 — Desktop sidebar privacy and navigation remediation
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Confirmed desktop control defect | FIXED | The header sidebar control previously changed state without collapsing the fixed-width desktop layout. The sidebar therefore remained visually exposed. |
+| State, accessibility and motion | PASS | A collapsed desktop sidebar now has no layout width, is `inert`, exposes a contextual open/close control, and honours reduced-motion. The existing mobile drawer rules are unchanged. |
+| Automated regression | PASS | Focused Home integration completed 29 tests; full suite completed 40 files passed, 1 skipped, 193 tests passed and 4 skipped. TypeScript and production build passed. |
+| Neutral visual recheck | PASS | An unauthenticated dark-default desktop shell showed no expanded sidebar width and a visible open-sidebar control. No user history, message content, account data, source data or secret appeared in the observation. |
+
+This result does not change the remaining authenticated-only memory, attachment, all-role search, isolation, or platform-blocked criteria.
