@@ -56,9 +56,31 @@ describe("chat stream happy-path", () => {
     expect(JSON.stringify(auditChatStream.mock.calls[0][0])).not.toContain("Привет");
     expect(JSON.stringify(auditChatStream.mock.calls[0][0])).not.toContain("example.com");
     expect(streamResponse.end).toHaveBeenCalledOnce();
-    expect(order).toEqual(["assistant-saved", "done", "end", "memory-enqueued", "memory-processed"]);
+    expect(order).toEqual(["assistant-saved", "done", "memory-enqueued", "memory-processed", "end"]);
     expect(enqueueMemoryExtractionJob).toHaveBeenCalledWith(expect.objectContaining({ userId: 42, sessionId: validRequestBody.sessionId, userMessageId: 1, assistantMessageId: 2, role: "fast" }));
     expect(processMemoryExtractionJob).toHaveBeenCalledWith(42, 2);
+  });
+
+  it("keeps the completed response and closes the stream when post-turn memory work fails", async () => {
+    const writes: string[] = [];
+    const streamResponse = Object.assign(new EventEmitter(), {
+      status: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis(), flushHeaders: vi.fn(), write: vi.fn((chunk: string) => writes.push(chunk)), end: vi.fn(), json: vi.fn(),
+    }) as unknown as Response;
+    const handler = createChatStreamHandler({
+      authenticateRequest: vi.fn().mockResolvedValue({ id: 42 }),
+      getOwnedChatSession: vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Новый разговор" }),
+      appendChatMessage: vi.fn().mockResolvedValueOnce({ id: 1, created: true }).mockResolvedValueOnce({ id: 2, created: true }),
+      updateChatTitle: vi.fn(), listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
+      buildChatContext: vi.fn().mockResolvedValue(context),
+      chatWithRoleStream: vi.fn().mockResolvedValue({ content: "Готово", modelUsed: "model", provider: "provider", label: "Модель" }),
+      enqueueMemoryExtractionJob: vi.fn().mockRejectedValue(new Error("queue unavailable")),
+      processMemoryExtractionJob: vi.fn(), auditChatStream: vi.fn(),
+    });
+
+    await handler({ body: validRequestBody } as Request, streamResponse, vi.fn());
+
+    expect(writes.join("")).toContain("event: done");
+    expect(streamResponse.end).toHaveBeenCalledOnce();
   });
 
   it("does not persist a partially streamed assistant reply after the client cancels", async () => {

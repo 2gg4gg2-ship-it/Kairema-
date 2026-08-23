@@ -313,16 +313,21 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
           })).catch(() => undefined);
           writeEvent(res, "done", publicStreamResult({ ...result, searchStatus: normalizedSearchStatus }));
           finished = true;
-          res.end();
           if (!input.regenerateMessageId && savedUserMessageId && savedAssistant.id) {
-            void dependencies.enqueueMemoryExtractionJob({
-              userId: user.id,
-              sessionId: input.sessionId,
-              userMessageId: savedUserMessageId,
-              assistantMessageId: savedAssistant.id,
-              role: input.modelId,
-            }).then(() => dependencies.processMemoryExtractionJob(user.id, savedAssistant.id)).catch(() => undefined);
+            try {
+              await dependencies.enqueueMemoryExtractionJob({
+                userId: user.id,
+                sessionId: input.sessionId,
+                userMessageId: savedUserMessageId,
+                assistantMessageId: savedAssistant.id,
+                role: input.modelId,
+              });
+              await dependencies.processMemoryExtractionJob(user.id, savedAssistant.id);
+            } catch {
+              // The durable retry sweep owns recovery. Never turn a completed chat response into an error.
+            }
           }
+          res.end();
         } else if (idempotencyKey) {
           pendingReplay?.resolve(null);
           pendingChatStreamReplays.delete(idempotencyKey);
