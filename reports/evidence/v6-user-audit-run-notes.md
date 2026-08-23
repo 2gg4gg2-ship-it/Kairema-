@@ -158,6 +158,16 @@ This proves one fresh-marker route through Apex only. It does not convert the se
 
 This remediation does not expose or retain prompts, replies, source links, titles, snippets, attachment data, user/session identifiers, provider internals, raw errors or secrets. Published browser validation of the new authoritative setting remains required after deployment; the broader live-search criterion is still open.
 
+## 2026-08-23 — Privacy-fix publication delivery check
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Local remediation | PASS — code verified | The second escaped opaque citation-ID regression is covered in the shared server/client sanitizers, focused tests, TypeScript and production build. |
+| Published frontend delivery | NOT VERIFIED — stale asset observed | After two checkpoints and a cache-busting navigation, the browser continued to load a frontend asset that lacked the current narrow sanitizer signature. A legacy rendered marker remained visible, so this is not treated as evidence against the new code nor as a successful published recheck. |
+| Browser privacy boundary | PROTECTED | No history entry was opened, copied, exported or used as input. The audit retained neither response content, opaque IDs, source data, attachment data, account/session identifiers nor raw errors. |
+
+The citation-replay criterion remains open until the canonical published domain demonstrably loads the current build and a new neutral chat confirms absence. No provider chain, owner guard, schedule, schema, attachment lifecycle or `chat_exports` was changed.
+
 ## 2026-08-23 — Published web-search control persistence recheck
 
 | Scope | Result | Privacy-safe observation |
