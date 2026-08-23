@@ -710,6 +710,21 @@ export async function updateMemoryProfile(userId: number, patch: MemoryProfilePa
   return profile;
 }
 
+/** Refreshes a read-only, bounded summary of automatic facts. A manual profile always takes precedence. */
+export async function refreshAutoMemoryProfileSummary(userId: number): Promise<MemoryProfile> {
+  const db = requireDatabase(await getDb());
+  const profile = await getMemoryProfile(userId);
+  if (profile.profile.trim()) return profile;
+  const facts = (await listMemoryEntries(userId, "fact"))
+    .filter((entry) => entry.source === "auto")
+    .slice(0, 8)
+    .map((entry) => entry.value)
+    .join("\n")
+    .slice(0, 1_800);
+  if (profile.summary !== facts) await db.update(memoryProfiles).set({ summary: facts }).where(eq(memoryProfiles.userId, userId));
+  return getMemoryProfile(userId);
+}
+
 async function ensureMemorySettings(userId: number): Promise<void> {
   const db = requireDatabase(await getDb());
   await db.insert(memorySettings).values({ userId }).onDuplicateKeyUpdate({ set: { userId } });

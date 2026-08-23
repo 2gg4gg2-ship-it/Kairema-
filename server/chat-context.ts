@@ -1,4 +1,4 @@
-import { claimMemoryExtractionJob, completeMemoryExtractionJob, deleteMemoryEntryByKey, deleteMemoryEntryByValue, getMemoryExtractionJobTurn, getMemoryProfile, getMemorySettings, getOwnedChatAttachments, getUserSettings, listMemoryEntries, retryMemoryExtractionJob, upsertMemoryEntry } from "./db";
+import { claimMemoryExtractionJob, completeMemoryExtractionJob, deleteMemoryEntryByKey, deleteMemoryEntryByValue, getMemoryExtractionJobTurn, getMemoryProfile, getMemorySettings, getOwnedChatAttachments, getUserSettings, listMemoryEntries, refreshAutoMemoryProfileSummary, retryMemoryExtractionJob, upsertMemoryEntry } from "./db";
 import { invokeLLM } from "./_core/llm";
 import type { ChatSettings } from "./providers";
 import { searchWeb } from "./web-search";
@@ -284,6 +284,7 @@ async function applyMemoryExtraction(userId: number, userText: string, turn: Ext
         memoryKey: `topic:${role}:${topic.toLocaleLowerCase("ru-RU")}`.slice(0, 160), role, source: "auto", sourceMessageId: turn.sourceMessageId, sessionId: turn.sessionId,
       });
     }
+    await refreshAutoMemoryProfileSummary(userId);
   } catch (error) {
     throw asMemoryExtractionPhaseError(error, "memory_write");
   }

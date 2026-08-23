@@ -11,6 +11,7 @@ vi.mock("./db", () => ({
   getOwnedChatAttachments: vi.fn().mockResolvedValue([]),
   getUserSettings: vi.fn().mockResolvedValue({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0 }),
   listMemoryEntries: vi.fn().mockResolvedValue([]),
+  refreshAutoMemoryProfileSummary: vi.fn(),
   retryMemoryExtractionJob: vi.fn().mockResolvedValue(undefined),
   upsertMemoryEntry: vi.fn(),
 }));
@@ -35,7 +36,7 @@ vi.mock("./knowledge", () => ({
 vi.mock("./_core/llm", () => ({ invokeLLM: vi.fn() }));
 
 import { buildChatContext, extractMemoryFacts, FLASH_WEB_RESEARCH_BUDGET_MS, FRESHNESS_EMPTY_PROMPT, FRESHNESS_UNAVAILABLE_PROMPT, isKairemaIdentityQuery, needsWebResearch, processMemoryExtractionJob, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
-import { claimMemoryExtractionJob, completeMemoryExtractionJob, deleteMemoryEntryByKey, getMemoryExtractionJobTurn, getMemoryProfile, getMemorySettings, getOwnedChatAttachments, getUserSettings, listMemoryEntries, retryMemoryExtractionJob, upsertMemoryEntry } from "./db";
+import { claimMemoryExtractionJob, completeMemoryExtractionJob, deleteMemoryEntryByKey, getMemoryExtractionJobTurn, getMemoryProfile, getMemorySettings, getOwnedChatAttachments, getUserSettings, listMemoryEntries, refreshAutoMemoryProfileSummary, retryMemoryExtractionJob, upsertMemoryEntry } from "./db";
 import { invokeLLM } from "./_core/llm";
 import { WebSearchUnavailableError, searchWeb } from "./web-search";
 import { getOwnedAttachmentVisionDataUrl } from "./attachments";
@@ -241,6 +242,7 @@ describe("chat context soft web research", () => {
 
     expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "fact", "Пользователь предпочитает русский язык", expect.objectContaining({ memoryKey: "language", source: "auto", sourceMessageId: 101 }));
     expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "dialog_topic", expect.stringContaining("Flash: обсуждение языковых предпочтений"), expect.objectContaining({ role: "fast", sessionId: job.sessionId, sourceMessageId: 101 }));
+    expect(refreshAutoMemoryProfileSummary).toHaveBeenCalledWith(7);
     expect(completeMemoryExtractionJob).toHaveBeenCalledWith(7, "job-complete");
     expect(retryMemoryExtractionJob).not.toHaveBeenCalled();
   });
