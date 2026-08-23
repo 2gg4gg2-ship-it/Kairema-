@@ -276,3 +276,7 @@ This result does not change the remaining authenticated-only memory, attachment,
 ### Published-delivery follow-up
 
 The checkpoint delivery was rechecked through the canonical published endpoint using cache-busting navigation and an asset-level signature test only. At the time of check, the page continued to serve an earlier frontend asset that did not contain the current sidebar-collapse signatures. Therefore the local visual evidence is **not** promoted to a published PASS. No sidebar item, history title, message content, account data, source data, attachment data, provider secret or raw error was recorded. The production sidebar criterion remains **NOT VERIFIED pending current asset delivery**.
+
+### Browser isolation safeguard
+
+During a later published navigation, browser session state changed after the element map had been obtained and the side navigation unexpectedly re-rendered. To protect privacy, no further browser interaction, history inspection, copying, export, deletion verification, or published authenticated acceptance action will be performed from that session. This observation records neither chat text, titles, identifiers, account/session data, sources, attachments, provider details, raw errors nor secrets. It is a **browser-automation isolation limitation**, not an application failure determination.
