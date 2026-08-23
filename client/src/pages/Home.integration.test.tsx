@@ -241,21 +241,15 @@ describe("Home integration flows", () => {
     await waitFor(() => expect(fixtures.clearMemory).toHaveBeenCalledOnce());
   });
 
-  it("keeps RAG feed URLs out of the public audit and reveals an owner URL only after an explicit action", async () => {
+  it("never renders RAG feed URLs or technical URL controls, including when an audit payload contains a URL", async () => {
     const user = userEvent.setup();
-    const { unmount } = render(<Home />);
+    fixtures.isOwner = true;
+    render(<Home />);
 
     await user.click(screen.getByRole("button", { name: "Аудит RAG" }));
     expect(screen.getByText("OpenAI News")).toBeTruthy();
     expect(screen.queryByText(/https:\/\//)).toBeNull();
     expect(screen.queryByRole("button", { name: "Показать технические детали" })).toBeNull();
-
-    unmount();
-    fixtures.isOwner = true;
-    render(<Home />);
-    await user.click(screen.getByRole("button", { name: "Аудит RAG" }));
-    await user.click(screen.getByRole("button", { name: "Показать технические детали" }));
-    expect(screen.getByText("URL ленты: https://openai.com/news/rss.xml")).toBeTruthy();
   });
 
 

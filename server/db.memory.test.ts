@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type MemoryRow = { id: string; userId: number; category: "fact" | "dialog_topic" | "profile"; value: string; memoryKey: string | null; role: "fast" | "smart" | "context" | "flagship" | null; source: "manual" | "auto"; sessionId: string | null; sourceMessageId: number | null; lastSeenAt: Date; createdAt: Date; updatedAt: Date };
 
@@ -41,12 +41,18 @@ function row(overrides: Partial<MemoryRow> = {}): MemoryRow {
 
 describe("memory database helper invariants", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
     process.env.DATABASE_URL = "mysql://test";
     state.selectRows = [];
     state.inserted = [];
     state.updated = [];
     state.deleted = [];
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("refreshes the same topic only for the same user/chat inside 24 hours and advances lastSeenAt", async () => {
