@@ -96,9 +96,18 @@ export function AIChatBox({
     const expectedSessionId = composerSessionId;
     try {
       const result = await onUploadFiles(Array.from(files));
-      if (composerSessionRef.current === expectedSessionId && result.sessionId === expectedSessionId) setAttachments((current) => [...current, ...result.attachments]);
+      const isSameComposerSession = composerSessionRef.current === expectedSessionId && result.sessionId === expectedSessionId;
+      const isUploadCreatedChat = expectedSessionId === "new-composer" && composerSessionRef.current === result.sessionId && result.sessionId !== "new-composer";
+      if (isSameComposerSession || isUploadCreatedChat) setAttachments((current) => [...current, ...result.attachments]);
     }
-    finally { if (composerSessionRef.current === expectedSessionId) { setIsUploading(false); if (fileInputRef.current) fileInputRef.current.value = ""; } }
+    finally {
+      const remainedOnExpectedSession = composerSessionRef.current === expectedSessionId;
+      const movedToUploadCreatedChat = expectedSessionId === "new-composer" && composerSessionRef.current !== "new-composer";
+      if (remainedOnExpectedSession || movedToUploadCreatedChat) {
+        setIsUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    }
   };
   const removeAttachment = async (attachment: ChatAttachment) => {
     await onRemoveAttachment?.(attachment);

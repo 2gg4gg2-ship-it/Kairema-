@@ -157,6 +157,24 @@ describe("AIChatBox user flows", () => {
     await waitFor(() => expect(screen.queryByText("old-chat.png")).toBeNull());
   });
 
+  it("keeps an upload preview when new composer upload creates its own chat session", async () => {
+    const user = userEvent.setup();
+    const attachment = { id: "attachment-created-chat", fileName: "created-chat.png", mimeType: "image/png", sizeBytes: 1024, kind: "image" as const, previewUrl: "https://preview.example.test/created-chat.png" };
+    let resolveUpload: ((value: { attachments: typeof attachment[]; sessionId: string }) => void) | undefined;
+    const onUploadFiles = vi.fn(() => new Promise<{ attachments: typeof attachment[]; sessionId: string }>((resolve) => { resolveUpload = resolve; }));
+    const { container, rerender } = render(<AIChatBox messages={[]} onSendMessage={vi.fn()} onUploadFiles={onUploadFiles} composerSessionId="new-composer" />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    if (!input) throw new Error("Attachment input is missing");
+
+    await user.upload(input, new File(["image"], "created-chat.png", { type: "image/png" }));
+    await waitFor(() => expect(onUploadFiles).toHaveBeenCalledOnce());
+    rerender(<AIChatBox messages={[]} onSendMessage={vi.fn()} onUploadFiles={onUploadFiles} composerSessionId="chat-created-by-upload" />);
+    resolveUpload?.({ attachments: [attachment], sessionId: "chat-created-by-upload" });
+
+    await waitFor(() => expect(screen.getByText("created-chat.png")).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Открыть предпросмотр: created-chat.png" })).toBeTruthy();
+  });
+
   it("ignores legacy continuation suggestions and does not render quick-prompt chips", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const legacyAssistantMessage = {
