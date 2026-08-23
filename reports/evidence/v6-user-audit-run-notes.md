@@ -326,3 +326,9 @@ During that interaction, browser session state rehydrated unexpectedly. The side
 | Server-secret-name bundle audit | PASS | A non-printing scan found none of the designated server-secret variable names in `dist/public`. No secret value or matching source was printed. |
 
 These checks are code/bundle evidence only and do not replace the paused authenticated browser acceptance flows.
+
+## 2026-08-23 — Primary-account neutral acceptance stop
+
+The user authorized neutral scenarios in the primary account. The workflow began by selecting a public role, but a top navigation control unexpectedly expanded the sidebar before a new chat could be created. The scenario was stopped immediately. No prior record was selected, opened, copied, exported, quoted, evaluated or used as acceptance input.
+
+No history title, message content, prompt, reply, account/session identifier, attachment detail, source data, provider detail, raw error or secret is retained in this evidence. Memory/profile, picker/PDF, and Context/Apex live-search browser criteria remain **NOT VERIFIED**; no defect is inferred from this isolation failure.
