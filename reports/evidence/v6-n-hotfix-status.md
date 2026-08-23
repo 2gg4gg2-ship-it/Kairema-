@@ -24,7 +24,7 @@
 | Vision serialization и candidate filtering | PASS | Targeted regression подтверждает image content part, vision-capable selection и прежний budget. |
 | Flash image-path timeout | PASS | Text-only TTFT 1,5 с сохранён; image-aware Flash не преждевременно обрывает единственный vision path и использует общий bounded attempt timeout. |
 | Реальный server-stream vision probe | PASS | 2026-08-23: ответ присутствует, streaming delta получена, fallback path допустим; provider/model/payload не фиксируются в evidence. |
-| Published composer thumbnail и sent-bubble thumbnail | NOT VERIFIED for latest revision | До transport/timeout hotfix previews ранее были browser PASS; после последнего checkpoint OAuth cookie не появилась в рабочем browser окне, поэтому новый полный сценарий не утверждается. |
+| Published composer thumbnail и sent-bubble thumbnail | NOT VERIFIED for latest revision | До transport/timeout hotfix previews ранее были browser PASS; после последнего checkpoint OAuth cookie не появилась в рабочем browser окне, поэтому новый полный сценарий не утверждается. Повторная проверка 2026-08-23 после включения пользовательской browser-интеграции также показала доступный только публичный экран «Войти для истории». |
 | Published neutral-image answer | NOT VERIFIED | До hotfix наблюдался отказ. После hotfix browser acceptance не удалось продолжить без пользовательской OAuth-сессии в рабочем окне. Server probe не заменяет browser PASS. |
 
 ### Устранённая причина
