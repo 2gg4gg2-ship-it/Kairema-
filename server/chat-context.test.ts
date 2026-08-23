@@ -9,7 +9,7 @@ vi.mock("./db", () => ({
   getMemoryProfile: vi.fn().mockResolvedValue({ profile: "", summary: "" }),
   getMemorySettings: vi.fn().mockResolvedValue({ enabled: 0, autoExtract: 0 }),
   getOwnedChatAttachments: vi.fn().mockResolvedValue([]),
-  getUserSettings: vi.fn().mockResolvedValue({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0 }),
+  getUserSettings: vi.fn().mockResolvedValue({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, webSearch: 1 }),
   listMemoryEntries: vi.fn().mockResolvedValue([]),
   refreshAutoMemoryProfileSummary: vi.fn(),
   retryMemoryExtractionJob: vi.fn().mockResolvedValue(undefined),
@@ -45,7 +45,7 @@ import { retrieveRagContext } from "./knowledge";
 const input = { query: "Что нового?", attachmentIds: [] };
 
 afterEach(() => {
-  vi.mocked(getUserSettings).mockResolvedValue({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0 });
+  vi.mocked(getUserSettings).mockResolvedValue({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, webSearch: 1 });
   vi.mocked(getMemorySettings).mockResolvedValue({ enabled: 0, autoExtract: 0 });
   vi.mocked(getMemoryProfile).mockResolvedValue({ profile: "", summary: "" });
   vi.mocked(listMemoryEntries).mockResolvedValue([]);
@@ -61,11 +61,19 @@ describe("chat context soft web research", () => {
     expect([...WEB_RESEARCH_ROLE_POLICY]).toEqual(["fast", "smart", "context", "flagship"]);
   });
 
-  it("injects verified fresh web research for an external-current request", async () => {
+  it("injects verified fresh web research for an external-current request when the user enabled web search", async () => {
     await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какая последняя версия браузера?", role: "fast" }))
       .resolves.toMatchObject({ webResearch: "Свежие проверяемые данные.", webSources: [{ title: "Официальный источник", url: "https://example.com", sourceId: "source-001", retrievedAt: "2026-08-21T00:00:00.000Z" }], webEvidence: [{ fact: "Проверяемый факт", sourceId: "source-001" }], searchStatus: { state: "found", verificationStatus: "verified", sourcesCount: 1 } });
     expect(searchWeb).toHaveBeenCalledTimes(1);
     expect(searchWeb).toHaveBeenCalledWith(expect.any(String), { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS });
+  });
+
+  it("does not start live research when the user disables web search", async () => {
+    vi.mocked(getUserSettings).mockResolvedValueOnce({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, webSearch: 0 } as never);
+
+    await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какая последняя версия браузера?", role: "fast" }))
+      .resolves.not.toHaveProperty("webResearch");
+    expect(searchWeb).not.toHaveBeenCalled();
   });
 
   it("does not constrain non-Flash roles to the Flash freshness budget", async () => {

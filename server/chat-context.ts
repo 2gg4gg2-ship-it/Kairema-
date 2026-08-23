@@ -41,6 +41,7 @@ const DEFAULT_CONTEXT_PREFERENCES = {
   effort: "standard" as const,
   thinking: 0,
   toolAccess: 1,
+  webSearch: 0,
 };
 
 export async function buildChatContext(userId: number, sessionId: string, input: { attachmentIds?: string[]; query?: string; role?: RagRole }): Promise<ChatSettings> {
@@ -74,7 +75,7 @@ export async function buildChatContext(userId: number, sessionId: string, input:
     ...(imageUrls.length ? { imageUrls } : {}),
   };
 
-  if (WEB_RESEARCH_ROLE_POLICY.has(input.role ?? "flagship") && needsWebResearch(input.query ?? "")) {
+  if (preferences.webSearch && WEB_RESEARCH_ROLE_POLICY.has(input.role ?? "flagship") && needsWebResearch(input.query ?? "")) {
     const role = input.role ?? "flagship";
     try {
       const search = await searchWeb(

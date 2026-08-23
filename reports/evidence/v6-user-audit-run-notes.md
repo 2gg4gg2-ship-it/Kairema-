@@ -129,3 +129,31 @@ The profile-save result above remains component/integration-level evidence. A ne
 | Full regression and type safety | PASS | Full `pnpm test`: 40 files passed, 1 skipped; 189 tests passed, 4 skipped. `pnpm check` passed. |
 
 The remediation does not alter the four roles, provider chains, attempt budget, memory extraction schedule, attachment lifecycle, owner guard, schema or `chat_exports`. It contains no user content, identifiers, secrets, URLs, raw errors or technical provider data.
+
+## 2026-08-23 — Context exact-recall recheck
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Context cross-chat exact recall | PASS (limited) | In a newly created, isolated audit chat, Context returned the exact value from a prior neutral marker chat. The test used no historic conversation as input and retained no prompt, marker, reply, attachment, source, identifier or provider-detail data. |
+| Flash cross-chat exact recall | PASS (limited) | In a newly created, isolated audit chat, Flash returned the exact value from the same prior neutral marker chat. The test used no historic conversation as input and retained no prompt, marker, reply, attachment, source, identifier or provider-detail data. |
+
+This confirms fresh-marker routes through Context and Flash. It does not replace the clean-store, all-role, second-user-isolation, attachment, live-search or owner-only acceptance criteria.
+
+## 2026-08-23 — Apex exact-recall recheck
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Apex cross-chat exact recall | PASS (limited) | In a newly created, isolated audit chat, Apex returned the exact value from the prior neutral marker chat. The check used no historic conversation as input and retains no prompt, marker, reply, attachment, source, identifier or provider-detail data. |
+
+This proves one fresh-marker route through Apex only. It does not convert the separate clean-store, second-user-isolation, attachment, live-search or owner-only criteria into PASS.
+
+## 2026-08-23 — Authoritative web-search preference remediation
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Saved web-search preference | FIXED — regression verified | The active server-side context builder now checks the saved web-search preference before any live-research call. An enabled preference retains the existing role-specific live-search path; a disabled preference performs no live-research call. Optional RAG retrieval and its existing metadata-only privacy contract remain separate. |
+| Focused server regression | PASS | `server/chat-context.test.ts` completed: 23 passed, covering both enabled and disabled web-search preference semantics alongside existing memory, attachment, RAG and freshness scenarios. |
+| Type safety and production build | PASS | `pnpm check` and `pnpm build` completed successfully. |
+| Full suite | EXTERNAL AVAILABILITY BLOCKER | The suite completed with 38 files passed, 1 skipped, 188 tests passed, 4 skipped, and 2 external credential-health checks rejected by their remote services. This does not affect the focused deterministic regression, but it is not reported as a full-suite PASS and no provider state, chain, fallback or health semantics was changed to mask it. |
+
+This remediation does not expose or retain prompts, replies, source links, titles, snippets, attachment data, user/session identifiers, provider internals, raw errors or secrets. Published browser validation of the new authoritative setting remains required after deployment; the broader live-search criterion is still open.
