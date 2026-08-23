@@ -386,6 +386,7 @@
 - [x] AUDIT-USER/FEATURE-AUTO-PROFILE: auto-derived summary now refreshes after successful extracted facts/topics, does not make a new LLM call, and never overrides a non-empty manual profile. Server/client focused regressions pass.
 - [x] AUDIT-USER/BUG-MEMORY-SETTINGS-BINDING: current unified dialog already binds `enabled` and `autoExtract` to authoritative `settings`; regression confirms independent `autoExtract: false` mutation. Legacy unused dialog remains out of user flow.
 - [ ] AUDIT-USER/ATTACHMENTS: проверить protected temporary photo/PDF attach, composer preview, removal, sent-bubble preview, image-aware answer и document card; не сохранять file bytes, URLs или user content в evidence.
+- [x] AUDIT-USER/BUG-PDF-CARD-SIZE: privacy-safe formatted document size now appears with filename in composer and sent bubbles; image previews remain unchanged. Focused component regression, full suite and TypeScript pass.
 - [ ] AUDIT-USER/ROLES-SEARCH: проверить Flash, Think, Context и Apex на нейтральных prompts, ≤4 upstream attempts, honest live-search/freshness semantics и отсутствие raw source renderers.
 - [ ] AUDIT-USER/UI: проверить Switch, dropdown, profile save, settings sections, theme/language/contrast and responsive controls; исправить подтверждённые defects and add regression coverage.
 - [ ] AUDIT-USER/EVIDENCE: подготовить metadata-only status table with DONE / NOT DONE / BROKEN, publish screenshots without private content, and preserve owner functions as platform-blocked.

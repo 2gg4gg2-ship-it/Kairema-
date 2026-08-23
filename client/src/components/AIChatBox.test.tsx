@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import React, { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { consumeChatStream } from "@/lib/chat-stream";
-import { AIChatBox, type Message } from "./AIChatBox";
+import { AIChatBox, formatAttachmentSize, type Message } from "./AIChatBox";
 
 const encoder = new TextEncoder();
 let releaseFinalStream: (() => void) | null = null;
@@ -119,6 +119,19 @@ describe("AIChatBox user flows", () => {
     const documentPreview = screen.getByTitle("notes.pdf");
     expect(documentPreview.getAttribute("src")).toBe("https://preview.example.test/notes.pdf");
     expect(screen.getByRole("dialog").textContent).toContain("notes.pdf");
+  });
+
+  it("renders a privacy-safe formatted size for a sent document card", () => {
+    render(<AIChatBox messages={[{
+      id: "user-document-size",
+      role: "user",
+      content: "",
+      attachments: [{ id: "attachment-size", fileName: "neutral-audit.pdf", mimeType: "application/pdf", sizeBytes: 1536, kind: "document" }],
+    }]} onSendMessage={vi.fn()} />);
+
+    expect(formatAttachmentSize(1536)).toBe("1.5 KB");
+    expect(screen.getByRole("button", { name: "Открыть предпросмотр: neutral-audit.pdf" }).textContent).toContain("neutral-audit.pdf · 1.5 KB");
+    expect(screen.queryByText(/https?:\/\//)).toBeNull();
   });
 
   it("keeps the temporary preview URL in the composer and deletes the temporary attachment on X", async () => {
