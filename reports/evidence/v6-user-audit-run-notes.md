@@ -344,3 +344,14 @@ No history title, message content, prompt, reply, account/session identifier, at
 | Memory profile and PDF preview | NOT VERIFIED | These flows were not opened because they could expose existing personal profile/memory data, and no safe reversible empty-state route was available. |
 
 No prompt, reply, history title, account/session identifier, attachment filename/content/size/URL, source URL/title/snippet, provider internals, raw error or secret is retained in this evidence.
+
+## 2026-08-23 — Four-role neutral matrix completion
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Flash and Think | PASS, limited | Both roles completed only in a newly created neutral audit chat. The capability selector remained limited to the four public roles. |
+| Context and Apex | PASS, limited | The earlier isolated Context/Apex checks remained consistent with the subsequent matrix. |
+| Search and citation rendering | PASS with honest availability limitation | The current assistant regions showed only approved aggregate search-state/count/date metadata; no raw HTTP(S) link or recognized opaque technical citation-list form was visible. The UI honestly signalled partial live-service availability. |
+| Attempt-budget contract | PASS in code regression | Current server regressions preserve the configured four-role policy and maximum four upstream attempts; no chain or health semantics changed. |
+
+Browser actions were stopped immediately after the role-selector observation. No query/reply text, history title, account/session identifier, source record, attachment detail, raw provider error or secret is retained in this evidence.
