@@ -280,3 +280,18 @@ The checkpoint delivery was rechecked through the canonical published endpoint u
 ### Browser isolation safeguard
 
 During a later published navigation, browser session state changed after the element map had been obtained and the side navigation unexpectedly re-rendered. To protect privacy, no further browser interaction, history inspection, copying, export, deletion verification, or published authenticated acceptance action will be performed from that session. This observation records neither chat text, titles, identifiers, account/session data, sources, attachments, provider details, raw errors nor secrets. It is a **browser-automation isolation limitation**, not an application failure determination.
+
+## 2026-08-23 — Role/search code-level revalidation
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Four-role context policy | PASS | The focused context regression completed with the configured role-policy and memory/search boundary coverage. |
+| Citation/source redaction | PASS | The focused provider safety regression completed, including streaming-safe technical reference filtering. |
+| Regression command | PASS | `server/chat-context.test.ts` and `server/providers-v5.5.test.ts` completed 28 tests successfully. |
+| Published live matrix | NOT VERIFIED | Flash/Think have earlier limited evidence; Context/Apex fresh neutral live-search checks are not repeated because the browser session no longer provides a safe isolated authenticated state. |
+
+No model reply, prompt, URL, source title/snippet, provider trace, account/session data, attachment metadata, raw error or secret was recorded.
+
+### Sidebar delivery confirmation follow-up
+
+An unauthenticated, cache-busted public asset scan inspected only the declared page assets and the presence of the application’s new sidebar-collapse signature. The canonical endpoint still did **not** serve that signature. This confirms the pending state is a **publication-delivery limitation**, not an inferred UI failure or a reason to perform further history interaction. The desktop sidebar production criterion stays **NOT VERIFIED**. No user, session, chat, source, attachment, provider or secret data was accessed or recorded.
