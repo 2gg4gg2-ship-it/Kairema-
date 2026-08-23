@@ -106,6 +106,7 @@ describe("AIChatBox user flows", () => {
 
     expect(redactLegacyAssistantReferences(legacyContent)).toContain("Полезная часть.");
     expect(redactLegacyAssistantReferences(legacyContent)).toContain("[1, 2]");
+    expect(redactLegacyAssistantReferences("Проверка \\\\[a3b2c1d0e9f8a7b6, c4d3e2f1a0b9c8d7\\\\]")).toBe("Проверка");
     expect(document.body.textContent).not.toContain("legacy-reference");
     expect(document.body.textContent).not.toContain("opaque-reference");
     expect(document.body.textContent).not.toContain("a3b2c1d0e9f8a7b6");
