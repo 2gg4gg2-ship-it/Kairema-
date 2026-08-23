@@ -129,3 +129,11 @@
 | Время (GMT+3) | Действие | Наблюдение | Статус | Артефакт |
 |---|---|---|---|---|
 | 2026-08-23 | Проверен и усилен существующий cron-only retry callback | Существующий маршрут `/api/scheduled/memory-extraction` остаётся единственным callback для bounded due-job sweep. Он обрабатывает не более восьми due references последовательно, изолирует неожиданную ошибку одного задания и продолжает последующие; ответ содержит только aggregate `ok`, `scanned`, `processed`, `failed`. Расписание, cadence, job identifiers, user data и raw error details не менялись и не зафиксированы. | **PASS**: bounded continuation and aggregate-only boundary | `server/memory-extraction-schedule.test.ts` — 4 passed; server suite — 128 passed, 4 skipped; `pnpm test` — 185 passed, 4 skipped; `pnpm check` — passed |
+
+## Non-owner validation refresh
+
+| Время (GMT+3) | Действие | Наблюдение | Статус | Артефакт |
+|---|---|---|---|---|
+| 2026-08-23 | Fresh production build | Сборка client и server output завершилась успешно после освобождения только отдельного typecheck-watch процесса; dev server не менялся. | **PASS**: production build | `pnpm build` |
+| 2026-08-23 | Public bundle privacy audit | Browser-delivered assets не содержат имён server-side secret variables и не совпадают ни с одним configured server secret. Heuristic scanner нашёл token-shaped строки только в bundled third-party syntax definitions; без вывода значений они классифицированы как non-secret false-positive candidates. | **PASS**: configured-secret equality and variable-name audit; heuristic context documented | `dist/public` audit, metadata-only |
+| 2026-08-23 | Published session boundary | Доступный agent browser context открыл опубликованный сайт в public state (`Войти для истории`). Никакие owner, second-user, download или stale-RAG browser проверки из этого context не запускались и не переопределялись. | **NOT VERIFIED**: authenticated acceptance remains unavailable in current browser context | published browser observation, no private content retained |
