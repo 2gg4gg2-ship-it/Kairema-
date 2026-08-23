@@ -332,3 +332,15 @@ These checks are code/bundle evidence only and do not replace the paused authent
 The user authorized neutral scenarios in the primary account. The workflow began by selecting a public role, but a top navigation control unexpectedly expanded the sidebar before a new chat could be created. The scenario was stopped immediately. No prior record was selected, opened, copied, exported, quoted, evaluated or used as acceptance input.
 
 No history title, message content, prompt, reply, account/session identifier, attachment detail, source data, provider detail, raw error or secret is retained in this evidence. Memory/profile, picker/PDF, and Context/Apex live-search browser criteria remain **NOT VERIFIED**; no defect is inferred from this isolation failure.
+
+## 2026-08-23 — Authorized neutral Context/Apex and picker recheck
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Context live-search scenario | PASS, limited | A newly created neutral chat completed under Context. The UI exposed only the approved search-status/count/date metadata and no raw link or recognized technical citation pattern. |
+| Apex live-search scenario | PASS, limited | The same isolated chat completed under Apex with the approved search-status/count/date metadata and no raw link or recognized technical citation pattern. The UI also honestly showed a limited-service aggregate indicator. |
+| Citation and raw-link control | PASS for both new outputs | The visible current-message region contained no raw HTTP(S) URL and no recognized opaque technical citation-list form. |
+| Browser attachment picker binding | NOT VERIFIED — automation limitation | The composer contains one enabled native file input, but the browser automation exposes the visible trigger rather than the hidden input; upload targeting therefore fails before app upload logic. This is not classified as an application defect. |
+| Memory profile and PDF preview | NOT VERIFIED | These flows were not opened because they could expose existing personal profile/memory data, and no safe reversible empty-state route was available. |
+
+No prompt, reply, history title, account/session identifier, attachment filename/content/size/URL, source URL/title/snippet, provider internals, raw error or secret is retained in this evidence.
