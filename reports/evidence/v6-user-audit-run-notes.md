@@ -364,3 +364,14 @@ No prompt, reply, history title, account/session identifier, attachment filename
 | Attempt-budget contract | PASS in code regression | Current server regressions preserve the configured four-role policy and maximum four upstream attempts; no chain or health semantics changed. |
 
 Browser actions were stopped immediately after the role-selector observation. No query/reply text, history title, account/session identifier, source record, attachment detail, raw provider error or secret is retained in this evidence.
+
+## 2026-08-23 — Temporary memory-marker acceptance safety stop
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| New-chat isolation boundary | NOT VERIFIED | The approved temporary-marker flow began with the side navigation already collapsed. After the neutral message was submitted, the visible session rendered an existing conversation rather than a confirmably new isolated conversation. The scenario was stopped at that point. |
+| Cross-chat recall | NOT VERIFIED | No second new chat was created and no recall query was sent after the boundary failure. |
+| Profile Save and memory search/filter | NOT VERIFIED | The settings and memory dialog were not opened, so existing profile, fact or topic entries were not displayed or used. |
+| Controlled deletion and post-delete check | NOT VERIFIED | No search, filter, deletion or clear action was attempted because the temporary entry could not be safely and unambiguously isolated. |
+
+No marker value, prompt, reply, history title, account/session identifier, profile content, memory entry, attachment data, source data, raw error or secret is retained. This is a privacy-isolation limitation, not an application-defect determination.
