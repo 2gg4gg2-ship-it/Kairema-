@@ -272,3 +272,7 @@ This is a binary verification only. It retains no query or reply text, identifie
 | Neutral visual recheck | PASS | An unauthenticated dark-default desktop shell showed no expanded sidebar width and a visible open-sidebar control. No user history, message content, account data, source data or secret appeared in the observation. |
 
 This result does not change the remaining authenticated-only memory, attachment, all-role search, isolation, or platform-blocked criteria.
+
+### Published-delivery follow-up
+
+The checkpoint delivery was rechecked through the canonical published endpoint using cache-busting navigation and an asset-level signature test only. At the time of check, the page continued to serve an earlier frontend asset that did not contain the current sidebar-collapse signatures. Therefore the local visual evidence is **not** promoted to a published PASS. No sidebar item, history title, message content, account data, source data, attachment data, provider secret or raw error was recorded. The production sidebar criterion remains **NOT VERIFIED pending current asset delivery**.
