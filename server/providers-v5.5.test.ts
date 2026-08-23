@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_ATTEMPTS, MODEL_ROLES, PUBLIC_DASHBOARD_PROVIDERS, ROLE_IDS, sanitizeAssistantContent } from "./providers";
+import { createSourceSafeStreamFilter, MAX_ATTEMPTS, MODEL_ROLES, PUBLIC_DASHBOARD_PROVIDERS, ROLE_IDS, sanitizeAssistantContent } from "./providers";
 
 describe("v5.5 server-side role safety", () => {
   it("keeps exactly four public role cards and a maximum of four real upstream attempts", () => {
@@ -24,6 +24,19 @@ describe("v5.5 server-side role safety", () => {
     const content = sanitizeAssistantContent("Проверенный вывод.\n\nИсточники:\n- https://example.com/very/long/path\n[Документ](https://example.org/doc)");
     expect(content).toBe("Проверенный вывод.");
     expect(content).not.toMatch(/https?:\/\//i);
+  });
+
+  it("removes technical citation identifiers from complete and fragmented streamed assistant text", () => {
+    const lineBufferedFilter = createSourceSafeStreamFilter();
+    expect(lineBufferedFilter("Подтверждённый факт [source-001]\n")).toBe("");
+    expect(lineBufferedFilter("", true)).toBe("Подтверждённый факт");
+    const bracketFilter = createSourceSafeStreamFilter();
+    expect(bracketFilter("Другой факт 【turn0search7†L3-L7】\n")).toBe("");
+    expect(bracketFilter("", true)).toBe("Другой факт");
+    const fragmentedFilter = createSourceSafeStreamFilter();
+    expect(fragmentedFilter("Фрагмент ⟦citation: web-42⟧ готов", true)).toBe("Фрагмент готов");
+    expect(sanitizeAssistantContent("Обычный массив [1, 2] не является ссылкой.")).toBe("Обычный массив [1, 2] не является ссылкой.");
+    expect(sanitizeAssistantContent("Утверждение подтверждено [1].")).toBe("Утверждение подтверждено.");
   });
 
   it("exposes OrcaRouter and the three primary public providers in the dashboard allowlist", () => {

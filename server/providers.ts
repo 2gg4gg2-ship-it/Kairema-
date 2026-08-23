@@ -449,6 +449,10 @@ export function sanitizeAssistantContent(value: string) {
     .replace(/\[[^\]]+\]\(https?:\/\/[^)\s]+\)/gi, "")
     .replace(/(?:^|\n)\s*(?:[-*•]\s*)?https?:\/\/[^\s<>()\[\]{}]+/gim, "")
     .replace(/https?:\/\/[^\s<>()\[\]{}]+/gi, "")
+    .replace(/\s*\[(?:(?:source|cite|citation|web|search|источник|ссылка)\b[^\]\r\n]*)\]/gi, "")
+    .replace(/\s*【[^】]*(?:(?:source|cite|citation|web|search|источник|ссылка)|†)[^】]*】/gi, "")
+    .replace(/\s*⟦(?:(?:source|cite|citation|web|search|источник|ссылка)\b[^⟧\r\n]*)⟧/gi, "")
+    .replace(/\s+\[(?:\d{1,3}(?:\s*,\s*\d{1,3})*)\](?=[.,;:!?)]?(?:[\t ]*(?:\r?\n|$)))/g, "")
     .replace(/(?:^|\n)\s*[-*•]\s*(?=\n|$)/g, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
