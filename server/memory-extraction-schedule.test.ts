@@ -29,7 +29,23 @@ describe("memory extraction schedule", () => {
     expect(listDueMemoryExtractionJobReferences).toHaveBeenCalledWith(MEMORY_EXTRACTION_SWEEP_BATCH);
     expect(processMemoryExtractionJob).toHaveBeenNthCalledWith(1, 7, 101);
     expect(processMemoryExtractionJob).toHaveBeenNthCalledWith(2, 8, 202);
-    expect(res.json).toHaveBeenCalledWith({ ok: true, scanned: 2 });
+    expect(res.json).toHaveBeenCalledWith({ ok: true, scanned: 2, processed: 2, failed: 0 });
+  });
+
+  it("continues a bounded sweep after one unexpected job failure without returning job data", async () => {
+    authenticateRequest.mockResolvedValue({ id: -1, isCron: true, taskUid: "task_memory" });
+    listDueMemoryExtractionJobReferences.mockResolvedValue([{ userId: 7, assistantMessageId: 101 }, { userId: 8, assistantMessageId: 202 }]);
+    processMemoryExtractionJob.mockRejectedValueOnce(new Error("transient provider failure")).mockResolvedValueOnce(undefined);
+    const res = response();
+
+    await createMemoryExtractionScheduleHandler()({} as Request, res, vi.fn());
+
+    expect(processMemoryExtractionJob).toHaveBeenNthCalledWith(1, 7, 101);
+    expect(processMemoryExtractionJob).toHaveBeenNthCalledWith(2, 8, 202);
+    expect(res.json).toHaveBeenCalledWith({ ok: true, scanned: 2, processed: 1, failed: 1 });
+    expect(JSON.stringify(res.json.mock.calls[0]?.[0])).not.toContain("provider failure");
+    expect(JSON.stringify(res.json.mock.calls[0]?.[0])).not.toContain("101");
+    expect(JSON.stringify(res.json.mock.calls[0]?.[0])).not.toContain("202");
   });
 
   it("rejects non-cron callers before any queue access", async () => {

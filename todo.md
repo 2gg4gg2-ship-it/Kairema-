@@ -1,5 +1,7 @@
 # Project TODO
 
+- [x] v6-MEM/MEMORY-RETRY-SWEEP-ISOLATION: existing cron-only bounded sweep continues processing later due references if one retry throws unexpectedly and returns only aggregate counts, never message text, IDs, raw errors or user data. Existing Heartbeat schedule UID and cadence were not added or altered. Targeted test, full suite and TypeScript passed.
+
 - [x] Создать статический реестр из шести карточек: DeepSeek, Gemma 4 31B, Gemini, ChatGPT / OpenAI, Kimi, Grok; исключить любую фильтрацию карточек по ключам или статусу.
 - [x] Реализовать изолированные server-side handler'ы DeepSeek, Gemini, Gemma, OpenAI, Kimi и Grok без передачи или журналирования ключей.
 - [x] Создать tRPC-процедуру получения живых статусов провайдеров со строго ограниченным набором русских бейджей.
@@ -368,7 +370,7 @@
 - [ ] v6-MEM/OAUTH-SESSION-ISOLATION: очистить или изолировать неверную browser OAuth-сессию и повторно открыть официальный вход с выбором другого аккаунта; затем ждать точную фразу пользователя «ВОШЁЛ КАК ВЛАДЕЛЕЦ».
 - [ ] v6-MEM/OWNER-ACCEPTANCE-RUN: после подтверждения owner-сессии проверить T1–T11, сохранение memory profile, image/document preview и vision, Markdown/PDF, отдельный экран owner analytics и Export metrics; зафиксировать PASS/FAIL/NOT VERIFIED со screenshots и не выполнять DROP при любом непрошедшем gate.
 - [x] v6-MEM/BUG-AUTO-TOPIC-EXTRACTION: owner T1 выявил отсутствие `dialog_topic` после успешного Flash turn (`Темы диалогов 0/100`, Think retrieval отрицает прошлый чат); диагностировать persisted extraction job, устранить причину и повторить T1 только после регрессий. Повторный Flash source-turn создал topic, а отдельный Apex чат вернул «размер луны» и Flash.
-- [ ] v6-MEM/BUG-EXTRACTION-RETRY-RUNNER: durable jobs переходят в `pending` после soft-failure, но до сих пор не имели гарантированного launcher для наступившего `runAfter`; добавить bounded запуск due retry без нового постоянного процесса и покрыть его тестом.
+- [x] v6-MEM/BUG-EXTRACTION-RETRY-RUNNER: existing Heartbeat route is the durable launcher for due `runAfter` jobs; no new schedule or process was added. The bounded sweep isolates an unexpected single-job failure and continues later jobs, returning aggregate-only counts. Targeted suite, full suite and TypeScript passed.
 
 - [x] v6-N/SAFE-FRESHNESS-UI: ordinary chat now receives only validated source-date min/max and source count; URL, title, snippets, evidence and raw RAG/web source metadata are excluded from new SSE and persisted assistant metadata. Server/component regressions, full test suite and TypeScript passed in checkpoint `cef3d3a2`.
 - [x] v6-N/DEPLOYMENT-PARITY: fresh published asset check 2026-08-23 confirmed expected safe freshness UI labels after propagation. This verifies the browser bundle matches checkpoint `cef3d3a2` for the metadata-only control without reading chats, sources or user data.

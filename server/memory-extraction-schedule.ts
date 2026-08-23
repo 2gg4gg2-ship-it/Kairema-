@@ -15,10 +15,17 @@ export function createMemoryExtractionScheduleHandler(): RequestHandler {
         return;
       }
       const references = await listDueMemoryExtractionJobReferences(MEMORY_EXTRACTION_SWEEP_BATCH);
+      let processed = 0;
+      let failed = 0;
       for (const reference of references) {
-        await processMemoryExtractionJob(reference.userId, reference.assistantMessageId);
+        try {
+          await processMemoryExtractionJob(reference.userId, reference.assistantMessageId);
+          processed += 1;
+        } catch {
+          failed += 1;
+        }
       }
-      res.json({ ok: true, scanned: references.length });
+      res.json({ ok: true, scanned: references.length, processed, failed });
     } catch {
       res.status(500).json({ error: "memory-extraction-sweep-failed", context: { path: "/api/scheduled/memory-extraction" }, timestamp: new Date().toISOString() });
     }
