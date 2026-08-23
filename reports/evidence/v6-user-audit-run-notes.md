@@ -315,3 +315,14 @@ The focused Home integration suite completed **29/29** tests. It covers the four
 The later canonical published page exposed the current sidebar contract. After invoking the standard close control, the binary state was **collapsed**: the navigation region had no desktop width and the visible control offered to show the sidebar. This confirms the published sidebar-collapse fix without retaining a screenshot or any content of the navigation region.
 
 During that interaction, browser session state rehydrated unexpectedly. The sidebar was closed immediately and no record was selected, copied, exported, quoted or used as audit input. All further published browser interactions are stopped in this session. No history title, message content, account/session identifier, attachment detail, source data, provider detail, raw error or secret is retained in this evidence.
+
+## 2026-08-23 — Current local regression and bundle audit
+
+| Check | Result | Privacy-safe observation |
+|---|---|---|
+| Full `pnpm test` | PASS | 40 test files passed, 1 skipped; 193 tests passed, 4 skipped. This is a new successful run; earlier remote provider authorization failures remain historical observations and were not masked by code or configuration changes. |
+| `pnpm check` | PASS | TypeScript completed without diagnostics. |
+| `pnpm build` | PASS | Production assets and server bundle completed. The bundler emitted only a size advisory, not a build error. |
+| Server-secret-name bundle audit | PASS | A non-printing scan found none of the designated server-secret variable names in `dist/public`. No secret value or matching source was printed. |
+
+These checks are code/bundle evidence only and do not replace the paused authenticated browser acceptance flows.
