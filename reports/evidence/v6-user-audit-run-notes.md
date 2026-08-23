@@ -295,3 +295,23 @@ No model reply, prompt, URL, source title/snippet, provider trace, account/sessi
 ### Sidebar delivery confirmation follow-up
 
 An unauthenticated, cache-busted public asset scan inspected only the declared page assets and the presence of the application’s new sidebar-collapse signature. The canonical endpoint still did **not** serve that signature. This confirms the pending state is a **publication-delivery limitation**, not an inferred UI failure or a reason to perform further history interaction. The desktop sidebar production criterion stays **NOT VERIFIED**. No user, session, chat, source, attachment, provider or secret data was accessed or recorded.
+
+## 2026-08-23 — Mobile shell visibility recheck
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| 375×812 unauthenticated shell | PASS | Dark-default mobile shell showed the language, theme, role, settings, menu, new-chat, attachment and send controls without visible clipping. |
+| Content boundary | PASS | The check used the signed-out shell and showed no user history, conversation, account data, source metadata, attachment selection or secret. |
+| Settings persistence and interactions | NOT VERIFIED | Existing integration coverage remains valid, but live settings actions are not repeated while a safe isolated authenticated session is unavailable. |
+
+No screenshot is used as evidence of an authenticated feature flow.
+
+### Focused UI regression follow-up
+
+The focused Home integration suite completed **29/29** tests. It covers the four public roles, full role descriptions, sidebar control state, owned temporary attachment rendering, explicit profile save and bounded memory filter, URL-free RAG rendering, streaming/copy/regenerate/stop behavior, settings rollback, independent switches, accessible dropdowns, and restricted non-owner/owner UI boundaries. This is **code-level PASS**, not a replacement for unavailable authenticated browser acceptance. No user content, account data, source record, attachment metadata or secret was used by the test evidence.
+
+## 2026-08-23 — Final binary sidebar confirmation and browser-isolation stop
+
+The later canonical published page exposed the current sidebar contract. After invoking the standard close control, the binary state was **collapsed**: the navigation region had no desktop width and the visible control offered to show the sidebar. This confirms the published sidebar-collapse fix without retaining a screenshot or any content of the navigation region.
+
+During that interaction, browser session state rehydrated unexpectedly. The sidebar was closed immediately and no record was selected, copied, exported, quoted or used as audit input. All further published browser interactions are stopped in this session. No history title, message content, account/session identifier, attachment detail, source data, provider detail, raw error or secret is retained in this evidence.
