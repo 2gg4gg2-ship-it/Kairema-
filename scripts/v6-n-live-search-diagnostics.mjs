@@ -92,7 +92,7 @@ results.push(await request("tavily", Boolean(tavilyKey), (signal) => fetch("http
   method: "POST", signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ api_key: tavilyKey, query: QUERY, search_depth: "basic", max_results: 5, topic: "general" }),
 }), (payload) => payload?.results?.length ?? 0, (payload) => (payload?.results ?? []).map((item) => item?.published_date ?? item?.publishedDate ?? item?.date)));
 
-results.push(await request("google", Boolean(geminiKey), (signal) => fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent", {
+results.push(await request("google", Boolean(geminiKey), (signal) => fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent", {
   method: "POST", signal, headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey }, body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: `Find authoritative, current sources only for: ${QUERY}. Return a terse answer.` }] }], tools: [{ google_search: {} }] }),
 }), (payload) => payload?.candidates?.[0]?.groundingMetadata?.groundingChunks?.length ?? 0));
 

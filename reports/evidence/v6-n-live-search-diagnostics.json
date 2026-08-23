@@ -1,61 +1,73 @@
 {
   "event": "v6-n.live-search-diagnostics",
   "queryClass": "provided_current_release_query",
-  "checkedAt": "2026-08-22T09:57:27.773Z",
+  "checkedAt": "2026-08-23T06:21:29.390Z",
   "results": [
     {
       "layer": "you",
-      "status": "unavailable",
-      "http": null,
-      "latencyMs": 10547,
-      "sourceCount": 0,
-      "reason": "network_or_parse",
-      "retryAfter": false
+      "status": "found",
+      "http": 200,
+      "latencyMs": 3515,
+      "sourceCount": 10,
+      "reason": "sources_returned",
+      "retryAfter": false,
+      "sourceDateMin": null,
+      "sourceDateMax": null
     },
     {
       "layer": "serper",
-      "status": "unavailable",
-      "http": null,
-      "latencyMs": 12002,
-      "sourceCount": 0,
-      "reason": "timeout",
-      "retryAfter": false
+      "status": "found",
+      "http": 200,
+      "latencyMs": 5635,
+      "sourceCount": 5,
+      "reason": "sources_returned",
+      "retryAfter": false,
+      "sourceDateMin": "2026-06-19",
+      "sourceDateMax": "2026-08-02"
     },
     {
       "layer": "exa",
       "status": "found",
       "http": 200,
-      "latencyMs": 2937,
+      "latencyMs": 2451,
       "sourceCount": 5,
       "reason": "sources_returned",
-      "retryAfter": false
+      "retryAfter": false,
+      "sourceDateMin": "2026-08-18",
+      "sourceDateMax": "2026-08-18"
     },
     {
       "layer": "tavily",
-      "status": "unavailable",
-      "http": null,
-      "latencyMs": 12001,
-      "sourceCount": 0,
-      "reason": "timeout",
-      "retryAfter": false
+      "status": "found",
+      "http": 200,
+      "latencyMs": 2911,
+      "sourceCount": 5,
+      "reason": "sources_returned",
+      "retryAfter": false,
+      "sourceDateMin": null,
+      "sourceDateMax": null
     },
     {
       "layer": "google",
       "status": "unavailable",
       "http": 404,
-      "latencyMs": 212,
+      "latencyMs": 177,
       "sourceCount": 0,
       "reason": "not_found",
-      "retryAfter": false
+      "retryAfter": false,
+      "sourceDateMin": null,
+      "sourceDateMax": null
     },
     {
       "layer": "openrouter_online_catalog",
       "status": "empty",
       "http": 200,
-      "latencyMs": 2224,
+      "latencyMs": 2291,
       "sourceCount": 0,
       "reason": "no_usable_sources",
-      "retryAfter": false
+      "retryAfter": false,
+      "sourceDateMin": null,
+      "sourceDateMax": null
     }
   ]
 }

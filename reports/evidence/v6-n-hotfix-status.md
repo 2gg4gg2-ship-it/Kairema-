@@ -37,12 +37,12 @@
 
 | Слой | Статус | HTTP | Latency | Источники | Диапазон дат | Причина / действие |
 |---|---:|---:|---:|---:|---|---|
-| You | PASS | 200 | 3,570 ms | 10 | Дата не предоставлена provider payload | Доступен; это первый слой active cascade. Реальный server cascade также вернул `found`, 5 sources. |
-| Serper | PASS | 200 | 4,079 ms | 5 | 2026-06-19 — 2026-06-19 | Доступен; source-date normalization сохраняет безопасную date metadata. |
-| Exa | PASS | 200 | 2,521 ms | 5 | 2026-08-18 — 2026-08-18 | Доступен; подтверждает источники 2026 года. |
-| Tavily | PASS (direct diagnostic) | 200 | 2,601 ms | 5 | Дата не предоставлена provider payload | Endpoint/ключ отвечают. Tavily не является active user-facing cascade layer в текущем privacy-preserving architecture; chain не расширялась. |
-| Google grounding | FAIL / unavailable | 404 | 161 ms | 0 | — | Direct diagnostic endpoint/model rejected. Active user-facing cascade не зависит от него; 404 не объявлен quota reset и не маскируется как healthy. |
-| OpenRouter `:online` catalog | FAIL / empty | 200 | 3,027 ms | 0 | — | Каталог доступен, но подходящих `:online` IDs не обнаружено; новый online candidate не добавлялся. |
+| You | PASS | 200 | 3,515 ms | 10 | Дата не предоставлена provider payload | Доступен; это первый слой active cascade. Реальный server cascade также вернул `found`, 5 sources. |
+| Serper | PASS | 200 | 5,635 ms | 5 | 2026-06-19 — 2026-08-02 | Доступен; source-date normalization сохраняет безопасную date metadata. |
+| Exa | PASS | 200 | 2,451 ms | 5 | 2026-08-18 — 2026-08-18 | Доступен; подтверждает источники 2026 года. |
+| Tavily | PASS (direct diagnostic) | 200 | 2,911 ms | 5 | Дата не предоставлена provider payload | Endpoint/ключ отвечают. Tavily не является active user-facing cascade layer в текущем privacy-preserving architecture; chain не расширялась. |
+| Google grounding | FAIL / unavailable | 404 | 177 ms | 0 | — | Google Search grounding invocation возвращает 404 даже с model ID, подтверждённым live catalog. Это не quota reset и не healthy status. Active user-facing cascade от Google не зависит; отдельный grounded слой не включался. |
+| OpenRouter `:online` catalog | FAIL / empty | 200 | 2,291 ms | 0 | — | Каталог доступен, но подходящих `:online` IDs не обнаружено; новый online candidate не добавлялся. |
 | RAG | NOT VERIFIED | — | — | — | — | В текущем browser session нет авторизованного user chat с RAG-only ответом; stale-RAG condition покрыт deterministic test и server-side signal, но live UI edge case не утверждается. |
 
 ### Реальная active cascade
