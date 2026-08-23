@@ -1,12 +1,12 @@
 # Kairema v6-MEM — фактический статус пользовательской приёмки
 
-**Дата обновления:** 2026-08-22  
+**Дата обновления:** 2026-08-23  
 **Основание:** опубликованные browser-проверки, unit/component/integration-регрессии и существующий подробный live journal `v6-mem-live-run-notes.md`.  
 **Защита данных:** этот отчёт не содержит OAuth ID, токенов, URL вложений, содержимого сообщений, содержимого памяти или raw provider errors.
 
 > **Итог на данный момент: v6-MEM ПОЛЬЗОВАТЕЛЬСКАЯ ЧАСТЬ НЕ ЗАКРЫТА.**
 >
-> Причины: фактическая live vision-проверка завершилась ошибкой доступности provider/model endpoint, а T4 и T6 не имеют полного PASS. Owner-only часть дополнительно блокирована отсутствующей платформенной production-настройкой owner claim. Никакой FAIL не маскируется формулировкой PASS.
+> Причины: поздняя controlled published vision-проверка уже дала PASS, но T4 и T6 не имеют полного PASS. Owner-only часть дополнительно блокирована отсутствующей платформенной production-настройкой owner claim. Никакой исторический FAIL не удаляется и не маскируется формулировкой PASS.
 
 ## Пользовательская память
 
@@ -27,7 +27,7 @@
 | Composer thumbnail | **PASS** | Published neutral-image browser check | Перед отправкой отображается preview; в evidence не сохранены байты, имя, URL или текст запроса. |
 | Protected temporary delete | **PASS** | Published browser check | Удаление доступно только для текущего composer attachment и после удаления preview/control исчезают. |
 | Sent-bubble thumbnail при provider failure | **PASS** | Published retest после `bd263b3c` | Исправлена hydration race между persisted message и attachment query; браузер подтвердил preview в user bubble при безопасной provider failure. |
-| Live vision answer | **FAIL** | Повторные neutral-image live attempts Context и Apex | Ни одна фактическая попытка не вернула vision answer: UI показал только классифицированную ошибку доступности provider/model endpoint. Raw error и provider chain намеренно не записывались. |
+| Live vision answer | **PASS** | Controlled neutral-image published acceptance, 2026-08-23 | Composer preview, sent-bubble preview и image-aware assistant answer получены в обычной authenticated session. В evidence не сохранены байты, имя, URL, prompt, answer text или provider chain. Ранние Context/Apex availability failures остаются историческим evidence, но не являются последним фактом. |
 
 ## Роли, controls и RAG
 
@@ -54,17 +54,16 @@
 |---|---|---|
 | Source-level regression утверждала сохранение sent-bubble preview после provider failure. | Первая published Apex проверка показала отсутствие preview после hydration. | Добавлен scoped fallback и invalidation attachment query; новая regression покрыла hydration race; опубликованный retest подтвердил PASS. |
 | Первая поправка switch прошла unit/integration tests. | Browser probe не показал конечную геометрию thumb. | Введён explicit production CSS root-state → thumb; после `eecdb55b` browser подтвердил `translate: 16px`. |
-| Attachment preview создавал впечатление готовности vision. | Две live role attempts не дали vision answer из-за provider/model endpoint availability. | Composer и sent preview разделены от vision answer; vision остаётся FAIL. |
+| Attachment preview создавал впечатление готовности vision. | Ранние Context/Apex attempts не дали vision answer из-за provider/model endpoint availability, но поздний controlled neutral-image published flow дал image-aware answer. | Composer/sent preview и vision answer остаются раздельными критериями; исторические availability failures сохранены, а текущий live vision status обновлён до PASS по более позднему browser факту. |
 | Владелец проекта ожидался доступным в owner analytics. | Hash-only production diagnostic показал `configured=false`, не claim mismatch. | Guard сохранён строгим; необходима platform configuration repair, а не role-based обход. |
 
 ## Доступные доказательства
 
-Подробная хронология и ссылки на локальные screenshot artifacts находятся в `reports/evidence/v6-mem-live-run-notes.md`. Ключевые подтверждения включают published switch PASS после `eecdb55b`, sent-bubble preview PASS после `bd263b3c`, memory/profile/control checks и live vision FAIL. Артефакты не содержат секретов в тексте этого отчёта.
+Подробная хронология и ссылки на локальные screenshot artifacts находятся в `reports/evidence/v6-mem-live-run-notes.md`. Ключевые подтверждения включают published switch PASS после `eecdb55b`, sent-bubble preview PASS после `bd263b3c`, memory/profile/control checks, исторический vision FAIL и поздний controlled published vision PASS. Артефакты не содержат секретов в тексте этого отчёта.
 
 ## Следующие обязательные шаги
 
 1. Восстановить системный production owner claim через платформенную поддержку, не передавая raw OAuth ID в код, БД или чат.
 2. После восстановления mapping повторить owner analytics, metric export, owner download, T1–T11 и все DROP prerequisites.
-3. Отдельно устранить реальную доступность хотя бы одного vision-capable provider/model и повторить live neutral-image acceptance до получения фактического vision answer.
-4. Выполнить T6 под безопасно авторизованным вторым пользователем либо оставить его **NOT VERIFIED**.
-5. Не использовать финальную формулировку о закрытии v6-MEM, пока каждая обязательная строка не имеет PASS.
+3. Выполнить T6 под безопасно авторизованным вторым пользователем либо оставить его **NOT VERIFIED**.
+4. Не использовать финальную формулировку о закрытии v6-MEM, пока каждая обязательная строка не имеет PASS.
