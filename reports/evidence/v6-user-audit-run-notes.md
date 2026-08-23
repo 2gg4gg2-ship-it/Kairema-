@@ -206,3 +206,12 @@ Both checks used disposable audit chats and recorded no message text, source URL
 | Full suite | EXTERNAL AVAILABILITY BLOCKER | The suite completed with 38 files passed, 1 skipped, 189 tests passed, 4 skipped, and 2 remote credential-health checks rejected externally. This is not reported as a full-suite PASS; no provider chain, fallback, status semantics or secret was changed to mask it. |
 
 The narrow remediation does not retain prompts, replies, source strings, attachment data, account/session identifiers, raw provider errors or secrets. Fresh published confirmation of citation-marker absence is still required before the broader all-role live-search criterion can be closed.
+
+## 2026-08-23 — Mobile shell recheck and current browser-session limitation
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Phone viewport shell | PASS | A fresh 375×812 dark-default Russian UI screenshot renders the role selector, menu controls, new-conversation header, export controls and composer without clipping or overlap. No authenticated history, message body or account data was visible. |
+| Published authenticated recheck | NOT VERIFIED — current session public | A fresh visit to the canonical published URL presents the signed-out shell. No existing history or account state was opened, copied or changed. The citation-marker absence and authenticated attachment/live-search paths cannot be rechecked in this browser state and remain open rather than inferred from code tests. |
+
+This does not alter the deterministic citation regression result or prior metadata-only acceptance evidence. It simply records the current browser-session boundary honestly.
