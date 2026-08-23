@@ -405,4 +405,34 @@ describe("Kairema v4 role registry", () => {
     expect(health.find((item) => item.provider === "openrouter")).toMatchObject({ state: "cooldown", category: "TIMEOUT" });
     vi.useRealTimers();
   });
+
+  it("allows Flash vision to wait for its sole vision candidate under the normal attempt timeout", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Изображение получено"}}]}\n\n'));
+        controller.close();
+      },
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => resolve(new Response(body, { status: 200 })), FLASH_VISIBLE_TTFT_DEADLINE_MS + 100);
+      const requestSignal = init?.signal as AbortSignal;
+      requestSignal.addEventListener("abort", () => { clearTimeout(timer); reject(requestSignal.reason); }, { once: true });
+    }));
+
+    const pending = chatWithRoleStream(
+      "fast",
+      [{ role: "user", content: "Опиши изображение" }],
+      { imageUrls: ["data:image/png;base64,AA=="] },
+      vi.fn(),
+    );
+    await vi.advanceTimersByTimeAsync(FLASH_VISIBLE_TTFT_DEADLINE_MS + 100);
+    const result = await pending;
+
+    expect(result).toMatchObject({ provider: "google", fallbackUsed: true, content: "Изображение получено" });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
 });

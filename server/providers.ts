@@ -672,7 +672,11 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
     let visibleDeltaDelivered = false;
     let providerDeltaReceived = false;
     let flashDeadlineExpired = false;
-    const flashDeadlineController = role.key === "fast" ? new AbortController() : null;
+    // A vision request can use only the dedicated vision candidate. Applying Flash's
+    // text TTFT fallback deadline here would abort that sole candidate before a
+    // normal image decode can yield its first token; the 25-second attempt limit
+    // in invoke() remains in force.
+    const flashDeadlineController = role.key === "fast" && !settings?.imageUrls?.length ? new AbortController() : null;
     const flashDeadlineTimer = flashDeadlineController ? setTimeout(() => {
       flashDeadlineExpired = true;
       flashDeadlineController.abort(new DOMException("Flash visible TTFT deadline exceeded", "TimeoutError"));

@@ -21,6 +21,24 @@ async function probe(kind, messages) {
   }
 }
 
+async function streamProbe(kind, messages) {
+  const startedAt = Date.now();
+  if (!apiKey) return { kind, status: "not_configured", http: null, latencyMs: 0, streamBodyPresent: false, visibleDeltaPresent: false };
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify({ model, messages, stream: true, max_tokens: 32 }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const body = await response.text();
+    const visibleDeltaPresent = /"content"\s*:\s*"[^"\n]+/.test(body);
+    return { kind, status: response.ok && visibleDeltaPresent ? "pass" : "fail", http: response.status, latencyMs: Date.now() - startedAt, streamBodyPresent: body.length > 0, visibleDeltaPresent };
+  } catch (error) {
+    return { kind, status: error?.name === "TimeoutError" ? "timeout" : "network_or_parse", http: null, latencyMs: Date.now() - startedAt, streamBodyPresent: false, visibleDeltaPresent: false };
+  }
+}
+
 const text = await probe("text", [{ role: "user", content: "Ответь одним словом: готово" }]);
 const image = await probe("neutral_png", [{
   role: "user",
@@ -29,4 +47,11 @@ const image = await probe("neutral_png", [{
     { type: "image_url", image_url: { url: `data:image/png;base64,${neutralPng}` } },
   ],
 }]);
-console.log(JSON.stringify({ event: "v6-n.google-vision-probe", candidate: model, checkedAt: new Date().toISOString(), results: [text, image] }, null, 2));
+const streamedImage = await streamProbe("neutral_png_stream", [{
+  role: "user",
+  content: [
+    { type: "text", text: "Опиши, есть ли прикреплённое изображение. Ответь одним коротким предложением." },
+    { type: "image_url", image_url: { url: `data:image/png;base64,${neutralPng}` } },
+  ],
+}]);
+console.log(JSON.stringify({ event: "v6-n.google-vision-probe", candidate: model, checkedAt: new Date().toISOString(), results: [text, image, streamedImage] }, null, 2));
