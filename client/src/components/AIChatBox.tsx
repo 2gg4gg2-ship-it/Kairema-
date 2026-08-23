@@ -71,6 +71,22 @@ export function formatAttachmentSize(sizeBytes: number) {
   return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Defense in depth for legacy assistant records created before server-side source redaction. */
+export function redactLegacyAssistantReferences(value: string) {
+  return value
+    .replace(/(?:^|\n)\s*(?:#{1,6}\s*)?(?:ссылки\s+на\s+источники?|источники|sources?)\s*:?\s*(?=\n|$)/gim, "\n")
+    .replace(/\[[^\]]+\]\(https?:\/\/[^)\s]+\)/gi, "")
+    .replace(/(?:^|\n)\s*(?:[-*•]\s*)?https?:\/\/[^\s<>()\[\]{}]+/gim, "")
+    .replace(/https?:\/\/[^\s<>()\[\]{}]+/gi, "")
+    .replace(/\s*\[(?:(?:source|cite|citation|web|search|источник|ссылка)\b[^\]\r\n]*)\]/gi, "")
+    .replace(/\s*【[^】]*(?:(?:source|cite|citation|web|search|источник|ссылка)|†)[^】]*】/gi, "")
+    .replace(/\s*⟦(?:(?:source|cite|citation|web|search|источник|ссылка)\b[^⟧\r\n]*)⟧/gi, "")
+    .replace(/\s+\[(?:\d{1,3}(?:\s*,\s*\d{1,3})*)\](?=[.,;:!?)]?(?:[\t ]*(?:\r?\n|$)))/g, "")
+    .replace(/(?:^|\n)\s*[-*•]\s*(?=\n|$)/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export function AIChatBox({
   messages, onSendMessage, onUploadFiles, isLoading = false, placeholder, className, height, emptyStateMessage,
   onExportMarkdown, onExportPdf, canExport = false, exportBusy = null, exportError = "",
@@ -134,11 +150,11 @@ export function AIChatBox({
       {exportError && <p className="kairema-export-error" role="status">{exportError}</p>}
       <div ref={viewportRef} className="min-h-0 flex-1 overflow-y-auto">
         {displayMessages.length === 0 ? <div className="flex min-h-[420px] flex-col items-center justify-center px-6 text-center"><div className="kairema-orb mb-6"><Sparkles className="size-7" /></div><h2 className="text-2xl font-semibold tracking-tight text-foreground">{emptyStateMessage}</h2><p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">{t.fourRoles}</p></div> : <div className="mx-auto flex w-full max-w-4xl flex-col gap-7 px-4 py-7 sm:px-8">{displayMessages.map((message, index) => <article key={message.id ?? `${message.role}-${index}`} className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
-          {message.role === "assistant" && <div className="kairema-avatar kairema-avatar-ai"><Sparkles className="size-4" /></div>}<div className={cn("max-w-[86%] sm:max-w-[76%]", message.role === "user" && "flex flex-col items-end")}><div className={cn("kairema-message", message.role === "user" ? "kairema-message-user" : "kairema-message-ai", message.isError && "kairema-message-error")}>{message.role === "assistant" && !message.isError ? <div className="kairema-markdown text-sm leading-6"><InlineMarkdown text={message.content} language={language} /></div> : <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>}</div>
+          {message.role === "assistant" && <div className="kairema-avatar kairema-avatar-ai"><Sparkles className="size-4" /></div>}<div className={cn("max-w-[86%] sm:max-w-[76%]", message.role === "user" && "flex flex-col items-end")}><div className={cn("kairema-message", message.role === "user" ? "kairema-message-user" : "kairema-message-ai", message.isError && "kairema-message-error")}>{message.role === "assistant" && !message.isError ? <div className="kairema-markdown text-sm leading-6"><InlineMarkdown text={redactLegacyAssistantReferences(message.content)} language={language} /></div> : <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>}</div>
           {message.role === "user" && Boolean(message.attachments?.length) && <div className="kairema-message-attachments" aria-label={language === "ru" ? "Вложения сообщения" : "Message attachments"}>{message.attachments?.map((attachment) => <button key={attachment.id} type="button" className="kairema-attachment-chip kairema-attachment-open" onClick={() => setPreviewAttachment(attachment)} aria-label={`${t.preview}: ${attachment.fileName}`}>{attachment.kind === "image" && attachment.previewUrl ? <img src={attachment.previewUrl} alt="" className="kairema-message-image" /> : attachment.kind === "image" ? <FileImage className="size-3.5" /> : <FileText className="size-3.5" />}<span>{attachment.fileName}{attachment.kind === "document" && formatAttachmentSize(attachment.sizeBytes) ? ` · ${formatAttachmentSize(attachment.sizeBytes)}` : ""}</span></button>)}</div>}
           {message.role === "assistant" && message.providerLabel && <p className="mt-2 px-1 text-xs text-muted-foreground">{message.providerLabel} · {message.model} · {message.status}</p>}
           {message.role === "assistant" && message.searchStatus && (() => { const dates = sourceDateRange(message.searchStatus, language); const status = message.searchStatus.staleRagOnly ? t.staleRag : message.searchStatus.state === "found" ? `${t.searchVerified}${message.searchStatus.sourcesCount ? ` · ${message.searchStatus.sourcesCount}` : ""}` : message.searchStatus.state === "empty" ? t.searchEmpty : message.searchStatus.state === "degraded" ? t.searchDegraded : t.searchError; return <p className="mt-2 inline-flex rounded-full border border-border/70 bg-muted/40 px-2 py-1 text-xs text-muted-foreground" role="status">{status}{dates ? ` · ${t.sourceDates}: ${dates}` : ""}</p>; })()}
-          {message.role === "assistant" && !message.isError && <div className="kairema-message-actions" aria-label="Actions"><button type="button" onClick={() => onCopyAssistant?.(message)} className="kairema-message-action"><Copy className="size-3.5" />{t.copy}</button><button type="button" onClick={() => onRegenerate?.(message)} disabled={isLoading} className="kairema-message-action"><RotateCcw className="size-3.5" />{t.retry}</button></div>}
+          {message.role === "assistant" && !message.isError && <div className="kairema-message-actions" aria-label="Actions"><button type="button" onClick={() => onCopyAssistant?.({ ...message, content: redactLegacyAssistantReferences(message.content) })} className="kairema-message-action"><Copy className="size-3.5" />{t.copy}</button><button type="button" onClick={() => onRegenerate?.(message)} disabled={isLoading} className="kairema-message-action"><RotateCcw className="size-3.5" />{t.retry}</button></div>}
           {message.role === "user" && <div className="kairema-message-actions" aria-label="Actions"><button type="button" onClick={() => onCopyUser?.(message)} className="kairema-message-action"><Copy className="size-3.5" />{t.copy}</button></div>}</div>{message.role === "user" && <div className="kairema-avatar"><User className="size-4" /></div>}</article>)}{isLoading && displayMessages.at(-1)?.role !== "assistant" && <div className="flex items-center gap-3"><div className="kairema-avatar kairema-avatar-ai"><Sparkles className="size-4" /></div><div className="kairema-typing"><Loader2 className="size-4 animate-spin" /> {t.typing}</div></div>}</div>}
       </div>
       <form onSubmit={submit} className="kairema-composer">

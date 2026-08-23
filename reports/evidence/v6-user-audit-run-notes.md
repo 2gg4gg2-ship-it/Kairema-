@@ -215,3 +215,15 @@ The narrow remediation does not retain prompts, replies, source strings, attachm
 | Published authenticated recheck | NOT VERIFIED — current session public | A fresh visit to the canonical published URL presents the signed-out shell. No existing history or account state was opened, copied or changed. The citation-marker absence and authenticated attachment/live-search paths cannot be rechecked in this browser state and remain open rather than inferred from code tests. |
 
 This does not alter the deterministic citation regression result or prior metadata-only acceptance evidence. It simply records the current browser-session boundary honestly.
+
+## 2026-08-23 — Legacy assistant replay redaction remediation
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Existing-record display gap | FIXED IN CODE — published recheck pending | A pre-existing assistant record created before the server-side citation fix could still show opaque technical reference markers when replayed. Its content, identifiers and conversation metadata were not copied into evidence. |
+| Client display and copy boundary | FIXED | A pure client-side defense-in-depth sanitizer now redacts recognized technical source/citation reference blocks before assistant markdown display and before the copy action. It does not mutate, export or otherwise alter historical records. |
+| Component regression | PASS | `client/src/components/AIChatBox.test.tsx` completed 11/11. The new deterministic legacy-record scenario confirms technical reference markers are absent from rendered and copied content while ordinary in-sentence numeric arrays remain visible. |
+| Type safety and production build | PASS | `pnpm check` and `pnpm build` completed successfully. |
+| Full suite | EXTERNAL AVAILABILITY BLOCKER | The suite completed with 38 files passed, 1 skipped, 190 tests passed, 4 skipped, and 2 remote credential-health checks rejected externally. The result is not represented as a full-suite PASS; no provider routing, fallback, health semantics or secret was changed. |
+
+The code fix does not retain or reveal historical message text, source data, attachment data, account/session identifiers, raw provider errors or secrets. A fresh published verification in an authenticated context remains required before this criterion is considered browser-confirmed.

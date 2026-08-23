@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import React, { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { consumeChatStream } from "@/lib/chat-stream";
-import { AIChatBox, formatAttachmentSize, type Message } from "./AIChatBox";
+import { AIChatBox, formatAttachmentSize, redactLegacyAssistantReferences, type Message } from "./AIChatBox";
 
 const encoder = new TextEncoder();
 let releaseFinalStream: (() => void) | null = null;
@@ -95,6 +95,23 @@ describe("AIChatBox user flows", () => {
     expect(screen.getByRole("status").textContent).toContain("Источники проверены");
     expect(screen.queryByText(/Tavily|Google|OpenRouter/i)).toBeNull();
     expect(screen.queryByText(/https?:\/\//i)).toBeNull();
+  });
+
+  it("redacts technical citation markers from legacy assistant replay and copied content", async () => {
+    const user = userEvent.setup();
+    const onCopyAssistant = vi.fn();
+    const legacyContent = "Полезная часть. Массив значений [1, 2] остаётся видимым.\n[Source: legacy-reference]\n【†opaque-reference】";
+    const reply: Message = { id: "legacy-assistant", role: "assistant", content: legacyContent, providerLabel: "Kairema Context", model: "safe-model", status: "полный ответ" };
+    render(<AIChatBox messages={[reply]} onSendMessage={vi.fn()} onCopyAssistant={onCopyAssistant} />);
+
+    expect(redactLegacyAssistantReferences(legacyContent)).toContain("Полезная часть.");
+    expect(redactLegacyAssistantReferences(legacyContent)).toContain("[1, 2]");
+    expect(document.body.textContent).not.toContain("legacy-reference");
+    expect(document.body.textContent).not.toContain("opaque-reference");
+
+    await user.click(screen.getByRole("button", { name: "Копировать" }));
+    expect(onCopyAssistant).toHaveBeenCalledWith(expect.objectContaining({ content: expect.not.stringContaining("opaque-reference") }));
+    expect(onCopyAssistant).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining("[1, 2]") }));
   });
 
   it("opens temporary image and document previews from a sent user message", async () => {
