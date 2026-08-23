@@ -125,6 +125,17 @@ describe("Home integration flows", () => {
     expect(screen.queryByText("Kairema Код")).toBeNull();
   });
 
+  it("keeps the complete descriptions for all four public roles in the selector", () => {
+    render(<Home />);
+
+    expect(Array.from(document.querySelectorAll(".kairema-provider-role")).map((node) => node.textContent)).toEqual([
+      "Короткие повседневные ответы без ожидания.",
+      "Логика, рассуждения и сложные задачи среднего объёма.",
+      "Длинные документы, большие фрагменты текста и связный контекст.",
+      "Требовательные задачи, глубокий анализ и комплексные ответы.",
+    ]);
+  });
+
   it("renders an owned temporary attachment only inside the saved user bubble that references it", () => {
     fixtures.messages = [{ id: 1, role: "user", content: "Посмотри изображение", modelId: "fast", createdAt: new Date("2026-08-19T00:00:00.000Z"), metadata: JSON.stringify({ attachmentIds: ["44444444-4444-4444-8444-444444444444"] }) }];
     fixtures.attachments = [{ id: "44444444-4444-4444-8444-444444444444", fileName: "owned.png", contentType: "image/png", byteSize: 100, kind: "image", previewUrl: "https://preview.example.test/owned.png" }];

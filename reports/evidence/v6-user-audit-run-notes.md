@@ -94,3 +94,13 @@ This entry contains no prompt/reply payload, history data, source metadata, atta
 | Regression and type safety | PASS | Focused component coverage, full suite and TypeScript passed after the UI-only change. |
 
 This code-level entry does not retain any attachment filename, size, MIME type, URL, file bytes, prompt/reply payload, user identifier or session material. A controlled browser upload remains a separate acceptance item.
+
+## 2026-08-23 — Role-description visual remediation
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Open role selector descriptions | FIXED — visual verified | The open selector now wraps the full public descriptions for Flash, Think, Context and Apex instead of visually truncating them. |
+| Four-role invariant | PASS | The selector still exposes exactly four public roles; their identifiers and configured chains were not changed. |
+| Regression coverage | PASS | Focused client regression and a desktop visual recheck passed after the CSS-only correction. |
+
+This entry retains no chat content, history, attachment data, source data, identifiers, secrets or provider technical details.
