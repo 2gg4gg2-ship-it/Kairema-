@@ -17,6 +17,7 @@ const fixtures = vi.hoisted(() => ({
   createChat: vi.fn(),
   deleteChat: vi.fn(),
   updateSettings: vi.fn(),
+  toggleTheme: vi.fn(),
   updateMemory: vi.fn(),
   deleteMemoryEntry: vi.fn(),
   clearMemory: vi.fn(),
@@ -36,7 +37,7 @@ Object.defineProperties(HTMLElement.prototype, {
 vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ isAuthenticated: true, loading: false }) }));
 vi.mock("@/const", () => ({ startLogin: vi.fn() }));
 vi.mock("@/lib/runtime-auth", () => ({ runtimeAuthHeaders: () => ({ Authorization: "Bearer test-session" }) }));
-vi.mock("@/contexts/ThemeContext", () => ({ useTheme: () => ({ theme: "dark", toggleTheme: vi.fn(), highContrast: false, setHighContrast: vi.fn() }) }));
+vi.mock("@/contexts/ThemeContext", () => ({ useTheme: () => ({ theme: "dark", toggleTheme: fixtures.toggleTheme, highContrast: false, setHighContrast: vi.fn() }) }));
 vi.mock("@/lib/chat-export", () => ({
   prepareChatMarkdown: fixtures.prepareMarkdown,
   prepareChatPdf: fixtures.preparePdf,
@@ -95,6 +96,7 @@ function resetFixtures() {
   fixtures.downloadPrepared.mockReset();
   fixtures.isOwner = false;
   fixtures.navigate.mockReset();
+  fixtures.toggleTheme.mockReset();
   fixtures.updateMemory.mockReset().mockResolvedValue(undefined);
   fixtures.deleteMemoryEntry.mockReset().mockResolvedValue(undefined);
   fixtures.clearMemory.mockReset().mockResolvedValue(undefined);
@@ -396,6 +398,17 @@ describe("Home integration flows", () => {
 
     expect(thinking.getAttribute("data-state")).toBe("checked");
     expect(fixtures.updateSettings).toHaveBeenCalledWith({ thinking: true });
+  });
+
+  it("restores the local theme when its setting save fails", async () => {
+    const user = userEvent.setup();
+    fixtures.updateSettings.mockRejectedValueOnce(new Error("offline"));
+    render(<Home />);
+
+    await user.click(screen.getByTitle("Светлая тема"));
+
+    await waitFor(() => expect(fixtures.updateSettings).toHaveBeenCalledWith({ theme: "light" }));
+    await waitFor(() => expect(fixtures.toggleTheme).toHaveBeenCalledTimes(2));
   });
 
   it("keeps independent Switch semantics and stable visual-state snapshots in light and dark wrappers", () => {

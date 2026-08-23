@@ -104,3 +104,28 @@ This code-level entry does not retain any attachment filename, size, MIME type, 
 | Regression coverage | PASS | Focused client regression and a desktop visual recheck passed after the CSS-only correction. |
 
 This entry retains no chat content, history, attachment data, source data, identifiers, secrets or provider technical details.
+
+## 2026-08-23 — Published settings dialog recheck
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Settings dialog and self-diagnostics | PASS | The canonical published dialog opened and its diagnostics rendered only the current theme and contrast state, with an explicit safe-reset action. No chat, history, keys, routes, identifiers or technical payloads were displayed in the isolated audit viewport. |
+| Default-role dropdown | PASS | The closed control showed its current value. The opened list exposed exactly the four public roles with complete, wrapped capability descriptions; Escape closed the list without choosing or persisting a new value. |
+| High-contrast switch | PASS | A reversible published interaction reached the semantic checked state and returned to its original unchecked state. The original account preference was restored after the observation. |
+
+This is a focused settings-dialog result. It does not yet substitute for the remaining profile-save, theme/language, responsive-control, clean-store memory, attachment, live-search or owner-only acceptance criteria. No prompt/reply text, history item, source metadata, attachment data, user ID, session material, secret, raw error or technical provider data is retained.
+
+| Theme and language controls | PASS | Reversible published interactions changed the semantic theme and language states, then restored the original dark Russian interface. No content-bearing area was included in this validation. |
+| Focused Home regression | PASS | `client/src/pages/Home.integration.test.tsx` completed: 27 passed. Coverage includes explicit profile-save UI, independent switch state during a pending save, light/dark switch visual states, named dropdown controls, closed/open role-dropdown behavior, and absence of internal routing details in settings. |
+
+The profile-save result above remains component/integration-level evidence. A new browser write is intentionally not performed against an unknown existing user profile because the audit may not read its current value and cannot safely restore it without disclosing private data.
+
+## 2026-08-23 — Settings-save rollback remediation
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Theme save failure | FIXED — regression verified | A failed settings mutation previously cleared the optimistic persisted settings override but could leave the locally toggled theme visually changed. The failure handler now applies the compensating theme toggle before clearing the override. |
+| Focused regression | PASS | The Home integration test simulates a rejected theme save and verifies both the initial user-facing switch and the compensating rollback. |
+| Full regression and type safety | PASS | Full `pnpm test`: 40 files passed, 1 skipped; 189 tests passed, 4 skipped. `pnpm check` passed. |
+
+The remediation does not alter the four roles, provider chains, attempt budget, memory extraction schedule, attachment lifecycle, owner guard, schema or `chat_exports`. It contains no user content, identifiers, secrets, URLs, raw errors or technical provider data.

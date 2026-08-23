@@ -390,4 +390,5 @@
 - [ ] AUDIT-USER/ROLES-SEARCH: проверить Flash, Think, Context и Apex на нейтральных prompts, ≤4 upstream attempts, honest live-search/freshness semantics и отсутствие raw source renderers.
 - [ ] AUDIT-USER/UI: проверить Switch, dropdown, profile save, settings sections, theme/language/contrast and responsive controls; исправить подтверждённые defects and add regression coverage.
 - [x] AUDIT-USER/BUG-ROLE-DROPDOWN-DESCRIPTIONS: removed visual line-clamping; all four role descriptions wrap in full on desktop/mobile. Focused regression and desktop visual check pass; exactly four roles, slugs and chains are unchanged.
+- [x] AUDIT-USER/BUG-THEME-SAVE-ROLLBACK: theme control now returns the local visual theme to its authoritative saved value if the settings mutation fails. Narrow Home regression confirms the initial switch, rejected save and compensating switch; language and high-contrast semantics remain unchanged.
 - [ ] AUDIT-USER/EVIDENCE: подготовить metadata-only status table with DONE / NOT DONE / BROKEN, publish screenshots without private content, and preserve owner functions as platform-blocked.
