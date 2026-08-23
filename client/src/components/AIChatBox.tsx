@@ -81,6 +81,7 @@ export function redactLegacyAssistantReferences(value: string) {
     .replace(/\s*\[(?:(?:source|cite|citation|web|search|источник|ссылка)\b[^\]\r\n]*)\]/gi, "")
     .replace(/\s*【[^】]*(?:(?:source|cite|citation|web|search|источник|ссылка)|†)[^】]*】/gi, "")
     .replace(/\s*⟦(?:(?:source|cite|citation|web|search|источник|ссылка)\b[^⟧\r\n]*)⟧/gi, "")
+    .replace(/\s*\\?\[\s*(?:[a-f0-9]{12,}(?:\s*,\s*[a-f0-9]{12,})+)\s*\\?\]/gi, "")
     .replace(/\s+\[(?:\d{1,3}(?:\s*,\s*\d{1,3})*)\](?=[.,;:!?)]?(?:[\t ]*(?:\r?\n|$)))/g, "")
     .replace(/(?:^|\n)\s*[-*•]\s*(?=\n|$)/g, "")
     .replace(/\n{3,}/g, "\n\n")

@@ -35,6 +35,9 @@ describe("v5.5 server-side role safety", () => {
     expect(bracketFilter("", true)).toBe("Другой факт");
     const fragmentedFilter = createSourceSafeStreamFilter();
     expect(fragmentedFilter("Фрагмент ⟦citation: web-42⟧ готов", true)).toBe("Фрагмент готов");
+    expect(sanitizeAssistantContent("Подтверждённый вывод \\[a3b2c1d0e9f8a7b6, c4d3e2f1a0b9c8d7\\].")).toBe("Подтверждённый вывод.");
+    const escapedIdsFilter = createSourceSafeStreamFilter();
+    expect(escapedIdsFilter("Поток \\[a3b2c1d0e9f8a7b6, c4d3e2f1a0b9c8d7\\].", true)).toBe("Поток.");
     expect(sanitizeAssistantContent("Обычный массив [1, 2] не является ссылкой.")).toBe("Обычный массив [1, 2] не является ссылкой.");
     expect(sanitizeAssistantContent("Утверждение подтверждено [1].")).toBe("Утверждение подтверждено.");
   });

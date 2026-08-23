@@ -227,3 +227,15 @@ This does not alter the deterministic citation regression result or prior metada
 | Full suite | EXTERNAL AVAILABILITY BLOCKER | The suite completed with 38 files passed, 1 skipped, 190 tests passed, 4 skipped, and 2 remote credential-health checks rejected externally. The result is not represented as a full-suite PASS; no provider routing, fallback, health semantics or secret was changed. |
 
 The code fix does not retain or reveal historical message text, source data, attachment data, account/session identifiers, raw provider errors or secrets. A fresh published verification in an authenticated context remains required before this criterion is considered browser-confirmed.
+
+## 2026-08-23 — Escaped opaque citation-ID remediation
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Published finding | FIXED IN CODE — published recheck pending | An authenticated published replay exposed a previously unhandled escaped bracketed multi-identifier citation form. The record content, identifiers, history metadata and session material were not copied into this evidence. |
+| Shared redaction boundary | FIXED | Server streaming/final persistence and client replay/copy now remove only escaped multi-item opaque hexadecimal identifier lists. Ordinary numeric arrays remain visible. |
+| Focused regression | PASS | The server safety and client component suites completed 16 tests across the two targeted files, including final streaming and legacy replay/copy coverage. |
+| Type safety and production build | PASS | `pnpm check` and `pnpm build` completed successfully. |
+| Full suite | EXTERNAL AVAILABILITY BLOCKER | The suite completed with 38 files passed, 1 skipped, 190 tests passed, 4 skipped, and 2 external credential-health checks rejected remotely. This is not reported as a full-suite PASS; no provider chain, fallback, health semantics or secret was changed. |
+
+The fresh browser confirmation will use only a newly created neutral chat after deployment. No prompt, reply, source URL/title/snippet, opaque identifier, attachment data, account/session identifier, raw error or secret is retained here.

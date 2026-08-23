@@ -100,7 +100,7 @@ describe("AIChatBox user flows", () => {
   it("redacts technical citation markers from legacy assistant replay and copied content", async () => {
     const user = userEvent.setup();
     const onCopyAssistant = vi.fn();
-    const legacyContent = "Полезная часть. Массив значений [1, 2] остаётся видимым.\n[Source: legacy-reference]\n【†opaque-reference】";
+    const legacyContent = "Полезная часть. Массив значений [1, 2] остаётся видимым.\\n[Source: legacy-reference]\\n【†opaque-reference】\\n\\[a3b2c1d0e9f8a7b6, c4d3e2f1a0b9c8d7\\]";
     const reply: Message = { id: "legacy-assistant", role: "assistant", content: legacyContent, providerLabel: "Kairema Context", model: "safe-model", status: "полный ответ" };
     render(<AIChatBox messages={[reply]} onSendMessage={vi.fn()} onCopyAssistant={onCopyAssistant} />);
 
@@ -108,9 +108,11 @@ describe("AIChatBox user flows", () => {
     expect(redactLegacyAssistantReferences(legacyContent)).toContain("[1, 2]");
     expect(document.body.textContent).not.toContain("legacy-reference");
     expect(document.body.textContent).not.toContain("opaque-reference");
+    expect(document.body.textContent).not.toContain("a3b2c1d0e9f8a7b6");
 
     await user.click(screen.getByRole("button", { name: "Копировать" }));
     expect(onCopyAssistant).toHaveBeenCalledWith(expect.objectContaining({ content: expect.not.stringContaining("opaque-reference") }));
+    expect(onCopyAssistant).toHaveBeenCalledWith(expect.objectContaining({ content: expect.not.stringContaining("a3b2c1d0e9f8a7b6") }));
     expect(onCopyAssistant).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining("[1, 2]") }));
   });
 
