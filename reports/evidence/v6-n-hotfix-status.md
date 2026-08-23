@@ -3,7 +3,7 @@
 **Дата обновления:** 2026-08-23 UTC  
 **Граница отчёта:** только metadata-only диагностика. В отчёте нет API-ключей, OAuth claims, URL вложений, пользовательских текстов, изображений, сырых ответов провайдеров или цепей ролей.
 
-> **Итог на дату отчёта: v6-N НЕ ЗАКРЫТА.** Server-side vision transport и правило fresh/historical покрыты тестами; полный published browser сценарий вложения и image-aware ответа не подтверждён в текущей рабочей OAuth-сессии.
+> **Итог на дату отчёта: v6-N НЕ ЗАКРЫТА.** Server-side vision transport и правило fresh/historical покрыты тестами; published browser сценарий neutral-image вложения и image-aware ответа, а также flows T1–T3, подтверждены. При этом live source-date display и RAG-only stale badge ещё не подтверждены, поэтому итоговая приёмка не закрыта.
 
 ## 1. Инварианты
 
@@ -24,8 +24,8 @@
 | Vision serialization и candidate filtering | PASS | Targeted regression подтверждает image content part, vision-capable selection и прежний budget. |
 | Flash image-path timeout | PASS | Text-only TTFT 1,5 с сохранён; image-aware Flash не преждевременно обрывает единственный vision path и использует общий bounded attempt timeout. |
 | Реальный server-stream vision probe | PASS | 2026-08-23: ответ присутствует, streaming delta получена, fallback path допустим; provider/model/payload не фиксируются в evidence. |
-| Published composer thumbnail и sent-bubble thumbnail | NOT VERIFIED for latest revision | До transport/timeout hotfix previews ранее были browser PASS; после последнего checkpoint OAuth cookie не появилась в рабочем browser окне, поэтому новый полный сценарий не утверждается. Повторная проверка 2026-08-23 после включения пользовательской browser-интеграции также показала доступный только публичный экран «Войти для истории». |
-| Published neutral-image answer | NOT VERIFIED | До hotfix наблюдался отказ. После hotfix browser acceptance не удалось продолжить без пользовательской OAuth-сессии в рабочем окне. Server probe не заменяет browser PASS. |
+| Published composer thumbnail и sent-bubble thumbnail | PASS | 2026-08-23 authenticated published acceptance: контролируемый neutral PNG появился в composer и сохранился в отправленном user bubble. Evidence намеренно не содержит image/file URL, attachment URL или содержимого. |
+| Published neutral-image answer | PASS | 2026-08-23 authenticated published acceptance: обычный Flash role path вернул image-aware ответ для того же neutral PNG. Это browser-user-flow факт, а не замена server probe; provider payload и текст ответа не сохраняются в evidence. |
 
 ### Устранённая причина
 
@@ -43,7 +43,7 @@
 | Tavily | PASS (direct diagnostic) | 200 | 2,911 ms | 5 | Дата не предоставлена provider payload | Endpoint/ключ отвечают. Tavily не является active user-facing cascade layer в текущем privacy-preserving architecture; chain не расширялась. |
 | Google grounding | FAIL / unavailable | 404 | 177 ms | 0 | — | Google Search grounding invocation возвращает 404 даже с model ID, подтверждённым live catalog. Это не quota reset и не healthy status. Active user-facing cascade от Google не зависит; отдельный grounded слой не включался. |
 | OpenRouter `:online` catalog | FAIL / empty | 200 | 2,291 ms | 0 | — | Каталог доступен, но подходящих `:online` IDs не обнаружено; новый online candidate не добавлялся. |
-| RAG | NOT VERIFIED | — | — | — | — | В текущем browser session нет авторизованного user chat с RAG-only ответом; stale-RAG condition покрыт deterministic test и server-side signal, но live UI edge case не утверждается. |
+| RAG | PARTIAL | — | — | — | — | 2026-08-23 published RAG audit показал metadata-only readiness/last-check status без URL и raw source content. Текущие records не были stale; искусственный stale scenario не создавался. Поэтому live RAG-only stale badge остаётся NOT VERIFIED, хотя condition покрыт deterministic test и server-side signal. |
 
 ### Реальная active cascade
 
@@ -53,10 +53,10 @@ Server probe `searchWeb()` для проверочного 2026-запроса �
 
 | Acceptance | Статус | Проверка |
 |---|---|---|
-| T1: established historical fact отвечает из знаний, когда live search молчит | PASS (deterministic) | Provider system guidance и regression запрещают подменять устойчивый факт общим отказом поиска. |
-| T2: «latest 2026» использует только live evidence или честно сообщает о деградации | PASS (deterministic + live search) | Prompt rule и regression запрещают называть старую версию «последней» без live evidence; active cascade фактически `found`. |
-| T3: mixed historical + latest 2026 request сохраняет это различие | PASS (deterministic) | Regression проверяет разделение stable identity/explanation и fresh claim, без подстановки старого RAG как current evidence. |
-| Browser screenshots T1–T3 | NOT VERIFIED | В текущем рабочем browser окне отсутствует OAuth-session cookie; server tests не заменяют пользовательские screenshots. |
+| T1: established historical fact отвечает из знаний, когда live search молчит | PASS (deterministic + published browser) | Provider system guidance и regression запрещают подменять устойчивый факт общим отказом поиска. 2026-08-23 authenticated published neutral-fact flow дал корректный краткий ответ без обязательного live-search claim; prompt/answer не сохраняются в evidence. |
+| T2: «latest 2026» использует только live evidence или честно сообщает о деградации | PASS (deterministic + live search + published browser) | Prompt rule и regression запрещают называть старую версию «последней» без live evidence; active cascade фактически `found`. 2026-08-23 authenticated published freshness-bound flow показал safe source-count indicator и не выдал неподтверждённую новизну за факт. Prompt, response, URL и source content не сохраняются в evidence. |
+| T3: mixed historical + latest 2026 request сохраняет это различие | PASS (deterministic + published browser) | Regression проверяет разделение stable identity/explanation и fresh claim, без подстановки старого RAG как current evidence. 2026-08-23 authenticated published neutral mixed flow отобразил отдельные stable и freshness-bound sections; current часть была честно ограничена при отсутствии подтверждённого fresh source. Prompt, response и source details не сохраняются в evidence. |
+| Browser screenshots T1–T3 | PASS (flows) / NOT VERIFIED (source-date UI) | T1–T3 подтверждены authenticated published browser flows. T2–T3 показали safe source-count indicator и честную обработку unconfirmed freshness-bound части. Отдельный source-date display в UI не наблюдался; этот узкий UI-критерий остаётся NOT VERIFIED. |
 
 ## 5. Тесты и расхождение отчёта с фактом
 
@@ -66,6 +66,6 @@ Server probe `searchWeb()` для проверочного 2026-запроса �
 | Full `pnpm test` | Code regressions PASS; внешние provider timeout/403 фиксируются как real degradation, не как synthetic PASS. |
 | `pnpm check` | PASS до опубликованных checkpoints v6-N |
 | Production server-stream vision probe | PASS после final Flash image-path hotfix |
-| Published vision browser acceptance | NOT VERIFIED после final hotfix из-за отсутствия OAuth cookie в рабочем browser окне |
+| Published vision browser acceptance | PASS: 2026-08-23 authenticated controlled neutral-image flow показал composer preview, sent-bubble preview и image-aware answer. |
 
-> **Расхождение отчёта и факта:** нельзя считать server-stream vision PASS равным published user-flow PASS. Также наличие живых You/Serper/Exa не позволяет назвать Google grounding или OpenRouter online healthy. Поэтому итог остаётся **«v6-N НЕ ЗАКРЫТА — требуется browser acceptance вложений/vision и screenshots, а RAG-only stale UI scenario остаётся NOT VERIFIED»**.
+> **Расхождение отчёта и факта:** ранняя запись `NOT VERIFIED/FAIL` для live vision отражала отсутствие рабочей OAuth-сессии либо ситуацию до hotfix. Она заменена более сильным поздним фактом: **published controlled neutral-image user flow PASS**. Позднее T1–T3 получили published browser PASS; в T2–T3 UI также честно отразил наличие проверенных источников в metadata-only форме, но без наблюдаемой даты источника. Это не делает live source-date display или RAG-only stale badge проверенными. Также наличие живых You/Serper/Exa не позволяет назвать Google grounding или OpenRouter online healthy. Поэтому итог остаётся **«v6-N НЕ ЗАКРЫТА — vision и T1–T3 PASS; source-date display и RAG-only stale UI остаются NOT VERIFIED»**.
