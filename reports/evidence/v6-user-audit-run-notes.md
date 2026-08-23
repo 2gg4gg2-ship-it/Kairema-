@@ -163,10 +163,11 @@ This remediation does not expose or retain prompts, replies, source links, title
 | Scope | Result | Privacy-safe observation |
 |---|---|---|
 | Local remediation | PASS — code verified | The second escaped opaque citation-ID regression is covered in the shared server/client sanitizers, focused tests, TypeScript and production build. |
-| Published frontend delivery | NOT VERIFIED — stale asset observed | After two checkpoints and a cache-busting navigation, the browser continued to load a frontend asset that lacked the current narrow sanitizer signature. A legacy rendered marker remained visible, so this is not treated as evidence against the new code nor as a successful published recheck. |
+| Published frontend delivery | PASS — current asset delivered | A subsequent publication refresh and cache-busting navigation loaded a new frontend asset that contains the current narrow sanitizer signature. No message content, history data or identifier values were inspected for this asset-level check. |
+| Fresh neutral reply recheck | NOT VERIFIED — public session | The browser is currently signed out and therefore cannot create the required new neutral chat. The prior rendered replay is not reopened or used as test data. |
 | Browser privacy boundary | PROTECTED | No history entry was opened, copied, exported or used as input. The audit retained neither response content, opaque IDs, source data, attachment data, account/session identifiers nor raw errors. |
 
-The citation-replay criterion remains open until the canonical published domain demonstrably loads the current build and a new neutral chat confirms absence. No provider chain, owner guard, schedule, schema, attachment lifecycle or `chat_exports` was changed.
+The citation-replay criterion remains open until a newly created neutral chat confirms absence in an authenticated session. No provider chain, owner guard, schedule, schema, attachment lifecycle or `chat_exports` was changed.
 
 ## 2026-08-23 — Published web-search control persistence recheck
 
@@ -249,3 +250,14 @@ The code fix does not retain or reveal historical message text, source data, att
 | Full suite | EXTERNAL AVAILABILITY BLOCKER | The suite completed with 38 files passed, 1 skipped, 190 tests passed, 4 skipped, and 2 external credential-health checks rejected remotely. This is not reported as a full-suite PASS; no provider chain, fallback, health semantics or secret was changed. |
 
 The fresh browser confirmation will use only a newly created neutral chat after deployment. No prompt, reply, source URL/title/snippet, opaque identifier, attachment data, account/session identifier, raw error or secret is retained here.
+
+## 2026-08-23 — Escaped citation replay published recheck
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Current frontend delivery | PASS | The canonical published page loaded the current frontend asset after the publication refresh. |
+| Isolated neutral request | PASS | A newly created audit chat completed a current-data request without opening, selecting, exporting or using prior history. |
+| Escaped opaque citation form | PASS | The current assistant-message region contained no recognized single- or double-escaped multi-identifier technical citation-list pattern. |
+| Raw-link rendering | PASS | The same current assistant-message region exposed no raw HTTP(S) URL. The completion control had cleared before the observation. |
+
+This is a binary verification only. It retains no query or reply text, identifier value, history title, source URL/title/snippet, attachment data, account/session material, provider detail, raw error or secret. The broader all-role live-search matrix remains open.
