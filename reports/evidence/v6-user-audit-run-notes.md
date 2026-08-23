@@ -375,3 +375,13 @@ Browser actions were stopped immediately after the role-selector observation. No
 | Controlled deletion and post-delete check | NOT VERIFIED | No search, filter, deletion or clear action was attempted because the temporary entry could not be safely and unambiguously isolated. |
 
 No marker value, prompt, reply, history title, account/session identifier, profile content, memory entry, attachment data, source data, raw error or secret is retained. This is a privacy-isolation limitation, not an application-defect determination.
+
+## 2026-08-23 — v6-P authorized targeted memory cleanup: paused
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Explicitly authorized test-record cleanup | PARTIAL / PAUSED | A user-authorized exact-match UI cleanup began without using the broad “clear all” control and without changing the manual profile. The visible memory count decreased from 30 to 16. |
+| Guarded deletion confirmation | NOT VERIFIED | A later deletion did not disappear from the UI within the bounded confirmation wait. Further delete actions were stopped rather than retrying blindly. |
+| Remaining target categories | NOT VERIFIED | Because the final deletion confirmation was incomplete, no claim is made that all user-listed test facts/topics are removed. |
+
+No record text, title, prompt, reply, profile value, identifier, attachment data, source data, raw error or secret is retained in this evidence. The next action is a code-level inspection of the delete mutation/revalidation path before any further user-data mutation.

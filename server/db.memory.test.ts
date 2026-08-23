@@ -30,7 +30,7 @@ const mockDb = vi.hoisted(() => ({
 
 vi.mock("drizzle-orm/mysql2", () => ({ drizzle: () => mockDb }));
 
-import { deleteMemoryEntry, listDueMemoryExtractionJobReferences, listMemoryEntries, upsertMemoryEntry } from "./db";
+import { deleteMemoryEntry, deleteOwnedChatSession, listDueMemoryExtractionJobReferences, listMemoryEntries, upsertMemoryEntry } from "./db";
 
 const now = new Date("2026-08-22T10:00:00.000Z");
 function row(overrides: Partial<MemoryRow> = {}): MemoryRow {
@@ -92,6 +92,16 @@ describe("memory database helper invariants", () => {
     expect(listed[0]?.id).toBe("fact-0");
     expect(listed[29]?.id).toBe("fact-29");
     expect(deleted).toBe(true);
+  });
+
+  it("cascades only the current user's dialog topics for an owned chat before deleting that chat", async () => {
+    state.selectRows = [[{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }]];
+
+    const deleted = await deleteOwnedChatSession(7, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+
+    expect(deleted).toBe(true);
+    expect(state.deleted).toHaveLength(2);
+    expect(mockDb.delete).toHaveBeenCalledTimes(2);
   });
 
   it("returns only bounded text-free references for due extraction jobs", async () => {

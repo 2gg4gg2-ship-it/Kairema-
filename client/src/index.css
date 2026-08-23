@@ -162,7 +162,7 @@
 /* Radix puts data-state on the root, not on the thumb. Keep this selector explicit
    so the thumb always reaches its checked endpoint in the compiled production CSS. */
 .kairema-switch-thumb { transform: translateX(0); transition: transform 150ms cubic-bezier(.23,1,.32,1); }
-.kairema-switch-root[data-state="checked"] .kairema-switch-thumb { transform: translateX(1rem); }
+.kairema-switch-root[data-state="checked"] .kairema-switch-thumb { transform: translateX(1.25rem); }
 @media (prefers-reduced-motion: reduce) { .kairema-switch-thumb { transition-duration: 0ms; } }
 
 @layer base {

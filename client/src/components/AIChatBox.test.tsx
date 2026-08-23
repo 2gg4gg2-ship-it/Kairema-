@@ -173,6 +173,30 @@ describe("AIChatBox user flows", () => {
     expect(screen.queryByText("draft.png")).toBeNull();
   });
 
+  it("shows an image-only local preview immediately while upload is still pending and removes it without a server delete", async () => {
+    const user = userEvent.setup();
+    const createObjectURL = vi.fn(() => "blob:local-preview");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
+    const onRemoveAttachment = vi.fn();
+    const onUploadFiles = vi.fn(() => new Promise<never>(() => undefined));
+    const { container } = render(<AIChatBox messages={[]} onSendMessage={vi.fn()} onUploadFiles={onUploadFiles} onRemoveAttachment={onRemoveAttachment} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    if (!input) throw new Error("Attachment input is missing");
+
+    await user.upload(input, new File(["image"], "local-preview.png", { type: "image/png" }));
+    await waitFor(() => expect(screen.getByTestId("local-attachment-preview")).toBeTruthy());
+    await user.click(screen.getByRole("button", { name: "Открыть предпросмотр: local-preview.png" }));
+    expect(screen.getByRole("img", { name: "local-preview.png" }).getAttribute("src")).toBe("blob:local-preview");
+
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Убрать вложение: local-preview.png" }));
+    expect(screen.queryByTestId("local-attachment-preview")).toBeNull();
+    expect(onRemoveAttachment).not.toHaveBeenCalled();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:local-preview");
+    vi.unstubAllGlobals();
+  });
+
   it("does not move a completed temporary upload into a composer after the user changes chat", async () => {
     const user = userEvent.setup();
     const attachment = { id: "attachment-race", fileName: "old-chat.png", mimeType: "image/png", sizeBytes: 1024, kind: "image" as const, previewUrl: "https://preview.example.test/old-chat.png" };

@@ -127,6 +127,15 @@ export async function updateChatTitle(userId: number, sessionId: string, title: 
 
 export async function deleteOwnedChatSession(userId: number, sessionId: string): Promise<boolean> {
   const db = requireDatabase(await getDb());
+  const owned = await db.select({ id: chatSessions.id }).from(chatSessions)
+    .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId))).limit(1);
+  if (!owned[0]) return false;
+  // Remove only this user's topics for the owned session before its foreign key is nulled.
+  await db.delete(memoryEntries).where(and(
+    eq(memoryEntries.userId, userId),
+    eq(memoryEntries.category, "dialog_topic"),
+    eq(memoryEntries.sessionId, sessionId),
+  ));
   const result = await db.delete(chatSessions).where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)));
   return result[0].affectedRows > 0;
 }
@@ -831,8 +840,12 @@ export async function updateMemoryEntry(userId: number, entryId: string, value: 
 
 export async function deleteMemoryEntry(userId: number, entryId: string): Promise<boolean> {
   const db = requireDatabase(await getDb());
+  const [entry] = await db.select({ category: memoryEntries.category }).from(memoryEntries)
+    .where(and(eq(memoryEntries.id, entryId), eq(memoryEntries.userId, userId))).limit(1);
   const result = await db.delete(memoryEntries).where(and(eq(memoryEntries.id, entryId), eq(memoryEntries.userId, userId)));
-  return Number(result[0]?.affectedRows ?? 0) > 0;
+  const deleted = Number(result[0]?.affectedRows ?? 0) > 0;
+  if (deleted && entry?.category === "fact") await refreshAutoMemoryProfileSummary(userId);
+  return deleted;
 }
 
 export async function deleteMemoryEntryByValue(userId: number, category: MemoryEntryCategory, value: string): Promise<boolean> {
@@ -846,16 +859,21 @@ export async function deleteMemoryEntryByValue(userId: number, category: MemoryE
 
 export async function deleteMemoryEntryByKey(userId: number, category: MemoryEntryCategory, memoryKey: string): Promise<boolean> {
   const db = requireDatabase(await getDb());
-  const result = await db.delete(memoryEntries).where(and(
+  const [match] = await db.select({ id: memoryEntries.id }).from(memoryEntries).where(and(
     eq(memoryEntries.userId, userId), eq(memoryEntries.category, category), eq(memoryEntries.memoryKey, memoryKey.slice(0, 160)),
-  ));
-  return Number(result[0]?.affectedRows ?? 0) > 0;
+  )).limit(1);
+  return match ? deleteMemoryEntry(userId, match.id) : false;
 }
 
 export async function clearMemoryByCategory(userId: number, category: MemoryEntryCategory): Promise<void> {
   const db = requireDatabase(await getDb());
   await db.delete(memoryEntries).where(and(eq(memoryEntries.userId, userId), eq(memoryEntries.category, category)));
-  if (category === "profile") await updateMemoryProfile(userId, { profile: "", summary: "" });
+  if (category === "profile") {
+    await ensureMemoryProfile(userId);
+    await db.update(memoryProfiles).set({ profile: "", summary: "" }).where(eq(memoryProfiles.userId, userId));
+    return;
+  }
+  if (category === "fact") await refreshAutoMemoryProfileSummary(userId);
 }
 
 export async function clearAllMemory(userId: number): Promise<void> {
@@ -924,14 +942,22 @@ export async function listDueMemoryExtractionJobReferences(limit = 8): Promise<M
 }
 
 /** Reads the pair only after user/session ownership has been confirmed; payload is not logged or exported. */
-export async function getMemoryExtractionJobTurn(userId: number, job: MemoryExtractionJob): Promise<{ userText: string; assistantText: string } | null> {
+export async function getMemoryExtractionJobTurn(userId: number, job: MemoryExtractionJob): Promise<{ userText: string; assistantText: string; hadLiveSearch: boolean } | null> {
   const db = requireDatabase(await getDb());
   const session = await getOwnedChatSession(userId, job.sessionId);
   if (!session) return null;
   const rows = await db.select().from(messages).where(eq(messages.sessionId, job.sessionId));
   const userMessage = rows.find((message) => message.id === job.userMessageId && message.role === "user");
   const assistantMessage = rows.find((message) => message.id === job.assistantMessageId && message.role === "assistant");
-  return userMessage && assistantMessage ? { userText: userMessage.content, assistantText: assistantMessage.content } : null;
+  if (!userMessage || !assistantMessage) return null;
+  let hadLiveSearch = false;
+  try {
+    const metadata = assistantMessage.metadata ? JSON.parse(assistantMessage.metadata) as { searchStatus?: unknown } : null;
+    hadLiveSearch = Boolean(metadata?.searchStatus);
+  } catch {
+    // Metadata is optional and malformed legacy data must not fail ordinary memory work.
+  }
+  return { userText: userMessage.content, assistantText: assistantMessage.content, hadLiveSearch };
 }
 
 export async function completeMemoryExtractionJob(userId: number, jobId: string): Promise<void> {

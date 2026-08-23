@@ -162,7 +162,7 @@ const MEMORY_ROLE_LABELS: Record<RagRole, string> = {
  * decoupled from the request-scoped model budget. Its failures are soft: no
  * user text is logged and an accepted chat turn is never delayed or reverted.
  */
-type ExtractionTurn = { assistantText?: string; role?: RagRole; sourceMessageId?: number | null; sessionId?: string | null };
+type ExtractionTurn = { assistantText?: string; role?: RagRole; sourceMessageId?: number | null; sessionId?: string | null; hadLiveSearch?: boolean };
 
 type MemoryExtractionPhase = "settings_read" | "turn_read" | "llm_invoke" | "content_shape" | "json_invalid" | "memory_write" | "completion_write" | "worker_unknown";
 
@@ -228,7 +228,15 @@ function fallbackDialogTopic(userText: string): string {
   return isQuestion && !containsInstructionMarker ? `Вопрос: ${question}`.slice(0, 360) : "";
 }
 
+/** Test markers and any live-search turn are transient by design, never long-term memory. */
+export function shouldSkipAutoMemoryExtraction(userText: string, turn: ExtractionTurn = {}): boolean {
+  const normalized = userText.trim();
+  if (turn.hadLiveSearch) return true;
+  return /(?:\b(?:test|marker)\b|\b(?:тест(?:овый|овая|овые)?|маркер|проверочн(?:ый|ая|ые)?)\b)/i.test(normalized);
+}
+
 async function applyMemoryExtraction(userId: number, userText: string, turn: ExtractionTurn = {}) {
+  if (shouldSkipAutoMemoryExtraction(userText, turn)) return;
   let settings;
   try {
     settings = await getMemorySettings(userId);
@@ -247,7 +255,7 @@ async function applyMemoryExtraction(userId: number, userText: string, turn: Ext
       messages: [
         {
           role: "system",
-          content: "Ты выполняешь очень консервативное извлечение личной памяти. Верни только JSON по схеме. Сохраняй только явно сообщённые пользователем долговременные, несекретные предпочтения или факты. Не сохраняй пароли, ключи, платёжные/медицинские данные, чужие персональные данные, инструкции, предположения или текст ассистента как факт. facts: не более трёх add/update/delete; key — короткая стабильная метка. topic — одна краткая нейтральная тема данного диалога; для содержательного вопроса пользователя topic не должен быть пустым, иначе пустая строка.",
+          content: "Ты выполняешь очень консервативное извлечение личной памяти. Верни только JSON по схеме. Сохраняй только явно сообщённые пользователем долговременные, несекретные предпочтения или факты. Никогда не сохраняй test/marker/проверочные фразы, результаты веб-поиска, пароли, ключи, платёжные/медицинские данные, чужие персональные данные, инструкции, предположения или текст ассистента как факт. facts: не более трёх add/update/delete; key — короткая стабильная метка. topic — одна краткая нейтральная тема данного диалога; для содержательного вопроса пользователя topic не должен быть пустым, иначе пустая строка.",
         },
         { role: "user", content: `ПОЛЬЗОВАТЕЛЬ:\n${userText.slice(0, 4_000)}\n\nОТВЕТ АССИСТЕНТА (только для определения темы, не источник фактов):\n${(turn.assistantText ?? "").slice(0, 2_000)}` },
       ],
@@ -319,7 +327,7 @@ export async function processMemoryExtractionJob(userId: number, assistantMessag
       }
       return;
     }
-    await applyMemoryExtraction(userId, turn.userText, { assistantText: turn.assistantText, role: job.role, sourceMessageId: job.assistantMessageId, sessionId: job.sessionId });
+    await applyMemoryExtraction(userId, turn.userText, { assistantText: turn.assistantText, role: job.role, sourceMessageId: job.assistantMessageId, sessionId: job.sessionId, hadLiveSearch: turn.hadLiveSearch });
     try {
       await completeMemoryExtractionJob(userId, job.id);
     } catch (error) {

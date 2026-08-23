@@ -35,7 +35,7 @@ vi.mock("./knowledge", () => ({
 
 vi.mock("./_core/llm", () => ({ invokeLLM: vi.fn() }));
 
-import { buildChatContext, extractMemoryFacts, FLASH_WEB_RESEARCH_BUDGET_MS, FRESHNESS_EMPTY_PROMPT, FRESHNESS_UNAVAILABLE_PROMPT, isKairemaIdentityQuery, needsWebResearch, processMemoryExtractionJob, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
+import { buildChatContext, extractMemoryFacts, FLASH_WEB_RESEARCH_BUDGET_MS, FRESHNESS_EMPTY_PROMPT, FRESHNESS_UNAVAILABLE_PROMPT, isKairemaIdentityQuery, needsWebResearch, processMemoryExtractionJob, shouldSkipAutoMemoryExtraction, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
 import { claimMemoryExtractionJob, completeMemoryExtractionJob, deleteMemoryEntryByKey, getMemoryExtractionJobTurn, getMemoryProfile, getMemorySettings, getOwnedChatAttachments, getUserSettings, listMemoryEntries, refreshAutoMemoryProfileSummary, retryMemoryExtractionJob, upsertMemoryEntry } from "./db";
 import { invokeLLM } from "./_core/llm";
 import { WebSearchUnavailableError, searchWeb } from "./web-search";
@@ -57,6 +57,12 @@ beforeEach(() => {
 });
 
 describe("chat context soft web research", () => {
+  it("does not auto-extract test markers or live-search turns into durable memory", () => {
+    expect(shouldSkipAutoMemoryExtraction("Это временный тестовый marker для проверки.")).toBe(true);
+    expect(shouldSkipAutoMemoryExtraction("Обычный долговременный факт.")).toBe(false);
+    expect(shouldSkipAutoMemoryExtraction("Обычный запрос", { hadLiveSearch: true })).toBe(true);
+  });
+
   it("retains the server-side policy for exactly four public roles", () => {
     expect([...WEB_RESEARCH_ROLE_POLICY]).toEqual(["fast", "smart", "context", "flagship"]);
   });
