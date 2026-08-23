@@ -292,6 +292,15 @@ During a later published navigation, browser session state changed after the ele
 
 No model reply, prompt, URL, source title/snippet, provider trace, account/session data, attachment metadata, raw error or secret was recorded.
 
+## 2026-08-23 — UI shell and settings evidence consolidation
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Focused UI regression | PASS | The Home integration suite covers settings save/rollback, switches, role dropdown and Escape behaviour, full role descriptions, profile Save control, theme/language/high-contrast controls and responsive shell state. |
+| Confirmed UI defects | FIXED | The rejected theme-save rollback and desktop sidebar-collapse defects remain regression-covered. |
+| Mobile unauthenticated shell | PASS | At the narrow mobile viewport, dark-default top controls, role selection, new-chat control, export controls and composer were visible without clipping. No history or account data appeared. |
+| Memory-profile persistence | NOT VERIFIED | This evidence covers the UI control and its contract only; it does not inspect or claim existing-profile content or persistence. |
+
 ### Sidebar delivery confirmation follow-up
 
 An unauthenticated, cache-busted public asset scan inspected only the declared page assets and the presence of the application’s new sidebar-collapse signature. The canonical endpoint still did **not** serve that signature. This confirms the pending state is a **publication-delivery limitation**, not an inferred UI failure or a reason to perform further history interaction. The desktop sidebar production criterion stays **NOT VERIFIED**. No user, session, chat, source, attachment, provider or secret data was accessed or recorded.
