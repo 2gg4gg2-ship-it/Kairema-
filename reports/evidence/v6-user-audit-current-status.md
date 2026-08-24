@@ -20,7 +20,7 @@
 
 | Проверка | Результат |
 |---|---|
-| `pnpm test` | **PASS:** 43 files passed, 1 skipped; 204 tests passed, 4 skipped. Ранее наблюдавшийся внешний health-probe timeout в этом запуске не повторился; provider semantics не менялись. |
+| `pnpm test` | **PASS:** 43 files passed, 1 skipped; 205 tests passed, 4 skipped. Ранее наблюдавшийся внешний health-probe timeout в этом запуске не повторился; provider semantics не менялись. |
 | `pnpm check` | **PASS** |
 | Focused `Home.integration.test.tsx` | **PASS:** 32 tests, включая controlled delete confirmation, cancel, explicit-confirm path и защиту от repeated confirm activation. |
 | `pnpm build` | **PASS**; только advisory о размере chunk. |

@@ -743,7 +743,7 @@ PDF document-card and vision acceptance remain **NOT VERIFIED**. This record del
 
 ### Double-submit protection
 
-The controlled confirmation now has a local in-flight guard and a disabled confirm action while its existing delete mutation is pending. A focused deferred double-activation integration regression passed: repeated activation of the confirm control produced exactly one delete mutation. The existing user-scoped server contract, OAuth flow and ownership scope were not changed. TypeScript and production build also passed.
+The controlled confirmation now has a local in-flight guard and a disabled confirm action while its existing delete mutation is pending. A focused deferred double-activation integration regression passed: repeated activation of the confirm control produced exactly one delete mutation. The full regression suite also passed (43 files; one skipped; 205 tests; four skipped). The existing user-scoped server contract, OAuth flow and ownership scope were not changed. TypeScript and production build also passed.
 
 No conversation text, history labels, identifiers, attachment details, session/cookie values, raw errors, URLs, OAuth material or secrets are recorded in this entry.
 
