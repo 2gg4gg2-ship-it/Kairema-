@@ -742,3 +742,13 @@ PDF document-card and vision acceptance remain **NOT VERIFIED**. This record del
 | Browser cleanup status | BLOCKED BY PLATFORM/BROWSER | This client-only hardening is not proof that the created temporary chat was deleted. A stable authorized browser context is still required before attempting removal of only that test material again. |
 
 No conversation text, history labels, identifiers, attachment details, session/cookie values, raw errors, URLs, OAuth material or secrets are recorded in this entry.
+
+## 2026-08-24 — Controlled cleanup retry
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Authorized browser context | Available briefly | The current account shell became available after the user-approved standard application sign-in path. No account data is reproduced here. |
+| Controlled dialog trigger | BLOCKED BY PLATFORM/BROWSER | Opening the new in-app delete dialog for only the known test-chat control again timed out and the browser moved to an empty tab before the dialog or a deletion result could be observed. No explicit destructive confirmation was reached. |
+| Cleanup disposition | NOT VERIFIED | The test-chat deletion is not asserted. No other history item was targeted, selected for deletion or changed. Further destructive retries are stopped to avoid a loop under the unstable browser context. |
+
+This entry excludes all visible chat text, history labels, identifiers, attachment details, session/cookie values, raw browser error data, URLs, OAuth material and secrets.
