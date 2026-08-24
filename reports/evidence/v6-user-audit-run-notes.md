@@ -470,3 +470,22 @@ The code-level guest-control regression remains PASS. Published visibility remai
 | Render/CSS source defect | NOT FOUND | The control has no source-level auth branch beyond the unauthenticated state and no mobile CSS concealment rule was found. This does not convert the canonical visible-control requirement into PASS because the application does not load for an anonymous request. |
 
 No browser OAuth action was launched. No conversation, history, profile, memory record, attachment, source, account/session identifier, raw response payload, cookie or secret was opened, copied or retained. The next step is an explicit user decision about changing the platform visibility/access policy; no static OAuth URL is safe or introduced.
+
+## 2026-08-24 — Canonical guest-control browser FAIL (supersedes route inference)
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Canonical guest shell | FAIL | The canonical browser rendered Kairema’s empty guest shell, including a visible empty-state sign-in message and disabled-by-state chat surface, but no labelled topbar entry control. |
+| Guest-control DOM | FAIL | A binary DOM check found no `.kairema-guest-login` element and no guest-control label in the document body. It did not inspect history, profile, memory, account/session values, cookies or network payloads. |
+| Prior HTTP route inference | SUPERSEDED | A non-browser anonymous HTTP redirect does not explain the browser-rendered Kairema guest shell. The current acceptance fact is a published guest-DOM mismatch with the locally verified source/regression. |
+
+The browser displayed no conversation content and no sidebar item was opened. No OAuth action was launched. The required next step is to compare canonical asset delivery with the current local build and fix only a confirmed delivery or render-version cause.
+
+## 2026-08-24 — Canonical asset delivery comparison
+
+| Comparison | Result | Privacy-safe conclusion |
+|---|---|---|
+| Current local production asset | Contains guest-control label and guest-control CSS-class signature | The local build corresponds to the guest-login implementation covered by focused regression. |
+| Asset loaded by canonical guest browser | Contains neither signature | The published browser is loading a distinct, older frontend asset from the local production build. |
+
+This is a **canonical delivery/version mismatch**, not a browser-authentication result and not a reason to alter OAuth, cookies, user data, provider configuration or access policy. Only public static asset signatures were compared; no user-related page data, request payload or session material was read.
