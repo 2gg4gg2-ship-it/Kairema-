@@ -517,6 +517,10 @@ After a short propagation wait, the canonical root-query retry still did not sho
 
 This confirms **published runtime/delivery mismatch remains FAIL**. It is not evidence that the user’s login, OAuth protocol or local implementation failed.
 
+## 2026-08-24 — User-confirmed platform blocker disposition
+
+The user explicitly directed that the canonical stale-runtime/delivery mismatch be recorded as **BLOCKED BY PLATFORM** and that work continue only on safe non-owner v6-P tasks. Browser verification is deferred until the platform serves the current runtime. No history, memory, conversation, attachment, profile, account/session material, cookie, OAuth state, source or secret was opened or retained.
+
 ## 2026-08-24 — Canonical asset delivery comparison
 
 | Comparison | Result | Privacy-safe conclusion |
