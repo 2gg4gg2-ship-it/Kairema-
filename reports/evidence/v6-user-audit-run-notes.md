@@ -481,6 +481,16 @@ No browser OAuth action was launched. No conversation, history, profile, memory 
 
 The browser displayed no conversation content and no sidebar item was opened. No OAuth action was launched. The required next step is to compare canonical asset delivery with the current local build and fix only a confirmed delivery or render-version cause.
 
+## 2026-08-24 — Independent phone-only welcome route (local verification)
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| `/welcome` route | PASS — local | The route contains no history, memory, attachment, settings, provider or user-data query. It renders one Russian-labelled mobile-first entry button. |
+| OAuth entry | PASS — local | The button invokes only the existing event-driven `startLogin()` handler. No reusable OAuth URL, state, cookie or token is created, shown or retained. |
+| Regression and visual checks | PASS — local | Welcome/Home focused regressions completed 32 tests; TypeScript and production build passed. Desktop and 375px mobile visual checks showed the same visible high-contrast button. |
+
+Canonical acceptance remains pending publication. No browser login was launched, and no account, conversation, history, profile, memory entry, attachment, source, cookie, token or secret was accessed.
+
 ## 2026-08-24 — Canonical asset delivery comparison
 
 | Comparison | Result | Privacy-safe conclusion |
