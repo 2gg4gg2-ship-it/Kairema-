@@ -619,3 +619,13 @@ The user confirmed that the labelled entry button is visible on the canonical mo
 | Authenticated settings visual acceptance | NOT VERIFIED | No authenticated settings page was opened; no user-scoped preference or other private data was read or changed. |
 
 No browser user content or runtime setting was accessed.
+
+## 2026-08-24 — Authorized settings-only check: safe stop
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Entry boundary | SAFE STOP | The user explicitly authorized a settings-only check. Settings was opened from an empty shell, but an existing conversation rendered in the background unexpectedly. |
+| Settings interaction | NOT VERIFIED | No switch, Save control, dropdown or self-diagnostic control was operated; no preference was read or changed. |
+| Data boundary | Preserved after detection | The check stopped immediately. No history item, conversation, memory, profile, attachment, export, source, account/session value, cookie, raw payload, OAuth material or secret was selected, copied, retained or used. |
+
+This is an isolation limitation, not a product failure or an authenticated-settings acceptance PASS. Future browser work requires a reliably data-free settings context.
