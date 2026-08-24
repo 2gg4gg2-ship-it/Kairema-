@@ -560,3 +560,14 @@ The checks used only public asset metadata and boolean signatures. No history, p
 ## 2026-08-24 — Guest recheck safe stop after session rehydration
 
 After a cache-refresh attempt, the browser rendered an authenticated application state. The guest-mode acceptance flow was stopped immediately. No sidebar item, conversation, message, profile, memory record, attachment, export, source, account/session value, cookie, raw response or OAuth material was selected, copied, recorded or used. This is a browser-isolation limitation, not a new product verdict. Canonical guest-control acceptance remains **NOT VERIFIED** until a stable guest-only browser context is available.
+
+## 2026-08-24 — Local attachment recovery remediation
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Failed upload preview | PASS — local | A transient upload failure now preserves the local preview instead of silently losing the selected file. |
+| Recovery controls | PASS — local | The composer presents a Russian failure status and retry action that resubmits the same local file; the user can also remove it explicitly. Sending remains blocked until the failed item is retried or removed. |
+| Lifecycle and accessibility | PASS — local | Existing temporary object-URL cleanup remains covered. Preview-dialog accessibility warning is removed without changing the request-only server lifecycle. |
+| Validation | PASS — local | `AIChatBox` focused regression: 13 tests passed; TypeScript and production build passed. |
+
+No real file picker, attachment, conversation, profile, memory entry, history, network payload, cookie, account/session material, source, secret or OAuth flow was accessed. Native browser picker, sent-bubble/PDF and vision acceptance remain **NOT VERIFIED**.

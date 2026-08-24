@@ -197,6 +197,29 @@ describe("AIChatBox user flows", () => {
     vi.unstubAllGlobals();
   });
 
+  it("keeps a recoverable local preview after an upload error and retries the same file", async () => {
+    const user = userEvent.setup();
+    const createObjectURL = vi.fn(() => "blob:recoverable-preview");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
+    const attachment = { id: "attachment-recovered", fileName: "recoverable.png", mimeType: "image/png", sizeBytes: 1024, kind: "image" as const, previewUrl: "https://preview.example.test/recoverable.png" };
+    const onUploadFiles = vi.fn().mockRejectedValueOnce(new Error("temporary-upload-error")).mockResolvedValueOnce({ attachments: [attachment], sessionId: "new-composer" });
+    const { container } = render(<AIChatBox messages={[]} onSendMessage={vi.fn()} onUploadFiles={onUploadFiles} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    if (!input) throw new Error("Attachment input is missing");
+
+    await user.upload(input, new File(["image"], "recoverable.png", { type: "image/png" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Не удалось загрузить вложение"));
+    expect(screen.getByTestId("local-attachment-preview")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Повторить загрузку: recoverable.png" }));
+    await waitFor(() => expect(onUploadFiles).toHaveBeenCalledTimes(2));
+    expect(onUploadFiles).toHaveBeenLastCalledWith([expect.objectContaining({ name: "recoverable.png", type: "image/png" })]);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Открыть предпросмотр: recoverable.png" })).toBeTruthy());
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:recoverable-preview");
+    vi.unstubAllGlobals();
+  });
+
   it("does not move a completed temporary upload into a composer after the user changes chat", async () => {
     const user = userEvent.setup();
     const attachment = { id: "attachment-race", fileName: "old-chat.png", mimeType: "image/png", sizeBytes: 1024, kind: "image" as const, previewUrl: "https://preview.example.test/old-chat.png" };
