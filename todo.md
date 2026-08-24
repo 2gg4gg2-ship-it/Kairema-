@@ -455,3 +455,4 @@
 - [x] v6-R/IMMEDIATE-CROSS-CHAT-RECALL: verify and preserve completion-before-done topic durability while ensuring the history view is invalidated immediately after a completed turn.
 - [x] v6-R/COMPACT-ATTACHMENT-UI: provide an accessible top-right remove action before send, 64px composer/sent thumbnails, and a tap-to-full-view path without changing protected storage lifecycle.
 - [x] v6-R/VALIDATION-AND-DELIVERY: focused/full tests, type/build and public delivery recheck completed; authenticated browser acceptance remains separately NOT VERIFIED BY PLATFORM SESSION and both canonical/project propagation constraints are recorded as BLOCKED BY PLATFORM DELIVERY.
+- [x] audit/MODEL-REGISTRY-INVENTORY: completed a read-only inventory of current public roles, configured fallback candidates, live role-runtime states, and stability mechanisms without revealing credentials, hidden user data, or raw provider failures.
