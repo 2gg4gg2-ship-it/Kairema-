@@ -639,3 +639,14 @@ This is an isolation limitation, not a product failure or an authenticated-setti
 | State and motion regression | PASS — local | Focused standalone switch and existing stylesheet geometry/reduced-motion coverage passed: 4 tests total. TypeScript and production build passed; a production asset scan confirmed the fixture text is absent from the bundle. |
 
 This local-only acceptance does not access or change a user preference and does not convert authenticated switch persistence or profile-save browser criteria into PASS.
+
+## 2026-08-24 — Authorized native attachment check: safe stop
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Guest preflight | PASS — limited | An empty application shell exposed the expected native attachment control. |
+| Native upload automation | NOT VERIFIED | The browser automation could not locate the hidden native file input for the permitted temporary fixture. No file was accepted or sent. |
+| Data boundary | SAFE STOP | After the failed native-upload attempt, the page unexpectedly restored an existing conversation. The check stopped immediately, without selecting, reading, copying, recording or using any existing conversation, memory, profile, attachment, export, source, account/session material, cookie, raw payload, OAuth material or secret. |
+| Test material cleanup | PASS | The single locally created neutral temporary fixture was removed. No server-side test material was created. |
+
+Composer preview, removal, sent-bubble, document card and vision remain **NOT VERIFIED** in the browser. This is an automation/isolation limitation, not an application acceptance PASS or a finding about existing user content.
