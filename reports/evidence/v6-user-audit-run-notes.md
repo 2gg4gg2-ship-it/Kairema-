@@ -767,3 +767,14 @@ This entry excludes all visible chat text, history labels, identifiers, attachme
 | Validation | PASS — local | Focused AIChatBox coverage passed (14 tests), TypeScript passed, and production build passed. |
 
 This is code-level presentation evidence only. It does not make a real browser PDF-card interaction or vision response PASS. No attachment name, size, URL, file bytes, chat content, identifier, session data, raw error or secret is retained.
+
+## 2026-08-24 — Confirmed temporary attachment-chat cleanup
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Authorized session recovery | PASS | A standard, user-approved application sign-in restored an authorized shell. No session, cookie or OAuth values are retained. |
+| In-app deletion flow | PASS | Only the known temporary attachment-chat control was opened. The controlled confirmation was displayed and explicitly confirmed after user approval. |
+| Post-delete verification | PASS | The targeted temporary-chat control no longer appeared in the history list after the mutation settled. No other entry was selected, opened, modified or deleted. |
+| Local test material | PARTIAL CLEANUP | The known neutral fixture had already been removed. The two browser downloads were intentionally left untouched because they cannot be safely distinguished from user files without risk. |
+
+The browser PDF-document-card and vision checks remain **NOT VERIFIED**. This entry contains no chat text, history labels, attachment data, identifiers, URLs, downloads, session/cookie values, raw errors, OAuth material or secrets.
