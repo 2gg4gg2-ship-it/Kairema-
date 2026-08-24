@@ -580,7 +580,7 @@ No real file picker, attachment, conversation, profile, memory entry, history, n
 
 | Scope | Result | Privacy-safe observation |
 |---|---|---|
-| Full test suite | PASS | `pnpm test` completed with 43 test files passed and 1 intentionally skipped file; 204 tests passed and 4 intentionally skipped tests. |
+| Full test suite | PASS | `pnpm test` completed with 43 test files passed and 1 intentionally skipped file; 203 tests passed and 4 intentionally skipped tests. |
 | Prior external probe result | Resolved in this run | The earlier external health-probe timeout did not recur. No provider chain, health policy, retry limit or provider semantics was weakened or changed. |
 | Browser acceptance | Unchanged | This run does not substitute for intentionally open native picker, sent-bubble/PDF, vision, settings, freshness, memory-cleanup or second-user browser criteria. |
 
@@ -634,8 +634,8 @@ This is an isolation limitation, not a product failure or an authenticated-setti
 
 | Scope | Result | Privacy-safe observation |
 |---|---|---|
-| Isolated test surface | PASS — local | A development-only root-query screen renders before Home and does not initialize OAuth, history, memory, profile, attachment or account-setting queries. It is excluded from production routing. |
+| Isolated test surface | PASS — local | A standalone development-only fixture initializes no OAuth, history, memory, profile, attachment or account-setting queries. It is excluded from the production route and bundle. |
 | Mobile visual states | PASS — local | At a 375px viewport, the screen displayed independent unchecked and checked switch positions with touch-friendly control rows and no content-bearing application surface. |
-| State and motion regression | PASS — local | Focused routing, standalone switch and existing stylesheet geometry/reduced-motion coverage passed: 5 tests total. TypeScript and production build passed. |
+| State and motion regression | PASS — local | Focused standalone switch and existing stylesheet geometry/reduced-motion coverage passed: 4 tests total. TypeScript and production build passed; a production asset scan confirmed the fixture text is absent from the bundle. |
 
 This local-only acceptance does not access or change a user preference and does not convert authenticated switch persistence or profile-save browser criteria into PASS.

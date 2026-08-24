@@ -6,13 +6,10 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import OwnerAnalytics from "./pages/OwnerAnalytics";
-import SwitchCheck from "./pages/SwitchCheck";
 import Welcome from "./pages/Welcome";
 
 function RootRoute() {
   const isWelcomeEntry = new URLSearchParams(window.location.search).get("welcome") === "1";
-  const isLocalSwitchCheck = !import.meta.env.PROD && new URLSearchParams(window.location.search).get("switch-check") === "1";
-  if (isLocalSwitchCheck) return <SwitchCheck />;
   if (isWelcomeEntry) return <Welcome />;
   return <Home />;
 }
