@@ -169,9 +169,12 @@ describe("Home integration flows", () => {
     fixtures.messages = [];
     render(<Home />);
 
-    const login = screen.getAllByRole("button", { name: "Войти для истории" }).find((node) => node.classList.contains("kairema-guest-login"));
-    expect(login).toBeDefined();
-    await user.click(login!);
+    const logins = screen.getAllByRole("button", { name: "Войти для истории" });
+    const topbarLogin = logins.find((node) => node.classList.contains("kairema-guest-login") && !node.classList.contains("kairema-guest-login-empty"));
+    const emptyStateLogin = logins.find((node) => node.classList.contains("kairema-guest-login-empty"));
+    expect(topbarLogin).toBeDefined();
+    expect(emptyStateLogin).toBeDefined();
+    await user.click(emptyStateLogin!);
     expect(fixtures.startLogin).toHaveBeenCalledTimes(1);
   });
 

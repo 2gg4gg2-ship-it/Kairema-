@@ -489,3 +489,14 @@ The browser displayed no conversation content and no sidebar item was opened. No
 | Asset loaded by canonical guest browser | Contains neither signature | The published browser is loading a distinct, older frontend asset from the local production build. |
 
 This is a **canonical delivery/version mismatch**, not a browser-authentication result and not a reason to alter OAuth, cookies, user data, provider configuration or access policy. Only public static asset signatures were compared; no user-related page data, request payload or session material was read.
+
+## 2026-08-24 — Guest empty-state entry remediation (local)
+
+| Scope | Result | Verification |
+|---|---|---|
+| Visible mobile fallback | PASS — local code | The empty guest screen now has a second labelled, 44px-minimum entry control in addition to the topbar action. It is not displayed for an authenticated chat state. |
+| OAuth safety | PASS — code/regression | Both entry controls only invoke the existing event-driven `startLogin()` call. No reusable callback, state value, cookie manipulation or direct OAuth URL was added. |
+| Focused client regression | PASS | Home integration: 31 tests passed, including both independent entry points and a single login invocation. AIChatBox: 12 tests passed. |
+| Type/build | PASS | TypeScript check passed. Production build passed with the existing chunk-size warning only. |
+
+Canonical publication remains **NOT VERIFIED** until the new release is served and the guest DOM can be inspected without invoking OAuth.
