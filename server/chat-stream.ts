@@ -311,8 +311,9 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
             sourceDateMax: sourceDates.at(-1) ?? null,
             timestamp: new Date().toISOString(),
           })).catch(() => undefined);
-          writeEvent(res, "done", publicStreamResult({ ...result, searchStatus: normalizedSearchStatus }));
-          finished = true;
+          // The client marks its turn complete on `done` and may immediately
+          // open a new chat. Persist the post-turn topic first, otherwise the
+          // following turn can build context before its predecessor exists.
           if (!input.regenerateMessageId && savedUserMessageId && savedAssistant.id) {
             try {
               await dependencies.enqueueMemoryExtractionJob({
@@ -327,6 +328,8 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
               // The durable retry sweep owns recovery. Never turn a completed chat response into an error.
             }
           }
+          writeEvent(res, "done", publicStreamResult({ ...result, searchStatus: normalizedSearchStatus }));
+          finished = true;
           res.end();
         } else if (idempotencyKey) {
           pendingReplay?.resolve(null);

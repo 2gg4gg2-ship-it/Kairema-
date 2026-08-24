@@ -255,7 +255,7 @@ describe("chat context soft web research", () => {
     await processMemoryExtractionJob(7, 101);
 
     expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "fact", "Пользователь предпочитает русский язык", expect.objectContaining({ memoryKey: "language", source: "auto", sourceMessageId: 101 }));
-    expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "dialog_topic", expect.stringContaining("Flash: обсуждение языковых предпочтений"), expect.objectContaining({ role: "fast", sessionId: job.sessionId, sourceMessageId: 101 }));
+    expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "dialog_topic", expect.stringContaining("Flash: обсуждение языковых предпочтений"), expect.objectContaining({ memoryKey: "topic:message:101", role: "fast", sessionId: job.sessionId, sourceMessageId: 101 }));
     expect(refreshAutoMemoryProfileSummary).toHaveBeenCalledWith(7);
     expect(completeMemoryExtractionJob).toHaveBeenCalledWith(7, "job-complete");
     expect(retryMemoryExtractionJob).not.toHaveBeenCalled();
@@ -270,7 +270,7 @@ describe("chat context soft web research", () => {
 
     await processMemoryExtractionJob(7, 103);
 
-    expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "dialog_topic", expect.stringContaining("Flash: Вопрос: Какого размера Луна?"), expect.objectContaining({ role: "fast", sessionId: job.sessionId, sourceMessageId: 103 }));
+    expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "dialog_topic", expect.stringContaining("Flash: Вопрос: Какого размера Луна?"), expect.objectContaining({ memoryKey: "topic:message:103", role: "fast", sessionId: job.sessionId, sourceMessageId: 103 }));
     expect(invokeLLM).toHaveBeenCalledTimes(1);
     expect(completeMemoryExtractionJob).toHaveBeenCalledWith(7, "job-empty-topic");
   });

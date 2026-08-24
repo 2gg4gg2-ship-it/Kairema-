@@ -298,8 +298,14 @@ async function applyMemoryExtraction(userId: number, userText: string, turn: Ext
     if (topic.length >= 3) {
       const date = new Date().toISOString().slice(0, 10);
       const role = turn.role ?? "flagship";
+      // A completed assistant message is the durable identity of exactly one
+      // exchange. Reusing its key makes retries idempotent without collapsing
+      // identical topics from separate chats or separate days.
+      const topicMemoryKey = turn.sourceMessageId
+        ? `topic:message:${turn.sourceMessageId}`
+        : `topic:${role}:${topic.toLocaleLowerCase("ru-RU")}`.slice(0, 160);
       await upsertMemoryEntry(userId, "dialog_topic", `${date} ${MEMORY_ROLE_LABELS[role]}: ${topic}`, {
-        memoryKey: `topic:${role}:${topic.toLocaleLowerCase("ru-RU")}`.slice(0, 160), role, source: "auto", sourceMessageId: turn.sourceMessageId, sessionId: turn.sessionId,
+        memoryKey: topicMemoryKey, role, source: "auto", sourceMessageId: turn.sourceMessageId, sessionId: turn.sessionId,
       });
     }
     await refreshAutoMemoryProfileSummary(userId);

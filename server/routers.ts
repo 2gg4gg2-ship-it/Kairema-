@@ -267,8 +267,15 @@ export const appRouter = router({
             })
             : undefined;
           const savedAssistant = await appendChatMessage(ctx.user.id, input.sessionId, "assistant", result.content, result.modelUsed, sourceMetadata);
-          void enqueueMemoryExtractionJob({ userId: ctx.user.id, sessionId: input.sessionId, userMessageId: savedUser.id, assistantMessageId: savedAssistant.id, role: input.modelId })
-            .then(() => processMemoryExtractionJob(ctx.user.id, savedAssistant.id)).catch(() => undefined);
+          // Make the post-turn topic durable before this non-stream response is
+          // returned. The durable job still owns retry recovery if extraction
+          // itself has a soft failure.
+          try {
+            await enqueueMemoryExtractionJob({ userId: ctx.user.id, sessionId: input.sessionId, userMessageId: savedUser.id, assistantMessageId: savedAssistant.id, role: input.modelId });
+            await processMemoryExtractionJob(ctx.user.id, savedAssistant.id);
+          } catch {
+            // A completed answer must remain usable when optional extraction fails.
+          }
           return result;
         } catch (error) {
           if (error instanceof Error && /чат|хранилище/i.test(error.message)) {

@@ -15,7 +15,7 @@ function response() {
 describe("chat stream happy-path", () => {
   beforeEach(() => resetChatStreamRateLimits());
 
-  it("emits start, incremental delta and done events before persisting the completed assistant reply", async () => {
+  it("persists post-turn memory before emitting the client-visible done event", async () => {
     const writes: string[] = [];
     const appended: Array<{ role: string; content: string; metadata?: string }> = [];
     const order: string[] = [];
@@ -56,7 +56,7 @@ describe("chat stream happy-path", () => {
     expect(JSON.stringify(auditChatStream.mock.calls[0][0])).not.toContain("Привет");
     expect(JSON.stringify(auditChatStream.mock.calls[0][0])).not.toContain("example.com");
     expect(streamResponse.end).toHaveBeenCalledOnce();
-    expect(order).toEqual(["assistant-saved", "done", "memory-enqueued", "memory-processed", "end"]);
+    expect(order).toEqual(["assistant-saved", "memory-enqueued", "memory-processed", "done", "end"]);
     expect(enqueueMemoryExtractionJob).toHaveBeenCalledWith(expect.objectContaining({ userId: 42, sessionId: validRequestBody.sessionId, userMessageId: 1, assistantMessageId: 2, role: "fast" }));
     expect(processMemoryExtractionJob).toHaveBeenCalledWith(42, 2);
   });
