@@ -605,3 +605,7 @@ The earlier stale runtime blocker is resolved for the desktop welcome route. A l
 | Data/OAuth boundary | Preserved | No action was pressed. The page remained a pre-auth empty state; no history item, conversation, memory, profile, setting, attachment, cookie, account/session value, source, network payload or secret was opened or retained. |
 
 The original published guest-control visibility defect is resolved on canonical desktop. Real canonical mobile viewport acceptance remains **NOT VERIFIED**.
+
+## 2026-08-24 — Canonical welcome: mobile visibility PASS (user confirmation)
+
+The user confirmed that the labelled entry button is visible on the canonical mobile welcome page. No OAuth action was requested or launched, and no history, memory, conversation, profile, setting, attachment, account/session value, cookie, source, raw payload or secret was accessed. This completes the canonical visibility acceptance for the safe root-query phone entry.
