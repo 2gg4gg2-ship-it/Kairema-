@@ -210,13 +210,20 @@ describe("Home integration flows", () => {
     expect(screen.queryByText(/\[object Object\]|\{"error"/)).toBeNull();
   });
 
-  it("deletes the active owned chat and clears the active-message query", async () => {
+  it("requires explicit in-app confirmation before deleting an active owned chat", async () => {
     const user = userEvent.setup();
-    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
     render(<Home />);
 
     await user.click(screen.getByRole("button", { name: "Удалить: Активная история" }));
 
+    expect(screen.getByRole("alertdialog", { name: "Удалить чат?" })).toBeTruthy();
+    expect(fixtures.deleteChat).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(fixtures.deleteChat).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Удалить: Активная история" }));
+    await user.click(screen.getByRole("button", { name: "Удалить чат" }));
     await waitFor(() => expect(fixtures.deleteChat).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
     await waitFor(() => expect(fixtures.invalidateSessions).toHaveBeenCalled());
     expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId });

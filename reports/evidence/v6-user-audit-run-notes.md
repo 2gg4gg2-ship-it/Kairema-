@@ -731,3 +731,14 @@ This entry intentionally excludes the temporary chat text, reply text, document 
 | Eligible cleanup scope | Preserved | Only the created test chat, its neutral local fixture and its two local downloads remain eligible for cleanup. |
 
 PDF document-card and vision acceptance remain **NOT VERIFIED**. This record deliberately excludes chat text, file content, history labels, profile/memory values, account/session values, cookies, raw errors, URLs, OAuth material and secrets.
+
+## 2026-08-24 — Delete confirmation hardening and cleanup diagnosis
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Server deletion boundary | PASS — source review | The protected delete procedure remains user-scoped and delegates only to the owned-session deletion helper. No server-side auth, cookie, OAuth or navigation behavior was changed. |
+| Confirmation UI | PASS — local | The browser-native confirmation was replaced with the existing controlled accessible application dialog. The generic dialog does not display a chat title or other user content. |
+| Explicit-action regression | PASS — local | Focused Home integration regression passed 31 tests: opening the delete control does not call the mutation, cancel does not call it, and only explicit in-app confirmation invokes the existing delete contract with the selected fixture session. TypeScript and production build passed. |
+| Browser cleanup status | BLOCKED BY PLATFORM/BROWSER | This client-only hardening is not proof that the created temporary chat was deleted. A stable authorized browser context is still required before attempting removal of only that test material again. |
+
+No conversation text, history labels, identifiers, attachment details, session/cookie values, raw errors, URLs, OAuth material or secrets are recorded in this entry.
