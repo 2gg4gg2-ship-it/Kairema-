@@ -668,3 +668,66 @@ No upload lifecycle, storage policy, server attachment policy, user data, attach
 | Full suite | PASS | `pnpm test` completed with 43 test files passed and 1 intentionally skipped file; 204 tests passed and 4 intentionally skipped tests. |
 
 This run performed no browser interaction and did not access or change user data, attachments, OAuth/session material, provider policy, schema, schedules or owner configuration.
+
+## 2026-08-24 — Authorized settings switch check (in progress)
+
+| Scope | Observation |
+|---|---|
+| Reversible control | The high-contrast switch was initially unchecked, changed to checked through its settings control, and showed the matching semantic state after the interaction. |
+| Persistence and rollback | PASS | The settings dialog was closed and reopened; the switch retained the checked semantic state. The same control then returned to the original unchecked semantic state. |
+
+No messages, memories, attachment contents, secrets, raw network payloads or identifying values are included in this note.
+
+## 2026-08-24 — Authorized default-role dropdown check
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Closed control | PASS | The control displayed its selected public role. |
+| Open list | PASS | The list exposed exactly the four public roles with full visible descriptions. |
+| Reversible exit | PASS | Escape closed the list without changing the selected role. |
+
+No conversation content, user setting values beyond the selected public role, memory, attachment data, identifiers, raw payloads or secrets are retained in this note.
+
+## 2026-08-24 — Authorized acceptance session boundary
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Current session | Authorized | The user granted ongoing authorization for user-facing acceptance checks in the current account. Existing data may be used only as necessary; no real content is deleted without need. |
+| Settings check | PASS | Reversible switch persistence and default-role dropdown behavior completed without changing the selected role or leaving the switch altered. |
+| Attachment check status | Pending | No temporary message, server-side attachment or deletion has yet been created in the resumed session. |
+
+Evidence continues to omit conversation text, memory values, profile data, attachment content, identifiers, raw errors, URLs, cookies and secrets.
+
+### Native-input preparation
+
+The existing native input was found with the expected accepted public file-type contract and its localized accessible name. For this one authorized browser check only, its rendered style was temporarily adjusted in the active page so the browser upload control can target it. No upload, message, server-side object or user-data change occurred during preparation; page reload will remove the temporary DOM-only presentation adjustment.
+
+### Authorized composer attachment check
+
+The neutral temporary text fixture was selected successfully through the native input. The composer displayed a named preview control and a distinct remove control before any message was sent. This verifies local selection/preview only; no server-side object, sent message, preview bubble, document card or vision result has been created. The fixture text and existing conversation content are not recorded here.
+
+The distinct remove control cleared the temporary composer preview. The native input returned to its empty state, and no message or server-side object was created from this first selection.
+
+## 2026-08-24 — Authorized temporary attachment and export acceptance
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Temporary chat boundary | PASS | One separate neutral test chat was created. Existing conversations were not modified. |
+| Native text attachment | PASS | A permitted neutral text fixture uploaded, completed its composer preview, and appeared as a sent document chip after a single bounded test turn. |
+| Sent attachment presentation | PASS | The test turn displayed the document chip with a formatted size; neither content nor attachment URL is recorded here. |
+| Markdown export | PASS | The temporary chat created one local Markdown download. |
+| PDF export | PASS | The same temporary chat created one local PDF download. |
+| Cleanup status | Pending | Only the created test chat, locally created fixture and the two associated local downloads are eligible for removal; no existing account data is eligible. |
+
+This entry intentionally excludes the temporary chat text, reply text, document name, document bytes, source details, history labels, profile/memory values, account identifiers, session/cookie material, raw errors, URLs and secrets.
+
+## 2026-08-24 — Temporary attachment cleanup blocker
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Composer and sent attachment | PASS — browser | In the separately created neutral test chat, native selection, composer preview/removal, sent document presentation and bounded temporary turn completed. No content, name, bytes, URL or identifier is retained. |
+| Immediate exports | PASS — browser | Markdown and PDF exports of that temporary chat each produced a local download. Their contents were not opened or retained. |
+| Test-chat cleanup | BLOCKED BY PLATFORM/BROWSER | Two attempts to delete only the created test chat timed out and left the browser in an empty tab. A subsequent confirmed OAuth attempt returned to the guest shell, so the test-chat deletion result cannot be safely confirmed. No other history entry was selected, changed or deleted. |
+| Eligible cleanup scope | Preserved | Only the created test chat, its neutral local fixture and its two local downloads remain eligible for cleanup. |
+
+PDF document-card and vision acceptance remain **NOT VERIFIED**. This record deliberately excludes chat text, file content, history labels, profile/memory values, account/session values, cookies, raw errors, URLs, OAuth material and secrets.
