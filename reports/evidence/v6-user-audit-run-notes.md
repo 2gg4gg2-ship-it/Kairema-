@@ -609,3 +609,13 @@ The original published guest-control visibility defect is resolved on canonical 
 ## 2026-08-24 — Canonical welcome: mobile visibility PASS (user confirmation)
 
 The user confirmed that the labelled entry button is visible on the canonical mobile welcome page. No OAuth action was requested or launched, and no history, memory, conversation, profile, setting, attachment, account/session value, cookie, source, raw payload or secret was accessed. This completes the canonical visibility acceptance for the safe root-query phone entry.
+
+## 2026-08-24 — Switch CSS regression hardening
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Focused switch regression | PASS | Two focused tests cover the existing root/thumb data-state contract and the stylesheet’s zero-position thumb transform, checked-state `1.25rem` travel and reduced-motion fallback. |
+| TypeScript and production build | PASS | `pnpm check` and the production build completed successfully after the test-only change. |
+| Authenticated settings visual acceptance | NOT VERIFIED | No authenticated settings page was opened; no user-scoped preference or other private data was read or changed. |
+
+No browser user content or runtime setting was accessed.

@@ -1,4 +1,6 @@
 /* @vitest-environment jsdom */
+import { readFileSync } from "node:fs";
+
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
@@ -18,5 +20,15 @@ describe("Switch", () => {
 
     await user.click(control);
     expect(control.getAttribute("data-state")).toBe("checked");
+  });
+
+  it("keeps checked-state thumb travel and reduced-motion fallback in the stylesheet", () => {
+    const css = readFileSync(`${process.cwd()}/client/src/index.css`, "utf8");
+
+    expect(css).toContain(".kairema-switch-thumb { transform: translateX(0)");
+    expect(css).toContain(
+      '.kairema-switch-root[data-state="checked"] .kairema-switch-thumb { transform: translateX(1.25rem)'
+    );
+    expect(css).toContain("transition-duration: 0ms");
   });
 });
