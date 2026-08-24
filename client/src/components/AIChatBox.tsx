@@ -142,7 +142,7 @@ export function AIChatBox({
       const timeout = new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("upload_timeout")), 15_000));
       const result = await Promise.race([onUploadFiles(localItems.map((item) => item.file)), timeout]);
       const isSameComposerSession = composerSessionRef.current === expectedSessionId && result.sessionId === expectedSessionId;
-      const isUploadCreatedChat = expectedSessionId === "new-composer" && composerSessionRef.current === result.sessionId && result.sessionId !== "new-composer";
+      const isUploadCreatedChat = expectedSessionId === "new-composer" && result.sessionId !== "new-composer" && (composerSessionRef.current === "new-composer" || composerSessionRef.current === result.sessionId);
       if (isSameComposerSession || isUploadCreatedChat) setAttachments((current) => [...current, ...result.attachments]);
       setPendingLocalAttachments((items) => {
         const uploaded = items.filter((item) => !localItems.some((local) => local.id === item.id));

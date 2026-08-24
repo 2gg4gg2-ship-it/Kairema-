@@ -267,6 +267,23 @@ describe("AIChatBox user flows", () => {
     expect(screen.getByRole("button", { name: "Открыть предпросмотр: created-chat.png" })).toBeTruthy();
   });
 
+  it("keeps a new-composer upload that settles before React rerenders with the created session", async () => {
+    const user = userEvent.setup();
+    const attachment = { id: "attachment-created-before-rerender", fileName: "created-before-rerender.png", mimeType: "image/png", sizeBytes: 1024, kind: "image" as const, previewUrl: "https://preview.example.test/created-before-rerender.png" };
+    let resolveUpload: ((value: { attachments: typeof attachment[]; sessionId: string }) => void) | undefined;
+    const onUploadFiles = vi.fn(() => new Promise<{ attachments: typeof attachment[]; sessionId: string }>((resolve) => { resolveUpload = resolve; }));
+    const { container } = render(<AIChatBox messages={[]} onSendMessage={vi.fn()} onUploadFiles={onUploadFiles} composerSessionId="new-composer" />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    if (!input) throw new Error("Attachment input is missing");
+
+    await user.upload(input, new File(["image"], "created-before-rerender.png", { type: "image/png" }));
+    await waitFor(() => expect(onUploadFiles).toHaveBeenCalledOnce());
+    resolveUpload?.({ attachments: [attachment], sessionId: "chat-created-before-rerender" });
+
+    await waitFor(() => expect(screen.getByText("created-before-rerender.png")).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Открыть предпросмотр: created-before-rerender.png" })).toBeTruthy();
+  });
+
   it("ignores legacy continuation suggestions and does not render quick-prompt chips", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const legacyAssistantMessage = {

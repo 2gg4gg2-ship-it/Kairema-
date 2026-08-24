@@ -778,3 +778,21 @@ This is code-level presentation evidence only. It does not make a real browser P
 | Local test material | PARTIAL CLEANUP | The known neutral fixture had already been removed. The two browser downloads were intentionally left untouched because they cannot be safely distinguished from user files without risk. |
 
 The browser PDF-document-card and vision checks remain **NOT VERIFIED**. This entry contains no chat text, history labels, attachment data, identifiers, URLs, downloads, session/cookie values, raw errors, OAuth material or secrets.
+
+## 2026-08-24 — Isolated PDF/vision check in progress
+
+A new blank temporary chat was opened in an authorized browser shell for the remaining PDF-card and vision acceptance. No existing history entry was opened for this step. At this point no file had been accepted, sent or recorded; only the native attachment control was opened for the neutral local fixture.
+
+The browser automation could not directly bind its upload primitive to the hidden native input. A controlled fallback dispatched the existing input change event with one neutral locally generated PDF obtained from a short-lived fixture server. The application rendered a completed composer document chip. No file text, identifier, URL, storage reference or account data is retained here.
+
+On the next browser state refresh, the temporary-chat shell reported that the chat was unavailable and the composer reported zero completed uploads from one attempted neutral file. No message was sent, no document card was created and no vision request was made. The isolated PDF-card/vision browser scenario is therefore paused pending an aggregate diagnostic of the transient temporary-chat/upload state.
+
+## 2026-08-24 — New-composer upload handoff remediation
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Browser observation before remediation | BLOCKED — client-state race | A neutral attachment upload started from a newly created empty composer could settle before the UI rerendered with the created session, leaving the temporary composer unable to use the returned attachment. No user attachment or chat content is retained. |
+| Client-only remediation | PASS — local validation | Attachment results now stay with the current new composer when the returned session is created before the rerender, while results are still rejected after an actual chat switch. Server upload validation, ownership, storage keys and request-only lifecycle were not changed. |
+| Regression and build | PASS | Focused AIChatBox coverage passed with 15 tests, including the pre-rerender completion case. The full suite also passed (43 files; one skipped; 206 tests; four skipped). TypeScript and production build passed. |
+
+The PDF-card and vision browser checks remain **NOT VERIFIED** until the published client fix can be exercised in the isolated temporary chat. No file names, message text, identifiers, URLs, upload metadata, session/cookie values, raw errors or secrets are included.
