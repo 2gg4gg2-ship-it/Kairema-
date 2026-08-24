@@ -451,3 +451,22 @@ The published recheck requires the current frontend delivery. No OAuth credentia
 | Remaining published acceptance | NOT VERIFIED | A same-window authenticated session is still required before any user-scoped memory or settings acceptance resumes. |
 
 No session material, account identifier, conversation data, memory entry, source, attachment detail, raw error or secret is retained.
+
+## 2026-08-24 — Canonical guest-control recheck safety stop
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Canonical guest-control visibility | NOT VERIFIED | The canonical page initially rendered a guest shell whose available action map did not expose the labelled entry control. A binary DOM check was started without launching OAuth. Before a deterministic visual result could be established, the session unexpectedly rehydrated. |
+| Authenticated state handling | PASS — safety | The recheck stopped immediately after the unexpected rehydration. No history, conversation, profile, memory entry, attachment, source or account/session value was opened, copied or retained. |
+
+The code-level guest-control regression remains PASS. Published visibility remains open until it can be checked in a stable guest session without triggering or inspecting authenticated content.
+
+## 2026-08-24 — Canonical guest-route pre-auth diagnosis
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Local guest topbar | PASS — code/regression | The Home route renders the labelled control whenever `useAuth()` is unauthenticated; the focused guest/mobile regression covers its visibility and one event-driven official login invocation. No OAuth state, cookie or user data was inspected. |
+| Canonical anonymous route | BLOCKED BY PLATFORM | An unauthenticated HTTP route check received a platform-level sign-in redirect before the React application bundle was served. The public response therefore belongs to the platform sign-in surface rather than Kairema’s guest shell. |
+| Render/CSS source defect | NOT FOUND | The control has no source-level auth branch beyond the unauthenticated state and no mobile CSS concealment rule was found. This does not convert the canonical visible-control requirement into PASS because the application does not load for an anonymous request. |
+
+No browser OAuth action was launched. No conversation, history, profile, memory record, attachment, source, account/session identifier, raw response payload, cookie or secret was opened, copied or retained. The next step is an explicit user decision about changing the platform visibility/access policy; no static OAuth URL is safe or introduced.
