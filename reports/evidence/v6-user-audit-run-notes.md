@@ -595,3 +595,13 @@ The run processed no browser session, user history, message, memory entry, profi
 | OAuth and data boundary | Preserved | No action was pressed. No authenticated UI, history, conversation, memory, settings, attachment, cookie, token, account/session detail, source or secret was accessed. |
 
 The earlier stale runtime blocker is resolved for the desktop welcome route. A local 375px visual check had already passed; **real canonical mobile viewport acceptance remains NOT VERIFIED** because the privacy-safe browser context cannot switch viewport dimensions. No mobile assertion is inferred from the desktop check.
+
+## 2026-08-24 — Canonical current main guest shell: desktop PASS
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Main guest topbar | PASS — desktop | The current canonical guest shell displayed a labelled `Войти для истории` action in the topbar. |
+| Main guest empty state | PASS — desktop | A second labelled `Войти для истории` action was visible in the empty state, providing an independent entry point. |
+| Data/OAuth boundary | Preserved | No action was pressed. The page remained a pre-auth empty state; no history item, conversation, memory, profile, setting, attachment, cookie, account/session value, source, network payload or secret was opened or retained. |
+
+The original published guest-control visibility defect is resolved on canonical desktop. Real canonical mobile viewport acceptance remains **NOT VERIFIED**.
