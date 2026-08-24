@@ -629,3 +629,13 @@ No browser user content or runtime setting was accessed.
 | Data boundary | Preserved after detection | The check stopped immediately. No history item, conversation, memory, profile, attachment, export, source, account/session value, cookie, raw payload, OAuth material or secret was selected, copied, retained or used. |
 
 This is an isolation limitation, not a product failure or an authenticated-settings acceptance PASS. Future browser work requires a reliably data-free settings context.
+
+## 2026-08-24 — Local data-free switch visual acceptance
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Isolated test surface | PASS — local | A development-only root-query screen renders before Home and does not initialize OAuth, history, memory, profile, attachment or account-setting queries. It is excluded from production routing. |
+| Mobile visual states | PASS — local | At a 375px viewport, the screen displayed independent unchecked and checked switch positions with touch-friendly control rows and no content-bearing application surface. |
+| State and motion regression | PASS — local | Focused routing, standalone switch and existing stylesheet geometry/reduced-motion coverage passed: 5 tests total. TypeScript and production build passed. |
+
+This local-only acceptance does not access or change a user preference and does not convert authenticated switch persistence or profile-save browser criteria into PASS.

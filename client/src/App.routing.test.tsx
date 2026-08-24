@@ -20,4 +20,13 @@ describe("gateway-safe welcome entry", () => {
     expect(screen.getByRole("button", { name: "Войти для истории" })).not.toBeNull();
     expect(screen.getByText("Войдите, чтобы начать")).not.toBeNull();
   });
+
+  it("renders the local switch check before Home without loading a user surface", () => {
+    window.history.replaceState({}, "", "/?switch-check=1");
+    render(<App />);
+
+    expect(screen.getByRole("heading", { name: "Switch без пользовательских данных" })).not.toBeNull();
+    expect(screen.getByRole("switch", { name: "Проверочное состояние" })).not.toBeNull();
+    expect(screen.queryByPlaceholderText("Напишите сообщение…")).toBeNull();
+  });
 });
