@@ -35,7 +35,11 @@ export type SearchOutcome = {
   state: Exclude<SearchResultState, "found">;
   verificationStatus: "no_results" | "degraded" | "unavailable";
 };
-export type SearchWebOptions = { timeoutMs?: number };
+export type SearchWebOptions = {
+  timeoutMs?: number;
+  /** Current-data requests require a provider-supplied publication date before they may be called verified. */
+  requireDatedSources?: boolean;
+};
 
 const YOU_ENDPOINT = "https://ydc-index.io/v1/search";
 const SERPER_ENDPOINT = "https://google.serper.dev/search";
@@ -188,6 +192,9 @@ function sourceDateRange(sources: WebSource[]) {
   const dates = sources.map((source) => source.publishedAt).filter((value): value is string => typeof value === "string").sort();
   return { sourceDateMin: dates[0] ?? null, sourceDateMax: dates.at(-1) ?? null };
 }
+function hasDatedSource(result: SearchResult) {
+  return result.sources.some((source) => Boolean(source.publishedAt));
+}
 function safeCascadeTelemetry(http: Record<SearchLayer, number | null>, selected: SearchCascadeUsed | null, sources: WebSource[] = []) { console.info("[Kairema search]", JSON.stringify({ event: "search.cascade", youHttp: http.you, serperHttp: http.serper, exaHttp: http.exa, selected, sourcesCount: sources.length, ...sourceDateRange(sources) })); }
 function outageClass(http: number | null): SearchOutageInput["errorClass"] { if (http === 429) return "rate_limited"; if (http === 401 || http === 403) return "auth"; if (http === 404) return "not_found"; if (http === null) return "network_error"; if (http >= 400) return "http_error"; return "no_sources"; }
 async function runCascade(query: string, options: SearchWebOptions, recordOutages: boolean): Promise<SearchResult | SearchOutcome> {
@@ -196,13 +203,15 @@ async function runCascade(query: string, options: SearchWebOptions, recordOutage
   const previous = await getWebSearchStatus();
   const signal = AbortSignal.timeout(Math.max(100, Math.min(options.timeoutMs ?? 25_000, 25_000)));
   const http: Record<SearchLayer, number | null> = { you: null, serper: null, exa: null };
-  const outcomes: SearchAttempt["outcome"][] = [];
+  const outcomes: Array<SearchAttempt["outcome"] | "undated"> = [];
   for (const layer of LAYERS) {
     if (signal.aborted || isCooling(layer)) continue;
     const attempt = await requestSearch(layer, query, signal);
     http[layer] = attempt.http;
-    outcomes.push(attempt.outcome);
-    if (attempt.result) {
+    const datedResultRequired = Boolean(options.requireDatedSources);
+    const datedResultAvailable = Boolean(attempt.result && hasDatedSource(attempt.result));
+    outcomes.push(attempt.result && datedResultRequired && !datedResultAvailable ? "undated" : attempt.outcome);
+    if (attempt.result && (!datedResultRequired || datedResultAvailable)) {
       safeCascadeTelemetry(http, layer, attempt.result.sources);
       await saveStatus({ available: true, reason: layer === "you" ? "Поиск доступен." : "Поиск доступен через резервный слой.", checkedAt, youHttp: http.you ?? previous.youHttp, serperHttp: http.serper ?? previous.serperHttp, exaHttp: http.exa ?? previous.exaHttp, googleHttp: previous.googleHttp, tavilyHttp: previous.tavilyHttp, openrouterHttp: previous.openrouterHttp });
       if (recordOutages) void recordSearchQuality({ outcome: "found", verification: "verified", verifiedSourceCount: attempt.result.evidence.length, attemptedLayerCount: outcomes.filter((outcome) => outcome !== "skipped").length, staleBlocked: false, latencyMs: Date.now() - startedAt }).catch(() => undefined);
@@ -212,7 +221,8 @@ async function runCascade(query: string, options: SearchWebOptions, recordOutage
   }
   safeCascadeTelemetry(http, null);
   const primaryHttp = http.you;
-  const reason = signal.aborted && options.timeoutMs ? "Поиск временно недоступен: превышен ограниченный бюджет свежих источников." : isCooling("you") ? "Поиск временно ограничен: основной слой ожидает сброса квоты." : primaryHttp ? `${statusFromHttp(primaryHttp)} Резервные слои не вернули проверяемые источники.` : "Поиск временно недоступен: ни один слой не вернул проверяемые источники.";
+  const undatedFreshnessFailure = Boolean(options.requireDatedSources && outcomes.includes("undated"));
+  const reason = undatedFreshnessFailure ? "Живой поиск не подтвердил свежесть: слои не вернули источники с проверяемой датой публикации." : signal.aborted && options.timeoutMs ? "Поиск временно недоступен: превышен ограниченный бюджет свежих источников." : isCooling("you") ? "Поиск временно ограничен: основной слой ожидает сброса квоты." : primaryHttp ? `${statusFromHttp(primaryHttp)} Резервные слои не вернули проверяемые источники.` : "Поиск временно недоступен: ни один слой не вернул проверяемые источники.";
   await saveStatus({ available: false, reason, checkedAt, youHttp: http.you ?? previous.youHttp, serperHttp: http.serper ?? previous.serperHttp, exaHttp: http.exa ?? previous.exaHttp, googleHttp: previous.googleHttp, tavilyHttp: previous.tavilyHttp, openrouterHttp: previous.openrouterHttp });
   const attempted = outcomes.filter((outcome) => outcome !== "skipped");
   const hasEmpty = attempted.includes("empty");
@@ -220,10 +230,10 @@ async function runCascade(query: string, options: SearchWebOptions, recordOutage
   let state: SearchOutcome["state"] = "error";
   if (hasEmpty && attempted.every((outcome) => outcome === "empty")) {
     state = "empty";
-  } else if (hasEmpty || hasTemporaryFault) {
+  } else if (undatedFreshnessFailure || hasEmpty || hasTemporaryFault) {
     state = "degraded";
   }
-  if (recordOutages) void recordSearchQuality({ outcome: state, verification: state === "empty" ? "no_results" : state === "degraded" ? "degraded" : "unavailable", verifiedSourceCount: 0, attemptedLayerCount: attempted.length, staleBlocked: signal.aborted, latencyMs: Date.now() - startedAt }).catch(() => undefined);
+  if (recordOutages) void recordSearchQuality({ outcome: state, verification: state === "empty" ? "no_results" : state === "degraded" ? "degraded" : "unavailable", verifiedSourceCount: 0, attemptedLayerCount: attempted.length, staleBlocked: signal.aborted || undatedFreshnessFailure, latencyMs: Date.now() - startedAt }).catch(() => undefined);
   return {
     summary: "",
     sources: [],

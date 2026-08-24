@@ -92,6 +92,24 @@ describe("v6-K SearchProvider", () => {
     expect(result.sources.find((source) => source.url === "https://example.com/future")).not.toHaveProperty("publishedAt");
   });
 
+  it("does not verify a current-data query when the only live result has no provider publication date", async () => {
+    process.env.YOU_API_KEY = "test-you";
+    process.env.SERPER_API_KEY = "";
+    process.env.EXA_API_KEY = "";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: { web: [
+      { title: "Undated live result", url: "https://example.com/undated", description: "No publication date supplied" },
+    ] } }), { status: 200 })));
+
+    await expect(searchWeb("Последние новости ИИ", { requireDatedSources: true })).resolves.toMatchObject({
+      state: "degraded",
+      verificationStatus: "degraded",
+      cascadeUsed: null,
+      sources: [],
+      evidence: [],
+    });
+    expect(recordSearchQuality).toHaveBeenCalledWith(expect.objectContaining({ outcome: "degraded", verification: "degraded", staleBlocked: true }));
+  });
+
   it("uses Serper only after a You.com failure and records metadata-only failover", async () => {
     process.env.YOU_API_KEY = "test-you";
     process.env.SERPER_API_KEY = "test-serper";

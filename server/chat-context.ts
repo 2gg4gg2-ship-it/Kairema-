@@ -89,7 +89,7 @@ export async function buildChatContext(userId: number, sessionId: string, input:
     try {
       const search = await searchWeb(
         "Собери только релевантные актуальные факты и источники для запроса пользователя:\n" + (input.query?.slice(0, 8_000) ?? ""),
-        role === "fast" ? { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS } : undefined,
+        { ...(role === "fast" ? { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS } : {}), requireDatedSources: true },
       );
       if (search.state === "found" && search.sources.length) {
         context.webResearch = search.summary;
@@ -108,11 +108,12 @@ export async function buildChatContext(userId: number, sessionId: string, input:
           sourcesCount: 0,
           state: search.state,
           verificationStatus: search.verificationStatus,
+          freshnessBlocked: true,
         };
       }
     } catch {
       context.freshnessWarning = FRESHNESS_UNAVAILABLE_PROMPT;
-      context.searchStatus = { cascadeUsed: null, sourcesCount: 0, state: "error", verificationStatus: "unavailable" };
+      context.searchStatus = { cascadeUsed: null, sourcesCount: 0, state: "error", verificationStatus: "unavailable", freshnessBlocked: true };
     }
   }
   try {

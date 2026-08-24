@@ -29,6 +29,8 @@ export type SafeSearchStatus = {
   sourcesCount: number;
   state?: SearchResultState;
   verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable";
+  /** A current-data request did not receive dated live evidence, so the model must not imply freshness. */
+  freshnessBlocked?: boolean;
   /** RAG was the only available source and its newest dated item is older than 90 days. */
   staleRagOnly?: boolean;
   /** Normalized source-date bounds for an ordinary-user freshness indicator; no source objects are exposed. */

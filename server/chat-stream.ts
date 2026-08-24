@@ -125,6 +125,7 @@ function publicSearchStatus(status: StreamResult["searchStatus"]) {
     state: status.state,
     verificationStatus: status.verificationStatus,
     sourcesCount: Math.max(0, Math.floor(status.sourcesCount)),
+    ...(status.freshnessBlocked ? { freshnessBlocked: true } : {}),
     ...(status.staleRagOnly ? { staleRagOnly: true } : {}),
     ...(sourceDateMin ? { sourceDateMin } : {}),
     ...(sourceDateMax ? { sourceDateMax } : {}),

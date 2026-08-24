@@ -71,7 +71,7 @@ describe("chat context soft web research", () => {
     await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какая последняя версия браузера?", role: "fast" }))
       .resolves.toMatchObject({ webResearch: "Свежие проверяемые данные.", webSources: [{ title: "Официальный источник", url: "https://example.com", sourceId: "source-001", retrievedAt: "2026-08-21T00:00:00.000Z" }], webEvidence: [{ fact: "Проверяемый факт", sourceId: "source-001" }], searchStatus: { state: "found", verificationStatus: "verified", sourcesCount: 1 } });
     expect(searchWeb).toHaveBeenCalledTimes(1);
-    expect(searchWeb).toHaveBeenCalledWith(expect.any(String), { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS });
+    expect(searchWeb).toHaveBeenCalledWith(expect.any(String), { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS, requireDatedSources: true });
   });
 
   it("does not start live research when the user disables web search and blocks unverified current-answer fallback", async () => {
@@ -84,7 +84,7 @@ describe("chat context soft web research", () => {
 
   it("does not constrain non-Flash roles to the Flash freshness budget", async () => {
     await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какие последние новости?", role: "smart" });
-    expect(searchWeb).toHaveBeenCalledWith(expect.any(String), undefined);
+    expect(searchWeb).toHaveBeenCalledWith(expect.any(String), { requireDatedSources: true });
   });
 
   it("continues with a truthful freshness warning when external search is unavailable", async () => {
@@ -104,7 +104,7 @@ describe("chat context soft web research", () => {
     vi.mocked(searchWeb).mockResolvedValueOnce({ summary: "", state: "degraded", verificationStatus: "degraded", cascadeUsed: null, sources: [], evidence: [] });
 
     await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какая актуальная цена?", role: "smart" }))
-      .resolves.toMatchObject({ freshnessWarning: FRESHNESS_UNAVAILABLE_PROMPT, searchStatus: { state: "degraded", verificationStatus: "degraded", sourcesCount: 0 } });
+      .resolves.toMatchObject({ freshnessWarning: FRESHNESS_UNAVAILABLE_PROMPT, searchStatus: { state: "degraded", verificationStatus: "degraded", freshnessBlocked: true, sourcesCount: 0 } });
   });
 
   it("marks stale-only RAG when live freshness search returns no source and the newest RAG date exceeds 90 days", async () => {

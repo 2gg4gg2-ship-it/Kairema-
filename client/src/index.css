@@ -377,3 +377,12 @@ body { background:var(--k-bg); color:var(--k-text); }
 /* v6-L.4: native selective-copy remains available inside chat message bubbles. */
 .kairema-message { -webkit-touch-callout:default; -webkit-user-select:text; user-select:text; }
 .kairema-message :is(p,li,pre,code,blockquote,span) { -webkit-user-select:text; user-select:text; }
+/* v6-R: compact, tappable attachment previews; attachment bytes remain server-managed. */
+.kairema-composer-attachment-chip { position:relative; min-height:72px; max-width:min(100%,260px); padding:4px 38px 4px 4px; }
+.kairema-attachment-preview-trigger,.kairema-attachment-open { display:flex!important; align-items:center; min-width:0; gap:7px; text-align:left; }
+.kairema-attachment-preview-trigger>span,.kairema-attachment-open>span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-attachment-preview,.kairema-message-image { display:block; width:64px!important; height:64px!important; min-width:64px; max-width:64px!important; min-height:64px; max-height:64px!important; border:1px solid var(--k-line); border-radius:6px; object-fit:cover; }
+.kairema-attachment-remove { position:absolute!important; top:2px; right:2px; z-index:2; width:32px; height:32px; border:1px solid var(--k-line)!important; border-radius:999px; color:var(--k-text)!important; background:var(--k-panel)!important; box-shadow:0 1px 4px rgb(0 0 0 / .14); }
+.kairema-attachment-remove:hover,.kairema-attachment-remove:focus-visible { border-color:var(--k-text)!important; color:var(--k-invert)!important; background:var(--k-strong)!important; }
+.kairema-attachment-remove:focus-visible { outline:2px solid var(--k-text); outline-offset:2px; }
+.kairema-attachment-retry { align-self:stretch; padding:0 4px; font-size:10px; text-decoration:underline; }

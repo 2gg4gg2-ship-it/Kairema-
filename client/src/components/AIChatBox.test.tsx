@@ -97,6 +97,17 @@ describe("AIChatBox user flows", () => {
     expect(screen.queryByText(/https?:\/\//i)).toBeNull();
   });
 
+  it("renders an explicit honest unavailable badge when fresh sources have no verified dates", () => {
+    render(<AIChatBox messages={[{
+      id: "assistant-freshness-blocked",
+      role: "assistant",
+      content: "Я не подтверждаю актуальность без датированных источников.",
+      searchStatus: { state: "degraded", verificationStatus: "degraded", freshnessBlocked: true, sourcesCount: 0 },
+    }]} onSendMessage={vi.fn()} />);
+
+    expect(screen.getByRole("status").textContent).toContain("Живой поиск недоступен: нет проверяемых свежих источников");
+  });
+
   it("redacts technical citation markers from legacy assistant replay and copied content", async () => {
     const user = userEvent.setup();
     const onCopyAssistant = vi.fn();
@@ -129,7 +140,9 @@ describe("AIChatBox user flows", () => {
       ],
     }]} onSendMessage={vi.fn()} />);
 
-    await user.click(screen.getByRole("button", { name: "Открыть предпросмотр: sample.webp" }));
+    const sentImageCard = screen.getByRole("button", { name: "Открыть предпросмотр: sample.webp" });
+    expect(sentImageCard.querySelector(".kairema-message-image")).toBeTruthy();
+    await user.click(sentImageCard);
     const imagePreview = screen.getByRole("img", { name: "sample.webp" });
     expect(imagePreview.getAttribute("src")).toBe("https://preview.example.test/sample.webp");
     expect(screen.getByRole("dialog").textContent).toContain("sample.webp");
@@ -167,6 +180,8 @@ describe("AIChatBox user flows", () => {
     if (!input) throw new Error("Attachment input is missing");
 
     await user.upload(input, new File(["image"], "draft.png", { type: "image/png" }));
+    expect(screen.getByRole("button", { name: "Убрать вложение: draft.png" }).classList.contains("kairema-attachment-remove")).toBe(true);
+    expect(screen.getByRole("button", { name: "Открыть предпросмотр: draft.png" }).querySelector(".kairema-attachment-preview")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Открыть предпросмотр: draft.png" }));
     expect(screen.getByRole("img", { name: "draft.png" }).getAttribute("src")).toBe("https://preview.example.test/draft.png");
 
