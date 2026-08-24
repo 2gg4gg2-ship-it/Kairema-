@@ -20,7 +20,7 @@
 
 | Проверка | Результат |
 |---|---|
-| `pnpm test` | **EXTERNAL AVAILABILITY BLOCKER:** 39 files passed, 1 failed, 1 skipped; 196 tests passed, 1 failed, 4 skipped. Единственный отказ — timeout внешнего SambaNova health probe; provider semantics не менялись и отказ не маскируется. |
+| `pnpm test` | **PASS:** 42 files passed, 1 skipped; 201 tests passed, 4 skipped. Ранее наблюдавшийся внешний health-probe timeout в этом запуске не повторился; provider semantics не менялись. |
 | `pnpm check` | **PASS** |
 | `pnpm build` | **PASS**; только advisory о размере chunk. |
 | Public bundle audit server-secret names | **PASS** |

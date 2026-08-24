@@ -571,3 +571,13 @@ After a cache-refresh attempt, the browser rendered an authenticated application
 | Validation | PASS — local | `AIChatBox` focused regression: 13 tests passed; TypeScript and production build passed. |
 
 No real file picker, attachment, conversation, profile, memory entry, history, network payload, cookie, account/session material, source, secret or OAuth flow was accessed. Native browser picker, sent-bubble/PDF and vision acceptance remain **NOT VERIFIED**.
+
+## 2026-08-24 — Full local v6-P regression refresh
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Full test suite | PASS | `pnpm test` completed with 42 test files passed and 1 intentionally skipped file; 201 tests passed and 4 intentionally skipped tests. |
+| Prior external probe result | Resolved in this run | The earlier external health-probe timeout did not recur. No provider chain, health policy, retry limit or provider semantics was weakened or changed. |
+| Browser acceptance | Unchanged | This run does not substitute for intentionally open native picker, sent-bubble/PDF, vision, settings, freshness, memory-cleanup or second-user browser criteria. |
+
+The run processed no browser session, user history, message, memory entry, profile, attachment, source, cookie, account identifier or secret.
