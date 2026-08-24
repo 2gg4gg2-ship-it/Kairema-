@@ -20,7 +20,7 @@
 
 | Проверка | Результат |
 |---|---|
-| `pnpm test` | **PASS:** 42 files passed, 1 skipped; 201 tests passed, 4 skipped. Ранее наблюдавшийся внешний health-probe timeout в этом запуске не повторился; provider semantics не менялись. |
+| `pnpm test` | **PASS:** 43 files passed, 1 skipped; 204 tests passed, 4 skipped. Ранее наблюдавшийся внешний health-probe timeout в этом запуске не повторился; provider semantics не менялись. |
 | `pnpm check` | **PASS** |
 | `pnpm build` | **PASS**; только advisory о размере chunk. |
 | Public bundle audit server-secret names | **PASS** |

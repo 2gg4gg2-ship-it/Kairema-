@@ -580,7 +580,7 @@ No real file picker, attachment, conversation, profile, memory entry, history, n
 
 | Scope | Result | Privacy-safe observation |
 |---|---|---|
-| Full test suite | PASS | `pnpm test` completed with 42 test files passed and 1 intentionally skipped file; 201 tests passed and 4 intentionally skipped tests. |
+| Full test suite | PASS | `pnpm test` completed with 43 test files passed and 1 intentionally skipped file; 204 tests passed and 4 intentionally skipped tests. |
 | Prior external probe result | Resolved in this run | The earlier external health-probe timeout did not recur. No provider chain, health policy, retry limit or provider semantics was weakened or changed. |
 | Browser acceptance | Unchanged | This run does not substitute for intentionally open native picker, sent-bubble/PDF, vision, settings, freshness, memory-cleanup or second-user browser criteria. |
 
