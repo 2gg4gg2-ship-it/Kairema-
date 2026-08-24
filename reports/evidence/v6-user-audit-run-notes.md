@@ -376,6 +376,27 @@ Browser actions were stopped immediately after the role-selector observation. No
 
 No marker value, prompt, reply, history title, account/session identifier, profile content, memory entry, attachment data, source data, raw error or secret is retained. This is a privacy-isolation limitation, not an application-defect determination.
 
+## 2026-08-23 — v6-P targeted memory cleanup (in progress)
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Exact-match fact deletion | PASS | One explicitly user-authorized test fact was filtered to one visible match, deleted once, and the same filter then returned no match. Fact count decreased by one. |
+| Exact-match topic deletions | PASS | Two explicitly user-authorized test topics were each filtered to one visible match, deleted once, and their individual filters then returned no match. Topic count decreased by two. |
+| Other requested test items | PENDING | Not yet actioned in this run. No unfiltered deletion or clear action was used. |
+
+### Continuation after published recheck
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Further individual topic deletions | PASS | Two further individually isolated, user-authorized test-topic deletions completed through the visible user-scoped dialog; each removal was confirmed by a subsequent empty result for the same narrow filter. Cumulative confirmed topic deletions in this run: four. |
+| First remaining exact fact marker | NOT FOUND | The exact, user-authorized search term returned no match. No deletion was attempted and no broadened query was used. |
+
+No additional entry text, profile content, conversation material, attachment detail, source data, raw error, identifier or secret is retained.
+
+No non-target entry was selected, deleted, copied, or recorded. The exact user-authorized values remain in the user instruction rather than this evidence journal.
+
+| Batch safety check | STOPPED | A scripted multi-term filter could not prove a one-to-one visible delete target for each term. It was not used again. The dialog’s aggregate counters after the attempt were 15 facts and 40 topics; per-entry attribution is therefore not claimed until each remaining term is rechecked individually. |
+
 ## 2026-08-23 — v6-P authorized targeted memory cleanup: paused
 
 | Scope | Result | Privacy-safe observation |
@@ -385,3 +406,18 @@ No marker value, prompt, reply, history title, account/session identifier, profi
 | Remaining target categories | NOT VERIFIED | Because the final deletion confirmation was incomplete, no claim is made that all user-listed test facts/topics are removed. |
 
 No record text, title, prompt, reply, profile value, identifier, attachment data, source data, raw error or secret is retained in this evidence. The next action is a code-level inspection of the delete mutation/revalidation path before any further user-data mutation.
+
+## 2026-08-23 — v6-P memory/freshness remediation and validation
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Auto-memory eligibility | PASS — code/regression | Service/test markers and transient live-search turns are rejected before durable auto-extraction. No user memory content was read for this verification. |
+| User-scoped topic cleanup and FIFO | PASS — code/regression | Owned-chat deletion cascades only related dialog topics; bounded fact/topic storage retains FIFO behavior. Manual profile and unrelated users remain outside the operation. |
+| Capacity UX | PASS — code/regression | The memory dialog now warns near the configured capacity and blocks only manual additions at the hard limit; the UI does not reveal additional entry data. |
+| Attachment preview/retry | PASS — code/regression | Local image preview, safe object-URL disposal and a bounded Russian retry state are covered without changing temporary server-side ownership/lifecycle. Fresh native-picker browser acceptance remains NOT VERIFIED. |
+| Switch end position | PASS — code/regression | The checked thumb uses corrected transform-only positioning, covered by UI regression. Authenticated live settings acceptance remains NOT VERIFIED. |
+| Freshness fallback | PASS — code/regression | Freshness-dependent requests now receive a truthful limitation when permitted live search is disabled, empty, degraded or unavailable rather than an unverified current answer. No sources or response text are retained. |
+| Full regression | EXTERNAL AVAILABILITY BLOCKER | 39 test files passed, one failed, one skipped; 196 tests passed, one failed, four skipped. The sole failure was a server-side external SambaNova health-probe connection timeout. Provider routing, fallback and health semantics were not changed or masked. |
+| TypeScript and production build | PASS | `pnpm check` and `pnpm build` completed after the final freshness change; the build produced only a chunk-size advisory. |
+
+This entry does not promote pending authenticated browser flows or the partial authorized memory cleanup to PASS. It contains no record values, conversation data, account/session material, source data, attachment data, raw external error detail or secret.

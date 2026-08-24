@@ -9,7 +9,7 @@
 | Четыре публичные роли | **СДЕЛАНО, с честным ограничением доступности** | Ровно Flash, Think, Context и Apex; server policy и лимит не более четырёх upstream-попыток покрыты регрессиями. Нейтральная published-матрица всех четырёх ролей завершена с approved safe search metadata и без raw links/recognized technical citation patterns. | Доступность части live-сервисов ограничена и отражена UI; это не маскируется как полный live-search PASS. |
 | Память и профиль | **ЧАСТИЧНО** | Изоляция, settings, extraction, post-turn worker и bounded profile summary покрыты server/client tests. v6-P добавляет исключение служебных/test и live-search turns, user-scoped каскад topics при удалении чата, FIFO и capacity guard. | Целевая очистка начата с точным user-scope, но UI-подтверждение одной поздней операции задержалось; полный перечень разрешённых user data пока **NOT VERIFIED**. Cross-chat/all-role recall, profile Save и second-user acceptance также **NOT VERIFIED**. |
 | Вложения и vision | **ЧАСТИЧНО** | Protected lifecycle, previews и image-aware flow имеют code-level evidence; v6-P добавляет немедленный local image preview, безопасный revoke и 15-second retry state; component regression PASS. | Browser automation по-прежнему не привязывается к hidden native input, поэтому свежий picker/sent-bubble/vision/PDF-proof — **NOT VERIFIED**; это не доказанный app defect. |
-| Live web-search | **ЧАСТИЧНО** | Persisted `webSearch` является server-side gate; safe count/date UI и redaction покрыты тестами. v6-P исключает transient live-search turns из авто-памяти. | RAG-only stale badge и fresh current-event acceptance без искусственных данных — **NOT VERIFIED**. |
+| Live web-search | **ЧАСТИЧНО** | Persisted `webSearch` является server-side gate; safe count/date UI и redaction покрыты тестами. v6-P исключает transient live-search turns из авто-памяти и добавляет server-side truthful limitation для freshness-intents при выключенном, empty, degraded или unavailable live search. | RAG-only stale badge и fresh current-event browser acceptance без искусственных данных — **NOT VERIFIED**. |
 | Citation/privacy redaction | **СДЕЛАНО** | Server stream/persistence и client replay/copy устраняют opaque citation forms, включая double-escaped вариант; fresh neutral published absence check выполнен. | Ничего дополнительного не заявляется для ранее неоткрытой истории. |
 | UI и настройки | **ЧАСТИЧНО** | Theme rollback, role descriptions, dropdown behavior, Home suite и published desktop sidebar-collapse исправлены и проверены. v6-P корректирует конечное transform-положение switch; unauthenticated desktop/mobile shell recheck не выявил clipping. | Fresh authenticated profile-save/settings switch persistence и memory dialog acceptance остаются **NOT VERIFIED**. |
 | Selective copy | **СДЕЛАНО в коде** | Message text selection и copy boundary покрыты component/UI regressions. | Не заменяет ручную mobile long-press приемку. |
@@ -20,7 +20,7 @@
 
 | Проверка | Результат |
 |---|---|
-| `pnpm test` | **PASS:** 40 files passed, 1 skipped; 193 tests passed, 4 skipped. |
+| `pnpm test` | **EXTERNAL AVAILABILITY BLOCKER:** 39 files passed, 1 failed, 1 skipped; 196 tests passed, 1 failed, 4 skipped. Единственный отказ — timeout внешнего SambaNova health probe; provider semantics не менялись и отказ не маскируется. |
 | `pnpm check` | **PASS** |
 | `pnpm build` | **PASS**; только advisory о размере chunk. |
 | Public bundle audit server-secret names | **PASS** |

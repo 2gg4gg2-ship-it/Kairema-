@@ -74,11 +74,11 @@ describe("chat context soft web research", () => {
     expect(searchWeb).toHaveBeenCalledWith(expect.any(String), { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS });
   });
 
-  it("does not start live research when the user disables web search", async () => {
+  it("does not start live research when the user disables web search and blocks unverified current-answer fallback", async () => {
     vi.mocked(getUserSettings).mockResolvedValueOnce({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, webSearch: 0 } as never);
 
     await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какая последняя версия браузера?", role: "fast" }))
-      .resolves.not.toHaveProperty("webResearch");
+      .resolves.toMatchObject({ freshnessWarning: FRESHNESS_UNAVAILABLE_PROMPT });
     expect(searchWeb).not.toHaveBeenCalled();
   });
 

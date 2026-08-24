@@ -75,7 +75,16 @@ export async function buildChatContext(userId: number, sessionId: string, input:
     ...(imageUrls.length ? { imageUrls } : {}),
   };
 
-  if (preferences.webSearch && WEB_RESEARCH_ROLE_POLICY.has(input.role ?? "flagship") && needsWebResearch(input.query ?? "")) {
+  const queryNeedsFreshSources = needsWebResearch(input.query ?? "");
+  const canUseLiveSearch = Boolean(preferences.webSearch) && WEB_RESEARCH_ROLE_POLICY.has(input.role ?? "flagship");
+  if (queryNeedsFreshSources && !canUseLiveSearch) {
+    // Never let an up-to-date request silently fall back to model training or RAG.
+    // The provider prompt treats this warning as an instruction to refuse unverified
+    // volatile claims while still allowing clearly-labelled general background.
+    context.freshnessWarning = FRESHNESS_UNAVAILABLE_PROMPT;
+  }
+
+  if (queryNeedsFreshSources && canUseLiveSearch) {
     const role = input.role ?? "flagship";
     try {
       const search = await searchWeb(
