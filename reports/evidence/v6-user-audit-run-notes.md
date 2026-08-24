@@ -660,3 +660,11 @@ Composer preview, removal, sent-bubble, document card and vision remain **NOT VE
 | Browser acceptance | NOT VERIFIED | No further browser interaction was attempted. This change does not prove native picker, upload, sent-bubble, document-card or vision behavior. |
 
 No upload lifecycle, storage policy, server attachment policy, user data, attachment content or URL was changed or accessed.
+
+## 2026-08-24 — Full regression refresh after attachment accessibility
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Full suite | PASS | `pnpm test` completed with 43 test files passed and 1 intentionally skipped file; 204 tests passed and 4 intentionally skipped tests. |
+
+This run performed no browser interaction and did not access or change user data, attachments, OAuth/session material, provider policy, schema, schedules or owner configuration.
