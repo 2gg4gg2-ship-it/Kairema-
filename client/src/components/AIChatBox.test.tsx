@@ -135,9 +135,12 @@ describe("AIChatBox user flows", () => {
     expect(screen.getByRole("dialog").textContent).toContain("sample.webp");
 
     await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: "Открыть предпросмотр: notes.pdf" }));
+    const documentCard = screen.getByRole("button", { name: "Открыть предпросмотр: notes.pdf" });
+    expect(documentCard.textContent).not.toContain("https://");
+    await user.click(documentCard);
     const documentPreview = screen.getByTitle("notes.pdf");
     expect(documentPreview.getAttribute("src")).toBe("https://preview.example.test/notes.pdf");
+    expect(documentPreview.getAttribute("sandbox")).toBe("allow-downloads allow-same-origin");
     expect(screen.getByRole("dialog").textContent).toContain("notes.pdf");
   });
 

@@ -757,3 +757,13 @@ No conversation text, history labels, identifiers, attachment details, session/c
 | Known local fixture | PASS — local cleanup | The isolated neutral fixture created for the attachment check was removed by its exact known local path. Browser downloads were not touched because they cannot be safely identified while the session is unstable. |
 
 This entry excludes all visible chat text, history labels, identifiers, attachment details, session/cookie values, raw browser error data, URLs, OAuth material and secrets.
+
+## 2026-08-24 — Local PDF preview presentation regression
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Sent document card | PASS — local | The component regression confirms the sent-message card keeps document metadata presentation separate from its preview URL. |
+| Document preview frame | PASS — local | The component regression confirms the existing document preview iframe retains its sandbox policy. |
+| Validation | PASS — local | Focused AIChatBox coverage passed (14 tests), TypeScript passed, and production build passed. |
+
+This is code-level presentation evidence only. It does not make a real browser PDF-card interaction or vision response PASS. No attachment name, size, URL, file bytes, chat content, identifier, session data, raw error or secret is retained.
