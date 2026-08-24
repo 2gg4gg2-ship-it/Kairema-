@@ -491,6 +491,16 @@ The browser displayed no conversation content and no sidebar item was opened. No
 
 Canonical acceptance remains pending publication. No browser login was launched, and no account, conversation, history, profile, memory entry, attachment, source, cookie, token or secret was accessed.
 
+## 2026-08-24 — Gateway-safe phone link remediation (local verification)
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Direct `/welcome` on canonical | FAIL — platform route | The platform returned a public 404 before the SPA server fallback could handle the path. This path is not presented as the phone-only link. |
+| Canonical-root query entry | PASS — local | The equivalent data-free screen is selected at `/?welcome=1`, keeping the request on the canonical root where the application shell is served. |
+| Regression and visual check | PASS — local | App routing and Welcome focused regressions passed (2 tests); TypeScript and production build passed. A 375px local root-query screenshot showed the single visible touch-friendly button. |
+
+The root-query route still invokes only the existing event-driven login handler. No OAuth transaction was launched, and no personal data, session detail, cookie, token or secret was inspected or retained.
+
 ## 2026-08-24 — Canonical asset delivery comparison
 
 | Comparison | Result | Privacy-safe conclusion |

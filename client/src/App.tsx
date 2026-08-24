@@ -8,7 +8,13 @@ import Home from "./pages/Home";
 import OwnerAnalytics from "./pages/OwnerAnalytics";
 import Welcome from "./pages/Welcome";
 
-function Router() { return <Switch><Route path="/" component={Home} /><Route path="/welcome" component={Welcome} /><Route path="/owner-analytics" component={OwnerAnalytics} /><Route path="/404" component={NotFound} /><Route component={NotFound} /></Switch>; }
+function RootRoute() {
+  const isWelcomeEntry = new URLSearchParams(window.location.search).get("welcome") === "1";
+  if (isWelcomeEntry) return <Welcome />;
+  return <Home />;
+}
+
+function Router() { return <Switch><Route path="/" component={RootRoute} /><Route path="/welcome" component={Welcome} /><Route path="/owner-analytics" component={OwnerAnalytics} /><Route path="/404" component={NotFound} /><Route component={NotFound} /></Switch>; }
 
 function App() { return <ErrorBoundary><ThemeProvider defaultTheme="dark" switchable><TooltipProvider><Toaster /><Router /></TooltipProvider></ThemeProvider></ErrorBoundary>; }
 
