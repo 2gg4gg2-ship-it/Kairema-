@@ -728,7 +728,7 @@ This entry intentionally excludes the temporary chat text, reply text, document 
 | Composer and sent attachment | PASS — browser | In the separately created neutral test chat, native selection, composer preview/removal, sent document presentation and bounded temporary turn completed. No content, name, bytes, URL or identifier is retained. |
 | Immediate exports | PASS — browser | Markdown and PDF exports of that temporary chat each produced a local download. Their contents were not opened or retained. |
 | Test-chat cleanup | BLOCKED BY PLATFORM/BROWSER | Two attempts to delete only the created test chat timed out and left the browser in an empty tab. A subsequent confirmed OAuth attempt returned to the guest shell, so the test-chat deletion result cannot be safely confirmed. No other history entry was selected, changed or deleted. |
-| Eligible cleanup scope | Preserved | Only the created test chat, its neutral local fixture and its two local downloads remain eligible for cleanup. |
+| Eligible cleanup scope | Narrowed | The known neutral local fixture was removed. Only the created test chat and its two local downloads remain eligible for cleanup. |
 
 PDF document-card and vision acceptance remain **NOT VERIFIED**. This record deliberately excludes chat text, file content, history labels, profile/memory values, account/session values, cookies, raw errors, URLs, OAuth material and secrets.
 
@@ -750,5 +750,6 @@ No conversation text, history labels, identifiers, attachment details, session/c
 | Authorized browser context | Available briefly | The current account shell became available after the user-approved standard application sign-in path. No account data is reproduced here. |
 | Controlled dialog trigger | BLOCKED BY PLATFORM/BROWSER | Opening the new in-app delete dialog for only the known test-chat control again timed out and the browser moved to an empty tab before the dialog or a deletion result could be observed. No explicit destructive confirmation was reached. |
 | Cleanup disposition | NOT VERIFIED | The test-chat deletion is not asserted. No other history item was targeted, selected for deletion or changed. Further destructive retries are stopped to avoid a loop under the unstable browser context. |
+| Known local fixture | PASS — local cleanup | The isolated neutral fixture created for the attachment check was removed by its exact known local path. Browser downloads were not touched because they cannot be safely identified while the session is unstable. |
 
 This entry excludes all visible chat text, history labels, identifiers, attachment details, session/cookie values, raw browser error data, URLs, OAuth material and secrets.
