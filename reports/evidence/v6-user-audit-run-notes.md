@@ -650,3 +650,13 @@ This local-only acceptance does not access or change a user preference and does 
 | Test material cleanup | PASS | The single locally created neutral temporary fixture was removed. No server-side test material was created. |
 
 Composer preview, removal, sent-bubble, document card and vision remain **NOT VERIFIED** in the browser. This is an automation/isolation limitation, not an application acceptance PASS or a finding about existing user content.
+
+## 2026-08-24 — Native attachment input accessibility
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Accessible input contract | PASS — local | The hidden native file input now has its own localized accessible name, distinct from the visible attachment trigger. The accepted file-type contract is unchanged. |
+| Regression | PASS — local | Focused AIChatBox component regression passed 14 tests, including the explicit input semantic check; TypeScript and production build passed. |
+| Browser acceptance | NOT VERIFIED | No further browser interaction was attempted. This change does not prove native picker, upload, sent-bubble, document-card or vision behavior. |
+
+No upload lifecycle, storage policy, server attachment policy, user data, attachment content or URL was changed or accessed.

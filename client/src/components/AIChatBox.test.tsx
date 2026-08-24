@@ -173,6 +173,15 @@ describe("AIChatBox user flows", () => {
     expect(screen.queryByText("draft.png")).toBeNull();
   });
 
+  it("gives the hidden native attachment input an explicit accessible name", () => {
+    render(<AIChatBox messages={[]} onSendMessage={vi.fn()} onUploadFiles={vi.fn()} />);
+
+    const nativeInput = screen.getByLabelText("Выбрать файл для вложения");
+    expect(nativeInput).toBeInstanceOf(HTMLInputElement);
+    expect((nativeInput as HTMLInputElement).type).toBe("file");
+    expect(nativeInput.getAttribute("accept")).toBe("image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown,.md");
+  });
+
   it("shows an image-only local preview immediately while upload is still pending and removes it without a server delete", async () => {
     const user = userEvent.setup();
     const createObjectURL = vi.fn(() => "blob:local-preview");
