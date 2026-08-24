@@ -500,3 +500,27 @@ This is a **canonical delivery/version mismatch**, not a browser-authentication 
 | Type/build | PASS | TypeScript check passed. Production build passed with the existing chunk-size warning only. |
 
 Canonical publication remains **NOT VERIFIED** until the new release is served and the guest DOM can be inspected without invoking OAuth.
+
+## 2026-08-24 — Canonical guest-control recheck after release `131c54b8`
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Guest-shell load | PASS | Canonical Kairema loaded an unauthenticated empty chat shell without any OAuth action, sidebar interaction, history access, memory access or attachment interaction. |
+| Topbar and empty-state guest controls | FAIL | The labelled guest entry was absent from the visible canonical page. A binary DOM check found zero control elements for both the topbar and the new empty-state fallback and no control label. |
+| Current release delivery | NOT VERIFIED | The release-specific cache-busting navigation did not yet produce the current frontend signature in the canonical guest DOM. This keeps the delivery/version mismatch open; it does not justify changing OAuth, cookies, access policy or user data. |
+
+No conversation content, profile, memory record, attachment, source, account/session identifier, cookie, raw network payload, secret or OAuth state was opened, copied or retained.
+
+## 2026-08-24 — Canonical asset/runtime distinction
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Current canonical main asset | PASS — static signature | A no-store fetch inside the guest shell returned JavaScript and contained the guest-login label. The direct unauthenticated HTTP request is not a reliable static-asset probe because platform pre-auth intercepts it. |
+| Current rendered guest DOM | FAIL | The same page’s rendered DOM still contained zero guest entry controls and no label. |
+| Diagnosis direction | OPEN | The mismatch is now narrowed to runtime auth/render-state or a distinct stale sub-bundle, rather than a simple absence of the label from the served main asset. |
+
+The checks used only public asset metadata and boolean signatures. No history, profile, memory, attachments, user/session values, cookies, sources, raw payloads, secrets or OAuth state was read.
+
+## 2026-08-24 — Guest recheck safe stop after session rehydration
+
+After a cache-refresh attempt, the browser rendered an authenticated application state. The guest-mode acceptance flow was stopped immediately. No sidebar item, conversation, message, profile, memory record, attachment, export, source, account/session value, cookie, raw response or OAuth material was selected, copied, recorded or used. This is a browser-isolation limitation, not a new product verdict. Canonical guest-control acceptance remains **NOT VERIFIED** until a stable guest-only browser context is available.
