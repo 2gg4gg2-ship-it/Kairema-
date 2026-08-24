@@ -421,3 +421,33 @@ No record text, title, prompt, reply, profile value, identifier, attachment data
 | TypeScript and production build | PASS | `pnpm check` and `pnpm build` completed after the final freshness change; the build produced only a chunk-size advisory. |
 
 This entry does not promote pending authenticated browser flows or the partial authorized memory cleanup to PASS. It contains no record values, conversation data, account/session material, source data, attachment data, raw external error detail or secret.
+
+## 2026-08-24 — Browser rehydration safety stop
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Canonical-session recheck | STOPPED | A canonical navigation unexpectedly rehydrated an existing conversation after the page initially presented a guest shell. The browser was closed immediately. |
+| Further memory operations | NOT PERFORMED | No further search, filter, deletion, export, copy, chat selection or settings action was run after the rehydration. |
+| Browser evidence | NOT VERIFIED | This session cannot be used for remaining authenticated acceptance until a stable, same-window OAuth session is established. |
+
+No conversation content, title, memory value, account/session identifier, source data, attachment data, raw error or secret is retained in this evidence. This is an automation/session-isolation limitation, not a new application-defect finding.
+
+## 2026-08-24 — Guest-mode official OAuth control
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Persistent guest entry point | PASS — code/regression | A labelled topbar control remains available whenever the session is unauthenticated, including the empty guest shell; the existing sidebar fallback remains available. |
+| Official login launch | PASS — code/regression | Clicking the control invokes the existing event-driven `startLogin()` path exactly once. That path creates a fresh one-time state cookie and returns to the same canonical origin; no reusable OAuth URL or state value is exposed. |
+| Phone layout | PASS — local visual/regression | The control is styled as a visible 44px touch target and preserved through mobile responsive rules. No user data or history was shown in the local shell check. |
+
+The published recheck requires the current frontend delivery. No OAuth credentials, cookies, account/session identifiers, conversation data or direct login URL are retained in this evidence.
+
+## 2026-08-24 — Guest-mode official OAuth control delivery
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Guest entry control | PASS — code/regression | The canonical UI has a permanent labelled guest-mode entry point in the topbar and retains the existing sidebar fallback. |
+| OAuth safety | PASS — code/regression | The visible control invokes only the existing event-driven login start; it does not expose a reusable OAuth URL, state, cookie or credential. |
+| Remaining published acceptance | NOT VERIFIED | A same-window authenticated session is still required before any user-scoped memory or settings acceptance resumes. |
+
+No session material, account identifier, conversation data, memory entry, source, attachment detail, raw error or secret is retained.

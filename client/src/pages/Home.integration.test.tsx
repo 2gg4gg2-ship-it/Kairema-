@@ -22,6 +22,9 @@ const fixtures = vi.hoisted(() => ({
   deleteMemoryEntry: vi.fn(),
   clearMemory: vi.fn(),
   uploadAttachment: vi.fn(),
+  startLogin: vi.fn(),
+  isAuthenticated: true,
+  authLoading: false,
   isOwner: false,
   navigate: vi.fn(),
   releaseSecondDelta: null as (() => void) | null,
@@ -35,8 +38,8 @@ Object.defineProperties(HTMLElement.prototype, {
   scrollIntoView: { configurable: true, value: () => undefined },
 });
 
-vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ isAuthenticated: true, loading: false }) }));
-vi.mock("@/const", () => ({ startLogin: vi.fn() }));
+vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ isAuthenticated: fixtures.isAuthenticated, loading: fixtures.authLoading }) }));
+vi.mock("@/const", () => ({ startLogin: fixtures.startLogin }));
 vi.mock("@/lib/runtime-auth", () => ({ runtimeAuthHeaders: () => ({ Authorization: "Bearer test-session" }) }));
 vi.mock("@/contexts/ThemeContext", () => ({ useTheme: () => ({ theme: "dark", toggleTheme: fixtures.toggleTheme, highContrast: false, setHighContrast: vi.fn() }) }));
 vi.mock("@/lib/chat-export", () => ({
@@ -84,6 +87,9 @@ import Home, { SettingSwitch } from "./Home";
 const encoder = new TextEncoder();
 
 function resetFixtures() {
+  fixtures.isAuthenticated = true;
+  fixtures.authLoading = false;
+  fixtures.startLogin.mockReset();
   fixtures.sessions = [{ id: fixtures.sessionId, modelId: fixtures.modelId, title: "Активная история" }];
   fixtures.messages = [
     { id: 1, role: "user", content: "Старое сообщение пользователя", modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:00:00.000Z") },
@@ -154,6 +160,19 @@ describe("Home integration flows", () => {
 
     await user.click(screen.getByRole("button", { name: "Скрыть боковую панель" }));
     expect(sidebar?.classList.contains("kairema-sidebar-collapsed")).toBe(true);
+  });
+
+  it("always exposes a persistent guest login control in the topbar", async () => {
+    const user = userEvent.setup();
+    fixtures.isAuthenticated = false;
+    fixtures.sessions = [];
+    fixtures.messages = [];
+    render(<Home />);
+
+    const login = screen.getAllByRole("button", { name: "Войти для истории" }).find((node) => node.classList.contains("kairema-guest-login"));
+    expect(login).toBeDefined();
+    await user.click(login!);
+    expect(fixtures.startLogin).toHaveBeenCalledTimes(1);
   });
 
   it("renders an owned temporary attachment only inside the saved user bubble that references it", () => {
