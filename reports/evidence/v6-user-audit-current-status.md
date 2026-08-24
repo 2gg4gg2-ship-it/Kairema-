@@ -27,4 +27,4 @@
 | `pnpm build` | **PASS**; только advisory о размере chunk. |
 | Public bundle audit server-secret names | **PASS** |
 
-> **Итог:** v6-Q не закрыта. Source/test milestone опубликован. После прежнего region blocker сессия была восстановлена в окне управления, однако перед любой browser-приёмкой существующий чат был обнаружен и исключён из сценария: дальнейшая проверка допускается только в новом изолированном agent-created чате. Все browser-пункты по-прежнему **NOT VERIFIED**, owner-only блок — **BLOCKED BY PLATFORM**. Никакой непроверенный browser-flow не считается PASS на основании одних тестов.
+> **Итог:** v6-Q не закрыта. Source/test race fix опубликован. После выбора уже доступной browser-учётной записи OAuth не вернул текущую sandbox-вкладку в Kairema и открыл пустую вкладку; повторные действия остановлены. Все browser-пункты по-прежнему **NOT VERIFIED**, owner-only блок — **BLOCKED BY PLATFORM**. Никакой непроверенный browser-flow не считается PASS на основании одних тестов.
