@@ -501,6 +501,22 @@ Canonical acceptance remains pending publication. No browser login was launched,
 
 The root-query route still invokes only the existing event-driven login handler. No OAuth transaction was launched, and no personal data, session detail, cookie, token or secret was inspected or retained.
 
+## 2026-08-24 — Canonical root-query welcome check
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Canonical root query arrival | PASS | The canonical root accepted `?welcome=1` and rendered the Kairema guest shell rather than the platform 404. |
+| Published welcome branch | FAIL | The visible guest shell was Home’s empty-state rather than the data-free welcome screen. A binary runtime check confirmed the query parameter was present while welcome-only copy was absent. |
+| Published asset | FAIL — stale/runtime mismatch | The public main asset currently served to the guest shell does not contain the new welcome signature. Local tests and build therefore do not establish canonical delivery. |
+
+No button was pressed and no OAuth flow was launched. The guest surface did not expose conversation text, memory, profile, attachment, cookies, account/session values, raw network payloads, secrets or other private data. Further work is limited to publishing/delivery diagnosis.
+
+## 2026-08-24 — Canonical root-query propagation recheck safe-stop
+
+After a short propagation wait, the canonical root-query retry still did not show the data-free welcome screen or its entry control. The shell mode then differed from the immediately preceding guest state. The verification was stopped at once; no user interface control was pressed and no conversation, history, profile, memory, attachment, account/session material, cookie, network payload, source or secret was opened, copied or retained.
+
+This confirms **published runtime/delivery mismatch remains FAIL**. It is not evidence that the user’s login, OAuth protocol or local implementation failed.
+
 ## 2026-08-24 — Canonical asset delivery comparison
 
 | Comparison | Result | Privacy-safe conclusion |
