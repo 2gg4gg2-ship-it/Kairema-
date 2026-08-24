@@ -5,6 +5,25 @@ import * as db from "../db";
 import { getSessionCookieOptions } from "./cookies";
 import { sdk } from "./sdk";
 
+export function getTrustedAppRoot(state: string): string {
+  const { redirectUri } = decodeOAuthState(state);
+
+  try {
+    const callbackUrl = new URL(redirectUri);
+    if (
+      callbackUrl.protocol === "https:" &&
+      callbackUrl.pathname === "/api/oauth/callback"
+    ) {
+      return new URL("/", callbackUrl).toString();
+    }
+  } catch {
+    // The callback keeps its fixed relative-root fallback below. The caller's
+    // nonce is still verified before a code can be redeemed.
+  }
+
+  return "/";
+}
+
 function getQueryParam(req: Request, key: string): string | undefined {
   const value = req.query[key];
   return typeof value === "string" ? value : undefined;
@@ -56,7 +75,9 @@ export function registerOAuthRoutes(app: Express) {
       const cookieOptions = getSessionCookieOptions(req);
       res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
 
-      res.redirect(302, "/");
+      // Keep the browser on the same public application origin after callback;
+      // a backend-relative root can otherwise render a blank gateway page.
+      res.redirect(303, getTrustedAppRoot(state));
     } catch (error) {
       console.error("[OAuth] Callback failed", error);
       res.status(500).json({ error: "OAuth callback failed" });
