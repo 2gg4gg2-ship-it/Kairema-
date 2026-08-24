@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, createChatSession, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatSession, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry } from "./db";
+import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, createChatSession, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatSession, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -234,6 +234,11 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const deleted = await deleteOwnedChatSession(ctx.user.id, input.sessionId);
         return { success: true, alreadyDeleted: !deleted } as const;
+      }),
+    clearAll: protectedProcedure
+      .mutation(async ({ ctx }) => {
+        const deletedCount = await deleteAllOwnedChatSessions(ctx.user.id);
+        return { success: true, deletedCount } as const;
       }),
     send: protectedProcedure
       .input(z.object({

@@ -16,9 +16,11 @@ const fixtures = vi.hoisted(() => ({
   invalidateSessions: vi.fn(),
   createChat: vi.fn(),
   deleteChat: vi.fn(),
+  clearHistory: vi.fn(),
   updateSettings: vi.fn(),
   toggleTheme: vi.fn(),
   updateMemory: vi.fn(),
+  addMemoryFact: vi.fn(),
   deleteMemoryEntry: vi.fn(),
   clearMemory: vi.fn(),
   uploadAttachment: vi.fn(),
@@ -57,7 +59,7 @@ vi.mock("@/lib/trpc", () => ({
       { key: "flagship", modelId: "flagship", label: "Kairema Apex", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
     ] }) } },
     settings: { get: { useQuery: () => ({ data: { language: "ru", theme: "dark", responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, defaultRole: "fast", webSearch: 0, healthRefreshSeconds: 30, highContrast: 0 } }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateSettings }) } },
-    memory: { get: { useQuery: () => ({ data: fixtures.memoryData }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateMemory }) }, addFact: { useMutation: () => ({ mutateAsync: vi.fn() }) }, deleteEntry: { useMutation: () => ({ mutateAsync: fixtures.deleteMemoryEntry }) }, clear: { useMutation: () => ({ mutateAsync: fixtures.clearMemory }) } },
+    memory: { get: { useQuery: () => ({ data: fixtures.memoryData }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateMemory }) }, addFact: { useMutation: () => ({ mutateAsync: fixtures.addMemoryFact }) }, deleteEntry: { useMutation: () => ({ mutateAsync: fixtures.deleteMemoryEntry }) }, clear: { useMutation: () => ({ mutateAsync: fixtures.clearMemory }) } },
     webSearch: { status: { useQuery: () => ({ data: { available: false, reason: "Поиск сейчас недоступен", checkedAt: "2026-08-19T00:00:00.000Z", layers: [{ id: "google", state: "limited", retryAt: null }, { id: "tavily", state: "ready", retryAt: null }, { id: "openrouter", state: "ready", retryAt: null }] } }) } },
     knowledge: { status: { useQuery: () => ({ data: { documents: 0, sources: [], lastRun: null } }) }, audit: { useQuery: () => ({ data: { sources: [{ name: "OpenAI News", domain: "openai.com", ...(fixtures.isOwner ? { url: "https://openai.com/news/rss.xml" } : {}), indexedCount: 12, lastSuccessAt: "2026-08-19T00:00:00.000Z" }], latestRun: { state: "completed", startedAt: "2026-08-19T00:00:00.000Z", finishedAt: "2026-08-19T00:01:00.000Z" } } }) }, refresh: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) } },
     providers: { dashboard: { useQuery: () => ({ data: [{ id: "openrouter", label: "OpenRouter", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }, { id: "google", label: "Google AI Studio", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }, { id: "groq", label: "Groq", state: "ready", category: null, capacity: "available", checkedAt: "2026-08-19T00:00:00.000Z", nextCheckAt: "2026-08-20T00:00:00.000Z" }] }) } },
@@ -69,6 +71,7 @@ vi.mock("@/lib/trpc", () => ({
       messages: { useQuery: () => ({ data: fixtures.messages }) },
       create: { useMutation: () => ({ mutateAsync: fixtures.createChat, isPending: false }) },
       delete: { useMutation: () => ({ mutateAsync: fixtures.deleteChat, isPending: false }) },
+      clearAll: { useMutation: () => ({ mutateAsync: fixtures.clearHistory, isPending: false }) },
     },
     useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, list: { invalidate: fixtures.invalidateSessions } } }),
   },
@@ -105,12 +108,14 @@ function resetFixtures() {
   fixtures.navigate.mockReset();
   fixtures.toggleTheme.mockReset();
   fixtures.updateMemory.mockReset().mockResolvedValue(undefined);
+  fixtures.addMemoryFact.mockReset().mockResolvedValue(undefined);
   fixtures.deleteMemoryEntry.mockReset().mockResolvedValue(undefined);
   fixtures.clearMemory.mockReset().mockResolvedValue(undefined);
   fixtures.uploadAttachment.mockReset().mockResolvedValue({ id: "55555555-5555-4555-8555-555555555555", fileName: "vision.png", contentType: "image/png", byteSize: 100, kind: "image", previewUrl: "https://preview.example.test/vision.png" });
   fixtures.invalidateSessions.mockReset().mockResolvedValue(undefined);
   fixtures.createChat.mockReset().mockResolvedValue({ id: "22222222-2222-4222-8222-222222222222", modelId: "fast", title: "Новый разговор" });
   fixtures.deleteChat.mockReset().mockResolvedValue({ success: true });
+  fixtures.clearHistory.mockReset().mockResolvedValue({ success: true, deletedCount: 1 });
   fixtures.updateSettings.mockReset().mockResolvedValue(undefined);
   fixtures.invalidateMessages.mockReset().mockImplementation(async () => {
     fixtures.messages = [
@@ -246,6 +251,24 @@ describe("Home integration flows", () => {
     await waitFor(() => expect(fixtures.invalidateSessions).toHaveBeenCalledOnce());
   });
 
+  it("requires explicit confirmation before bulk-clearing history and clears it once after consent", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Очистить всю историю" }));
+    expect(screen.getByRole("alertdialog", { name: "Очистить всю историю?" })).toBeTruthy();
+    expect(fixtures.clearHistory).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(fixtures.clearHistory).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Очистить всю историю" }));
+    await user.dblClick(screen.getByRole("button", { name: "Да, удалить всё" }));
+    await waitFor(() => expect(fixtures.clearHistory).toHaveBeenCalledOnce());
+    await waitFor(() => expect(fixtures.invalidateSessions).toHaveBeenCalled());
+    expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId });
+  });
+
   it("downloads only the active persisted history in Markdown and PDF without a server-side export record", async () => {
     const user = userEvent.setup();
     render(<Home />);
@@ -301,34 +324,57 @@ describe("Home integration flows", () => {
     await waitFor(() => expect(screen.queryByText("Предпочитает русский язык")).toBeNull());
   });
 
-  it("filters bounded memory entries, keeps auto-extraction independent and requires a clear confirmation", async () => {
+  it("filters unlimited memory entries, keeps auto-extraction independent and requires a clear confirmation", async () => {
     const user = userEvent.setup();
     render(<Home />);
     await user.click(screen.getByRole("button", { name: "Память" }));
 
-    expect(screen.getByText("1/30")).toBeTruthy();
-    expect(screen.getByText("1/100")).toBeTruthy();
+    const memoryCounts = Array.from(document.querySelectorAll(".kairema-entry-count")).map((node) => node.textContent);
+    expect(memoryCounts).toEqual(["1", "1"]);
+    expect(memoryCounts.every((count) => !count?.includes("/"))).toBe(true);
     await user.type(screen.getByLabelText("Поиск по памяти"), "профиля");
     expect(screen.getByText("2026-08-21 Flash: настройка профиля")).toBeTruthy();
     await user.click(within(screen.getByRole("group", { name: "Фильтр памяти" })).getByRole("button", { name: "Факты памяти" }));
     expect(screen.queryByText("2026-08-21 Flash: настройка профиля")).toBeNull();
     await user.click(screen.getByRole("switch", { name: "Автоматически извлекать новые факты" }));
     await waitFor(() => expect(fixtures.updateMemory).toHaveBeenCalledWith({ autoExtract: false }));
-    await user.click(screen.getByRole("button", { name: "Очистить память" }));
+    await user.click(screen.getByRole("button", { name: "Очистить всю память" }));
     expect(fixtures.clearMemory).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Подтвердить очистку" }));
+    expect(screen.getByRole("alertdialog", { name: "Очистить всю память?" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Да, очистить всё" }));
     await waitFor(() => expect(fixtures.clearMemory).toHaveBeenCalledOnce());
   });
 
-  it("warns near the memory limit and prevents a manual fact from exceeding the fixed fact capacity", async () => {
+  it("submits a bulk-memory clear only once when confirmation is activated repeatedly", async () => {
     const user = userEvent.setup();
-    fixtures.memoryData = { ...fixtures.memoryData, facts: Array.from({ length: 30 }, (_, index) => ({ id: `11111111-1111-4111-8111-${String(index).padStart(12, "0")}`, value: `Нейтральный факт ${index + 1}` })) };
+    let resolveClear: (() => void) | undefined;
+    fixtures.clearMemory.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      resolveClear = resolve;
+    }));
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Память" }));
+    await user.click(screen.getByRole("button", { name: "Очистить всю память" }));
+    await user.dblClick(screen.getByRole("button", { name: "Да, очистить всё" }));
+
+    await waitFor(() => expect(fixtures.clearMemory).toHaveBeenCalledOnce());
+    resolveClear?.();
+    await waitFor(() => expect(screen.queryByRole("alertdialog", { name: "Очистить всю память?" })).toBeNull());
+  });
+
+  it("shows actual counts above the former limits and allows another manual fact without truncation", async () => {
+    const user = userEvent.setup();
+    fixtures.memoryData = { ...fixtures.memoryData, facts: Array.from({ length: 31 }, (_, index) => ({ id: `11111111-1111-4111-8111-${String(index).padStart(12, "0")}`, value: `Нейтральный факт ${index + 1}` })), topics: Array.from({ length: 101 }, (_, index) => ({ id: `22222222-2222-4222-8222-${String(index).padStart(12, "0")}`, value: `2026-08-21 Context: нейтральная тема ${index + 1}`, role: "context" })) };
     render(<Home />);
     await user.click(screen.getByRole("button", { name: "Память" }));
 
-    expect(screen.getByText("Память близка к лимиту: новые автоматические записи будут вытеснять самые старые.")).toBeTruthy();
+    expect(Array.from(document.querySelectorAll(".kairema-entry-count")).map((node) => node.textContent)).toEqual(["31", "101"]);
+    expect(screen.queryByText(/лимит|вытеснять/i)).toBeNull();
     await user.type(document.querySelector(".kairema-fact-add input") as HTMLInputElement, "Новый нейтральный факт");
-    expect((document.querySelector(".kairema-fact-add button") as HTMLButtonElement).disabled).toBe(true);
+    const addButton = document.querySelector(".kairema-fact-add button") as HTMLButtonElement;
+    expect(addButton.disabled).toBe(false);
+    await user.click(addButton);
+    await waitFor(() => expect(fixtures.addMemoryFact).toHaveBeenCalledWith({ fact: "Новый нейтральный факт" }));
   });
 
   it("never renders RAG feed URLs or technical URL controls, including when an audit payload contains a URL", async () => {

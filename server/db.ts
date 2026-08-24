@@ -140,6 +140,21 @@ export async function deleteOwnedChatSession(userId: number, sessionId: string):
   return result[0].affectedRows > 0;
 }
 
+/** Deletes only one user's chats and their dialog topics; other users' records are never selected or removed. */
+export async function deleteAllOwnedChatSessions(userId: number): Promise<number> {
+  const db = requireDatabase(await getDb());
+  const sessions = await db.select({ id: chatSessions.id }).from(chatSessions).where(eq(chatSessions.userId, userId));
+  const sessionIds = sessions.map((session) => session.id);
+  if (!sessionIds.length) return 0;
+  await db.delete(memoryEntries).where(and(
+    eq(memoryEntries.userId, userId),
+    eq(memoryEntries.category, "dialog_topic"),
+    inArray(memoryEntries.sessionId, sessionIds),
+  ));
+  const result = await db.delete(chatSessions).where(eq(chatSessions.userId, userId));
+  return Number(result[0]?.affectedRows ?? 0);
+}
+
 export async function listProviderHealth(): Promise<ProviderHealthRecord[]> {
   const db = await getDb();
   if (!db) return [];
@@ -672,7 +687,6 @@ export type MemorySettingsPatch = Partial<Pick<MemorySettings, "enabled" | "auto
 export type MemoryEntryCategory = "profile" | "fact" | "dialog_topic";
 export type MemoryEntryRole = "fast" | "smart" | "context" | "flagship";
 export type MemoryEntrySource = "manual" | "auto";
-const MEMORY_ENTRY_LIMITS: Record<MemoryEntryCategory, number> = { profile: 1, fact: 30, dialog_topic: 100 };
 
 async function ensureUserSettings(userId: number): Promise<void> {
   const db = requireDatabase(await getDb());
@@ -758,23 +772,13 @@ function normalizeMemoryEntry(value: string) {
   return value.trim().replace(/\s+/g, " ").slice(0, 500);
 }
 
-async function trimMemoryEntries(userId: number, category: MemoryEntryCategory): Promise<void> {
-  const db = requireDatabase(await getDb());
-  const limit = MEMORY_ENTRY_LIMITS[category];
-  const rows = await db.select({ id: memoryEntries.id }).from(memoryEntries)
-    .where(and(eq(memoryEntries.userId, userId), eq(memoryEntries.category, category)))
-    .orderBy(asc(memoryEntries.lastSeenAt), asc(memoryEntries.id));
-  const overflow = rows.slice(0, Math.max(0, rows.length - limit)).map((row) => row.id);
-  if (overflow.length) await db.delete(memoryEntries).where(and(eq(memoryEntries.userId, userId), inArray(memoryEntries.id, overflow)));
-}
-
-/** Lists only entries belonging to the authenticated user; topic and fact limits are enforced both on write and read. */
+/** Lists all entries belonging to the authenticated user, newest first, without capacity pruning. */
 export async function listMemoryEntries(userId: number, category?: MemoryEntryCategory): Promise<MemoryEntry[]> {
   const db = requireDatabase(await getDb());
   const rows = await db.select().from(memoryEntries).where(category
     ? and(eq(memoryEntries.userId, userId), eq(memoryEntries.category, category))
     : eq(memoryEntries.userId, userId)).orderBy(desc(memoryEntries.lastSeenAt), desc(memoryEntries.updatedAt), desc(memoryEntries.createdAt));
-  return category ? rows.slice(0, MEMORY_ENTRY_LIMITS[category]) : rows;
+  return rows;
 }
 
 /** Inserts or refreshes a canonical entry. Matching is case-insensitive and never crosses user boundaries. */
@@ -818,7 +822,6 @@ export async function upsertMemoryEntry(userId: number, category: MemoryEntryCat
     lastSeenAt: now, createdAt: now, updatedAt: now,
   };
   await db.insert(memoryEntries).values(record);
-  await trimMemoryEntries(userId, category);
   const [stored] = await db.select().from(memoryEntries).where(and(eq(memoryEntries.id, record.id), eq(memoryEntries.userId, userId))).limit(1);
   return stored ?? null;
 }

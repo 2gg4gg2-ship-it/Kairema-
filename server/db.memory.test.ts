@@ -30,7 +30,7 @@ const mockDb = vi.hoisted(() => ({
 
 vi.mock("drizzle-orm/mysql2", () => ({ drizzle: () => mockDb }));
 
-import { deleteMemoryEntry, deleteOwnedChatSession, listDueMemoryExtractionJobReferences, listMemoryEntries, upsertMemoryEntry } from "./db";
+import { deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatSession, listDueMemoryExtractionJobReferences, listMemoryEntries, upsertMemoryEntry } from "./db";
 
 const now = new Date("2026-08-22T10:00:00.000Z");
 function row(overrides: Partial<MemoryRow> = {}): MemoryRow {
@@ -68,29 +68,28 @@ describe("memory database helper invariants", () => {
     expect(state.inserted).toHaveLength(0);
   });
 
-  it("does not merge a matching topic from another chat and trims least-recently-seen overflow for the current user/category", async () => {
+  it("does not merge a matching topic from another chat and never trims entries by capacity", async () => {
     const otherChat = row({ sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" });
-    const fifoRows = Array.from({ length: 101 }, (_, index) => ({ id: `entry-${index}` }));
     const stored = row({ id: "22222222-2222-4222-8222-222222222222", sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
-    state.selectRows = [[otherChat], fifoRows, [stored]];
+    state.selectRows = [[otherChat], [stored]];
 
     const result = await upsertMemoryEntry(7, "dialog_topic", stored.value, { memoryKey: stored.memoryKey, role: "fast", sessionId: stored.sessionId, source: "auto" });
 
     expect(result).toEqual(stored);
     expect(state.inserted).toHaveLength(1);
-    expect(state.deleted).toHaveLength(1);
+    expect(state.deleted).toHaveLength(0);
   });
 
-  it("returns no more than 30 facts in lastSeen order and deletion reports no access to a foreign entry", async () => {
+  it("returns every fact in lastSeen order and keeps deletion user-scoped", async () => {
     const facts = Array.from({ length: 31 }, (_, index) => row({ id: `fact-${index}`, category: "fact", value: `Факт номер ${index + 1}`, lastSeenAt: new Date(now.getTime() - index * 1_000) }));
     state.selectRows = [facts];
 
     const listed = await listMemoryEntries(7, "fact");
     const deleted = await deleteMemoryEntry(7, "33333333-3333-4333-8333-333333333333");
 
-    expect(listed).toHaveLength(30);
+    expect(listed).toHaveLength(31);
     expect(listed[0]?.id).toBe("fact-0");
-    expect(listed[29]?.id).toBe("fact-29");
+    expect(listed[30]?.id).toBe("fact-30");
     expect(deleted).toBe(true);
   });
 
@@ -100,6 +99,16 @@ describe("memory database helper invariants", () => {
     const deleted = await deleteOwnedChatSession(7, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
 
     expect(deleted).toBe(true);
+    expect(state.deleted).toHaveLength(2);
+    expect(mockDb.delete).toHaveBeenCalledTimes(2);
+  });
+
+  it("bulk-deletes only the caller's chats and their dialog topics", async () => {
+    state.selectRows = [[{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }, { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }]];
+
+    const deletedCount = await deleteAllOwnedChatSessions(7);
+
+    expect(deletedCount).toBe(1);
     expect(state.deleted).toHaveLength(2);
     expect(mockDb.delete).toHaveBeenCalledTimes(2);
   });
