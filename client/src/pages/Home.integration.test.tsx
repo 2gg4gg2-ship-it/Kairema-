@@ -229,6 +229,23 @@ describe("Home integration flows", () => {
     expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId });
   });
 
+  it("submits an active chat deletion only once when confirmation is activated repeatedly", async () => {
+    const user = userEvent.setup();
+    let resolveDelete: (() => void) | undefined;
+    fixtures.deleteChat.mockImplementationOnce(() => new Promise<{ success: boolean }>((resolve) => {
+      resolveDelete = () => resolve({ success: true });
+    }));
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Удалить: Активная история" }));
+    const confirm = screen.getByRole("button", { name: "Удалить чат" });
+    await user.dblClick(confirm);
+
+    await waitFor(() => expect(fixtures.deleteChat).toHaveBeenCalledTimes(1));
+    resolveDelete?.();
+    await waitFor(() => expect(fixtures.invalidateSessions).toHaveBeenCalledOnce());
+  });
+
   it("downloads only the active persisted history in Markdown and PDF without a server-side export record", async () => {
     const user = userEvent.setup();
     render(<Home />);

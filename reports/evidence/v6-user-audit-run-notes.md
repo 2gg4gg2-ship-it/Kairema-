@@ -741,6 +741,10 @@ PDF document-card and vision acceptance remain **NOT VERIFIED**. This record del
 | Explicit-action regression | PASS — local | Focused Home integration regression passed 31 tests: opening the delete control does not call the mutation, cancel does not call it, and only explicit in-app confirmation invokes the existing delete contract with the selected fixture session. TypeScript and production build passed. |
 | Browser cleanup status | BLOCKED BY PLATFORM/BROWSER | This client-only hardening is not proof that the created temporary chat was deleted. A stable authorized browser context is still required before attempting removal of only that test material again. |
 
+### Double-submit protection
+
+The controlled confirmation now has a local in-flight guard and a disabled confirm action while its existing delete mutation is pending. A focused deferred double-activation integration regression passed: repeated activation of the confirm control produced exactly one delete mutation. The existing user-scoped server contract, OAuth flow and ownership scope were not changed. TypeScript and production build also passed.
+
 No conversation text, history labels, identifiers, attachment details, session/cookie values, raw errors, URLs, OAuth material or secrets are recorded in this entry.
 
 ## 2026-08-24 — Controlled cleanup retry
