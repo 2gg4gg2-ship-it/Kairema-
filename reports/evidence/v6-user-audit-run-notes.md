@@ -585,3 +585,13 @@ No real file picker, attachment, conversation, profile, memory entry, history, n
 | Browser acceptance | Unchanged | This run does not substitute for intentionally open native picker, sent-bubble/PDF, vision, settings, freshness, memory-cleanup or second-user browser criteria. |
 
 The run processed no browser session, user history, message, memory entry, profile, attachment, source, cookie, account identifier or secret.
+
+## 2026-08-24 — Canonical current welcome runtime: desktop PASS
+
+| Scope | Result | Privacy-safe observation |
+|---|---|---|
+| Canonical root-query welcome | PASS — desktop | The canonical root query rendered the data-free welcome screen rather than Home or a platform 404. |
+| Visible entry action | PASS — desktop | Exactly one visible labelled `Войти для истории` action was present. The screen states that history, memory and attachments remain unavailable before the same-window secure entry. |
+| OAuth and data boundary | Preserved | No action was pressed. No authenticated UI, history, conversation, memory, settings, attachment, cookie, token, account/session detail, source or secret was accessed. |
+
+The earlier stale runtime blocker is resolved for the desktop welcome route. A local 375px visual check had already passed; **real canonical mobile viewport acceptance remains NOT VERIFIED** because the privacy-safe browser context cannot switch viewport dimensions. No mobile assertion is inferred from the desktop check.
