@@ -3,10 +3,11 @@
 ## Multi-user foundation — 2026-08
 
 - [x] multiuser/AUDIT: проведён source-level аудит Manus OAuth, users/profiles, user-scoped chats/messages, memory, attachments, exports, owner mapping и storage; параллельная auth-система не создавалась. Результат зафиксирован в `reports/evidence/multiuser-foundation-audit.md`.
-- [ ] multiuser/SCHEMA: спроектировать и применить только необходимые additive schema migrations для недостающих user-scoped persistence-полей и сущностей; не удалять и не сбрасывать существующие данные.
+- [x] multiuser/SCHEMA: применена необходимая additive migration `0030_confused_starbolt.sql` для user-scoped `emailNotifications` с safe default; удаление, сброс и преобразование существующих данных не выполнялись.
 - [x] multiuser/USER-PROFILE-SETTINGS: существующие server-persisted profile, interface/AI preferences и memory settings подтверждены audit-ом; добавлен user-scoped `emailNotifications` с safe default, protected allowlist и settings UI. Focused tests PASS: 2 files, 6 tests.
-- [ ] multiuser/CHAT-MESSAGE-ISOLATION: подтвердить или укрепить owner-scoped create/read/update/delete/archive/export operations для chats и messages; история должна быть доступна только текущему verified user.
-- [ ] multiuser/SHARED-MEMORY: подтвердить или укрепить один unified memory store per user, общий для Flash/Think/Context/Apex и полностью изолированный между пользователями.
+- [ ] multiuser/CHAT-MESSAGE-ISOLATION: core server-derived `userId` и owner-scoped chat/message boundaries подтверждены existing helpers и targeted `db.access`/`multiuser-boundaries` regressions; до закрытия остаётся явная owner-scoped archive/export boundary проверка без frontend user ID.
+- [ ] multiuser/CHAT-ARCHIVE-EXPORT-IDOR: добавить targeted cross-user structural regressions для archive/export boundaries чатов и сообщений; подтвердить foreign denial и owner-safe path без реальных данных.
+- [x] multiuser/SHARED-MEMORY: подтверждён один server-derived user-scoped memory store для facts/topics/profile, инжектируемый в контекст всех четырёх публичных ролей. Targeted `chat-context`, `memory.router`, `db.access` regressions PASS: 3 files, 29 tests.
 - [x] multiuser/SHARED-MEMORY-CHAT-OWNERSHIP-VERIFY: подтверждены существующие server-derived memory injection и chat ownership boundaries audit-ом и targeted tests: `chat-context`, `memory.router`, `db.access` — 3 files, 29 tests PASS. Второй memory store не создавался, user scope не ослаблялся.
 - [ ] multiuser/ATTACHMENT-EXPORT-ISOLATION: подтвердить или укрепить owner checks для attachment и export create/read/download/delete; сохранить binary upload и storage lifecycle.
 - [x] multiuser/ATTACHMENT-OWNER-VERIFY: подтверждены существующие owner-scoped binary upload, owned attachment lookup и transient vision boundaries regressions: 3 files, 30 tests PASS. Persistent exports не изменялись и остаются в основном пункте `multiuser/ATTACHMENT-EXPORT-ISOLATION`.
