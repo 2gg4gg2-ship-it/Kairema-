@@ -1,5 +1,5 @@
 /* @vitest-environment jsdom */
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React, { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -78,17 +78,17 @@ describe("AIChatBox user flows", () => {
     expect(onCancelStream).toHaveBeenCalledOnce();
   });
 
-  it("shows a long-press text-selection action without sending a new request", async () => {
+  it("shows text selection only from the long-press menu without sending a new request", async () => {
     const reply: Message = { id: "assistant-select", role: "assistant", content: "Выделяемый фрагмент ответа", providerLabel: "Kairema", model: "safe", status: "полный ответ" };
     render(<AIChatBox messages={[reply]} onSendMessage={vi.fn()} />);
     const bubble = screen.getByText("Выделяемый фрагмент ответа").closest(".kairema-message");
     if (!bubble) throw new Error("Message bubble is missing");
-
-    bubble.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }));
-    await new Promise((resolve) => window.setTimeout(resolve, 540));
-    expect(screen.getByRole("button", { name: "Выбрать текст" })).toBeTruthy();
-    screen.getByRole("button", { name: "Выбрать текст" }).click();
-    expect(window.getSelection()?.toString()).toContain("Выделяемый фрагмент ответа");
+    expect(screen.queryByRole("menuitem", { name: "Выбрать текст" })).toBeNull();
+    fireEvent.contextMenu(bubble);
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "Выбрать текст" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("menuitem", { name: "Выбрать текст" }));
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "Копировать выбранное" })).toBeTruthy());
+    expect(bubble.classList.contains("kairema-message-selection-mode")).toBe(true);
   });
 
   it("renders only the safe web-search status beneath an assistant reply", () => {
