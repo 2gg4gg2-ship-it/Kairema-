@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("./_core/hooks/useAuth", () => ({
+  useAuth: () => ({ user: null, loading: false }),
+}));
+
 import App from "./App";
 
 describe("gateway-safe welcome entry", () => {
@@ -11,14 +16,17 @@ describe("gateway-safe welcome entry", () => {
     });
   });
 
-  afterEach(() => window.history.replaceState({}, "", "/"));
+  afterEach(() => {
+    cleanup();
+    window.history.replaceState({}, "", "/");
+  });
 
   it("renders the data-free welcome screen from the canonical root query", () => {
     window.history.replaceState({}, "", "/?welcome=1");
     render(<App />);
 
-    expect(screen.getByRole("button", { name: "Войти для истории" })).not.toBeNull();
-    expect(screen.getByText("Войдите, чтобы начать")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Продолжить с Google" })).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Добро пожаловать" })).not.toBeNull();
   });
 
 });

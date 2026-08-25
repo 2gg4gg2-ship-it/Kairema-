@@ -1,5 +1,19 @@
 # Project TODO
 
+## First-launch auth flow — 2026-08
+
+- [x] auth-first-launch/AUDIT: подтверждены existing Manus OAuth, verified server session, local users mapping и logout. Все найденные email integrations отключены; отдельный email/password provider, verification/recovery delivery и отдельная session infrastructure отсутствуют.
+- [x] auth-first-launch/AUTH-GATE-UI: реализован mobile/desktop first-launch auth screen; root route показывает private Kairema UI только после verified session и использует существующие Google/Manus OAuth entrypoints без новой сессии.
+- [x] auth-first-launch/EMAIL-FEASIBILITY — BLOCKED/DOCUMENTED: email/password registration/login, verification и recovery не реализованы, потому что отсутствуют подтверждённые auth provider, managed session/password policy и transactional delivery. Честный результат зафиксирован в `reports/evidence/first-launch-auth-audit.md`; фиктивный flow не добавлялся.
+- [x] auth-first-launch/EMAIL-PROVIDER-BLOCKER — BLOCKED/DOCUMENTED: локальные passwords, tokens и email delivery поверх Manus OAuth не добавлялись. Для отдельного email/password flow нужен отдельно согласованный provider и transactional email integration; до этого оставлен только работающий provider-managed secure sign-in.
+- [x] auth-first-launch/SESSION-PRIVATE-ROUTE-REGRESSIONS: добавлены guest/verified root-gate и provider-entry regressions; focused PASS: 3 files, 38 tests. Existing backend `protectedProcedure` и OAuth contract не изменялись.
+- [x] auth-first-launch/LEGAL-INTERACTIONS: несуществующие routes заменены accessible встроенным disclosure условий и privacy; final focused auth UI suite PASS: 2 files, 6 tests.
+- [x] auth-first-launch/SESSION-LOGOUT-RESET-REGRESSION: explicit UI regression подтверждает, что session reset возвращает root route к auth gate и удаляет private UI из render tree. PASS: 3 client tests.
+- [x] auth-first-launch/PROTECTED-BACKEND-BOUNDARY-REGRESSION: explicit server regression подтверждает UNAUTHORIZED для guest protected procedure и сохранение public `auth.me` contract для existing OAuth flow. PASS: 2 server tests.
+- [x] auth-first-launch/LEGACY-ROUTING-TEST-COMPATIBILITY: canonical-root routing test mock-ирует guest auth state и проверяет фактический Welcome heading/Google CTA. PASS в focused и deterministic suite.
+- [x] auth-first-launch/DIRECT-PRIVATE-ROUTE-GUARD: `/owner-analytics` обёрнут в тот же verified-session gate; guest/verified route regressions PASS без запроса private data.
+- [x] auth-first-launch/VALIDATION-REPORT: `reports/evidence/first-launch-auth-audit.md` фиксирует typecheck, focused/deterministic results, единственный внешний Tavily 403 и browser/OAuth/email-delivery limits. Production build намеренно не запускался.
+
 ## Multi-user foundation — 2026-08
 
 - [x] multiuser/PLATFORM-BLOCKER-REGISTRY: все 24 исторических browser/OAuth/owner/provider/build пункта перенесены в `reports/evidence/platform-blocker-registry-2026-08.md` с причиной, статусом и условием разблокировки. Приёмки не возобновлялись; OAuth/owner mapping не менялись.

@@ -4,17 +4,28 @@ import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import { useAuth } from "./_core/hooks/useAuth";
 import Home from "./pages/Home";
 import OwnerAnalytics from "./pages/OwnerAnalytics";
 import Welcome from "./pages/Welcome";
 
-function RootRoute() {
-  const isWelcomeEntry = new URLSearchParams(window.location.search).get("welcome") === "1";
-  if (isWelcomeEntry) return <Welcome />;
-  return <Home />;
+export function VerifiedSessionRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth({ redirectOnUnauthenticated: false });
+  if (loading || !user) return <Welcome />;
+  return <>{children}</>;
 }
 
-function Router() { return <Switch><Route path="/" component={RootRoute} /><Route path="/welcome" component={Welcome} /><Route path="/owner-analytics" component={OwnerAnalytics} /><Route path="/404" component={NotFound} /><Route component={NotFound} /></Switch>; }
+export function RootRoute() {
+  const isWelcomeEntry = new URLSearchParams(window.location.search).get("welcome") === "1";
+  if (isWelcomeEntry) return <Welcome />;
+  return <VerifiedSessionRoute><Home /></VerifiedSessionRoute>;
+}
+
+export function OwnerAnalyticsRoute() {
+  return <VerifiedSessionRoute><OwnerAnalytics /></VerifiedSessionRoute>;
+}
+
+function Router() { return <Switch><Route path="/" component={RootRoute} /><Route path="/welcome" component={Welcome} /><Route path="/owner-analytics" component={OwnerAnalyticsRoute} /><Route path="/404" component={NotFound} /><Route component={NotFound} /></Switch>; }
 
 function App() { return <ErrorBoundary><ThemeProvider defaultTheme="dark" switchable><TooltipProvider><Toaster /><Router /></TooltipProvider></ThemeProvider></ErrorBoundary>; }
 
