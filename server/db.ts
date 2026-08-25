@@ -120,9 +120,10 @@ export async function getStoredAssistantForClientMessage(userId: number, session
   return candidate?.role === "assistant" ? candidate : undefined;
 }
 
-export async function updateChatTitle(userId: number, sessionId: string, title: string): Promise<void> {
+export async function updateChatTitle(userId: number, sessionId: string, title: string): Promise<boolean> {
   const db = requireDatabase(await getDb());
-  await db.update(chatSessions).set({ title, updatedAt: new Date() }).where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)));
+  const result = await db.update(chatSessions).set({ title, updatedAt: new Date() }).where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)));
+  return Number(result[0]?.affectedRows ?? 0) > 0;
 }
 
 export async function deleteOwnedChatSession(userId: number, sessionId: string): Promise<boolean> {

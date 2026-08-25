@@ -175,11 +175,15 @@ export const appRouter = router({
   }),
   attachments: router({
     list: protectedProcedure.input(z.object({ sessionId: z.string().uuid() })).query(async ({ ctx, input }) => {
-      const attachments = await listSessionAttachments(ctx.user.id, input.sessionId);
-      return Promise.all(attachments.map(async (attachment) => ({
-        ...attachment,
-        previewUrl: (await getOwnedAttachmentDownload(ctx.user.id, attachment.id)).url,
-      })));
+      try {
+        const attachments = await listSessionAttachments(ctx.user.id, input.sessionId);
+        return Promise.all(attachments.map(async (attachment) => ({
+          ...attachment,
+          previewUrl: (await getOwnedAttachmentDownload(ctx.user.id, attachment.id)).url,
+        })));
+      } catch (error) {
+        throw new TRPCError({ code: "NOT_FOUND", message: storageError(error) });
+      }
     }),
     upload: protectedProcedure.input(attachmentInputSchema).mutation(async ({ ctx, input }) => {
       try {
@@ -225,7 +229,7 @@ export const appRouter = router({
       .input(z.object({ sessionId: z.string().uuid(), title: z.string().trim().min(1).max(255) }))
       .mutation(async ({ ctx, input }) => {
         try {
-          await updateChatTitle(ctx.user.id, input.sessionId, input.title);
+          if (!await updateChatTitle(ctx.user.id, input.sessionId, input.title)) throw new Error("Чат не найден или недоступен.");
           return { success: true } as const;
         } catch (error) {
           throw new TRPCError({ code: "NOT_FOUND", message: storageError(error) });
