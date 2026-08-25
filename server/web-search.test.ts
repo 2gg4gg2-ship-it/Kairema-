@@ -22,6 +22,7 @@ afterEach(() => {
   process.env.YOU_API_KEY = originalKeys.you;
   process.env.SERPER_API_KEY = originalKeys.serper;
   process.env.EXA_API_KEY = originalKeys.exa;
+  process.env.TAVILY_API_KEY = "";
   vi.unstubAllGlobals();
   vi.useRealTimers();
   recordSearchOutage.mockClear();
@@ -110,6 +111,34 @@ describe("v6-K SearchProvider", () => {
     expect(recordSearchQuality).toHaveBeenCalledWith(expect.objectContaining({ outcome: "degraded", verification: "degraded", staleBlocked: true }));
   });
 
+  it("falls through a stale dated result and returns only an in-window verified source", async () => {
+    process.env.YOU_API_KEY = "test-you";
+    process.env.SERPER_API_KEY = "test-serper";
+    process.env.EXA_API_KEY = "";
+    const staleDate = new Date(Date.now() - 10 * 24 * 60 * 60_000).toISOString();
+    const freshDate = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: { web: [{ title: "Старый материал", url: "https://example.com/stale", description: "Архив", publishedAt: staleDate }] } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ organic: [{ title: "Свежий материал", link: "https://example.com/fresh", snippet: "Новая публикация", date: freshDate }] }), { status: 200 })));
+
+    await expect(searchWeb("Последние новости", { requireDatedSources: true, publishedAfter: new Date(Date.now() - 3 * 24 * 60 * 60_000).toISOString() })).resolves.toMatchObject({
+      state: "found", cascadeUsed: "serper", sources: [{ url: "https://example.com/fresh", publishedAt: freshDate }],
+    });
+  });
+
+  it("returns an honest degraded outcome when all dated sources are older than the requested window", async () => {
+    process.env.YOU_API_KEY = "test-you";
+    process.env.SERPER_API_KEY = "";
+    process.env.EXA_API_KEY = "";
+    const staleDate = new Date(Date.now() - 10 * 24 * 60 * 60_000).toISOString();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: { web: [{ title: "Старый материал", url: "https://example.com/stale", description: "Архив", publishedAt: staleDate }] } }), { status: 200 })));
+
+    await expect(searchWeb("Последние новости", { requireDatedSources: true, publishedAfter: new Date(Date.now() - 3 * 24 * 60 * 60_000).toISOString() })).resolves.toMatchObject({
+      state: "degraded", verificationStatus: "degraded", cascadeUsed: null, sources: [], evidence: [],
+    });
+    expect(recordSearchQuality).toHaveBeenCalledWith(expect.objectContaining({ outcome: "degraded", staleBlocked: true }));
+  });
+
   it("uses Serper only after a You.com failure and records metadata-only failover", async () => {
     process.env.YOU_API_KEY = "test-you";
     process.env.SERPER_API_KEY = "test-serper";
@@ -142,6 +171,25 @@ describe("v6-K SearchProvider", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("uses Tavily only as the fourth bounded fallback after You.com, Serper and Exa fail", async () => {
+    process.env.YOU_API_KEY = "test-you";
+    process.env.SERPER_API_KEY = "test-serper";
+    process.env.EXA_API_KEY = "test-exa";
+    process.env.TAVILY_API_KEY = "test-tavily";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.now() + 16 * 60_000));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "busy" }), { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "busy" }), { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "busy" }), { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ title: "Проверяемый Tavily-источник", url: "https://example.org/tavily", content: "Проверяемый фрагмент" }] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(searchWeb("Проверь резервный поиск")).resolves.toMatchObject({ cascadeUsed: "tavily", sources: [{ url: "https://example.org/tavily" }] });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect((await getWebSearchStatus()).layers).toContainEqual(expect.objectContaining({ id: "tavily", state: "ready" }));
+  });
+
   it("returns an error outcome and cooldown state honestly when the primary layer is rate limited", async () => {
     process.env.YOU_API_KEY = "test-you";
     process.env.SERPER_API_KEY = "";
@@ -158,11 +206,13 @@ describe("v6-K SearchProvider", () => {
     process.env.YOU_API_KEY = "test-you";
     process.env.SERPER_API_KEY = "test-serper";
     process.env.EXA_API_KEY = "test-exa";
+    process.env.TAVILY_API_KEY = "test-tavily";
     vi.useFakeTimers();
     vi.setSystemTime(new Date(Date.now() + 16 * 60_000));
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ results: { web: [] } }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ organic: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ results: [] }), { status: 200 })));
 
     await expect(searchWeb("Найди неизвестный термин")).resolves.toMatchObject({ state: "empty", verificationStatus: "no_results", sources: [], evidence: [] });

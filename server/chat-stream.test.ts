@@ -46,11 +46,10 @@ describe("chat stream happy-path", () => {
     const persistedMetadata = JSON.parse(appended[1]?.metadata ?? "{}");
     expect(writes.join("")).toContain('"sourceDateMin":"2026-08-19T00:00:00.000Z"');
     expect(writes.join("")).toContain('"sourceDateMax":"2026-08-23T00:00:00.000Z"');
-    expect(writes.join("")).not.toMatch(/example\.com|Официальный источник|Private RAG|private snippet|cascadeUsed/);
-    expect(donePayload).toEqual({ content: "Привет", modelUsed: "llama-3.1-8b-instant", label: "Llama 3.1 8B Instant", searchStatus: { state: "found", verificationStatus: "verified", sourcesCount: 2, sourceDateMin: "2026-08-19T00:00:00.000Z", sourceDateMax: "2026-08-23T00:00:00.000Z" } });
-    expect(donePayload).not.toHaveProperty("sources");
-    expect(persistedMetadata).toEqual({ searchStatus: donePayload.searchStatus });
-    expect(JSON.stringify(persistedMetadata)).not.toMatch(/example\.com|Официальный источник|Private RAG|private snippet|cascadeUsed/);
+    expect(writes.join("")).not.toMatch(/Private RAG|private snippet|cascadeUsed/);
+    expect(donePayload).toEqual({ content: "Привет", modelUsed: "llama-3.1-8b-instant", label: "Llama 3.1 8B Instant", searchStatus: { state: "found", verificationStatus: "verified", sourcesCount: 2, sourceDateMin: "2026-08-19T00:00:00.000Z", sourceDateMax: "2026-08-23T00:00:00.000Z" }, sources: [{ title: "Официальный источник", url: "https://example.com/fresh", publishedAt: "2026-08-23T00:00:00.000Z" }] });
+    expect(persistedMetadata).toEqual({ searchStatus: donePayload.searchStatus, sources: donePayload.sources });
+    expect(JSON.stringify(persistedMetadata)).not.toMatch(/Private RAG|private snippet|cascadeUsed/);
     expect(appended.map(({ role, content }) => ({ role, content }))).toEqual([{ role: "user", content: "Привет" }, { role: "assistant", content: "Привет" }]);
     expect(auditChatStream).toHaveBeenCalledWith(expect.objectContaining({ event: "chat_stream.completed", userId: 42, roleId: "fast", provider: "groq", searchAttached: true, sourcesCount: 2 }));
     expect(JSON.stringify(auditChatStream.mock.calls[0][0])).not.toContain("Привет");

@@ -35,7 +35,7 @@ vi.mock("./knowledge", () => ({
 
 vi.mock("./_core/llm", () => ({ invokeLLM: vi.fn() }));
 
-import { buildChatContext, extractMemoryFacts, FLASH_WEB_RESEARCH_BUDGET_MS, FRESHNESS_EMPTY_PROMPT, FRESHNESS_UNAVAILABLE_PROMPT, isKairemaIdentityQuery, needsWebResearch, processMemoryExtractionJob, shouldSkipAutoMemoryExtraction, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
+import { buildChatContext, extractMemoryFacts, FLASH_WEB_RESEARCH_BUDGET_MS, freshnessSearchPolicy, FRESHNESS_EMPTY_PROMPT, FRESHNESS_UNAVAILABLE_PROMPT, isKairemaIdentityQuery, needsWebResearch, processMemoryExtractionJob, shouldSkipAutoMemoryExtraction, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
 import { claimMemoryExtractionJob, completeMemoryExtractionJob, deleteMemoryEntryByKey, getMemoryExtractionJobTurn, getMemoryProfile, getMemorySettings, getOwnedChatAttachments, getUserSettings, listMemoryEntries, refreshAutoMemoryProfileSummary, retryMemoryExtractionJob, upsertMemoryEntry } from "./db";
 import { invokeLLM } from "./_core/llm";
 import { WebSearchUnavailableError, searchWeb } from "./web-search";
@@ -71,7 +71,7 @@ describe("chat context soft web research", () => {
     await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какая последняя версия браузера?", role: "fast" }))
       .resolves.toMatchObject({ webResearch: "Свежие проверяемые данные.", webSources: [{ title: "Официальный источник", url: "https://example.com", sourceId: "source-001", retrievedAt: "2026-08-21T00:00:00.000Z" }], webEvidence: [{ fact: "Проверяемый факт", sourceId: "source-001" }], searchStatus: { state: "found", verificationStatus: "verified", sourcesCount: 1 } });
     expect(searchWeb).toHaveBeenCalledTimes(1);
-    expect(searchWeb).toHaveBeenCalledWith(expect.any(String), { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS, requireDatedSources: true });
+    expect(searchWeb).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS, requireDatedSources: true, publishedAfter: expect.any(String) }));
   });
 
   it("does not start live research when the user disables web search and blocks unverified current-answer fallback", async () => {
@@ -84,7 +84,7 @@ describe("chat context soft web research", () => {
 
   it("does not constrain non-Flash roles to the Flash freshness budget", async () => {
     await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какие последние новости?", role: "smart" });
-    expect(searchWeb).toHaveBeenCalledWith(expect.any(String), { requireDatedSources: true });
+    expect(searchWeb).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ requireDatedSources: true, publishedAfter: expect.any(String) }));
   });
 
   it("continues with a truthful freshness warning when external search is unavailable", async () => {
@@ -129,6 +129,12 @@ describe("chat context soft web research", () => {
     expect(searchWeb).not.toHaveBeenCalled();
     expect(isKairemaIdentityQuery("Кто ты?")).toBe(true);
     expect(needsWebResearch("Какая последняя версия браузера?")).toBe(true);
+  });
+
+  it("uses a narrow window for today and honors an explicitly requested calendar year", () => {
+    const now = new Date("2026-08-25T12:00:00.000Z");
+    expect(freshnessSearchPolicy("Что вышло у OpenAI сегодня?", now)).toEqual({ requireDatedSources: true, publishedAfter: "2026-08-23T12:00:00.000Z" });
+    expect(freshnessSearchPolicy("Какие новые AI-модели появились в 2026 году?", now)).toEqual({ requireDatedSources: true, publishedAfter: "2026-01-01T00:00:00.000Z" });
   });
 
   it("keeps attributable RAG as an additional context rather than a search substitute", async () => {

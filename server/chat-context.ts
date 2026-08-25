@@ -8,7 +8,9 @@ import { getAttachmentPromptText, getOwnedAttachmentVisionDataUrl } from "./atta
 /** All four public roles may use live research when the user asks for external current facts. */
 export const WEB_RESEARCH_ROLE_POLICY: ReadonlySet<RagRole> = new Set<RagRole>(["fast", "smart", "context", "flagship"]);
 export const FLASH_WEB_RESEARCH_BUDGET_MS = 1_500;
-const FRESHNESS_QUERY_PATTERN = /(?:сегодня|сейчас|нынешн|текущ|последн|новост|свеж|актуальн|обновлен|верси[яиюе]|релиз|курс|цен[аы]|погод|врем[яени]|дата|событи|\bnow\b|\btoday\b|\bcurrent\b|\blatest\b|\brecent\b|\bnews\b|\bupdate\b|\bversion\b|\brelease\b|\bprice\b|\bweather\b)/i;
+const FRESHNESS_QUERY_PATTERN = /(?:сегодня|сейчас|нынешн|текущ|последн|новост|свеж|актуальн|обновлен|нов(?:ый|ая|ые|ое)|верси[яиюе]|релиз|курс|цен[аы]|погод|врем[яени]|дата|событи|\bnow\b|\btoday\b|\bcurrent\b|\blatest\b|\brecent\b|\bnew\b|\bnews\b|\bupdate\b|\bversion\b|\brelease\b|\bprice\b|\bweather\b)/i;
+const TODAY_QUERY_PATTERN = /(?:сегодня|сейчас|\bnow\b|\btoday\b)/i;
+const RECENT_QUERY_PATTERN = /(?:последн|новост|свеж|актуальн|текущ|обновлен|нов(?:ый|ая|ые|ое)|релиз|\bcurrent\b|\blatest\b|\brecent\b|\bnew\b|\bnews\b|\bupdate\b|\brelease\b)/i;
 const STALE_RAG_AGE_MS = 90 * 24 * 60 * 60_000;
 const IDENTITY_QUERY_PATTERN = /^\s*(?:кто\s+ты|что\s+ты\s+(?:такое|за\s+ассистент)|как\s+тебя\s+зовут|ты\s+(?:kairema|кайрема)|who\s+are\s+you|what\s+are\s+you|what(?:'s|\s+is)\s+your\s+name)\s*[?!。.]?\s*$/i;
 export const FRESHNESS_UNAVAILABLE_PROMPT = "Свежие источники сейчас недоступны, поэтому я не могу надёжно подтвердить актуальные сведения.";
@@ -20,6 +22,14 @@ export function isKairemaIdentityQuery(query: string) {
 
 export function needsWebResearch(query: string) {
   return !isKairemaIdentityQuery(query) && FRESHNESS_QUERY_PATTERN.test(query);
+}
+
+/** Fresh web questions may use only dated evidence recent enough for the wording of the request. */
+export function freshnessSearchPolicy(query: string, now = new Date()) {
+  const requestedYear = query.match(/(?:^|\D)(20\d{2})(?:\D|$)/)?.[1];
+  if (requestedYear) return { requireDatedSources: true as const, publishedAfter: `${requestedYear}-01-01T00:00:00.000Z` };
+  const maxAgeMs = TODAY_QUERY_PATTERN.test(query) ? 48 * 60 * 60_000 : RECENT_QUERY_PATTERN.test(query) ? 30 * 24 * 60 * 60_000 : 365 * 24 * 60 * 60_000;
+  return { requireDatedSources: true as const, publishedAfter: new Date(now.getTime() - maxAgeMs).toISOString() };
 }
 
 function memoryContext(profile: { profile: string; summary: string }, facts: Array<{ value: string }>, topics: Array<{ value: string }>) {
@@ -89,7 +99,7 @@ export async function buildChatContext(userId: number, sessionId: string, input:
     try {
       const search = await searchWeb(
         "Собери только релевантные актуальные факты и источники для запроса пользователя:\n" + (input.query?.slice(0, 8_000) ?? ""),
-        { ...(role === "fast" ? { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS } : {}), requireDatedSources: true },
+        { ...(role === "fast" ? { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS } : {}), ...freshnessSearchPolicy(input.query ?? "") },
       );
       if (search.state === "found" && search.sources.length) {
         context.webResearch = search.summary;

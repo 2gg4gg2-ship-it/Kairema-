@@ -97,6 +97,19 @@ describe("AIChatBox user flows", () => {
     expect(screen.queryByText(/https?:\/\//i)).toBeNull();
   });
 
+  it("renders only verified public source evidence beneath a verified fresh reply", () => {
+    render(<AIChatBox messages={[{
+      id: "assistant-source-evidence",
+      role: "assistant",
+      content: "Проверенный ответ",
+      searchStatus: { state: "found", verificationStatus: "verified", sourcesCount: 1, sourceDateMin: "2026-08-23T00:00:00.000Z", sourceDateMax: "2026-08-23T00:00:00.000Z" },
+      sources: [{ title: "Официальная публикация", url: "https://example.com/official", publishedAt: "2026-08-23T00:00:00.000Z" }],
+    }]} onSendMessage={vi.fn()} />);
+
+    expect(screen.getByRole("link", { name: "Официальная публикация" }).getAttribute("href")).toBe("https://example.com/official");
+    expect(screen.getByText("23.08.2026")).toBeTruthy();
+  });
+
   it("renders an explicit honest unavailable badge when fresh sources have no verified dates", () => {
     render(<AIChatBox messages={[{
       id: "assistant-freshness-blocked",
@@ -106,6 +119,7 @@ describe("AIChatBox user flows", () => {
     }]} onSendMessage={vi.fn()} />);
 
     expect(screen.getByRole("status").textContent).toContain("Живой поиск недоступен: нет проверяемых свежих источников");
+    expect(screen.queryByRole("link")).toBeNull();
   });
 
   it("redacts technical citation markers from legacy assistant replay and copied content", async () => {

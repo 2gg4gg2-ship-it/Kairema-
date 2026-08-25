@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { SearchResultState, WebEvidence, WebSource } from "./providers";
 import { getWebSearchStatus as getSavedWebSearchStatus, recordSearchOutage, recordSearchQuality, type SearchOutageInput, upsertWebSearchStatus } from "./db";
 
-export type SearchCascadeUsed = "you" | "serper" | "exa";
+export type SearchCascadeUsed = "you" | "serper" | "exa" | "tavily";
 type SearchLayer = SearchCascadeUsed;
 type LayerState = "ready" | "limited" | "unavailable" | "unknown";
 export type SearchLayerStatus = { id: SearchLayer; state: LayerState; checkedAt: string; retryAt: string | null };
@@ -13,7 +13,7 @@ export type WebSearchStatus = {
   youHttp: number | null;
   serperHttp: number | null;
   exaHttp: number | null;
-  /** Kept as null-only compatibility fields while v6-K consumers move to provider-neutral layers. */
+  /** Kept as null-only compatibility field while consumers move to provider-neutral layers. */
   googleHttp: number | null;
   tavilyHttp: number | null;
   openrouterHttp: number | null;
@@ -39,18 +39,21 @@ export type SearchWebOptions = {
   timeoutMs?: number;
   /** Current-data requests require a provider-supplied publication date before they may be called verified. */
   requireDatedSources?: boolean;
+  /** Optional lower bound for publication dates; non-qualifying sources are never passed to the model or UI. */
+  publishedAfter?: string;
 };
 
 const YOU_ENDPOINT = "https://ydc-index.io/v1/search";
 const SERPER_ENDPOINT = "https://google.serper.dev/search";
 const EXA_ENDPOINT = "https://api.exa.ai/search";
+const TAVILY_ENDPOINT = "https://api.tavily.com/search";
 const STATUS_KEY = "google_grounding";
 const QUERY_LIMIT = 8_000;
 const SOURCE_LIMIT = 5;
 const SNIPPET_LIMIT = 550;
 const PREFERRED_GLOBAL_DOMAINS = [".gov", ".edu", ".int", ".org", "openai.com", "google.com", "microsoft.com", "who.int", "un.org", "europa.eu"];
-const LAYERS: SearchLayer[] = ["you", "serper", "exa"];
-const LAYER_COOLDOWN_MS: Record<SearchLayer, number> = { you: 10 * 60_000, serper: 10 * 60_000, exa: 10 * 60_000 };
+const LAYERS: SearchLayer[] = ["you", "serper", "exa", "tavily"];
+const LAYER_COOLDOWN_MS: Record<SearchLayer, number> = { you: 10 * 60_000, serper: 10 * 60_000, exa: 10 * 60_000, tavily: 10 * 60_000 };
 const layerCooldowns: Partial<Record<SearchLayer, number>> = {};
 
 /** Stable compatibility export: search failure stays an optional context and never throws this error to chat users. */
@@ -76,7 +79,8 @@ function expandStatus(input: StatusInput): WebSearchStatus {
   noteLayerOutcome("you", input.youHttp);
   noteLayerOutcome("serper", input.serperHttp);
   noteLayerOutcome("exa", input.exaHttp);
-  return { ...input, layers: LAYERS.map((layer) => layerStatus(layer, input[`${layer}Http` as "youHttp" | "serperHttp" | "exaHttp"], input.checkedAt)) };
+  noteLayerOutcome("tavily", input.tavilyHttp);
+  return { ...input, layers: LAYERS.map((layer) => layerStatus(layer, input[`${layer}Http` as "youHttp" | "serperHttp" | "exaHttp" | "tavilyHttp"], input.checkedAt)) };
 }
 let lastStatus = expandStatus({ available: false, reason: "Проверка web-поиска ещё не выполнялась.", checkedAt: new Date().toISOString(), youHttp: null, serperHttp: null, exaHttp: null, googleHttp: null, tavilyHttp: null, openrouterHttp: null });
 
@@ -159,17 +163,28 @@ function exaResult(payload: unknown): Omit<SearchResult, "cascadeUsed" | "state"
   const evidence = evidenceFromEntries(entries, sources);
   return sources.length ? { summary: sourceSummary(evidence), sources, evidence } : null;
 }
+function tavilyResult(payload: unknown): Omit<SearchResult, "cascadeUsed" | "state" | "verificationStatus"> | null {
+  const entries = ((payload as { results?: Array<{ title?: unknown; url?: unknown; content?: unknown; published_date?: unknown; publishedAt?: unknown }> })?.results ?? []).flatMap((item) => {
+    const source = webSource(item.title, item.url, undefined, item.publishedAt ?? item.published_date);
+    return source ? [{ source, text: typeof item.content === "string" ? item.content.replace(/\s+/g, " ").trim().slice(0, SNIPPET_LIMIT) : "" }] : [];
+  });
+  const sources = uniqueSources(entries.map((entry) => entry.source));
+  const evidence = evidenceFromEntries(entries, sources);
+  return sources.length ? { summary: sourceSummary(evidence), sources, evidence } : null;
+}
 function skippedAttempt(): SearchAttempt { return { result: null, http: null, latencyMs: 0, outcome: "skipped" }; }
 async function requestSearch(layer: SearchLayer, query: string, signal: AbortSignal): Promise<SearchAttempt> {
   const startedAt = Date.now();
-  const apiKey = (layer === "you" ? process.env.YOU_API_KEY : layer === "serper" ? process.env.SERPER_API_KEY : process.env.EXA_API_KEY)?.trim() ?? "";
+  const apiKey = (layer === "you" ? process.env.YOU_API_KEY : layer === "serper" ? process.env.SERPER_API_KEY : layer === "exa" ? process.env.EXA_API_KEY : process.env.TAVILY_API_KEY)?.trim() ?? "";
   if (!apiKey) return skippedAttempt();
   try {
     const request: { url: string; headers: Record<string, string>; body: object; parse: (payload: unknown) => Omit<SearchResult, "cascadeUsed" | "state" | "verificationStatus"> | null } = layer === "you"
       ? { url: YOU_ENDPOINT, headers: { "Content-Type": "application/json", "X-API-Key": apiKey }, body: { query, count: SOURCE_LIMIT, safesearch: "moderate" }, parse: youResult }
       : layer === "serper"
         ? { url: SERPER_ENDPOINT, headers: { "Content-Type": "application/json", "X-API-KEY": apiKey }, body: { q: query, num: SOURCE_LIMIT }, parse: serperResult }
-        : { url: EXA_ENDPOINT, headers: { "Content-Type": "application/json", "x-api-key": apiKey }, body: { query, numResults: SOURCE_LIMIT, contents: { text: { maxCharacters: 2_000 } } }, parse: exaResult };
+        : layer === "exa"
+          ? { url: EXA_ENDPOINT, headers: { "Content-Type": "application/json", "x-api-key": apiKey }, body: { query, numResults: SOURCE_LIMIT, contents: { text: { maxCharacters: 2_000 } } }, parse: exaResult }
+          : { url: TAVILY_ENDPOINT, headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: { query, max_results: SOURCE_LIMIT, search_depth: "basic" }, parse: tavilyResult };
     const response = await fetch(request.url, { method: "POST", headers: request.headers, body: JSON.stringify(request.body), signal });
     const parsed = request.parse(await response.json().catch(() => null));
     if (response.ok && parsed) return { http: response.status, latencyMs: Date.now() - startedAt, result: { ...parsed, cascadeUsed: layer, state: "found", verificationStatus: "verified" }, outcome: "success" };
@@ -192,48 +207,64 @@ function sourceDateRange(sources: WebSource[]) {
   const dates = sources.map((source) => source.publishedAt).filter((value): value is string => typeof value === "string").sort();
   return { sourceDateMin: dates[0] ?? null, sourceDateMax: dates.at(-1) ?? null };
 }
-function hasDatedSource(result: SearchResult) {
-  return result.sources.some((source) => Boolean(source.publishedAt));
+function requiredPublishedAfter(options: SearchWebOptions) {
+  if (!options.publishedAfter) return null;
+  const timestamp = Date.parse(options.publishedAfter);
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
-function safeCascadeTelemetry(http: Record<SearchLayer, number | null>, selected: SearchCascadeUsed | null, sources: WebSource[] = []) { console.info("[Kairema search]", JSON.stringify({ event: "search.cascade", youHttp: http.you, serperHttp: http.serper, exaHttp: http.exa, selected, sourcesCount: sources.length, ...sourceDateRange(sources) })); }
+function qualifyingFreshResult(result: SearchResult, options: SearchWebOptions): SearchResult | null {
+  if (!options.requireDatedSources) return result;
+  const minimum = requiredPublishedAfter(options);
+  const sources = result.sources.filter((source) => {
+    if (!source.publishedAt) return false;
+    const timestamp = Date.parse(source.publishedAt);
+    return Number.isFinite(timestamp) && (minimum === null || timestamp >= minimum);
+  });
+  if (!sources.length) return null;
+  const sourceUrls = new Set(sources.map((source) => source.url));
+  const evidence = result.evidence.filter((entry) => sourceUrls.has(entry.sourceUrl));
+  return { ...result, sources, evidence, summary: sourceSummary(evidence) };
+}
+function safeCascadeTelemetry(http: Record<SearchLayer, number | null>, selected: SearchCascadeUsed | null, sources: WebSource[] = []) { console.info("[Kairema search]", JSON.stringify({ event: "search.cascade", youHttp: http.you, serperHttp: http.serper, exaHttp: http.exa, tavilyHttp: http.tavily, selected, sourcesCount: sources.length, ...sourceDateRange(sources) })); }
 function outageClass(http: number | null): SearchOutageInput["errorClass"] { if (http === 429) return "rate_limited"; if (http === 401 || http === 403) return "auth"; if (http === 404) return "not_found"; if (http === null) return "network_error"; if (http >= 400) return "http_error"; return "no_sources"; }
 async function runCascade(query: string, options: SearchWebOptions, recordOutages: boolean): Promise<SearchResult | SearchOutcome> {
   const startedAt = Date.now();
   const checkedAt = new Date().toISOString();
   const previous = await getWebSearchStatus();
   const signal = AbortSignal.timeout(Math.max(100, Math.min(options.timeoutMs ?? 25_000, 25_000)));
-  const http: Record<SearchLayer, number | null> = { you: null, serper: null, exa: null };
-  const outcomes: Array<SearchAttempt["outcome"] | "undated"> = [];
+  const http: Record<SearchLayer, number | null> = { you: null, serper: null, exa: null, tavily: null };
+  const outcomes: Array<SearchAttempt["outcome"] | "undated" | "stale"> = [];
   for (const layer of LAYERS) {
     if (signal.aborted || isCooling(layer)) continue;
     const attempt = await requestSearch(layer, query, signal);
     http[layer] = attempt.http;
-    const datedResultRequired = Boolean(options.requireDatedSources);
-    const datedResultAvailable = Boolean(attempt.result && hasDatedSource(attempt.result));
-    outcomes.push(attempt.result && datedResultRequired && !datedResultAvailable ? "undated" : attempt.outcome);
-    if (attempt.result && (!datedResultRequired || datedResultAvailable)) {
-      safeCascadeTelemetry(http, layer, attempt.result.sources);
-      await saveStatus({ available: true, reason: layer === "you" ? "Поиск доступен." : "Поиск доступен через резервный слой.", checkedAt, youHttp: http.you ?? previous.youHttp, serperHttp: http.serper ?? previous.serperHttp, exaHttp: http.exa ?? previous.exaHttp, googleHttp: previous.googleHttp, tavilyHttp: previous.tavilyHttp, openrouterHttp: previous.openrouterHttp });
-      if (recordOutages) void recordSearchQuality({ outcome: "found", verification: "verified", verifiedSourceCount: attempt.result.evidence.length, attemptedLayerCount: outcomes.filter((outcome) => outcome !== "skipped").length, staleBlocked: false, latencyMs: Date.now() - startedAt }).catch(() => undefined);
-      return attempt.result;
+    const verifiedResult = attempt.result ? qualifyingFreshResult(attempt.result, options) : null;
+    const hasAnyDatedSource = Boolean(attempt.result?.sources.some((source) => Boolean(source.publishedAt)));
+    outcomes.push(attempt.result && options.requireDatedSources && !verifiedResult ? hasAnyDatedSource ? "stale" : "undated" : attempt.outcome);
+    if (verifiedResult) {
+      safeCascadeTelemetry(http, layer, verifiedResult.sources);
+      await saveStatus({ available: true, reason: layer === "you" ? "Поиск доступен." : "Поиск доступен через резервный слой.", checkedAt, youHttp: http.you ?? previous.youHttp, serperHttp: http.serper ?? previous.serperHttp, exaHttp: http.exa ?? previous.exaHttp, googleHttp: previous.googleHttp, tavilyHttp: http.tavily ?? previous.tavilyHttp, openrouterHttp: previous.openrouterHttp });
+      if (recordOutages) void recordSearchQuality({ outcome: "found", verification: "verified", verifiedSourceCount: verifiedResult.evidence.length, attemptedLayerCount: outcomes.filter((outcome) => outcome !== "skipped").length, staleBlocked: false, latencyMs: Date.now() - startedAt }).catch(() => undefined);
+      return verifiedResult;
     }
-    if (recordOutages) void recordSearchOutage({ layer, errorClass: outageClass(attempt.http), latencyMs: attempt.latencyMs, fellBack: layer !== "exa" && !signal.aborted });
+    if (recordOutages) void recordSearchOutage({ layer, errorClass: outageClass(attempt.http), latencyMs: attempt.latencyMs, fellBack: layer !== "tavily" && !signal.aborted });
   }
   safeCascadeTelemetry(http, null);
   const primaryHttp = http.you;
   const undatedFreshnessFailure = Boolean(options.requireDatedSources && outcomes.includes("undated"));
-  const reason = undatedFreshnessFailure ? "Живой поиск не подтвердил свежесть: слои не вернули источники с проверяемой датой публикации." : signal.aborted && options.timeoutMs ? "Поиск временно недоступен: превышен ограниченный бюджет свежих источников." : isCooling("you") ? "Поиск временно ограничен: основной слой ожидает сброса квоты." : primaryHttp ? `${statusFromHttp(primaryHttp)} Резервные слои не вернули проверяемые источники.` : "Поиск временно недоступен: ни один слой не вернул проверяемые источники.";
-  await saveStatus({ available: false, reason, checkedAt, youHttp: http.you ?? previous.youHttp, serperHttp: http.serper ?? previous.serperHttp, exaHttp: http.exa ?? previous.exaHttp, googleHttp: previous.googleHttp, tavilyHttp: previous.tavilyHttp, openrouterHttp: previous.openrouterHttp });
+  const staleFreshnessFailure = Boolean(options.requireDatedSources && outcomes.includes("stale"));
+  const reason = staleFreshnessFailure ? "Живой поиск не подтвердил свежесть: слои вернули только устаревшие относительно запроса источники." : undatedFreshnessFailure ? "Живой поиск не подтвердил свежесть: слои не вернули источники с проверяемой датой публикации." : signal.aborted && options.timeoutMs ? "Поиск временно недоступен: превышен ограниченный бюджет свежих источников." : isCooling("you") ? "Поиск временно ограничен: основной слой ожидает сброса квоты." : primaryHttp ? `${statusFromHttp(primaryHttp)} Резервные слои не вернули проверяемые источники.` : "Поиск временно недоступен: ни один слой не вернул проверяемые источники.";
+  await saveStatus({ available: false, reason, checkedAt, youHttp: http.you ?? previous.youHttp, serperHttp: http.serper ?? previous.serperHttp, exaHttp: http.exa ?? previous.exaHttp, googleHttp: previous.googleHttp, tavilyHttp: http.tavily ?? previous.tavilyHttp, openrouterHttp: previous.openrouterHttp });
   const attempted = outcomes.filter((outcome) => outcome !== "skipped");
   const hasEmpty = attempted.includes("empty");
   const hasTemporaryFault = attempted.includes("timeout") || attempted.some((outcome) => outcome === "failed" && http.you === null);
   let state: SearchOutcome["state"] = "error";
   if (hasEmpty && attempted.every((outcome) => outcome === "empty")) {
     state = "empty";
-  } else if (undatedFreshnessFailure || hasEmpty || hasTemporaryFault) {
+  } else if (undatedFreshnessFailure || staleFreshnessFailure || hasEmpty || hasTemporaryFault) {
     state = "degraded";
   }
-  if (recordOutages) void recordSearchQuality({ outcome: state, verification: state === "empty" ? "no_results" : state === "degraded" ? "degraded" : "unavailable", verifiedSourceCount: 0, attemptedLayerCount: attempted.length, staleBlocked: signal.aborted || undatedFreshnessFailure, latencyMs: Date.now() - startedAt }).catch(() => undefined);
+  if (recordOutages) void recordSearchQuality({ outcome: state, verification: state === "empty" ? "no_results" : state === "degraded" ? "degraded" : "unavailable", verifiedSourceCount: 0, attemptedLayerCount: attempted.length, staleBlocked: signal.aborted || undatedFreshnessFailure || staleFreshnessFailure, latencyMs: Date.now() - startedAt }).catch(() => undefined);
   return {
     summary: "",
     sources: [],

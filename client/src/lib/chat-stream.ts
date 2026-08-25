@@ -3,7 +3,8 @@ export type StreamDonePayload = {
   content?: string;
   modelUsed?: string;
   label?: string;
-  searchStatus?: { state?: "found" | "empty" | "degraded" | "error"; verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable"; sourcesCount?: number; staleRagOnly?: boolean; sourceDateMin?: string; sourceDateMax?: string };
+  searchStatus?: { state?: "found" | "empty" | "degraded" | "error"; verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable"; sourcesCount?: number; freshnessBlocked?: boolean; staleRagOnly?: boolean; sourceDateMin?: string; sourceDateMax?: string };
+  sources?: StreamSource[];
 };
 
 export function sseEventFromBlock(block: string) {

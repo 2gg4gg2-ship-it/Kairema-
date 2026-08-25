@@ -9,7 +9,7 @@ export const CHAT_STREAM_RATE_LIMIT = 60;
 const CHAT_STREAM_RATE_WINDOW_MS = 60_000;
 const CHAT_STREAM_REPLAY_TTL_MS = 5 * 60_000;
 type StreamResult = Awaited<ReturnType<typeof chatWithRoleStream>>;
-type StoredReplay = Pick<StreamResult, "content" | "modelUsed" | "label" | "searchStatus">;
+type StoredReplay = Pick<StreamResult, "content" | "modelUsed" | "label" | "searchStatus" | "sources">;
 type PendingReplay = { promise: Promise<StreamResult | null>; resolve: (result: StreamResult | null) => void };
 
 type RateWindow = { count: number; windowStart: number };
@@ -19,7 +19,7 @@ type ChatStreamAuditRecord = {
   roleId?: RoleId;
   provider?: Provider;
   searchAttached?: boolean;
-  respondedLayer?: "you" | "serper" | "exa" | "rag" | "none";
+  respondedLayer?: "you" | "serper" | "exa" | "tavily" | "rag" | "none";
   sourcesCount?: number;
   sourceDateMin?: string | null;
   sourceDateMax?: string | null;
@@ -116,7 +116,7 @@ function normalizedDate(value: unknown): string | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
-/** The ordinary-user SSE boundary exposes freshness metadata only, never source objects or their contents. */
+/** The ordinary-user SSE boundary exposes only safe freshness metadata. */
 function publicSearchStatus(status: StreamResult["searchStatus"]) {
   if (!status) return undefined;
   const sourceDateMin = normalizedDate(status.sourceDateMin);
@@ -132,12 +132,35 @@ function publicSearchStatus(status: StreamResult["searchStatus"]) {
   };
 }
 
-function publicStreamResult(result: Pick<StreamResult, "content" | "modelUsed" | "label" | "searchStatus">) {
+type PublicWebSource = { title: string; url: string; publishedAt?: string };
+
+/** Keep only validated public web references; RAG snippets and provider diagnostics never cross this boundary. */
+function publicWebSources(sources: StreamResult["sources"]): PublicWebSource[] {
+  if (!Array.isArray(sources)) return [];
+  const seen = new Set<string>();
+  return sources.flatMap((source) => {
+    if (!source || typeof source !== "object") return [];
+    const candidate = source as { title?: unknown; url?: unknown; publishedAt?: unknown };
+    if (typeof candidate.title !== "string" || typeof candidate.url !== "string") return [];
+    let url: URL;
+    try { url = new URL(candidate.url); } catch { return []; }
+    if (!(url.protocol === "https:" || url.protocol === "http:") || seen.has(url.href)) return [];
+    const title = candidate.title.replace(/\s+/g, " ").trim().slice(0, 180);
+    if (!title) return [];
+    seen.add(url.href);
+    const publishedAt = normalizedDate(candidate.publishedAt);
+    return [{ title, url: url.href, ...(publishedAt ? { publishedAt } : {}) }];
+  }).slice(0, 5);
+}
+
+function publicStreamResult(result: Pick<StreamResult, "content" | "modelUsed" | "label" | "searchStatus" | "sources">) {
+  const sources = result.searchStatus?.verificationStatus === "verified" && !result.searchStatus.freshnessBlocked ? publicWebSources(result.sources) : [];
   return {
     content: result.content,
     modelUsed: result.modelUsed,
     label: result.label,
     ...(result.searchStatus ? { searchStatus: publicSearchStatus(result.searchStatus) } : {}),
+    ...(sources.length ? { sources } : {}),
   };
 }
 
@@ -235,7 +258,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
             content: stored.content,
             modelUsed: stored.modelId ?? input.modelId,
             label: "Kairema",
-            ...(stored.metadata ? (() => { try { return JSON.parse(stored.metadata) as Pick<StoredReplay, "searchStatus">; } catch { return {}; } })() : {}),
+            ...(stored.metadata ? (() => { try { return JSON.parse(stored.metadata) as Pick<StoredReplay, "searchStatus" | "sources">; } catch { return {}; } })() : {}),
           } : null);
           if (!replay) throw new Error("Предыдущее сообщение ещё не дало готового ответа. Повторите отправку через несколько секунд.");
           res.status(200);
@@ -292,7 +315,8 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
             sourceDateMax: result.searchStatus.sourceDateMax ?? sourceDates.at(-1) ?? null,
           } : undefined;
           const safeSearchStatus = publicSearchStatus(normalizedSearchStatus);
-          const sourceMetadata = safeSearchStatus ? JSON.stringify({ searchStatus: safeSearchStatus }) : undefined;
+          const publicSources = normalizedSearchStatus?.verificationStatus === "verified" && !normalizedSearchStatus.freshnessBlocked ? publicWebSources(result.sources) : [];
+          const sourceMetadata = safeSearchStatus ? JSON.stringify({ searchStatus: safeSearchStatus, ...(publicSources.length ? { sources: publicSources } : {}) }) : undefined;
           const savedAssistant = await dependencies.appendChatMessage(user.id, input.sessionId, "assistant", result.content, result.modelUsed, sourceMetadata);
           if (idempotencyKey) {
             completedChatStreamReplays.set(idempotencyKey, { result, expiresAt: Date.now() + CHAT_STREAM_REPLAY_TTL_MS });

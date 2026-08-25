@@ -25,7 +25,7 @@ export type WebEvidence = {
 export type RagSource = { title: string; url: string; publishedAt: string | null };
 export type SearchResultState = "found" | "empty" | "degraded" | "error";
 export type SafeSearchStatus = {
-  cascadeUsed: "you" | "serper" | "exa" | null;
+  cascadeUsed: "you" | "serper" | "exa" | "tavily" | null;
   sourcesCount: number;
   state?: SearchResultState;
   verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable";
