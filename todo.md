@@ -422,6 +422,7 @@
 - [x] AUDIT-USER/BUG-ROLE-DROPDOWN-DESCRIPTIONS: removed visual line-clamping; all four role descriptions wrap in full on desktop/mobile. Focused regression and desktop visual check pass; exactly four roles, slugs and chains are unchanged.
 - [x] AUDIT-USER/BUG-THEME-SAVE-ROLLBACK: theme control now returns the local visual theme to its authoritative saved value if the settings mutation fails. Narrow Home regression confirms the initial switch, rejected save and compensating switch; language and high-contrast semantics remain unchanged.
 - [ ] AUDIT-USER/EVIDENCE: подготовить metadata-only status table with DONE / NOT DONE / BROKEN, publish screenshots without private content, and preserve owner functions as platform-blocked.
+- [x] AUDIT-USER/EVIDENCE-REFRESH: privacy-safe metadata-only сводка актуализирована по уже зафиксированным code/test/live-проверкам без открытия истории, памяти, профиля, вложений или owner-разделов; platform/session blockers сохранены как NOT VERIFIED.
 
 ## v6-P — чистота памяти, вложения, свежесть поиска, switch
 - [ ] v6-P/MEMORY-CLEANUP: удалить только явно перечисленные пользователем тестовые facts/topics через защищённый user-scoped UI/API; до действия проверить точное совпадение, не удалять похожие реальные записи, не показывать или не сохранять содержимое иных записей; отчитаться только агрегатом и списком разрешённых категорий. Частичная точечная очистка начата, но финальное подтверждение UI запаздывало; новых удалений до deploy/recheck не выполнять.
