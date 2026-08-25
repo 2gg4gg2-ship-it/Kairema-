@@ -20,6 +20,7 @@
 |---|---|
 | `0030_confused_starbolt.sql` | **APPLIED:** additive `emailNotifications int DEFAULT 0 NOT NULL` в `user_settings`; без удаления или преобразования данных. |
 | Focused settings regressions | **PASS:** 2 files, 6 tests. |
+| Core cross-user boundary regressions | **PASS:** 3 files, 30 tests для chat/attachment/memory owner scope; export/settings-specific IDOR coverage остаётся открытой. |
 | `pnpm check` | **PASS**. |
 | `git diff --check` | **PASS**. |
 

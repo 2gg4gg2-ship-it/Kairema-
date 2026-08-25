@@ -11,6 +11,7 @@
 - [ ] multiuser/ADMIN-OWNER-BOUNDARY: сохранить существующий owner mapping и подготовить server-only user/admin/owner boundary без выдачи admin-функций обычному пользователю.
 - [x] multiuser/NOTIFICATIONS-ABSTRACTION: реализована server-persisted user-scoped preference `emailNotifications` без фиктивной email-интеграции, delivery provider или client secrets. Focused tests PASS: 2 files, 6 tests.
 - [ ] multiuser/IDOR-REGRESSIONS: добавить cross-user IDOR и horizontal privilege escalation tests для chat, message, memory, attachment, export и settings; не использовать реальные пользовательские данные.
+- [x] multiuser/IDOR-CORE-BOUNDARIES: добавлены и пройдены server-side cross-user регрессии ядра chat/attachment/memory boundaries без реальных данных: 3 files, 30 tests. Export/settings-specific IDOR coverage остаётся в основном пункте `multiuser/IDOR-REGRESSIONS`.
 - [ ] multiuser/VALIDATION-REPORT: выполнить typecheck, целевые и полный tests; production build проверять отдельно и сохранять честный blocker при SIGTERM среды; подготовить точный архитектурный отчёт.
 
 - [x] AUDIT-USER/AUTHORIZED-SESSION-BOUNDARY: проверка завершена без доступа к данным. Agent-visible browser на публичном и welcome-маршруте оставался guest-shell с «Войти для истории», поэтому новый чат не создавался, OAuth не запускался и существующая история/память/профиль/вложения/owner-разделы не открывались. Для browser-приёмки сохраняется session boundary blocker.
