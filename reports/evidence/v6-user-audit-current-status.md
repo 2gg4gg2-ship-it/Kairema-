@@ -25,6 +25,7 @@
 | `pnpm check` | **PASS** по последней подтверждённой валидации текущего исправления. |
 | `git diff --check` | **PASS** перед evidence-checkpoint. |
 | `pnpm build` | **NOT VERIFIED BY SANDBOX RESOURCES:** четыре запуска были завершены средой с SIGTERM при Vite chunk rendering; последняя попытка завершилась после 6107 transformed modules на `rendering chunks (303)`. Пользователь явно попросил оставить этот blocker открытым и не оптимизировать рабочий код ради него. |
+| Data-free mobile welcome | **PASS:** безопасный гостевой экран `/?welcome=1` визуально проверен в mobile viewport 375×812; он показывает единственное действие входа и не открывает историю, память, профиль или вложения. |
 
 > **Итог:** текущий mobile selection/photo scope подтверждён пользователем в live-сессии. Production-build acceptance намеренно остаётся открытым platform-blocker до доступного runtime. Эта сводка не заявляет PASS для browser-пунктов, которые не были выполнены в авторизованной среде.
 
@@ -34,3 +35,4 @@
 |---|---|
 | 1 | `todo.md`: tracked code/test/live acceptance и явные blockers. |
 | 2 | Checkpoints `480096e8`, `842a2394`, `f43eb6c5`, `8ad120b7`: history mobile selection/photo acceptance и build-blocker evidence. |
+| 3 | Data-free mobile screenshot `/?welcome=1`, 375×812, 2026-08-25: доступная гостевая login entry без private content. |

@@ -421,7 +421,7 @@
 - [x] AUDIT-USER/UI: settings and responsive controls are covered by focused Home integration (switch persistence/rollback, dropdown Escape/role descriptions, profile Save UI, settings sections, theme/language/high-contrast) plus privacy-safe desktop/mobile shell checks. Confirmed sidebar-collapse and rejected-theme-save defects were fixed. This does not promote the separate memory-profile persistence criterion beyond NOT VERIFIED.
 - [x] AUDIT-USER/BUG-ROLE-DROPDOWN-DESCRIPTIONS: removed visual line-clamping; all four role descriptions wrap in full on desktop/mobile. Focused regression and desktop visual check pass; exactly four roles, slugs and chains are unchanged.
 - [x] AUDIT-USER/BUG-THEME-SAVE-ROLLBACK: theme control now returns the local visual theme to its authoritative saved value if the settings mutation fails. Narrow Home regression confirms the initial switch, rejected save and compensating switch; language and high-contrast semantics remain unchanged.
-- [ ] AUDIT-USER/EVIDENCE: подготовить metadata-only status table with DONE / NOT DONE / BROKEN, publish screenshots without private content, and preserve owner functions as platform-blocked.
+- [x] AUDIT-USER/EVIDENCE: подготовлена metadata-only status table с DONE / NOT DONE / BROKEN; зафиксирован data-free mobile welcome screenshot без private content; owner functions сохранены как platform-blocked.
 - [x] AUDIT-USER/EVIDENCE-REFRESH: privacy-safe metadata-only сводка актуализирована по уже зафиксированным code/test/live-проверкам без открытия истории, памяти, профиля, вложений или owner-разделов; platform/session blockers сохранены как NOT VERIFIED.
 
 ## v6-P — чистота памяти, вложения, свежесть поиска, switch
