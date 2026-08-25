@@ -78,8 +78,11 @@ describe("AIChatBox user flows", () => {
     expect(onCancelStream).toHaveBeenCalledOnce();
   });
 
-  it("shows text selection only from the long-press menu without sending a new request", async () => {
+  it("keeps text selection active after a repeated long-press and copies only the selected fragment", async () => {
     const reply: Message = { id: "assistant-select", role: "assistant", content: "Выделяемый фрагмент ответа", providerLabel: "Kairema", model: "safe", status: "полный ответ" };
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const originalClipboard = navigator.clipboard;
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     render(<AIChatBox messages={[reply]} onSendMessage={vi.fn()} />);
     const bubble = screen.getByText("Выделяемый фрагмент ответа").closest(".kairema-message");
     if (!bubble) throw new Error("Message bubble is missing");
@@ -89,6 +92,20 @@ describe("AIChatBox user flows", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Выбрать текст" }));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: "Копировать выбранное" })).toBeTruthy());
     expect(bubble.classList.contains("kairema-message-selection-mode")).toBe(true);
+    const textNode = bubble.querySelector("p")?.firstChild;
+    if (!textNode) throw new Error("Message text node is missing");
+    const range = document.createRange();
+    range.setStart(textNode, 0);
+    range.setEnd(textNode, "Выделяемый".length);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    fireEvent.mouseUp(bubble);
+    fireEvent.contextMenu(bubble);
+    expect(bubble.classList.contains("kairema-message-selection-mode")).toBe(true);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Копировать выбранное" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Выделяемый"));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: originalClipboard });
   });
 
   it("renders only the safe web-search status beneath an assistant reply", () => {

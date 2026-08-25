@@ -132,19 +132,61 @@ export function AIChatBox({
   const setComposerInput = (value: string) => { setInput(value); onComposerValueChange?.(value); };
 
   const clearLongPress = () => { if (longPressTimerRef.current !== null) { window.clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; } };
-  const startLongPress = (index: number, pointerType: string) => { if (pointerType !== "touch") return; clearLongPress(); longPressTimerRef.current = window.setTimeout(() => { longPressTimerRef.current = null; suppressLongPressClickRef.current = index; setSelectionModeMessageIndex(null); setSelectionNotice(""); setLongPressMessageIndex(index); }, 520); };
+  const openTextSelectionMenu = (index: number) => {
+    if (selectionModeMessageIndex !== null) return;
+    clearLongPress();
+    suppressLongPressClickRef.current = index;
+    setSelectedText("");
+    setSelectionNotice("");
+    setLongPressMessageIndex(index);
+  };
+  const startLongPress = (index: number, pointerType: string) => {
+    if (pointerType !== "touch" || selectionModeMessageIndex !== null) return;
+    clearLongPress();
+    longPressTimerRef.current = window.setTimeout(() => { longPressTimerRef.current = null; openTextSelectionMenu(index); }, 520);
+  };
+  const handleMessageContextMenu = (index: number, event: React.MouseEvent<HTMLDivElement>) => {
+    if (selectionModeMessageIndex !== null) return;
+    event.preventDefault();
+    openTextSelectionMenu(index);
+  };
   const consumeLongPressClick = (index: number) => { if (suppressLongPressClickRef.current !== index) return false; suppressLongPressClickRef.current = null; return true; };
-  const captureSelectedText = (index: number) => {
-    if (selectionModeMessageIndex !== index) return;
+  const selectedTextInsideMessage = (index: number) => {
     const selection = window.getSelection();
     const bubble = messageTextRefs.current.get(index);
     const text = selection?.toString().trim() ?? "";
     const isInsideBubble = Boolean(bubble && selection?.anchorNode && selection?.focusNode && bubble.contains(selection.anchorNode) && bubble.contains(selection.focusNode));
-    setSelectedText(isInsideBubble ? text : "");
-    setSelectionNotice(isInsideBubble && text ? "" : t.selectionInstructions);
+    return isInsideBubble ? text : "";
+  };
+  const captureSelectedText = (index: number) => {
+    if (selectionModeMessageIndex !== index) return;
+    const text = selectedTextInsideMessage(index);
+    setSelectedText(text);
+    setSelectionNotice(text ? "" : t.selectionInstructions);
   };
   const selectMessageText = (index: number) => { const node = messageTextRefs.current.get(index); if (!node) return; window.getSelection()?.removeAllRanges(); setSelectedText(""); setLongPressMessageIndex(index); setSelectionModeMessageIndex(index); setSelectionNotice(t.selectionInstructions); window.requestAnimationFrame(() => node.focus()); };
-  const copySelectedText = async () => { if (!selectedText) { setSelectionNotice(t.selectionInstructions); return; } try { await navigator.clipboard.writeText(selectedText); setSelectionNotice(t.selectionCopied); } catch { setSelectionNotice(language === "ru" ? "Не удалось скопировать выбранный фрагмент." : "Could not copy the selected text."); } };
+  const copySelectedText = async () => {
+    const activeIndex = selectionModeMessageIndex;
+    const text = activeIndex === null ? "" : selectedTextInsideMessage(activeIndex) || selectedText;
+    if (!text) { setSelectionNotice(t.selectionInstructions); return; }
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
+      else {
+        const fallback = document.createElement("textarea");
+        fallback.value = text;
+        fallback.setAttribute("readonly", "");
+        fallback.style.position = "fixed";
+        fallback.style.opacity = "0";
+        document.body.appendChild(fallback);
+        fallback.select();
+        const copied = document.execCommand("copy");
+        fallback.remove();
+        if (!copied) throw new Error("clipboard_unavailable");
+      }
+      setSelectedText(text);
+      setSelectionNotice(t.selectionCopied);
+    } catch { setSelectionNotice(language === "ru" ? "Не удалось скопировать выбранный фрагмент." : "Could not copy the selected text."); }
+  };
   const closeTextSelection = () => { window.getSelection()?.removeAllRanges(); setSelectedText(""); setLongPressMessageIndex(null); setSelectionModeMessageIndex(null); setSelectionNotice(""); };
 
   useEffect(() => { viewportRef.current?.scrollTo?.({ top: viewportRef.current.scrollHeight, behavior: "smooth" }); }, [displayMessages.length, isLoading]);
@@ -252,7 +294,7 @@ export function AIChatBox({
       {exportError && <p className="kairema-export-error" role="status">{exportError}</p>}
       <div ref={viewportRef} className="min-h-0 flex-1 overflow-y-auto">
         {displayMessages.length === 0 ? <div className="flex min-h-[420px] flex-col items-center justify-center px-6 text-center"><div className="kairema-orb mb-6"><Sparkles className="size-7" /></div><h2 className="text-2xl font-semibold tracking-tight text-foreground">{emptyStateMessage}</h2><p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">{t.fourRoles}</p>{guestLoginAction && <button type="button" className="kairema-guest-login kairema-guest-login-empty" onClick={guestLoginAction.onClick}><LogIn className="size-4" /><span>{guestLoginAction.label}</span></button>}</div> : <div className="mx-auto flex w-full max-w-4xl flex-col gap-7 px-4 py-7 sm:px-8">{displayMessages.map((message, index) => <article key={message.id ?? `${message.role}-${index}`} className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
-          {message.role === "assistant" && <div className="kairema-avatar kairema-avatar-ai"><Sparkles className="size-4" /></div>}<div onPointerDown={(event) => startLongPress(index, event.pointerType || "touch")} onPointerUp={clearLongPress} onPointerCancel={clearLongPress} onPointerMove={clearLongPress} onTouchStart={() => startLongPress(index, "touch")} onTouchEnd={clearLongPress} onTouchCancel={clearLongPress} onContextMenu={(event) => { event.preventDefault(); clearLongPress(); suppressLongPressClickRef.current = index; setSelectedText(""); setSelectionModeMessageIndex(null); setSelectionNotice(""); setLongPressMessageIndex(index); }} className={cn("max-w-[86%] sm:max-w-[76%]", message.role === "user" && "flex flex-col items-end")}><div ref={(node) => { if (node) messageTextRefs.current.set(index, node); else messageTextRefs.current.delete(index); }} onPointerUp={() => captureSelectedText(index)} onTouchEnd={() => captureSelectedText(index)} onContextMenu={(event) => { event.preventDefault(); clearLongPress(); suppressLongPressClickRef.current = index; setSelectedText(""); setSelectionModeMessageIndex(null); setSelectionNotice(""); setLongPressMessageIndex(index); }} tabIndex={selectionModeMessageIndex === index ? 0 : undefined} className={cn("kairema-message", message.role === "user" ? "kairema-message-user" : "kairema-message-ai", message.isError && "kairema-message-error", selectionModeMessageIndex === index && "kairema-message-selection-mode")}>{message.role === "assistant" && !message.isError ? <div className="kairema-markdown text-sm leading-6"><InlineMarkdown text={redactLegacyAssistantReferences(message.content)} language={language} /></div> : <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>}</div>
+          {message.role === "assistant" && <div className="kairema-avatar kairema-avatar-ai"><Sparkles className="size-4" /></div>}<div onPointerDown={(event) => startLongPress(index, event.pointerType || "touch")} onPointerUp={clearLongPress} onPointerCancel={clearLongPress} onPointerMove={clearLongPress} onTouchStart={() => startLongPress(index, "touch")} onTouchEnd={clearLongPress} onTouchCancel={clearLongPress} onContextMenu={(event) => handleMessageContextMenu(index, event)} className={cn("max-w-[86%] sm:max-w-[76%]", message.role === "user" && "flex flex-col items-end")}><div ref={(node) => { if (node) messageTextRefs.current.set(index, node); else messageTextRefs.current.delete(index); }} onPointerUp={() => captureSelectedText(index)} onTouchEnd={() => captureSelectedText(index)} onContextMenu={(event) => handleMessageContextMenu(index, event)} tabIndex={selectionModeMessageIndex === index ? 0 : undefined} className={cn("kairema-message", message.role === "user" ? "kairema-message-user" : "kairema-message-ai", message.isError && "kairema-message-error", selectionModeMessageIndex === index && "kairema-message-selection-mode")}>{message.role === "assistant" && !message.isError ? <div className="kairema-markdown text-sm leading-6"><InlineMarkdown text={redactLegacyAssistantReferences(message.content)} language={language} /></div> : <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>}</div>
           {message.role === "user" && Boolean(message.attachments?.length) && <div className="kairema-message-attachments" aria-label={language === "ru" ? "Вложения сообщения" : "Message attachments"}>{message.attachments?.map((attachment) => <button key={attachment.id} type="button" className="kairema-attachment-chip kairema-attachment-open" onClick={() => { if (!consumeLongPressClick(index)) setPreviewAttachment(attachment); }} aria-label={`${t.preview}: ${attachment.fileName}`}>{attachment.kind === "image" && attachment.previewUrl ? <img src={attachment.previewUrl} alt="" className="kairema-message-image" /> : attachment.kind === "image" ? <FileImage className="size-3.5" /> : <FileText className="size-3.5" />}{attachment.kind === "document" && <span>{attachment.fileName}{formatAttachmentSize(attachment.sizeBytes) ? ` · ${formatAttachmentSize(attachment.sizeBytes)}` : ""}</span>}</button>)}</div>}
           {message.role === "assistant" && message.providerLabel && <p className="mt-2 px-1 text-xs text-muted-foreground">{message.providerLabel} · {message.model} · {message.status}</p>}
           {message.role === "assistant" && message.searchStatus && (() => { const dates = sourceDateRange(message.searchStatus, language); const status = message.searchStatus.freshnessBlocked ? t.freshnessBlocked : message.searchStatus.staleRagOnly ? t.staleRag : message.searchStatus.state === "found" ? `${t.searchVerified}${message.searchStatus.sourcesCount ? ` · ${message.searchStatus.sourcesCount}` : ""}` : message.searchStatus.state === "empty" ? t.searchEmpty : message.searchStatus.state === "degraded" ? t.searchDegraded : t.searchError; const sources = !message.searchStatus.freshnessBlocked && message.searchStatus.verificationStatus === "verified" ? message.sources ?? [] : []; return <div className="mt-2 space-y-2"><p className="inline-flex rounded-full border border-border/70 bg-muted/40 px-2 py-1 text-xs text-muted-foreground" role="status">{status}{dates ? ` · ${t.sourceDates}: ${dates}` : ""}</p>{sources.length > 0 && <ul className="kairema-source-evidence" aria-label={language === "ru" ? "Проверенные источники" : "Verified sources"}>{sources.map((source) => <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer noopener">{source.title}</a>{source.publishedAt ? <span>{new Intl.DateTimeFormat(language === "ru" ? "ru-RU" : "en-US", { dateStyle: "short" }).format(new Date(source.publishedAt))}</span> : null}</li>)}</ul>}</div>; })()}
