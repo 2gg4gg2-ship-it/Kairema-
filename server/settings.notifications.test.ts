@@ -19,6 +19,13 @@ describe("notification preference contract", () => {
     expect(db).toContain('"emailNotifications"');
   });
 
+  it("derives settings reads and patches from the authenticated context instead of client user input", () => {
+    const router = readFileSync(`${project}/server/routers.ts`, "utf8");
+    expect(router).toContain("getUserSettings(ctx.user.id)");
+    expect(router).toContain("updateUserSettings(ctx.user.id, {");
+    expect(router).not.toMatch(/settings:\s*router\([\s\S]{0,900}userId:\s*z\./);
+  });
+
   it("exposes a preference control without implementing email delivery or storing client secrets", () => {
     const home = readFileSync(`${project}/client/src/pages/Home.tsx`, "utf8");
     expect(home).toContain("Email-уведомления");

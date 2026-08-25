@@ -14,6 +14,7 @@
 - [ ] multiuser/ADMIN-OWNER-BOUNDARY: сохранить существующий owner mapping и подготовить server-only user/admin/owner boundary без выдачи admin-функций обычному пользователю.
 - [x] multiuser/NOTIFICATIONS-ABSTRACTION: реализована server-persisted user-scoped preference `emailNotifications` без фиктивной email-интеграции, delivery provider или client secrets. Focused tests PASS: 2 files, 6 tests.
 - [ ] multiuser/IDOR-REGRESSIONS: добавить cross-user IDOR и horizontal privilege escalation tests для chat, message, memory, attachment, export и settings; не использовать реальные пользовательские данные.
+- [x] multiuser/SETTINGS-IDOR-REGRESSION: добавлена и пройдена server-side structural regression: settings read/patch используют только `ctx.user.id`, input schema не принимает frontend user ID. Targeted PASS: 2 files, 7 tests.
 - [x] multiuser/IDOR-CORE-BOUNDARIES: добавлены и пройдены server-side cross-user регрессии ядра chat/attachment/memory boundaries без реальных данных: 3 files, 30 tests. Export/settings-specific IDOR coverage остаётся в основном пункте `multiuser/IDOR-REGRESSIONS`.
 - [ ] multiuser/VALIDATION-REPORT: выполнить typecheck, целевые и полный tests; production build проверять отдельно и сохранять честный blocker при SIGTERM среды; подготовить точный архитектурный отчёт.
 
