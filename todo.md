@@ -1,5 +1,7 @@
 # Project TODO
 
+- [x] v6-P/ATTACHMENTS-PDF-VISION-CODE-VERIFY: проверены типы, magic-byte validation, owner scope, S3 key lifecycle, PDF metadata contract и transient image vision context только по коду и регрессиям; пользовательские файлы не создавались, не открывались и не отправлялись. PASS: 3 files, 30 tests. Реальная PDF/vision browser-приёмка остаётся NOT VERIFIED.
+
 - [x] v6-MEM/MEMORY-RETRY-SWEEP-ISOLATION: existing cron-only bounded sweep continues processing later due references if one retry throws unexpectedly and returns only aggregate counts, never message text, IDs, raw errors or user data. Existing Heartbeat schedule UID and cadence were not added or altered. Targeted test, full suite and TypeScript passed.
 
 - [x] Создать статический реестр из шести карточек: DeepSeek, Gemma 4 31B, Gemini, ChatGPT / OpenAI, Kimi, Grok; исключить любую фильтрацию карточек по ключам или статусу.
