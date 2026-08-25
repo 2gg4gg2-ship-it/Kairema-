@@ -303,8 +303,8 @@ describe("AIChatBox user flows", () => {
     rerender(<AIChatBox messages={[]} onSendMessage={vi.fn()} onUploadFiles={onUploadFiles} composerSessionId="chat-created-by-upload" />);
     resolveUpload?.({ attachments: [attachment], sessionId: "chat-created-by-upload" });
 
-    await waitFor(() => expect(screen.getByText("created-chat.png")).toBeTruthy());
-    expect(screen.getByRole("button", { name: "Открыть предпросмотр: created-chat.png" })).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Открыть предпросмотр: created-chat.png" })).toBeTruthy());
+    expect(screen.queryByText("created-chat.png")).toBeNull();
   });
 
   it("keeps a new-composer upload that settles before React rerenders with the created session", async () => {
@@ -320,8 +320,8 @@ describe("AIChatBox user flows", () => {
     await waitFor(() => expect(onUploadFiles).toHaveBeenCalledOnce());
     resolveUpload?.({ attachments: [attachment], sessionId: "chat-created-before-rerender" });
 
-    await waitFor(() => expect(screen.getByText("created-before-rerender.png")).toBeTruthy());
-    expect(screen.getByRole("button", { name: "Открыть предпросмотр: created-before-rerender.png" })).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Открыть предпросмотр: created-before-rerender.png" })).toBeTruthy());
+    expect(screen.queryByText("created-before-rerender.png")).toBeNull();
   });
 
   it("ignores legacy continuation suggestions and does not render quick-prompt chips", () => {
