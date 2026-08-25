@@ -7,6 +7,7 @@ import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { registerChatStreamRoute } from "../chat-stream";
+import { registerAttachmentUploadRoute } from "../attachment-upload";
 import { registerProviderHealthScheduleRoute } from "../provider-health-schedule";
 import { registerKnowledgeScheduleRoute } from "../knowledge-schedule";
 import { registerMemoryExtractionScheduleRoute } from "../memory-extraction-schedule";
@@ -42,6 +43,7 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
   registerOAuthRoutes(app);
+  registerAttachmentUploadRoute(app);
   registerChatStreamRoute(app);
   registerProviderHealthScheduleRoute(app);
   registerKnowledgeScheduleRoute(app);

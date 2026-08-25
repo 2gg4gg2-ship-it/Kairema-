@@ -54,11 +54,11 @@ async function extractText(bytes: Buffer, contentType: AcceptedAttachmentType) {
   }
 }
 
-export async function uploadOwnedChatAttachment(userId: number, input: { sessionId: string; fileName: string; contentType: string; contentBase64: string }): Promise<PreparedAttachment> {
+export async function uploadOwnedChatAttachmentBytes(userId: number, input: { sessionId: string; fileName: string; contentType: string; bytes: Buffer }): Promise<PreparedAttachment> {
   const contentType = input.contentType as AcceptedAttachmentType;
   const type = ACCEPTED_TYPES[contentType];
   if (!type) throw publicAttachmentError("Поддерживаются PNG, JPG, WEBP, PDF, TXT и MD.");
-  const bytes = Buffer.from(input.contentBase64, "base64");
+  const bytes = input.bytes;
   if (!bytes.length || bytes.length > MAX_ATTACHMENT_BYTES) throw publicAttachmentError("Размер вложения должен быть от 1 байта до 8 МБ.");
   assertMagic(bytes, contentType);
   const fileName = safeFileName(input.fileName);
@@ -76,6 +76,11 @@ export async function uploadOwnedChatAttachment(userId: number, input: { session
     extractedText: extraction.extractedText,
   });
   return { id: record.id, fileName: record.fileName, contentType, byteSize: record.byteSize, kind: record.kind, processingStatus: record.processingStatus, extractedText: record.extractedText, previewUrl: type.kind === "image" ? stored.url : undefined };
+}
+
+/** Legacy tRPC contract retained for already-open clients; new clients send binary bytes directly. */
+export async function uploadOwnedChatAttachment(userId: number, input: { sessionId: string; fileName: string; contentType: string; contentBase64: string }): Promise<PreparedAttachment> {
+  return uploadOwnedChatAttachmentBytes(userId, { ...input, bytes: Buffer.from(input.contentBase64, "base64") });
 }
 
 export async function getOwnedAttachmentDownload(userId: number, attachmentId: string) {

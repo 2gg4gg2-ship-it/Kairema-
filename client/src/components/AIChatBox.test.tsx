@@ -61,23 +61,34 @@ describe("AIChatBox user flows", () => {
     expect(onExportPdf).toHaveBeenCalledOnce();
   });
 
-  it("invokes copy, regenerate and cancel controls for an assistant reply", async () => {
+  it("keeps copy and cancel controls while removing the regenerate action", async () => {
     const user = userEvent.setup();
     const reply: Message = { id: "assistant-1", role: "assistant", content: "Текст ответа", providerLabel: "Kairema Быстрый", model: "test-model", status: "полный ответ" };
     const onCopyAssistant = vi.fn();
-    const onRegenerate = vi.fn();
     const onCancelStream = vi.fn();
-    const { rerender } = render(<AIChatBox messages={[reply]} onSendMessage={vi.fn()} onCopyAssistant={onCopyAssistant} onRegenerate={onRegenerate} onCancelStream={onCancelStream} />);
+    const { rerender } = render(<AIChatBox messages={[reply]} onSendMessage={vi.fn()} onCopyAssistant={onCopyAssistant} onCancelStream={onCancelStream} />);
 
     await user.click(screen.getByRole("button", { name: "Копировать" }));
-    await user.click(screen.getByRole("button", { name: "Ещё вариант" }));
 
     expect(onCopyAssistant).toHaveBeenCalledWith(reply);
-    expect(onRegenerate).toHaveBeenCalledWith(reply);
+    expect(screen.queryByRole("button", { name: "Ещё вариант" })).toBeNull();
 
-    rerender(<AIChatBox messages={[reply]} onSendMessage={vi.fn()} isLoading onCopyAssistant={onCopyAssistant} onRegenerate={onRegenerate} onCancelStream={onCancelStream} />);
+    rerender(<AIChatBox messages={[reply]} onSendMessage={vi.fn()} isLoading onCopyAssistant={onCopyAssistant} onCancelStream={onCancelStream} />);
     await user.click(screen.getByRole("button", { name: "Отменить генерацию" }));
     expect(onCancelStream).toHaveBeenCalledOnce();
+  });
+
+  it("shows a long-press text-selection action without sending a new request", async () => {
+    const reply: Message = { id: "assistant-select", role: "assistant", content: "Выделяемый фрагмент ответа", providerLabel: "Kairema", model: "safe", status: "полный ответ" };
+    render(<AIChatBox messages={[reply]} onSendMessage={vi.fn()} />);
+    const bubble = screen.getByText("Выделяемый фрагмент ответа").closest(".kairema-message");
+    if (!bubble) throw new Error("Message bubble is missing");
+
+    bubble.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }));
+    await new Promise((resolve) => window.setTimeout(resolve, 540));
+    expect(screen.getByRole("button", { name: "Выбрать текст" })).toBeTruthy();
+    screen.getByRole("button", { name: "Выбрать текст" }).click();
+    expect(window.getSelection()?.toString()).toContain("Выделяемый фрагмент ответа");
   });
 
   it("renders only the safe web-search status beneath an assistant reply", () => {

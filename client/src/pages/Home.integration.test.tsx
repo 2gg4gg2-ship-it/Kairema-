@@ -423,7 +423,9 @@ describe("Home integration flows", () => {
 
   it("keeps an optimistic sent-image preview visible when the provider fails after the user message is persisted", async () => {
     const user = userEvent.setup();
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("unavailable", { status: 503, statusText: "Service Unavailable" })));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/attachments/upload"
+      ? new Response(JSON.stringify({ id: "55555555-5555-4555-8555-555555555555", fileName: "vision.png", contentType: "image/png", byteSize: 7, kind: "image", previewUrl: "https://files.example/vision.png" }), { status: 201, headers: { "content-type": "application/json" } })
+      : new Response("unavailable", { status: 503, statusText: "Service Unavailable" })));
     render(<Home />);
 
     const input = document.querySelector<HTMLInputElement>('input[type="file"]');
@@ -447,12 +449,14 @@ describe("Home integration flows", () => {
       ];
       fixtures.attachments = [];
     });
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(encoder.encode('event: done\ndata: {"content":"Готово","modelUsed":"fast","label":"Kairema Flash"}\n\n'));
-        controller.close();
-      },
-    }))));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/attachments/upload"
+      ? new Response(JSON.stringify({ id: "55555555-5555-4555-8555-555555555555", fileName: "vision.png", contentType: "image/png", byteSize: 7, kind: "image", previewUrl: "https://files.example/vision.png" }), { status: 201, headers: { "content-type": "application/json" } })
+      : new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode('event: done\ndata: {"content":"Готово","modelUsed":"fast","label":"Kairema Flash"}\n\n'));
+          controller.close();
+        },
+      }))));
     render(<Home />);
 
     const input = document.querySelector<HTMLInputElement>('input[type="file"]');
@@ -465,28 +469,17 @@ describe("Home integration flows", () => {
     expect(screen.getByRole("button", { name: "Открыть предпросмотр: vision.png" })).toBeTruthy();
   });
 
-  it("copies an assistant reply and regenerates it from the previous user prompt", async () => {
+  it("copies an assistant reply and does not expose a regenerate request", async () => {
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
-    const fetchSpy = vi.fn((_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => Promise.resolve(new Response(new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(encoder.encode('event: done\ndata: {"content":"Новый вариант","modelUsed":"llama-3.1-8b-instant","label":"Kairema Быстрый"}\n\n'));
-        controller.close();
-      },
-    }))));
-    vi.stubGlobal("fetch", fetchSpy);
     render(<Home />);
 
     await user.click(screen.getAllByRole("button", { name: "Копировать" })[1]!);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("Старый ответ Kairema"));
     expect(screen.getAllByRole("status").some((node) => node.textContent?.includes("Сообщение скопировано"))).toBe(true);
 
-    await user.click(screen.getByRole("button", { name: "Ещё вариант" }));
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
-    const payload = JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined)?.body));
-    expect(payload).toMatchObject({ content: "Старое сообщение пользователя", regenerateMessageId: 2, sessionId: fixtures.sessionId });
-    await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
+    expect(screen.queryByRole("button", { name: "Ещё вариант" })).toBeNull();
   });
 
   it("aborts an active stream and refreshes persisted history without leaving an optimistic reply", async () => {
