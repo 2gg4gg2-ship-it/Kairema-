@@ -8,9 +8,11 @@ vi.mock("./db", () => ({
   incrementProviderDailySuccess: vi.fn().mockResolvedValue(undefined),
   getProviderDailySuccess: vi.fn().mockResolvedValue(0),
   recordFlashTtftMetric: vi.fn().mockResolvedValue(undefined),
+  recordTechnicalEvent: vi.fn().mockResolvedValue(undefined),
+  listProviderControlFlags: vi.fn().mockResolvedValue([]),
 }));
 
-import { recordFlashTtftMetric } from "./db";
+import { listProviderControlFlags, recordFlashTtftMetric } from "./db";
 import { ATTEMPT_TIMEOUT_MS, DIAGNOSTIC_CANDIDATES, FLASH_VISIBLE_TTFT_DEADLINE_MS, InvalidModelSelectionError, MAX_ATTEMPTS, MODEL_CONFIG, MODEL_IDS, MODEL_ROLES, __resetProviderHealthForTests, buildOpenRouterMessages, chatWithRole, chatWithRoleStream, classifyOpenRouterFailure, createReasoningStreamFilter, dataFromSseBlock, getProviderHealthForTesting, getZenmuxHeartbeatTrackingForTests, isAllowedModelId, modelById, openRouterStreamDelta, publicChatError, refreshProviderHealth, statusFromChatPayload, statusLabel, stripReasoningBlocks, toPublicModelView, toRoleRuntimeView } from "./providers";
 
 afterEach(() => {
@@ -116,6 +118,26 @@ describe("Kairema v4 role registry", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(3);
     expect(String(fetchSpy.mock.calls[2]?.[0])).toContain("generativelanguage.googleapis.com");
     expect(health.find((item) => item.provider === "openrouter")).toMatchObject({ state: "unavailable", category: "QUOTA" });
+  });
+
+  it("skips an owner-disabled configured candidate before the network and does not consume an LLM attempt", async () => {
+    const flash = MODEL_ROLES.find((role) => role.key === "fast")!;
+    const disabledProvider = flash.chain.at(-1)!.provider;
+    vi.mocked(listProviderControlFlags).mockResolvedValueOnce([
+      { targetType: "provider", targetKey: disabledProvider, disabled: true, preference: "normal" },
+    ] as never);
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    vi.stubEnv("ORCAROUTER_API_KEY", "");
+    vi.stubEnv("GROQ_API_KEY", "");
+    vi.stubEnv("GEMINI_API_KEY", "test-google-key");
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    await expect(chatWithRole("fast", [{ role: "user", content: "Проверка fail-safe control" }])).rejects.toMatchObject({
+      status: { category: "CONFIG" },
+    });
+
+    expect(flash.chain.at(-1)?.provider).toBe(disabledProvider);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("globally skips OrcaRouter after its 429 and continues each later role with another provider", async () => {

@@ -7,18 +7,29 @@ const fixtures = vi.hoisted(() => ({
   isOwner: false,
   download: vi.fn(),
   navigate: vi.fn(),
+  invalidateControls: vi.fn(),
+  invalidateObservability: vi.fn(),
   qualityPanel: vi.fn(),
   qualityChart: vi.fn(),
   claimDiagnostic: vi.fn(),
+  observability: vi.fn(),
+  providerControls: vi.fn(),
+  providerControlTargets: vi.fn(),
+  updateProviderControl: vi.fn(),
 }));
 
 vi.mock("wouter", () => ({ useLocation: () => ["/owner-analytics", fixtures.navigate] }));
 vi.mock("@/lib/chat-export", () => ({ downloadPreparedChatExport: fixtures.download }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
+    useUtils: () => ({ owner: { providerControls: { invalidate: fixtures.invalidateControls }, observability: { invalidate: fixtures.invalidateObservability } } }),
     owner: {
       isOwner: { useQuery: () => ({ data: fixtures.isOwner, isLoading: false, isSuccess: true }) },
       claimDiagnostic: { useQuery: (input: unknown, options: unknown) => { fixtures.claimDiagnostic(options); return { data: fixtures.isOwner ? null : { comparedClaim: "openId", configured: true, expectedFingerprint: "sha256:expected", sessionFingerprint: "sha256:session", matches: false } }; } },
+      observability: { useQuery: (input: unknown, options: unknown) => { fixtures.observability(options); return { data: fixtures.isOwner ? { providers: [{ provider: "DeepSeek", state: "ready", category: null, checkedAt: "2026-08-20T10:00:00.000Z" }], search: { samples24h: 4, outages24h: 1 }, memory: { facts: 8, topics: 3 }, events: [{ id: 1, title: "Provider control updated", kind: "provider_control", roleId: "flash", code: "MANUAL" , createdAt: "2026-08-20T10:00:00.000Z" }] } : null }; } },
+      providerControls: { useQuery: (input: unknown, options: unknown) => { fixtures.providerControls(options); return { data: fixtures.isOwner ? [{ targetType: "provider", targetKey: "deepseek", disabled: false, preference: "avoid" }] : null }; } },
+      providerControlTargets: { useQuery: (input: unknown, options: unknown) => { fixtures.providerControlTargets(options); return { data: fixtures.isOwner ? { providers: ["deepseek"], models: ["deepseek-chat"] } : null }; } },
+      updateProviderControl: { useMutation: () => ({ mutateAsync: fixtures.updateProviderControl, isPending: false, error: null }) },
     },
     search: {
       qualityPanel: { useQuery: (input: unknown, options: unknown) => { fixtures.qualityPanel(options); return { data: null }; } },
@@ -29,22 +40,25 @@ vi.mock("@/lib/trpc", () => ({
 
 import OwnerAnalytics from "./OwnerAnalytics";
 
-beforeEach(() => { fixtures.isOwner = false; fixtures.download.mockReset(); fixtures.navigate.mockReset(); fixtures.qualityPanel.mockReset(); fixtures.qualityChart.mockReset(); fixtures.claimDiagnostic.mockReset(); });
+beforeEach(() => { fixtures.isOwner = false; fixtures.download.mockReset(); fixtures.navigate.mockReset(); fixtures.invalidateControls.mockReset(); fixtures.invalidateObservability.mockReset(); fixtures.qualityPanel.mockReset(); fixtures.qualityChart.mockReset(); fixtures.claimDiagnostic.mockReset(); fixtures.observability.mockReset(); fixtures.providerControls.mockReset(); fixtures.providerControlTargets.mockReset(); fixtures.updateProviderControl.mockReset(); });
 afterEach(() => cleanup());
 
 describe("owner analytics", () => {
   it("does not render aggregate data to a non-owner and disables protected query paths", () => {
     render(<OwnerAnalytics />);
     expect(screen.getByText("Аналитика недоступна")).toBeTruthy();
-    expect(screen.queryByText("Качество поиска")).toBeNull();
+    expect(screen.queryByText("Наблюдаемость Kairema")).toBeNull();
     expect(fixtures.qualityChart).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+    expect(fixtures.observability).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+    expect(fixtures.providerControls).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(fixtures.claimDiagnostic).toHaveBeenCalledWith(expect.objectContaining({ enabled: true }));
   });
 
   it("renders aggregate-only 7d/24h charts and downloads local CSV/JSON", async () => {
     fixtures.isOwner = true;
     render(<OwnerAnalytics />);
-    expect(screen.getByText("Качество поиска")).toBeTruthy();
+    expect(screen.getByText("Наблюдаемость Kairema")).toBeTruthy();
+    expect(screen.getByText("Fail-safe routing controls")).toBeTruthy();
     expect(screen.getByLabelText("Успешные результаты за семь дней")).toBeTruthy();
     expect(screen.getByLabelText("Отказы анонимных слоёв поиска за двадцать четыре часа")).toBeTruthy();
     expect(screen.queryByText(/https?:\/\//)).toBeNull();

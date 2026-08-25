@@ -14,6 +14,19 @@
 - [x] auth-first-launch/DIRECT-PRIVATE-ROUTE-GUARD: `/owner-analytics` обёрнут в тот же verified-session gate; guest/verified route regressions PASS без запроса private data.
 - [x] auth-first-launch/VALIDATION-REPORT: `reports/evidence/first-launch-auth-audit.md` фиксирует typecheck, focused/deterministic results, единственный внешний Tavily 403 и browser/OAuth/email-delivery limits. Production build намеренно не запускался.
 
+## Owner observability and draft autosave — 2026-08
+
+- [x] owner-tools/AUDIT: существующие owner route/guard, provider health, fallback routing, metrics/event paths, memory aggregates и chat composer расширены без дублирующих systems.
+- [x] owner-tools/SERVER-OWNER-BOUNDARY: сохранён server-side owner mapping; owner-only diagnostics/flag mutations проверены: guest UNAUTHORIZED, non-owner FORBIDDEN, owner allowed.
+- [x] owner-tools/OBSERVABILITY: добавлены privacy-safe provider/search/memory health, bounded technical events, fallback visibility и aggregate metrics без secrets, message text, private memory или files.
+- [x] owner-tools/FEATURE-FLAGS: реализованы persistent server-side fail-safe provider/model controls и permitted preferences с metadata-only owner audit events; allowlist, rate limits и maximum four attempts сохранены.
+- [x] owner-tools/MOBILE-UX — CODE-LEVEL PASS / LIVE NOT VERIFIED: existing owner panel получила compact mobile-first cards и confirmed controls; authenticated browser/device acceptance остаётся platform-session blocked.
+- [x] draft-autosave/SCOPED-PERSISTENCE: debounced autosave scoped к verified user identity + chat ID, с server ownership check и без guest/user или cross-user/cross-chat mixing.
+- [x] draft-autosave/COMPOSER-BEHAVIOR: same-chat hydration, edit/clear/send, clear только после confirmed success и retention при failed/aborted send реализованы; auto-send отсутствует.
+- [x] owner-tools/SECURITY-REGRESSIONS: deterministic owner-only, allowlist, metadata-only diagnostics и disabled-candidate fallback regressions PASS.
+- [x] draft-autosave/REGRESSIONS: deterministic reload/scope/send-success/failure coverage PASS; live mobile browser acceptance intentionally NOT VERIFIED without OAuth/owner-session action.
+- [x] owner-tools/VALIDATION-REPORT: `reports/evidence/owner-observability-drafts-audit.md` фиксирует exact results: full suite 56 files/269 tests PASS, `pnpm check`, diff-check и dev HTTP 200 PASS; production build не запускался по existing SIGTERM blocker.
+
 ## Multi-user foundation — 2026-08
 
 - [x] multiuser/PLATFORM-BLOCKER-REGISTRY: все 24 исторических browser/OAuth/owner/provider/build пункта перенесены в `reports/evidence/platform-blocker-registry-2026-08.md` с причиной, статусом и условием разблокировки. Приёмки не возобновлялись; OAuth/owner mapping не менялись.

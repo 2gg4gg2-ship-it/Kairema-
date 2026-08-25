@@ -1,4 +1,4 @@
-import { getProviderAvailability, getProviderDailySuccess, getPublicProviderAvailabilityHistory, incrementProviderDailySuccess, listProviderHealth, listRoleRuntimeStatus, recordFlashTtftMetric, upsertProviderHealth, upsertRoleRuntimeStatus } from "./db";
+import { getProviderAvailability, getProviderDailySuccess, getPublicProviderAvailabilityHistory, incrementProviderDailySuccess, listProviderControlFlags, listProviderHealth, listRoleRuntimeStatus, recordFlashTtftMetric, recordTechnicalEvent, upsertProviderHealth, upsertRoleRuntimeStatus } from "./db";
 
 export const ROLE_IDS = ["fast", "smart", "context", "flagship"] as const;
 /** Compatibility alias: clients select a role, never a raw upstream model. */
@@ -104,6 +104,18 @@ export const DIAGNOSTIC_CANDIDATES = [
 ] as const;
 export const MODEL_CONFIG = MODEL_ROLES;
 
+/** Owner controls can target only a known configured provider or a known server-only candidate key. */
+export const OWNER_CONTROL_TARGETS = Object.freeze({
+  providers: Array.from(new Set(MODEL_ROLES.flatMap((role) => role.chain.map((candidate) => candidate.provider)))) as Provider[],
+  models: Array.from(new Set(MODEL_ROLES.flatMap((role) => role.chain.map((candidate) => `${candidate.provider}:${candidate.modelId}`)))),
+});
+
+export function isOwnerControlTarget(targetType: "provider" | "model", targetKey: string) {
+  return targetType === "provider"
+    ? OWNER_CONTROL_TARGETS.providers.includes(targetKey as Provider)
+    : OWNER_CONTROL_TARGETS.models.includes(targetKey);
+}
+
 /**
  * Exact free-labelled IDs observed in ZenMux `/models` on 2026-08-20.
  * They remain server-only and are deliberately excluded from active role chains
@@ -147,6 +159,27 @@ const PROVIDER_RECHECK_MS = 24 * 60 * 60 * 1_000;
 const DEFAULT_RETRY_AFTER_MS = 60_000;
 const TRANSIENT_COOLDOWN_MS = 5 * 60_000;
 const now = () => new Date().toISOString();
+
+type ManualControl = { disabled: boolean; preference: "normal" | "prefer" | "avoid" };
+
+function controlForCandidate(candidate: Candidate, controls: Map<string, ManualControl>) {
+  const providerControl = controls.get(`provider:${candidate.provider}`);
+  const modelControl = controls.get(`model:${candidate.provider}:${candidate.modelId}`);
+  return {
+    disabled: Boolean(providerControl?.disabled || modelControl?.disabled),
+    preference: modelControl?.preference ?? providerControl?.preference ?? "normal" as const,
+  };
+}
+
+async function controlledCandidates(chain: readonly Candidate[]) {
+  const rows = await listProviderControlFlags();
+  const controls = new Map(rows.map((row) => [`${row.targetType}:${row.targetKey}`, { disabled: Boolean(row.disabled), preference: row.preference as ManualControl["preference"] }]));
+  return chain.map((candidate, originalIndex) => ({ candidate, originalIndex, control: controlForCandidate(candidate, controls) }))
+    .sort((a, b) => {
+      const weight = (preference: ManualControl["preference"]) => preference === "prefer" ? -1 : preference === "avoid" ? 1 : 0;
+      return weight(a.control.preference) - weight(b.control.preference) || a.originalIndex - b.originalIndex;
+    });
+}
 
 /** Metadata-only telemetry: no prompt, response, IDs, headers or credentials. */
 function recordFlashTtft(metric: FlashTtftMetric) {
@@ -629,13 +662,14 @@ export async function chatWithRole(roleId: string, history: ChatMessage[], setti
   const role = roleById(roleId)!;
   const attempts: ChainAttempt[] = [];
   let last: OpenRouterError | null = null;
-  const candidates = role.chain;
+  const candidates = await controlledCandidates(role.chain);
   const budget = createRequestBudget();
-  if (settings?.imageUrls?.length && !candidates.some((candidate) => candidate.vision && providerAvailable(candidate.provider))) {
+  if (settings?.imageUrls?.length && !candidates.some(({ candidate, control }) => !control.disabled && candidate.vision && providerAvailable(candidate.provider))) {
     throw new OpenRouterError({ state: "unavailable", badge: "Недоступно", category: "PROVIDER_UNAVAILABLE", http: null, checkedAt: now(), confirmed: "Анализ изображений временно недоступен: нет готового vision-кандидата." });
   }
   for (let index = 0; index < candidates.length; index += 1) {
-    const candidate = candidates[index]!;
+    const { candidate, originalIndex, control } = candidates[index]!;
+    if (control.disabled) { attempts.push(attempt(candidate, "skipped")); continue; }
     if (settings?.imageUrls?.length && !candidate.vision) { attempts.push(attempt(candidate, "skipped")); continue; }
     if (!providerAvailable(candidate.provider)) { attempts.push(attempt(candidate, "skipped")); continue; }
     if (budget.remaining <= 0) break;
@@ -643,9 +677,10 @@ export async function chatWithRole(roleId: string, history: ChatMessage[], setti
       const response = await invoke(candidate, role, history, settings, false, undefined, budget);
       const content = contentFrom(await response.json());
       attempts.push(attempt(candidate, "ready"));
-      const fallbackUsed = index > 0;
+      const fallbackUsed = originalIndex > 0;
       if (candidate.provider === "orcarouter") await incrementProviderDailySuccess("orcarouter");
       await saveRoleRuntime(role.key, fallbackUsed ? "backup" : "ready", candidate.provider, candidate.displayName);
+      if (fallbackUsed) void recordTechnicalEvent({ kind: "fallback", title: "Резервный кандидат использован", code: candidate.provider, roleId: role.key }).catch(() => undefined);
       return { content, modelUsed: candidate.displayName, provider: candidate.provider, fallbackUsed, label: role.label, status: fallbackUsed ? backup(`Ответил резерв ${candidate.displayName}.`) : ready(), ...(settings?.webSources?.length ? { sources: settings.webSources } : {}), ...(settings?.webEvidence?.length ? { evidence: settings.webEvidence } : {}), ...(settings?.ragSources?.length ? { ragSources: settings.ragSources } : {}), ...(settings?.searchStatus ? { searchStatus: settings.searchStatus } : {}) };
     } catch (error) {
       const status = error instanceof OpenRouterError ? error.status : network(error);
@@ -666,15 +701,16 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
   const role = roleById(roleId)!;
   const attempts: ChainAttempt[] = [];
   let last: OpenRouterError | null = null;
-  const candidates = role.chain;
+  const candidates = await controlledCandidates(role.chain);
   const budget = createRequestBudget();
   /** Every visible fragment is retained only for this request, so a reserve can continue in one answer bubble. */
   const emittedParts: string[] = [];
-  if (settings?.imageUrls?.length && !candidates.some((candidate) => candidate.vision && providerAvailable(candidate.provider))) {
+  if (settings?.imageUrls?.length && !candidates.some(({ candidate, control }) => !control.disabled && candidate.vision && providerAvailable(candidate.provider))) {
     throw new OpenRouterError({ state: "unavailable", badge: "Недоступно", category: "PROVIDER_UNAVAILABLE", http: null, checkedAt: now(), confirmed: "Анализ изображений временно недоступен: нет готового vision-кандидата." });
   }
   for (let index = 0; index < candidates.length; index += 1) {
-    const candidate = candidates[index]!;
+    const { candidate, originalIndex, control } = candidates[index]!;
+    if (control.disabled) { attempts.push(attempt(candidate, "skipped")); continue; }
     if (settings?.imageUrls?.length && !candidate.vision) { attempts.push(attempt(candidate, "skipped")); continue; }
     if (!providerAvailable(candidate.provider)) { attempts.push(attempt(candidate, "skipped")); continue; }
     if (budget.remaining <= 0) break;
@@ -700,7 +736,7 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
       const reader = response.body?.getReader();
       if (!reader) throw new OpenRouterError({ state: "error", badge: "Недоступно", category: "PARSE", http: 200, checkedAt: now(), confirmed: "Провайдер не открыл поток ответа." });
       const decoder = new TextDecoder(); const filter = createReasoningStreamFilter(); const sourceFilter = createSourceSafeStreamFilter(); const attemptParts: string[] = []; let buffer = "";
-      const emit = (raw: string, final = false) => { const filtered = filter(raw, final); if (filtered) providerDeltaReceived = true; const visible = sourceFilter(filtered, final); if (visible) { if (!visibleDeltaDelivered && role.key === "fast") { if (flashDeadlineTimer) clearTimeout(flashDeadlineTimer); recordFlashTtft({ event: "flash.ttft", provider: candidate.provider, fallbackUsed: index > 0, durationMs: Math.max(0, Date.now() - attemptStartedAt) }); } visibleDeltaDelivered = true; attemptParts.push(visible); emittedParts.push(visible); onDelta(visible); } };
+      const emit = (raw: string, final = false) => { const filtered = filter(raw, final); if (filtered) providerDeltaReceived = true; const visible = sourceFilter(filtered, final); if (visible) { if (!visibleDeltaDelivered && role.key === "fast") { if (flashDeadlineTimer) clearTimeout(flashDeadlineTimer); recordFlashTtft({ event: "flash.ttft", provider: candidate.provider, fallbackUsed: originalIndex > 0, durationMs: Math.max(0, Date.now() - attemptStartedAt) }); } visibleDeltaDelivered = true; attemptParts.push(visible); emittedParts.push(visible); onDelta(visible); } };
       const consume = (block: string) => { const raw = dataFromSseBlock(block); if (!raw || raw === "[DONE]") return; try { emit(openRouterStreamDelta(JSON.parse(raw))); } catch { /* upstream comments are ignorable */ } };
       try {
         while (true) { const { done, value } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true }); const blocks = buffer.split(/\r?\n\r?\n/); buffer = blocks.pop() ?? ""; blocks.forEach(consume); }
@@ -710,9 +746,10 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
       const content = sanitizeAssistantContent(emittedParts.join(""));
       if (!content) throw new OpenRouterError({ state: "error", badge: "Недоступно", category: "PARSE", http: 200, checkedAt: now(), confirmed: "После удаления reasoning-блоков не осталось финального ответа." });
       attempts.push(attempt(candidate, "ready"));
-      const fallbackUsed = index > 0;
+      const fallbackUsed = originalIndex > 0;
       if (candidate.provider === "orcarouter") await incrementProviderDailySuccess("orcarouter");
       await saveRoleRuntime(role.key, fallbackUsed ? "backup" : "ready", candidate.provider, candidate.displayName);
+      if (fallbackUsed) void recordTechnicalEvent({ kind: "fallback", title: "Резервный кандидат использован", code: candidate.provider, roleId: role.key }).catch(() => undefined);
       return { content, modelUsed: candidate.displayName, provider: candidate.provider, fallbackUsed, label: role.label, status: fallbackUsed ? backup(`Ответил резерв ${candidate.displayName}.`) : ready(), ...(settings?.webSources?.length ? { sources: settings.webSources } : {}), ...(settings?.webEvidence?.length ? { evidence: settings.webEvidence } : {}), ...(settings?.ragSources?.length ? { ragSources: settings.ragSources } : {}), ...(settings?.searchStatus ? { searchStatus: settings.searchStatus } : {}) };
     } catch (error) {
       if (signal?.aborted) throw error;

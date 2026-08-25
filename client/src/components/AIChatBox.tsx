@@ -28,7 +28,7 @@ export type Message = {
 type Language = "ru" | "en";
 type AIChatBoxProps = {
   messages: Message[];
-  onSendMessage: (content: string, options?: { attachmentIds?: string[]; attachments?: ChatAttachment[]; clientMessageId?: string }) => void;
+  onSendMessage: (content: string, options?: { attachmentIds?: string[]; attachments?: ChatAttachment[]; clientMessageId?: string }) => void | Promise<boolean>;
   onUploadFiles?: (files: File[]) => Promise<ComposerUploadResult>;
   onRemoveAttachment?: (attachment: ChatAttachment) => Promise<void> | void;
   isLoading?: boolean;
@@ -210,11 +210,12 @@ export function AIChatBox({
     setAttachments([]); setPreviewAttachment(null); setPendingLocalAttachments((items) => { items.forEach((item) => revokeLocalPreview(item.previewUrl)); return []; }); setIsUploading(false); if (fileInputRef.current) fileInputRef.current.value = "";
   }, [composerSessionId]);
 
-  const submit = (event?: React.FormEvent) => {
+  const submit = async (event?: React.FormEvent) => {
     event?.preventDefault();
     const value = currentInput.trim();
     if (!value || isLoading || isUploading || pendingLocalAttachments.length > 0) return;
-    onSendMessage(value, { attachmentIds: attachments.map((attachment) => attachment.id), attachments, clientMessageId: crypto.randomUUID() });
+    const sent = await onSendMessage(value, { attachmentIds: attachments.map((attachment) => attachment.id), attachments, clientMessageId: crypto.randomUUID() });
+    if (sent === false) return;
     setComposerInput("");
     setAttachments([]);
     textareaRef.current?.focus();

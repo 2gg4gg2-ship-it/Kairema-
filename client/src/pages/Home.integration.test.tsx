@@ -18,6 +18,10 @@ const fixtures = vi.hoisted(() => ({
   deleteChat: vi.fn(),
   clearHistory: vi.fn(),
   updateSettings: vi.fn(),
+  draft: null as { content: string; updatedAt: Date } | null,
+  draftQueryInput: null as { sessionId: string } | null,
+  saveDraft: vi.fn(),
+  clearDraft: vi.fn(),
   toggleTheme: vi.fn(),
   updateMemory: vi.fn(),
   addMemoryFact: vi.fn(),
@@ -75,9 +79,12 @@ vi.mock("@/lib/trpc", () => ({
     chats: {
       list: { useQuery: () => ({ data: fixtures.sessions, isLoading: false }) },
       messages: { useQuery: () => ({ data: fixtures.messages }) },
+      draft: { useQuery: (input: { sessionId: string }) => { fixtures.draftQueryInput = input; return { data: fixtures.draft, isLoading: false }; } },
       create: { useMutation: () => ({ mutateAsync: fixtures.createChat, isPending: false }) },
       delete: { useMutation: () => ({ mutateAsync: fixtures.deleteChat, isPending: false }) },
       clearAll: { useMutation: () => ({ mutateAsync: fixtures.clearHistory, isPending: false }) },
+      saveDraft: { useMutation: () => ({ mutateAsync: fixtures.saveDraft, isPending: false }) },
+      clearDraft: { useMutation: () => ({ mutateAsync: fixtures.clearDraft, isPending: false }) },
     },
     useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: fixtures.downloadExport } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, list: { invalidate: fixtures.invalidateSessions } } }),
   },
@@ -123,6 +130,10 @@ function resetFixtures() {
   fixtures.deleteChat.mockReset().mockResolvedValue({ success: true });
   fixtures.clearHistory.mockReset().mockResolvedValue({ success: true, deletedCount: 1 });
   fixtures.updateSettings.mockReset().mockResolvedValue(undefined);
+  fixtures.draft = null;
+  fixtures.draftQueryInput = null;
+  fixtures.saveDraft.mockReset().mockResolvedValue({ content: "", updatedAt: new Date() });
+  fixtures.clearDraft.mockReset().mockResolvedValue({ cleared: true });
   fixtures.invalidateMessages.mockReset().mockImplementation(async () => {
     fixtures.messages = [
       ...fixtures.messages,
@@ -427,7 +438,22 @@ describe("Home integration flows", () => {
 
     await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
     await waitFor(() => expect(screen.getByText("Первый фрагмент ответа")).toBeTruthy());
+    await waitFor(() => expect(fixtures.clearDraft).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
+    expect((composer as HTMLTextAreaElement).value).toBe("");
     expect(screen.queryByText("печатает")).toBeNull();
+  });
+
+  it("restores a persisted draft only for the active chat and debounces its scoped save", async () => {
+    const user = userEvent.setup();
+    fixtures.draft = { content: "Восстановленный черновик", updatedAt: new Date("2026-08-25T00:00:00.000Z") };
+    render(<Home />);
+
+    const composer = await screen.findByPlaceholderText("Напишите сообщение…");
+    await waitFor(() => expect((composer as HTMLTextAreaElement).value).toBe("Восстановленный черновик"));
+    expect(fixtures.draftQueryInput).toEqual({ sessionId: fixtures.sessionId });
+    await user.type(composer, " + продолжение");
+
+    await waitFor(() => expect(fixtures.saveDraft).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, content: "Восстановленный черновик + продолжение" }), { timeout: 1_200 });
   });
 
   it("keeps an optimistic sent-image preview visible when the provider fails after the user message is persisted", async () => {
@@ -445,8 +471,10 @@ describe("Home integration flows", () => {
     await user.keyboard("{Enter}");
 
     await waitFor(() => expect(screen.getByText(/Не удалось начать потоковый ответ|Service Unavailable/)).toBeTruthy());
-    expect(screen.getByRole("button", { name: "Открыть предпросмотр: vision.png" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Открыть предпросмотр: vision.png" }).length).toBeGreaterThanOrEqual(1);
     await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
+    expect((screen.getByPlaceholderText("Напишите сообщение…") as HTMLTextAreaElement).value).toBe("Проверь вложение");
+    expect(fixtures.clearDraft).not.toHaveBeenCalled();
   });
 
   it("keeps a sent-image preview while persisted message hydration leads the attachment query", async () => {
@@ -491,7 +519,7 @@ describe("Home integration flows", () => {
     expect(screen.queryByRole("button", { name: "Ещё вариант" })).toBeNull();
   });
 
-  it("aborts an active stream and refreshes persisted history without leaving an optimistic reply", async () => {
+  it("aborts an active stream, refreshes persisted history and retains the draft", async () => {
     const user = userEvent.setup();
     const fetchSpy = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
@@ -507,7 +535,8 @@ describe("Home integration flows", () => {
 
     await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Отменить генерацию" })).toBeNull());
-    expect(screen.queryByText("Отменяемый запрос")).toBeNull();
+    expect((composer as HTMLTextAreaElement).value).toBe("Отменяемый запрос");
+    expect(fixtures.clearDraft).not.toHaveBeenCalled();
   });
 
   it("updates a setting's active state immediately while its server save is still pending", async () => {

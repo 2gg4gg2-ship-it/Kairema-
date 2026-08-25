@@ -53,8 +53,20 @@ export const chatExports = mysqlTable("chat_exports", {
   searchText: text("searchText"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => [
-  index("chat_exports_user_created_idx").on(table.userId, table.createdAt),
-  index("chat_exports_session_created_idx").on(table.sessionId, table.createdAt),
+	index("chat_exports_user_created_idx").on(table.userId, table.createdAt),
+	index("chat_exports_session_created_idx").on(table.sessionId, table.createdAt),
+]);
+
+/** One unfinished composer text per verified user and chat; never used as a guest identity bridge. */
+export const chatDrafts = mysqlTable("chat_drafts", {
+	userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+	sessionId: varchar("sessionId", { length: 36 }).notNull().references(() => chatSessions.id, { onDelete: "cascade" }),
+	content: text("content").notNull(),
+	createdAt: timestamp("createdAt").defaultNow().notNull(),
+	updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.userId, table.sessionId] }),
+	index("chat_drafts_session_updated_idx").on(table.sessionId, table.updatedAt),
 ]);
 
 export const providerHealth = mysqlTable("provider_health", {
@@ -77,6 +89,28 @@ export const providerHealthHistory = mysqlTable("provider_health_history", {
 	http: int("http"),
 	checkedAt: timestamp("checkedAt").defaultNow().notNull(),
 }, (table) => [index("provider_health_history_provider_checked_idx").on(table.provider, table.checkedAt)]);
+
+/** Owner-managed controls for existing allowlisted candidates; absent/unknown state resolves to enabled + normal. */
+export const providerControlFlags = mysqlTable("provider_control_flags", {
+	targetKey: varchar("targetKey", { length: 220 }).primaryKey(),
+	targetType: mysqlEnum("targetType", ["provider", "model"]).notNull(),
+	disabled: int("disabled").notNull().default(0),
+	preference: mysqlEnum("preference", ["normal", "prefer", "avoid"]).notNull().default("normal"),
+	updatedByUserId: int("updatedByUserId").references(() => users.id, { onDelete: "set null" }),
+	createdAt: timestamp("createdAt").defaultNow().notNull(),
+	updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("provider_control_flags_updated_idx").on(table.updatedAt)]);
+
+/** Bounded technical events; prompts, replies, URLs, files, secrets and private memory are never stored here. */
+export const technicalEvents = mysqlTable("technical_events", {
+	id: int("id").autoincrement().primaryKey(),
+	kind: mysqlEnum("kind", ["provider", "fallback", "search", "owner_flag", "attachment"]).notNull(),
+	title: varchar("title", { length: 220 }).notNull(),
+	code: varchar("code", { length: 48 }),
+	roleId: varchar("roleId", { length: 24 }),
+	actorUserId: int("actorUserId").references(() => users.id, { onDelete: "set null" }),
+	createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("technical_events_created_idx").on(table.createdAt)]);
 
 /** Aggregate-only daily provider usage; prompts, users and response content are never stored here. */
 export const providerDailyUsage = mysqlTable("provider_daily_usage", {

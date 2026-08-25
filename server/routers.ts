@@ -1,12 +1,12 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, createChatSession, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatSession, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry } from "./db";
+import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { ENV } from "./_core/env";
-import { MODEL_IDS, chatWithRole, getModelViews, getPublicProviderDashboard, publicChatError } from "./providers";
+import { MODEL_IDS, OWNER_CONTROL_TARGETS, chatWithRole, getModelViews, getPublicProviderDashboard, isOwnerControlTarget, publicChatError } from "./providers";
 import { getOwnedAttachmentDownload, uploadOwnedChatAttachment } from "./attachments";
 import { createPersistentChatExport, getOwnedChatExportDownload } from "./chat-exports";
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
@@ -23,6 +23,20 @@ const settingsSchema = z.object({
 }).optional();
 
 const modelIdSchema = z.enum(MODEL_IDS);
+
+const providerControlSchema = z.object({
+  targetKey: z.string().trim().min(1).max(160),
+  targetType: z.enum(["provider", "model"]),
+  disabled: z.boolean(),
+  preference: z.enum(["normal", "prefer", "avoid"]),
+});
+
+function requireOwner(ctx: { user: { id: number; openId: string } }) {
+  if (!ENV.ownerOpenId || ctx.user.openId !== ENV.ownerOpenId) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Инструменты владельца доступны только владельцу." });
+  }
+  return ctx.user;
+}
 
 const userSettingsSchema = z.object({
   language: z.enum(["ru", "en"]).optional(),
@@ -88,6 +102,27 @@ export const appRouter = router({
     searchOutages: protectedProcedure.query(async ({ ctx }) => {
       if (!ENV.ownerOpenId || ctx.user.openId !== ENV.ownerOpenId) throw new TRPCError({ code: "FORBIDDEN", message: "Журнал поиска доступен только владельцу." });
       return getSearchOutageSummary();
+    }),
+    observability: protectedProcedure.query(async ({ ctx }) => {
+      requireOwner(ctx);
+      return getOwnerObservabilitySnapshot();
+    }),
+    providerControls: protectedProcedure.query(async ({ ctx }) => {
+      requireOwner(ctx);
+      return listProviderControlFlags();
+    }),
+    providerControlTargets: protectedProcedure.query(({ ctx }) => {
+      requireOwner(ctx);
+      return OWNER_CONTROL_TARGETS;
+    }),
+    updateProviderControl: protectedProcedure.input(providerControlSchema).mutation(async ({ ctx, input }) => {
+      const owner = requireOwner(ctx);
+      if (!isOwnerControlTarget(input.targetType, input.targetKey)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Недопустимая цель управления провайдером." });
+      }
+      const control = await upsertProviderControlFlag({ ...input, actorUserId: owner.id });
+      await recordTechnicalEvent({ kind: "owner_flag", title: input.disabled ? "Кандидат отключён владельцем" : "Настройка кандидата обновлена", code: `${input.targetType}:${input.targetKey}`, actorUserId: owner.id });
+      return control;
     }),
   }),
   settings: router({
@@ -254,6 +289,27 @@ export const appRouter = router({
           throw new TRPCError({ code: "NOT_FOUND", message: storageError(error) });
         }
       }),
+    draft: protectedProcedure.input(z.object({ sessionId: z.string().uuid() })).query(async ({ ctx, input }) => {
+      try {
+        return await getOwnedChatDraft(ctx.user.id, input.sessionId);
+      } catch {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Чат не найден или недоступен." });
+      }
+    }),
+    saveDraft: protectedProcedure.input(z.object({ sessionId: z.string().uuid(), content: z.string().max(16_000) })).mutation(async ({ ctx, input }) => {
+      try {
+        return await saveOwnedChatDraft(ctx.user.id, input.sessionId, input.content);
+      } catch {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Чат не найден или недоступен." });
+      }
+    }),
+    clearDraft: protectedProcedure.input(z.object({ sessionId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+      try {
+        return await clearOwnedChatDraft(ctx.user.id, input.sessionId);
+      } catch {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Чат не найден или недоступен." });
+      }
+    }),
     rename: protectedProcedure
       .input(z.object({ sessionId: z.string().uuid(), title: z.string().trim().min(1).max(255) }))
       .mutation(async ({ ctx, input }) => {

@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, isNull, like, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
-import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryExtractionJob, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryExtractionJobs, memoryFacts, memoryProfiles, memorySettings, messages, providerDailyUsage, providerHealth, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, userSettings, users, webSearchStatus } from "../drizzle/schema";
+import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryExtractionJob, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatDrafts, chatExports, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryExtractionJobs, memoryFacts, memoryProfiles, memorySettings, messages, providerControlFlags, providerDailyUsage, providerHealth, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, technicalEvents, userSettings, users, webSearchStatus } from "../drizzle/schema";
 import { providerHealthHistory } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -69,6 +69,35 @@ export async function getOwnedChatSession(userId: number, sessionId: string): Pr
   const db = requireDatabase(await getDb());
   const result = await db.select().from(chatSessions).where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId))).limit(1);
   return result[0];
+}
+
+export async function getOwnedChatDraft(userId: number, sessionId: string) {
+  const db = requireDatabase(await getDb());
+  requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
+  const rows = await db.select({ content: chatDrafts.content, updatedAt: chatDrafts.updatedAt })
+    .from(chatDrafts).where(and(eq(chatDrafts.userId, userId), eq(chatDrafts.sessionId, sessionId))).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function saveOwnedChatDraft(userId: number, sessionId: string, content: string) {
+  const db = requireDatabase(await getDb());
+  requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
+  const normalized = content.slice(0, 16_000);
+  if (!normalized) {
+    await db.delete(chatDrafts).where(and(eq(chatDrafts.userId, userId), eq(chatDrafts.sessionId, sessionId)));
+    return null;
+  }
+  const now = new Date();
+  await db.insert(chatDrafts).values({ userId, sessionId, content: normalized, createdAt: now, updatedAt: now })
+    .onDuplicateKeyUpdate({ set: { content: normalized, updatedAt: now } });
+  return { content: normalized, updatedAt: now };
+}
+
+export async function clearOwnedChatDraft(userId: number, sessionId: string) {
+  const db = requireDatabase(await getDb());
+  requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
+  await db.delete(chatDrafts).where(and(eq(chatDrafts.userId, userId), eq(chatDrafts.sessionId, sessionId)));
+  return { success: true } as const;
 }
 
 export function requireOwnedSession<T extends Pick<ChatSession, "userId">>(userId: number, session: T | undefined): T {
@@ -195,6 +224,54 @@ export async function getProviderAvailability(provider: string, days = 30): Prom
     .where(and(eq(providerHealthHistory.provider, provider), gt(providerHealthHistory.checkedAt, since)));
   const ready = rows.filter((row) => row.state === "ready").length;
   return { samples: rows.length, ready, uptime: rows.length ? Math.round((ready / rows.length) * 1000) / 10 : 0 };
+}
+
+export type ProviderControlFlagInput = {
+  targetKey: string;
+  targetType: "provider" | "model";
+  disabled: boolean;
+  preference: "normal" | "prefer" | "avoid";
+  actorUserId: number;
+};
+
+export async function listProviderControlFlags() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({ targetKey: providerControlFlags.targetKey, targetType: providerControlFlags.targetType, disabled: providerControlFlags.disabled, preference: providerControlFlags.preference, updatedAt: providerControlFlags.updatedAt })
+    .from(providerControlFlags).orderBy(desc(providerControlFlags.updatedAt));
+}
+
+export async function upsertProviderControlFlag(input: ProviderControlFlagInput) {
+  const db = requireDatabase(await getDb());
+  const now = new Date();
+  await db.insert(providerControlFlags).values({ targetKey: input.targetKey, targetType: input.targetType, disabled: input.disabled ? 1 : 0, preference: input.preference, updatedByUserId: input.actorUserId, createdAt: now, updatedAt: now })
+    .onDuplicateKeyUpdate({ set: { targetType: input.targetType, disabled: input.disabled ? 1 : 0, preference: input.preference, updatedByUserId: input.actorUserId, updatedAt: now } });
+  return { targetKey: input.targetKey, targetType: input.targetType, disabled: input.disabled, preference: input.preference, updatedAt: now };
+}
+
+/** Stores only bounded diagnostic metadata with 30-day retention. */
+export async function recordTechnicalEvent(input: { kind: "provider" | "fallback" | "search" | "owner_flag" | "attachment"; title: string; code?: string; roleId?: string; actorUserId?: number }) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(technicalEvents).values({ kind: input.kind, title: input.title.slice(0, 220), code: input.code?.slice(0, 48) ?? null, roleId: input.roleId?.slice(0, 24) ?? null, actorUserId: input.actorUserId ?? null });
+  const retention = new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000);
+  await db.delete(technicalEvents).where(sql`${technicalEvents.createdAt} < ${retention}`);
+}
+
+export async function getOwnerObservabilitySnapshot() {
+  const db = await getDb();
+  if (!db) return { providers: [], events: [], memory: { facts: 0, topics: 0, profiles: 0 }, search: { samples24h: 0, outages24h: 0 } };
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1_000);
+  const [providers, events, factRows, topicRows, profileRows, searchRows, outageRows] = await Promise.all([
+    db.select({ provider: providerHealth.provider, state: providerHealth.state, category: providerHealth.category, checkedAt: providerHealth.checkedAt, blockedUntil: providerHealth.blockedUntil }).from(providerHealth).orderBy(asc(providerHealth.provider)),
+    db.select({ id: technicalEvents.id, kind: technicalEvents.kind, title: technicalEvents.title, code: technicalEvents.code, roleId: technicalEvents.roleId, createdAt: technicalEvents.createdAt }).from(technicalEvents).orderBy(desc(technicalEvents.createdAt)).limit(30),
+    db.select({ count: sql<number>`count(*)` }).from(memoryFacts),
+    db.select({ count: sql<number>`count(*)` }).from(memoryEntries).where(eq(memoryEntries.category, "dialog_topic")),
+    db.select({ count: sql<number>`count(*)` }).from(memoryProfiles),
+    db.select({ count: sql<number>`count(*)` }).from(searchQualityMetrics).where(gt(searchQualityMetrics.createdAt, since24h)),
+    db.select({ count: sql<number>`count(*)` }).from(searchOutageLogs).where(gt(searchOutageLogs.createdAt, since24h)),
+  ]);
+  return { providers, events, memory: { facts: Number(factRows[0]?.count ?? 0), topics: Number(topicRows[0]?.count ?? 0), profiles: Number(profileRows[0]?.count ?? 0) }, search: { samples24h: Number(searchRows[0]?.count ?? 0), outages24h: Number(outageRows[0]?.count ?? 0) } };
 }
 
 type PublicAvailabilityState = "ready" | "cooldown" | "auth_failed" | "unavailable" | "not_configured";
