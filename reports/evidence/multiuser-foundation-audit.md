@@ -21,6 +21,7 @@
 | `0030_confused_starbolt.sql` | **APPLIED:** additive `emailNotifications int DEFAULT 0 NOT NULL` в `user_settings`; без удаления или преобразования данных. |
 | Focused settings regressions | **PASS:** 2 files, 6 tests. |
 | Core cross-user boundary regressions | **PASS:** 3 files, 30 tests для chat/attachment/memory owner scope; export/settings-specific IDOR coverage остаётся открытой. |
+| Attachment download IDOR | **PASS:** structural regression подтверждает owner-scoped lookup до signed URL и безопасную ошибку при неуспешном owner lookup; `attachments.lifecycle.test.ts`, 4 tests. Positive signed-download flow этим тестом не заявляется. |
 | `pnpm check` | **PASS**. |
 | `git diff --check` | **PASS**. |
 
