@@ -463,3 +463,4 @@
 - [x] v3/LLM-PRIMARY-HEALTH: completed an evidence-only neutral probe of the four public roles, recorded successful fallback answers without raw errors or identifiers, and preserved the four-attempt cap.
 - [x] v3/CLIENT-SECURITY-AUDIT: verified that server-side credentials and upstream endpoints do not ship to the browser; the isolated raw-HTML style template has no confirmed user-content exposure.
 - [x] v3/PUBLIC-DELIVERY-RECHECK: completed unauthenticated public delivery verification after the v3 evidence checkpoint; canonical `lkn.manus.space` is recorded as BLOCKED BY PLATFORM DELIVERY and project-domain authenticated acceptance remains NOT VERIFIED BY PLATFORM SESSION.
+- [x] v3/LIVE-SEARCH-RETEST-AFTER-MAINTENANCE: canonical runtime retest completed. `lkn.manus.space` still did not deliver Kairema runtime, so the three requested search queries were deliberately not run; evidence records BLOCKED BY PLATFORM DELIVERY and no code/provider change was made.
