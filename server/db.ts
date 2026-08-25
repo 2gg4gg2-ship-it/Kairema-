@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, isNull, like, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { randomUUID } from "node:crypto";
-import { ChatAttachment, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryExtractionJob, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryExtractionJobs, memoryFacts, memoryProfiles, memorySettings, messages, providerDailyUsage, providerHealth, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, userSettings, users, webSearchStatus } from "../drizzle/schema";
+import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryExtractionJob, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatExports, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryExtractionJobs, memoryFacts, memoryProfiles, memorySettings, messages, providerDailyUsage, providerHealth, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, userSettings, users, webSearchStatus } from "../drizzle/schema";
 import { providerHealthHistory } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -1093,6 +1093,64 @@ export async function cleanupExpiredChatAttachments(now = new Date()): Promise<n
   const db = requireDatabase(await getDb());
   const result = await db.delete(chatAttachments).where(lt(chatAttachments.expiresAt, now));
   return Number(result[0]?.affectedRows ?? 0);
+}
+
+export type ChatExportFormat = "markdown" | "pdf";
+
+export async function createChatExport(userId: number, input: {
+  sessionId: string;
+  fileKey: string;
+  fileName: string;
+  format: ChatExportFormat;
+  contentType: string;
+  byteSize: number;
+  searchText?: string | null;
+}): Promise<ChatExport> {
+  const db = requireDatabase(await getDb());
+  requireOwnedSession(userId, await getOwnedChatSession(userId, input.sessionId));
+  const record: ChatExport = {
+    id: randomUUID(),
+    userId,
+    sessionId: input.sessionId,
+    fileKey: input.fileKey,
+    fileName: input.fileName,
+    format: input.format,
+    contentType: input.contentType,
+    byteSize: input.byteSize,
+    archived: 0,
+    searchText: input.searchText ?? null,
+    createdAt: new Date(),
+  };
+  await db.insert(chatExports).values(record);
+  return record;
+}
+
+export async function listOwnedChatExports(userId: number, sessionId?: string): Promise<ChatExport[]> {
+  const db = requireDatabase(await getDb());
+  if (sessionId) requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
+  return db.select().from(chatExports).where(and(
+    eq(chatExports.userId, userId),
+    ...(sessionId ? [eq(chatExports.sessionId, sessionId)] : []),
+  )).orderBy(desc(chatExports.createdAt));
+}
+
+export async function getOwnedChatExport(userId: number, exportId: string): Promise<ChatExport | undefined> {
+  const db = requireDatabase(await getDb());
+  const result = await db.select().from(chatExports).where(and(
+    eq(chatExports.id, exportId),
+    eq(chatExports.userId, userId),
+  )).limit(1);
+  return result[0];
+}
+
+/** Deletion removes only a user-owned metadata record; storage has no physical-delete API. */
+export async function deleteOwnedChatExport(userId: number, exportId: string): Promise<boolean> {
+  const db = requireDatabase(await getDb());
+  const result = await db.delete(chatExports).where(and(
+    eq(chatExports.id, exportId),
+    eq(chatExports.userId, userId),
+  ));
+  return Number(result[0]?.affectedRows ?? 0) > 0;
 }
 
 function searchSnippet(content: string, query: string, maximum = 220) {

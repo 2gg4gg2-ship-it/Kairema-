@@ -23,6 +23,11 @@ const fixtures = vi.hoisted(() => ({
   addMemoryFact: vi.fn(),
   deleteMemoryEntry: vi.fn(),
   clearMemory: vi.fn(),
+  createExport: vi.fn(),
+  deleteExport: vi.fn(),
+  downloadExport: vi.fn(),
+  invalidateExports: vi.fn(),
+  exports: [] as Array<{ id: string; fileName: string; format: "markdown" | "pdf"; byteSize: number; createdAt: Date }>,
   uploadAttachment: vi.fn(),
   startLogin: vi.fn(),
   isAuthenticated: true,
@@ -66,6 +71,7 @@ vi.mock("@/lib/trpc", () => ({
     owner: { isOwner: { useQuery: () => ({ data: fixtures.isOwner }) }, flashTtft: { useQuery: () => ({ data: fixtures.isOwner ? { last24h: { p50Ms: 220, p95Ms: 440, samples: 2 }, last7d: { p50Ms: 250, p95Ms: 480, samples: 5 } } : null }) }, flashTtftTrend: { useQuery: () => ({ data: fixtures.isOwner ? [{ date: "2026-08-20", p50Ms: 220, p95Ms: 440, samples: 2 }] : [] }) }, searchOutages: { useQuery: () => ({ data: fixtures.isOwner ? { last24h: 1, last7d: 2, recent: [{ layer: "google", errorClass: "http_429", latencyMs: 120, createdAt: "2026-08-20T00:00:00.000Z" }] } : null }) } },
     search: { query: { useQuery: () => ({ data: [] }) }, qualityPanel: { useQuery: () => ({ data: fixtures.isOwner ? { last24h: { sampleCount: 4, counts: { found: 2, empty: 1, degraded: 1, error: 0 }, verifiedSourceCount: 2, zeroSourceCount: 2, staleBlockedCount: 1, foundRate: 0.5, verificationPassRate: 0.5 }, last7d: { sampleCount: 10, counts: { found: 6, empty: 2, degraded: 1, error: 1 }, verifiedSourceCount: 6, zeroSourceCount: 4, staleBlockedCount: 2, foundRate: 0.6, verificationPassRate: 0.6 } } : null }) }, qualityChart: { useQuery: () => ({ data: fixtures.isOwner ? { daily: [{ day: "08-15", found: 1, empty: 0, degraded: 0, error: 0 }, { day: "08-21", found: 3, empty: 1, degraded: 0, error: 0 }], hourlyLayers: [{ hour: "09", layer1: 2, layer2: 1, layer3: 0 }, { hour: "10", layer1: 1, layer2: 0, layer3: 1 }] } : null }) } },
     attachments: { list: { useQuery: () => ({ data: fixtures.attachments }) }, upload: { useMutation: () => ({ mutateAsync: fixtures.uploadAttachment }) }, delete: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
+    exports: { list: { useQuery: () => ({ data: fixtures.exports, isLoading: false }) }, create: { useMutation: () => ({ mutateAsync: fixtures.createExport, isPending: false }) }, delete: { useMutation: () => ({ mutateAsync: fixtures.deleteExport, isPending: false, variables: undefined }) } },
     chats: {
       list: { useQuery: () => ({ data: fixtures.sessions, isLoading: false }) },
       messages: { useQuery: () => ({ data: fixtures.messages }) },
@@ -73,7 +79,7 @@ vi.mock("@/lib/trpc", () => ({
       delete: { useMutation: () => ({ mutateAsync: fixtures.deleteChat, isPending: false }) },
       clearAll: { useMutation: () => ({ mutateAsync: fixtures.clearHistory, isPending: false }) },
     },
-    useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, list: { invalidate: fixtures.invalidateSessions } } }),
+    useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: fixtures.downloadExport } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, list: { invalidate: fixtures.invalidateSessions } } }),
   },
 }));
 vi.mock("@/components/ui/dialog", () => ({
@@ -99,11 +105,11 @@ function resetFixtures() {
     { id: 2, role: "assistant", content: "Старый ответ Kairema", modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:01:00.000Z") },
   ];
   fixtures.attachments = [];
-  const markdownFile = { fileName: "Активная история.md", contentType: "text/markdown", blob: new Blob(["markdown"]) };
-  const pdfFile = { fileName: "Активная история.pdf", contentType: "application/pdf", blob: new Blob(["pdf"]) };
-  fixtures.prepareMarkdown.mockReset().mockResolvedValue(markdownFile);
-  fixtures.preparePdf.mockReset().mockResolvedValue(pdfFile);
-  fixtures.downloadPrepared.mockReset();
+  fixtures.createExport.mockReset().mockImplementation(async ({ sessionId, format }: { sessionId: string; format: "markdown" | "pdf" }) => ({ id: format === "markdown" ? "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" : "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", sessionId, fileName: `Активная история.${format === "markdown" ? "md" : "pdf"}`, format, byteSize: 100, createdAt: new Date("2026-08-25T00:00:00.000Z") }));
+  fixtures.deleteExport.mockReset().mockResolvedValue({ success: true });
+  fixtures.downloadExport.mockReset().mockResolvedValue({ url: "https://storage.example.test/signed-export" });
+  fixtures.invalidateExports.mockReset().mockResolvedValue(undefined);
+  fixtures.exports = [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", fileName: "Активная история.md", format: "markdown", byteSize: 100, createdAt: new Date("2026-08-25T00:00:00.000Z") }];
   fixtures.isOwner = false;
   fixtures.navigate.mockReset();
   fixtures.toggleTheme.mockReset();
@@ -269,23 +275,26 @@ describe("Home integration flows", () => {
     expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId });
   });
 
-  it("downloads only the active persisted history in Markdown and PDF without a server-side export record", async () => {
+  it("creates server-side Markdown and PDF exports for only the active persisted history", async () => {
     const user = userEvent.setup();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     render(<Home />);
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Markdown" })).toHaveProperty("disabled", false));
     await user.click(screen.getByRole("button", { name: "Markdown" }));
     await user.click(screen.getByRole("button", { name: "PDF" }));
 
-    expect(fixtures.prepareMarkdown).toHaveBeenCalledWith(expect.objectContaining({ title: "Активная история", messages: [expect.objectContaining({ content: "Старое сообщение пользователя" }), expect.objectContaining({ content: "Старый ответ Kairema" })] }));
-    await waitFor(() => expect(fixtures.preparePdf).toHaveBeenCalledOnce());
-    expect(fixtures.downloadPrepared).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(fixtures.createExport).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, format: "markdown" }));
+    expect(fixtures.createExport).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, format: "pdf" });
+    expect(fixtures.downloadExport).toHaveBeenCalledTimes(2);
+    expect(fixtures.invalidateExports).toHaveBeenCalledTimes(2);
+    click.mockRestore();
   });
 
-  it("does not render a persistent exports or files sidebar section", () => {
+  it("renders a personal persistent export history control without a permanent files panel", () => {
     render(<Home />);
 
-    expect(screen.queryByRole("region", { name: "Экспорты" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Экспорты" })).toHaveProperty("disabled", false);
     expect(screen.queryByRole("region", { name: "Файлы" })).toBeNull();
   });
 

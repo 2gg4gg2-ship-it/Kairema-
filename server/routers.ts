@@ -1,13 +1,14 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, createChatSession, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatSession, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry } from "./db";
+import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, createChatSession, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatSession, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listSessionAttachments, listSessionMessages, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { ENV } from "./_core/env";
 import { MODEL_IDS, chatWithRole, getModelViews, getPublicProviderDashboard, publicChatError } from "./providers";
 import { getOwnedAttachmentDownload, uploadOwnedChatAttachment } from "./attachments";
+import { createPersistentChatExport, getOwnedChatExportDownload } from "./chat-exports";
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
 import { getWebSearchStatus, probeWebSearchStatus } from "./web-search";
 import { getKnowledgeAudit, getKnowledgeStatus, refreshKnowledgeBase } from "./knowledge";
@@ -202,6 +203,34 @@ export const appRouter = router({
     }),
     delete: protectedProcedure.input(z.object({ attachmentId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
       if (!await deleteOwnedChatAttachment(ctx.user.id, input.attachmentId)) throw new TRPCError({ code: "NOT_FOUND", message: "Вложение не найдено или недоступно." });
+      return { success: true } as const;
+    }),
+  }),
+  exports: router({
+    list: protectedProcedure.input(z.object({ sessionId: z.string().uuid().optional() }).optional()).query(async ({ ctx, input }) => {
+      try {
+        return await listOwnedChatExports(ctx.user.id, input?.sessionId);
+      } catch {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Чат не найден или недоступен." });
+      }
+    }),
+    create: protectedProcedure.input(z.object({ sessionId: z.string().uuid(), format: z.enum(["markdown", "pdf"]) })).mutation(async ({ ctx, input }) => {
+      try {
+        return await createPersistentChatExport(ctx.user.id, input);
+      } catch (error) {
+        if (error instanceof Error && /чат не найден|недоступен/i.test(error.message)) throw new TRPCError({ code: "NOT_FOUND", message: "Чат не найден или недоступен." });
+        throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Не удалось подготовить экспорт." });
+      }
+    }),
+    download: protectedProcedure.input(z.object({ exportId: z.string().uuid() })).query(async ({ ctx, input }) => {
+      try {
+        return await getOwnedChatExportDownload(ctx.user.id, input.exportId);
+      } catch {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Экспорт не найден или недоступен." });
+      }
+    }),
+    delete: protectedProcedure.input(z.object({ exportId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+      if (!await deleteOwnedChatExport(ctx.user.id, input.exportId)) throw new TRPCError({ code: "NOT_FOUND", message: "Экспорт не найден или недоступен." });
       return { success: true } as const;
     }),
   }),

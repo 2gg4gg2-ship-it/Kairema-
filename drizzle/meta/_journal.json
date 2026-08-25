@@ -218,6 +218,13 @@
       "when": 1787655052024,
       "tag": "0030_confused_starbolt",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "5",
+      "when": 1787658246869,
+      "tag": "0031_export_compatibility_mapping",
+      "breakpoints": true
     }
   ]
 }

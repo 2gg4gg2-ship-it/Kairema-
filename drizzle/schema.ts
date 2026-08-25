@@ -36,6 +36,27 @@ export const messages = mysqlTable("messages", {
   uniqueIndex("messages_client_message_id_unique").on(table.clientMessageId),
 ]);
 
+/**
+ * Compatibility mapping for the pre-existing persistent export archive.
+ * This only reflects the legacy table; it does not create, drop, or migrate it.
+ */
+export const chatExports = mysqlTable("chat_exports", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  sessionId: varchar("sessionId", { length: 36 }).notNull().references(() => chatSessions.id, { onDelete: "cascade" }),
+  fileKey: varchar("fileKey", { length: 512 }).notNull(),
+  fileName: varchar("fileName", { length: 255 }).notNull(),
+  format: mysqlEnum("format", ["markdown", "pdf"]).notNull(),
+  contentType: varchar("contentType", { length: 128 }).notNull(),
+  byteSize: int("byteSize").notNull(),
+  archived: int("archived").notNull().default(0),
+  searchText: text("searchText"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [
+  index("chat_exports_user_created_idx").on(table.userId, table.createdAt),
+  index("chat_exports_session_created_idx").on(table.sessionId, table.createdAt),
+]);
+
 export const providerHealth = mysqlTable("provider_health", {
 	provider: varchar("provider", { length: 32 }).primaryKey(),
 	state: mysqlEnum("state", ["ready", "cooldown", "auth_failed", "unavailable", "not_configured"]).notNull(),
@@ -295,6 +316,7 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type ChatSession = typeof chatSessions.$inferSelect;
 export type ChatMessageRecord = typeof messages.$inferSelect;
+export type ChatExport = typeof chatExports.$inferSelect;
 export type ProviderHealthRecord = typeof providerHealth.$inferSelect;
 export type ProviderDailyUsageRecord = typeof providerDailyUsage.$inferSelect;
 export type FlashTtftMetricRecord = typeof flashTtftMetrics.$inferSelect;

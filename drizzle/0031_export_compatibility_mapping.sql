@@ -1,0 +1,2 @@
+-- Compatibility-only migration: `chat_exports` predates Drizzle mapping and was verified as already present.
+-- No CREATE, ALTER, DROP, index, or data statement is intentionally applied here.
