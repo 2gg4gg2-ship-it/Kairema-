@@ -460,3 +460,5 @@
 - [x] search-fix/STATUS-TRANSPORT: preserved freshness-blocked state through streaming and persisted-message client normalization so the honest unavailable badge cannot disappear.
 - [x] search-fix/REAL-SOURCE-EVIDENCE: exposed only provider-returned public source title, URL and real publication metadata to the user for verified web results; unavailable search retains empty evidence.
 - [x] search-fix/DIAGNOSTICS-AND-REGRESSION: completed privacy-safe layer diagnostics, focused regressions, TypeScript/build and full suite verification without synthetic sources or user-data access; canonical delivery remains separately recorded as a platform blocker.
+- [x] v3/LLM-PRIMARY-HEALTH: completed an evidence-only neutral probe of the four public roles, recorded successful fallback answers without raw errors or identifiers, and preserved the four-attempt cap.
+- [x] v3/CLIENT-SECURITY-AUDIT: verified that server-side credentials and upstream endpoints do not ship to the browser; the isolated raw-HTML style template has no confirmed user-content exposure.
