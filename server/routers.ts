@@ -35,6 +35,7 @@ const userSettingsSchema = z.object({
   toolAccess: z.boolean().optional(),
   healthRefreshSeconds: z.union([z.literal(0), z.literal(15), z.literal(30), z.literal(60)]).optional(),
   highContrast: z.boolean().optional(),
+  emailNotifications: z.boolean().optional(),
 });
 
 const attachmentInputSchema = z.object({
@@ -94,13 +95,14 @@ export const appRouter = router({
       return settings;
     }),
     update: protectedProcedure.input(userSettingsSchema).mutation(async ({ ctx, input }) => {
-      const { thinking, webSearch, toolAccess, highContrast, ...rest } = input;
+      const { thinking, webSearch, toolAccess, highContrast, emailNotifications, ...rest } = input;
       return updateUserSettings(ctx.user.id, {
         ...rest,
         ...(thinking === undefined ? {} : { thinking: thinking ? 1 : 0 }),
         ...(webSearch === undefined ? {} : { webSearch: webSearch ? 1 : 0 }),
         ...(toolAccess === undefined ? {} : { toolAccess: toolAccess ? 1 : 0 }),
         ...(highContrast === undefined ? {} : { highContrast: highContrast ? 1 : 0 }),
+        ...(emailNotifications === undefined ? {} : { emailNotifications: emailNotifications ? 1 : 0 }),
       });
     }),
   }),

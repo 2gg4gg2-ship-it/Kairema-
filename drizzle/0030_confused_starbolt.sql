@@ -1,0 +1,1 @@
+ALTER TABLE `user_settings` ADD `emailNotifications` int DEFAULT 0 NOT NULL;

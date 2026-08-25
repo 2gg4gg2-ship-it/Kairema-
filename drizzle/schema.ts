@@ -190,6 +190,7 @@ export const userSettings = mysqlTable("user_settings", {
   toolAccess: int("toolAccess").notNull().default(1),
   healthRefreshSeconds: int("healthRefreshSeconds").notNull().default(30),
   highContrast: int("highContrast").notNull().default(0),
+  emailNotifications: int("emailNotifications").notNull().default(0),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
