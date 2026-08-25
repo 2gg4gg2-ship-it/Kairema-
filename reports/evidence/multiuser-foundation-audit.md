@@ -1,7 +1,7 @@
 # Multi-user foundation — audit и первый additive шаг
 
 **Дата:** 2026-08-25 UTC  
-**Статус:** source-level audit завершён; неэкспортные multi-user границы и отдельный persistent export lifecycle реализованы и покрыты изолированными регрессиями. Это не заменяет отложенную browser-приёмку и не является заявлением о production build.
+**Статус:** functional/code-level multi-user scope завершён и опубликован: неэкспортные user-scoped границы и отдельный persistent export lifecycle реализованы и покрыты изолированными регрессиями. Legacy browser/OAuth/owner/provider/build приёмки вынесены в отдельный [`platform-blocker registry`](platform-blocker-registry-2026-08.md); это не заменяет отложенную browser-приёмку и не является заявлением о production build.
 
 | Требование | Текущий результат |
 |---|---|
@@ -21,7 +21,7 @@
 | `0030_confused_starbolt.sql` | **APPLIED:** additive `emailNotifications int DEFAULT 0 NOT NULL` в `user_settings`; без удаления или преобразования данных. |
 | `0031_export_compatibility_mapping.sql` | **APPLIED:** compatibility-only пустая migration. `chat_exports` уже существовала; `CREATE`/`ALTER`/`DROP`, индексы и данные не затрагивались. |
 | Focused settings regressions | **PASS:** 2 files, 6 tests. |
-| Core cross-user boundary regressions | **PASS:** 3 files, 30 tests для chat/attachment/memory owner scope; export/settings-specific IDOR coverage остаётся открытой. |
+| Core cross-user boundary regressions | **PASS:** 3 files, 30 tests для chat/attachment/memory owner scope; export/settings-specific IDOR затем закрыта отдельными export regressions. |
 | Expanded non-export router sweep | **PASS:** 9 files, 48 tests. Включает foreign chat rename denial, foreign attachment list denial до signed URL и runtime scope profile/memory settings/user settings только из `ctx.user.id`; реальные пользовательские данные, файлы и signed URLs не создавались. |
 | Attachment download IDOR | **PASS:** structural regression подтверждает owner-scoped lookup до signed URL и безопасную ошибку при неуспешном owner lookup; `attachments.lifecycle.test.ts`, 4 tests. Positive signed-download flow этим тестом не заявляется. |
 | `pnpm check` | **PASS**. |
@@ -33,3 +33,7 @@
 | Deterministic regression suite | **PASS:** с исключением только двух внешних 403 health tests — 49 files, 244 tests; 1 file / 4 tests skipped. Также прошли `pnpm check` и `git diff --check`. |
 
 > Production build не повторялся: пользователь ранее явно оставил этот platform-blocker открытым после четырёх SIGTERM среды во время Vite chunk rendering.
+
+## Legacy platform-blocked acceptance
+
+Все 24 исторических browser/OAuth/owner/provider/build пункта перенесены в отдельный privacy-safe [реестр platform-blockers](platform-blocker-registry-2026-08.md). Реестр содержит для каждого пункта статус, конкретную внешнюю причину и условие возобновления. При переносе не запускались browser/OAuth/owner-приёмки, не менялись OAuth/owner mapping и не открывался пользовательский контент.
