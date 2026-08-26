@@ -7,7 +7,7 @@ vi.mock("./db", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./db")>()),
   consumeChatStreamRequestQuota: chatQuota,
 }));
-import { CHAT_STREAM_RATE_LIMIT, createChatStreamHandler, resetChatStreamRateLimits } from "./chat-stream";
+import { CHAT_STREAM_RATE_LIMIT, createChatStreamHandler, getChatStreamRuntimeGaugeSnapshot, resetChatStreamRateLimits } from "./chat-stream";
 
 const context = { style: "default" as const, responseLength: "normal" as const, quickReplies: true, effort: "standard" as const, thinking: false };
 const validRequestBody = { sessionId: "550e8400-e29b-41d4-a716-446655440000", modelId: "fast", content: "Привет" };
@@ -288,6 +288,12 @@ describe("chat stream happy-path", () => {
 
     expect(limitedResponse.status).toHaveBeenCalledWith(503);
     expect(limitedResponse.json).toHaveBeenCalledWith({ error: "Сервис временно занят. Повторите попытку позже." });
+    expect(getChatStreamRuntimeGaugeSnapshot()).toMatchObject({
+      scope: "local_process",
+      queue: { entered: 0, timedOut: 0, waitSamples: 0 },
+      active: { streams: 2, userBuckets: 1 },
+      outcomes: { accepted: 2, capacityRejected: 1, perUserCapacityRejected: 1 },
+    });
     expect(listSessionMessages).toHaveBeenCalledTimes(2);
     expect(appendChatMessage).toHaveBeenCalledTimes(2);
 
@@ -298,6 +304,11 @@ describe("chat stream happy-path", () => {
     await handler({ body: validRequestBody } as Request, resumedResponse, vi.fn());
     expect(resumedResponse.status).toHaveBeenCalledWith(200);
     expect(chatWithRoleStream).toHaveBeenCalledTimes(3);
+    const runtime = getChatStreamRuntimeGaugeSnapshot();
+    expect(runtime.active).toEqual({ streams: 0, userBuckets: 0 });
+    expect(runtime.outcomes).toMatchObject({ accepted: 3, capacityRejected: 1, completed: 3 });
+    expect(runtime.samples.count.activeDuration).toBe(3);
+    expect(JSON.stringify(runtime)).not.toMatch(/userId|sessionId|content|prompt|response|Привет/);
   });
 
   it("keeps durable quotas isolated between authenticated users", async () => {

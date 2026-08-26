@@ -1,0 +1,296 @@
+{
+  "generatedAt": "2026-08-26T08:32:59.892Z",
+  "isolation": {
+    "realDatabaseOrStorage": false,
+    "importsProductionRuntime": false,
+    "networkGuardBlockedAttempts": 0,
+    "maximumLogicalWorkers": 64
+  },
+  "tiers": [
+    {
+      "actors": 10,
+      "logicalOperations": 1000,
+      "workers": 10,
+      "durationMs": 1.3138119999999986,
+      "logicalRps": 761143.9079563903,
+      "latency": {
+        "p50Ms": 0.00015999999999394277,
+        "p95Ms": 0.0005610000000046966,
+        "p99Ms": 0.003945999999999117
+      },
+      "errors": {
+        "expected": 0,
+        "unexpected": 0,
+        "unexpectedRate": 0
+      },
+      "adapter": {
+        "semanticQueryUnits": 1264,
+        "queryUnitsByPath": {
+          "session.validation": 120,
+          "chat.ownerScopedListRead": 180,
+          "chat.create": 80,
+          "message.ownerScopedMutation": 200,
+          "message.durableReplayRead": 100,
+          "memory.extractionTurnPair": 100,
+          "memory.extractionCas": 100,
+          "memory.boundedFactTopicRead": 50,
+          "attachment.ownerScopedMetadata": 80,
+          "export.ownerScopedMetadata": 50,
+          "draft.ownerScopedUpsert": 80,
+          "owner.aggregateOnlyRead": 40,
+          "isolation.crossActorDenied": 20,
+          "memory.casContention": 64
+        },
+        "syntheticMetadataBytes": 5784,
+        "replayHits": 280,
+        "assistantMutations": 20,
+        "duplicateAttempts": 280,
+        "cas": {
+          "contenders": 64,
+          "winners": 1,
+          "losers": 63
+        },
+        "crossActorDenials": 20,
+        "paginationReads": 180,
+        "boundedMemoryReads": 50,
+        "attachmentMetadataOps": 80,
+        "exportMetadataOps": 50,
+        "draftOps": 80,
+        "ownerAggregateReads": 40
+      },
+      "process": {
+        "cpuMs": 1.312,
+        "rssDeltaBytes": 0,
+        "heapDeltaBytes": 497072
+      }
+    },
+    {
+      "actors": 100,
+      "logicalOperations": 10000,
+      "workers": 64,
+      "durationMs": 4.463474999999988,
+      "logicalRps": 2240406.857885398,
+      "latency": {
+        "p50Ms": 0.00008000000002539309,
+        "p95Ms": 0.00023000000000195087,
+        "p99Ms": 0.0004200000000196269
+      },
+      "errors": {
+        "expected": 0,
+        "unexpected": 0,
+        "unexpectedRate": 0
+      },
+      "adapter": {
+        "semanticQueryUnits": 12064,
+        "queryUnitsByPath": {
+          "session.validation": 1200,
+          "chat.ownerScopedListRead": 1800,
+          "chat.create": 800,
+          "message.ownerScopedMutation": 2000,
+          "message.durableReplayRead": 1000,
+          "memory.extractionTurnPair": 1000,
+          "memory.extractionCas": 1000,
+          "memory.boundedFactTopicRead": 500,
+          "attachment.ownerScopedMetadata": 800,
+          "export.ownerScopedMetadata": 500,
+          "draft.ownerScopedUpsert": 800,
+          "owner.aggregateOnlyRead": 400,
+          "isolation.crossActorDenied": 200,
+          "memory.casContention": 64
+        },
+        "syntheticMetadataBytes": 57680,
+        "replayHits": 2800,
+        "assistantMutations": 200,
+        "duplicateAttempts": 2800,
+        "cas": {
+          "contenders": 64,
+          "winners": 1,
+          "losers": 63
+        },
+        "crossActorDenials": 200,
+        "paginationReads": 1800,
+        "boundedMemoryReads": 500,
+        "attachmentMetadataOps": 800,
+        "exportMetadataOps": 500,
+        "draftOps": 800,
+        "ownerAggregateReads": 400
+      },
+      "process": {
+        "cpuMs": 8.778,
+        "rssDeltaBytes": 1949696,
+        "heapDeltaBytes": 1203568
+      }
+    },
+    {
+      "actors": 1000,
+      "logicalOperations": 100000,
+      "workers": 64,
+      "durationMs": 21.794405000000012,
+      "logicalRps": 4588333.565426538,
+      "latency": {
+        "p50Ms": 0.00007999999999697138,
+        "p95Ms": 0.00013000000001284207,
+        "p99Ms": 0.00020100000000411455
+      },
+      "errors": {
+        "expected": 0,
+        "unexpected": 0,
+        "unexpectedRate": 0
+      },
+      "adapter": {
+        "semanticQueryUnits": 120064,
+        "queryUnitsByPath": {
+          "session.validation": 12000,
+          "chat.ownerScopedListRead": 18000,
+          "chat.create": 8000,
+          "message.ownerScopedMutation": 20000,
+          "message.durableReplayRead": 10000,
+          "memory.extractionTurnPair": 10000,
+          "memory.extractionCas": 10000,
+          "memory.boundedFactTopicRead": 5000,
+          "attachment.ownerScopedMetadata": 8000,
+          "export.ownerScopedMetadata": 5000,
+          "draft.ownerScopedUpsert": 8000,
+          "owner.aggregateOnlyRead": 4000,
+          "isolation.crossActorDenied": 2000,
+          "memory.casContention": 64
+        },
+        "syntheticMetadataBytes": 576576,
+        "replayHits": 28000,
+        "assistantMutations": 2000,
+        "duplicateAttempts": 28000,
+        "cas": {
+          "contenders": 64,
+          "winners": 1,
+          "losers": 63
+        },
+        "crossActorDenials": 2000,
+        "paginationReads": 18000,
+        "boundedMemoryReads": 5000,
+        "attachmentMetadataOps": 8000,
+        "exportMetadataOps": 5000,
+        "draftOps": 8000,
+        "ownerAggregateReads": 4000
+      },
+      "process": {
+        "cpuMs": 33.113,
+        "rssDeltaBytes": 5128192,
+        "heapDeltaBytes": 215424
+      }
+    },
+    {
+      "actors": 10000,
+      "logicalOperations": 1000000,
+      "workers": 64,
+      "durationMs": 141.38468899999998,
+      "logicalRps": 7072901.649201917,
+      "latency": {
+        "p50Ms": 0.00004100000001017179,
+        "p95Ms": 0.00011000000000649379,
+        "p99Ms": 0.00018000000000029104
+      },
+      "errors": {
+        "expected": 0,
+        "unexpected": 0,
+        "unexpectedRate": 0
+      },
+      "adapter": {
+        "semanticQueryUnits": 1200064,
+        "queryUnitsByPath": {
+          "session.validation": 120000,
+          "chat.ownerScopedListRead": 180000,
+          "chat.create": 80000,
+          "message.ownerScopedMutation": 200000,
+          "message.durableReplayRead": 100000,
+          "memory.extractionTurnPair": 100000,
+          "memory.extractionCas": 100000,
+          "memory.boundedFactTopicRead": 50000,
+          "attachment.ownerScopedMetadata": 80000,
+          "export.ownerScopedMetadata": 50000,
+          "draft.ownerScopedUpsert": 80000,
+          "owner.aggregateOnlyRead": 40000,
+          "isolation.crossActorDenied": 20000,
+          "memory.casContention": 64
+        },
+        "syntheticMetadataBytes": 5765728,
+        "replayHits": 280000,
+        "assistantMutations": 20000,
+        "duplicateAttempts": 280000,
+        "cas": {
+          "contenders": 64,
+          "winners": 1,
+          "losers": 63
+        },
+        "crossActorDenials": 20000,
+        "paginationReads": 180000,
+        "boundedMemoryReads": 50000,
+        "attachmentMetadataOps": 80000,
+        "exportMetadataOps": 50000,
+        "draftOps": 80000,
+        "ownerAggregateReads": 40000
+      },
+      "process": {
+        "cpuMs": 145.011,
+        "rssDeltaBytes": 4325376,
+        "heapDeltaBytes": 5137624
+      }
+    },
+    {
+      "actors": 50000,
+      "logicalOperations": 5000000,
+      "workers": 64,
+      "durationMs": 803.1891499999999,
+      "logicalRps": 6225183.694276746,
+      "latency": {
+        "p50Ms": 0.000040000000012696546,
+        "p95Ms": 0.00008000000002539309,
+        "p99Ms": 0.00013000000001284207
+      },
+      "errors": {
+        "expected": 0,
+        "unexpected": 0,
+        "unexpectedRate": 0
+      },
+      "adapter": {
+        "semanticQueryUnits": 6000064,
+        "queryUnitsByPath": {
+          "session.validation": 600000,
+          "chat.ownerScopedListRead": 900000,
+          "chat.create": 400000,
+          "message.ownerScopedMutation": 1000000,
+          "message.durableReplayRead": 500000,
+          "memory.extractionTurnPair": 500000,
+          "memory.extractionCas": 500000,
+          "memory.boundedFactTopicRead": 250000,
+          "attachment.ownerScopedMetadata": 400000,
+          "export.ownerScopedMetadata": 250000,
+          "draft.ownerScopedUpsert": 400000,
+          "owner.aggregateOnlyRead": 200000,
+          "isolation.crossActorDenied": 100000,
+          "memory.casContention": 64
+        },
+        "syntheticMetadataBytes": 28828576,
+        "replayHits": 1400000,
+        "assistantMutations": 100000,
+        "duplicateAttempts": 1400000,
+        "cas": {
+          "contenders": 64,
+          "winners": 1,
+          "losers": 63
+        },
+        "crossActorDenials": 100000,
+        "paginationReads": 900000,
+        "boundedMemoryReads": 250000,
+        "attachmentMetadataOps": 400000,
+        "exportMetadataOps": 250000,
+        "draftOps": 400000,
+        "ownerAggregateReads": 200000
+      },
+      "process": {
+        "cpuMs": 826.45,
+        "rssDeltaBytes": 37785600,
+        "heapDeltaBytes": 10972712
+      }
+    }
+  ]
+}

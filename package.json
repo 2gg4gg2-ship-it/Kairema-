@@ -12,6 +12,7 @@
     "test": "vitest run",
     "benchmark:synthetic": "node scripts/synthetic-load-benchmark.mjs",
     "benchmark:instrumented": "tsx scripts/instrumented-nonproduction-benchmark.ts",
+    "benchmark:db-storage": "tsx scripts/db-storage-benchmark.ts",
     "db:push": "drizzle-kit generate && drizzle-kit migrate"
   },
   "dependencies": {

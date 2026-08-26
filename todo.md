@@ -108,6 +108,17 @@
 - [x] scale-instrumented/VALIDATION: focused no-network harness regression PASS (2 tests), `pnpm check` PASS and `git diff --check` PASS; provider-oriented/real-network tests are excluded from evidence and production build was not run.
 - [x] scale-instrumented/REPORT: factual results, measured/simulated/unavailable metrics and the recorded 12-stream local saturation boundary are documented at `reports/evidence/instrumented-nonproduction-benchmark-results-2026-08.md`; no architecture or transcript-window work followed.
 
+## SCALE & STABILITY — admission, gauges and DB/storage evidence
+
+- [x] scale-admission/READ-ONLY-CONTRACT: reviewed current 12-per-instance/2-per-user admission/rejection/release path and recorded metadata-only measurement contract at `reports/evidence/sse-admission-contract-2026-08.md` before behavior changes.
+- [x] scale-admission/BOUNDED-POLICY: documented bounded wait/queue as unsafe and non-uniform without distributed infrastructure; retains immediate accept plus controlled pre-provider 503, with no new queue/service added.
+- [x] scale-gauges/METADATA-ONLY: extended existing owner-only observability with bounded process-local SSE admission/replay/rate/duration snapshots and compact UI; no prompts, responses, tokens, identifiers or raw payloads are retained. Focused SSE/owner regressions (18 tests) and `pnpm check` PASS.
+- [x] scale-db-benchmark/HARNESS: deterministic no-network synthetic DB/storage abstraction benchmark added with provider-free in-memory adapters; no production data, database, storage, schema or provider runtime is imported.
+- [x] scale-db-benchmark/WORKLOAD: direct bounded run completed for 10/100/1K/10K/50K actors (6,111,000 logical operations, max 64 logical workers); user-scoped reads/mutations, pagination, bounded memory, CAS/replay, drafts, attachment/export metadata, owner aggregate and isolation paths are covered as simulation.
+- [x] scale-db-benchmark/ANALYSIS: strict JSON raw artifact and unified evidence report record adapter query patterns, local latency/errors/RSS/CPU, CAS contention and modeled amplification; no index or transcript policy was added.
+- [x] scale-db-benchmark/VALIDATION: focused no-network admission/gauge/benchmark/security tests PASS (3 files, 19 tests), `pnpm check` PASS and `git diff --check` PASS; provider suites and production build were not run.
+- [x] scale-db-benchmark/REPORT: unified Russian evidence report at `reports/evidence/scale-stability-admission-db-storage-evidence-2026-08.md` separates measured/simulated/unmeasured results, bottlenecks, external blockers and low-risk next steps; work stopped before transcript-window/memory-dedup/new infrastructure.
+
 ## Multi-user foundation — 2026-08
 
 - [x] multiuser/PLATFORM-BLOCKER-REGISTRY: все 24 исторических browser/OAuth/owner/provider/build пункта перенесены в `reports/evidence/platform-blocker-registry-2026-08.md` с причиной, статусом и условием разблокировки. Приёмки не возобновлялись; OAuth/owner mapping не менялись.

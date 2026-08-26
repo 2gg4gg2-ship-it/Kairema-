@@ -33,6 +33,61 @@ const completedChatStreamReplays = new Map<string, { result: StreamResult; expir
 const pendingChatStreamReplays = new Map<string, PendingReplay>();
 const activeChatStreamsByUser = new Map<number, number>();
 let activeChatStreams = 0;
+const CHAT_STREAM_GAUGE_SAMPLE_LIMIT = 128;
+const chatStreamRuntimeGauges = {
+  accepted: 0,
+  rateLimited: 0,
+  quotaUnavailable: 0,
+  capacityRejected: 0,
+  perUserCapacityRejected: 0,
+  replayCompleted: 0,
+  replayPending: 0,
+  replayStored: 0,
+  completed: 0,
+  failed: 0,
+  cancelled: 0,
+  startLatencyMs: [] as number[],
+  activeDurationMs: [] as number[],
+};
+
+function addGaugeSample(samples: number[], value: number) {
+  samples.push(Math.max(0, Math.round(value)));
+  if (samples.length > CHAT_STREAM_GAUGE_SAMPLE_LIMIT) samples.splice(0, samples.length - CHAT_STREAM_GAUGE_SAMPLE_LIMIT);
+}
+
+function percentile(samples: number[], ratio: number) {
+  if (!samples.length) return null;
+  const sorted = [...samples].sort((left, right) => left - right);
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1)] ?? null;
+}
+
+/** Metadata-only local-process diagnostic snapshot. It contains no user IDs, content, prompts, responses, tokens or raw payloads. */
+export function getChatStreamRuntimeGaugeSnapshot() {
+  return {
+    scope: "local_process" as const,
+    limits: { activePerInstance: CHAT_STREAM_MAX_ACTIVE_PER_INSTANCE, activePerUser: CHAT_STREAM_MAX_ACTIVE_PER_USER },
+    queue: { entered: 0, timedOut: 0, waitSamples: 0 },
+    active: { streams: activeChatStreams, userBuckets: activeChatStreamsByUser.size },
+    outcomes: {
+      accepted: chatStreamRuntimeGauges.accepted,
+      rateLimited: chatStreamRuntimeGauges.rateLimited,
+      quotaUnavailable: chatStreamRuntimeGauges.quotaUnavailable,
+      capacityRejected: chatStreamRuntimeGauges.capacityRejected,
+      perUserCapacityRejected: chatStreamRuntimeGauges.perUserCapacityRejected,
+      replayCompleted: chatStreamRuntimeGauges.replayCompleted,
+      replayPending: chatStreamRuntimeGauges.replayPending,
+      replayStored: chatStreamRuntimeGauges.replayStored,
+      completed: chatStreamRuntimeGauges.completed,
+      failed: chatStreamRuntimeGauges.failed,
+      cancelled: chatStreamRuntimeGauges.cancelled,
+    },
+    samples: {
+      count: { startLatency: chatStreamRuntimeGauges.startLatencyMs.length, activeDuration: chatStreamRuntimeGauges.activeDurationMs.length },
+      startLatencyMs: { p50: percentile(chatStreamRuntimeGauges.startLatencyMs, 0.5), p95: percentile(chatStreamRuntimeGauges.startLatencyMs, 0.95), p99: percentile(chatStreamRuntimeGauges.startLatencyMs, 0.99) },
+      activeDurationMs: { p50: percentile(chatStreamRuntimeGauges.activeDurationMs, 0.5), p95: percentile(chatStreamRuntimeGauges.activeDurationMs, 0.95), p99: percentile(chatStreamRuntimeGauges.activeDurationMs, 0.99) },
+    },
+  };
+}
 
 /** Test-only reset of local replay optimization; durable quota state is deliberately not process-local. */
 export function resetChatStreamRateLimits() {
@@ -40,12 +95,25 @@ export function resetChatStreamRateLimits() {
   pendingChatStreamReplays.clear();
   activeChatStreamsByUser.clear();
   activeChatStreams = 0;
+  chatStreamRuntimeGauges.accepted = 0;
+  chatStreamRuntimeGauges.rateLimited = 0;
+  chatStreamRuntimeGauges.quotaUnavailable = 0;
+  chatStreamRuntimeGauges.capacityRejected = 0;
+  chatStreamRuntimeGauges.perUserCapacityRejected = 0;
+  chatStreamRuntimeGauges.replayCompleted = 0;
+  chatStreamRuntimeGauges.replayPending = 0;
+  chatStreamRuntimeGauges.replayStored = 0;
+  chatStreamRuntimeGauges.completed = 0;
+  chatStreamRuntimeGauges.failed = 0;
+  chatStreamRuntimeGauges.cancelled = 0;
+  chatStreamRuntimeGauges.startLatencyMs.length = 0;
+  chatStreamRuntimeGauges.activeDurationMs.length = 0;
 }
 
-function reserveActiveChatStream(userId: number): { allowed: true; release: () => void } | { allowed: false } {
-  if (activeChatStreams >= CHAT_STREAM_MAX_ACTIVE_PER_INSTANCE) return { allowed: false };
+function reserveActiveChatStream(userId: number): { allowed: true; release: () => void } | { allowed: false; reason: "instance" | "user" } {
+	if (activeChatStreams >= CHAT_STREAM_MAX_ACTIVE_PER_INSTANCE) return { allowed: false, reason: "instance" };
   const userActiveStreams = activeChatStreamsByUser.get(userId) ?? 0;
-  if (userActiveStreams >= CHAT_STREAM_MAX_ACTIVE_PER_USER) return { allowed: false };
+	if (userActiveStreams >= CHAT_STREAM_MAX_ACTIVE_PER_USER) return { allowed: false, reason: "user" };
   activeChatStreams += 1;
   activeChatStreamsByUser.set(userId, userActiveStreams + 1);
   let released = false;
@@ -219,10 +287,13 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
     }
 
     const input = parsed.data;
+    const handlerStartedAt = performance.now();
     let pendingReplay: PendingReplay | undefined;
     let activeIdempotencyKey: string | undefined;
     let savedUserMessageId: number | undefined;
     let releaseActiveStream: (() => void) | undefined;
+    let streamStartedAt: number | undefined;
+    let streamOutcome: "completed" | "failed" | "cancelled" | undefined;
     try {
       const session = await dependencies.getOwnedChatSession(user.id, input.sessionId);
       if (!session) throw new Error("Чат не найден или недоступен.");
@@ -231,6 +302,8 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
       const completedReplay = idempotencyKey ? getCompletedReplay(idempotencyKey) : undefined;
       const pendingReplayAtStart = idempotencyKey ? pendingChatStreamReplays.get(idempotencyKey) : undefined;
       if (completedReplay || pendingReplayAtStart) {
+        if (completedReplay) chatStreamRuntimeGauges.replayCompleted += 1;
+        else chatStreamRuntimeGauges.replayPending += 1;
         const replay = completedReplay ?? await pendingReplayAtStart!.promise;
         if (!replay) throw new Error("Предыдущее сообщение ещё не дало готового ответа. Повторите отправку через несколько секунд.");
         res.status(200);
@@ -243,6 +316,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
       }
       const persistedReplay = idempotencyKey ? replayFromStoredAssistant(await dependencies.getStoredAssistantForClientMessage(user.id, input.sessionId, input.clientMessageId!), input.modelId) : undefined;
       if (persistedReplay) {
+        chatStreamRuntimeGauges.replayStored += 1;
         res.status(200);
         res.set({ "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
         res.flushHeaders();
@@ -255,20 +329,25 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
       try {
         rateLimit = await dependencies.consumeChatStreamRequestQuota(user.id, CHAT_STREAM_RATE_LIMIT, CHAT_STREAM_RATE_WINDOW_MS);
       } catch {
+        chatStreamRuntimeGauges.quotaUnavailable += 1;
         res.status(503).json({ error: "Проверка лимита временно недоступна. Повторите попытку позже." });
         return;
       }
       if (!rateLimit.allowed) {
+        chatStreamRuntimeGauges.rateLimited += 1;
         void Promise.resolve(dependencies.auditChatStream({ event: "chat_stream.rate_limited", userId: user.id, timestamp: new Date().toISOString(), retryAfterSeconds: rateLimit.retryAfterSeconds })).catch(() => undefined);
         res.set("Retry-After", String(rateLimit.retryAfterSeconds)).status(429).json({ error: "Слишком много запросов. Подождите минуту." });
         return;
       }
       const activeStream = reserveActiveChatStream(user.id);
       if (!activeStream.allowed) {
+        chatStreamRuntimeGauges.capacityRejected += 1;
+        if (activeStream.reason === "user") chatStreamRuntimeGauges.perUserCapacityRejected += 1;
         res.status(503).json({ error: "Сервис временно занят. Повторите попытку позже." });
         return;
       }
       releaseActiveStream = activeStream.release;
+      chatStreamRuntimeGauges.accepted += 1;
       let history: Awaited<ReturnType<typeof dependencies.listSessionMessages>> | undefined;
       if (input.regenerateMessageId) {
         const currentHistory = await dependencies.listSessionMessages(user.id, input.sessionId);
@@ -324,6 +403,8 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
         }
       });
       writeEvent(res, "start", { sessionId: input.sessionId, regenerated: Boolean(input.regenerateMessageId) });
+      streamStartedAt = performance.now();
+      addGaugeSample(chatStreamRuntimeGauges.startLatencyMs, streamStartedAt - handlerStartedAt);
 
       try {
         const result = await dependencies.chatWithRoleStream(
@@ -383,15 +464,26 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
             }
           }
           writeEvent(res, "done", publicStreamResult({ ...result, searchStatus: normalizedSearchStatus }));
+          streamOutcome = "completed";
+          chatStreamRuntimeGauges.completed += 1;
           finished = true;
           res.end();
         } else if (idempotencyKey) {
           pendingReplay?.resolve(null);
           pendingChatStreamReplays.delete(idempotencyKey);
+          streamOutcome = "cancelled";
+          chatStreamRuntimeGauges.cancelled += 1;
         }
       } catch (error) {
         pendingReplay?.resolve(null);
         if (idempotencyKey) pendingChatStreamReplays.delete(idempotencyKey);
+        if (closed) {
+          streamOutcome = "cancelled";
+          chatStreamRuntimeGauges.cancelled += 1;
+        } else {
+          streamOutcome = "failed";
+          chatStreamRuntimeGauges.failed += 1;
+        }
         if (!closed) {
           writeEvent(res, "error", { message: publicChatError(input.modelId, error) });
           finished = true;
@@ -401,8 +493,13 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
     } catch (error) {
       pendingReplay?.resolve(null);
       if (activeIdempotencyKey) pendingChatStreamReplays.delete(activeIdempotencyKey);
+      if (releaseActiveStream && !streamOutcome) {
+        streamOutcome = "failed";
+        chatStreamRuntimeGauges.failed += 1;
+      }
       res.status(400).json({ error: historyError(error) });
     } finally {
+      if (streamStartedAt !== undefined) addGaugeSample(chatStreamRuntimeGauges.activeDurationMs, performance.now() - streamStartedAt);
       releaseActiveStream?.();
     }
   };

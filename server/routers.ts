@@ -15,6 +15,7 @@ import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
 import { getWebSearchStatus, probeWebSearchStatus } from "./web-search";
 import { getKnowledgeAudit, getKnowledgeStatus, refreshKnowledgeBase } from "./knowledge";
 import { ownerClaimFingerprint } from "./owner-claim";
+import { getChatStreamRuntimeGaugeSnapshot } from "./chat-stream";
 
 const settingsSchema = z.object({
   style: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional(),
@@ -239,7 +240,7 @@ export const appRouter = router({
     }),
     observability: protectedProcedure.query(async ({ ctx }) => {
       requireOwner(ctx);
-      return getOwnerObservabilitySnapshot();
+      return { ...(await getOwnerObservabilitySnapshot()), runtime: getChatStreamRuntimeGaugeSnapshot() };
     }),
     providerControls: protectedProcedure.query(async ({ ctx }) => {
       requireOwner(ctx);
