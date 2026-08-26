@@ -75,6 +75,23 @@
 - [x] scale-audit/SECURITY-ISOLATION: inspected server-derived authorization, ownership filters, secret/error handling and cross-user boundaries under scale assumptions.
 - [x] scale-audit/REPORT: factual 10K–50K synthetic-user readiness report created at `reports/evidence/scale-stability-read-only-audit-2026-08.md`; it separates strengths, demonstrated bottlenecks, low-risk hardening candidates, deferred changes and unverified load characteristics. `git diff --check` and report structure checks PASS; no hardening was implemented.
 
+## SCALE & STABILITY HARDENING — low-risk package 1
+
+- [x] scale-hardening/INVARIANTS-AND-SCOPE: re-verified the four roles, <=4 LLM attempts, Provider Health/allowlist, search/RAG, user-scoped memory, owner-only exports, secure attachments, Google OAuth, Stytch email/password, drafts and owner controls; Magic Link remains external BLOCKED and untouched. One unintended existing OrcaRouter test-side TLS connection was attempted by the initial full suite and failed before TLS; no runtime hardening code invokes providers, and all subsequent validation was no-network.
+- [x] scale-hardening/PROCESS-LOCAL-CRITICAL-PATHS: durable DB-backed chat quota and persisted assistant replay now cover cross-replica admission/idempotency; local replay/cache remains an explicitly non-authoritative optimization and local capacity guard.
+- [x] scale-hardening/DURABLE-CHAT-INGRESS-QUOTA: added separate `chat_stream_rate_windows` fixed-minute per-user quota with additive migration `0035_tense_vertigo.sql`; it denies before history/context/provider work and does not reuse Dev API state.
+- [x] scale-hardening/LOCAL-SSE-CAPACITY-GUARD: added per-instance 12-stream and per-user 2-stream admission gate, released in `finally` on completion/error/cancellation; explicitly documented as local only, not cross-replica coordination.
+- [x] scale-hardening/MUTATION-CONCURRENCY: targeted replay lookup plus observed-attempts CAS claim and pair-only extraction reads harden duplicate/retry transitions while retaining user scope and retry behavior.
+- [x] scale-hardening/COLLECTION-BOUNDS: server chat context uses opt-in SQL windows of 30 facts and 15 topics matching pre-existing prompt slicing; user-facing memory lists remain complete.
+- [x] scale-hardening/MEMORY-CONTEXT-SQL-BOUND: added an opt-in capped SQL query for server chat context only, retaining the pre-existing prompt window and preserving full user-facing lists plus user scope. Focused regressions (2 files, 13 tests) and `pnpm check` PASS.
+- [x] scale-hardening/RESOURCE-DEGRADATION: stream path now fails closed with generic 503 on durable quota unavailability and rejects local saturation before history/provider work; existing attachment/export/search contracts were intentionally unchanged pending separate evidence.
+- [x] scale-hardening/REGRESSIONS-VALIDATION: added focused replay/quota/capacity/DB structural regressions (5 files, 28 tests PASS); `pnpm check` and `git diff --check` PASS. Full `pnpm test` is NOT PASS only because one external OrcaRouter TLS transport test returned `ECONNRESET` before TLS; deterministic no-network suite PASS (53 files, 281 tests). Production build remains excluded by the known SIGTERM blocker.
+- [x] scale-hardening/TEST-HARNESS-FIX: repaired the new scale regression test by explicitly importing Vitest globals; no runtime behavior change.
+- [x] scale-hardening/REPLAY-SEMANTICS-FIX: preserved previous idempotent replay semantics by checking only the immediately following session message before accepting an assistant response.
+- [x] scale-hardening/MEMORY-JOB-CAS: hardened stale/pending memory-job claims with an observed-attempts compare-and-swap predicate and structural regression; retry timing and user scoping preserved. Focused suite (3 files, 14 tests) and `pnpm check` PASS.
+- [x] scale-hardening/REPORT: evidence recorded at `reports/evidence/scale-stability-hardening-package-1-2026-08.md`, with exact eliminated bottlenecks, low-risk rationale, retained limits, validation and no 10K–50K readiness claim.
+- [x] scale-hardening/NETWORK-TEST-EXCEPTION: documented the one unintended external OrcaRouter test-side connection (`ECONNRESET` before TLS, no provider response/content); all subsequent validation explicitly excluded known network provider tests.
+
 ## Multi-user foundation — 2026-08
 
 - [x] multiuser/PLATFORM-BLOCKER-REGISTRY: все 24 исторических browser/OAuth/owner/provider/build пункта перенесены в `reports/evidence/platform-blocker-registry-2026-08.md` с причиной, статусом и условием разблокировки. Приёмки не возобновлялись; OAuth/owner mapping не менялись.

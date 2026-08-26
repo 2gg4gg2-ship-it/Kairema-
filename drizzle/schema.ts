@@ -252,6 +252,14 @@ export const devApiRateWindows = mysqlTable("dev_api_rate_windows", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+/** Per-user fixed-minute quota state for ordinary chat-stream ingress; intentionally separate from Dev API quota. */
+export const chatStreamRateWindows = mysqlTable("chat_stream_rate_windows", {
+  userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  windowStarted: timestamp("windowStarted").defaultNow().notNull(),
+  requestCount: int("requestCount").notNull().default(0),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 /** Metadata-only audit trail: never stores request prompts, response bodies, headers, IPs, or credentials. */
 export const devApiAuditRecords = mysqlTable("dev_api_audit_records", {
   id: varchar("id", { length: 36 }).primaryKey(),

@@ -246,6 +246,13 @@
       "when": 1787720151310,
       "tag": "0034_aberrant_nemesis",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "5",
+      "when": 1787729513409,
+      "tag": "0035_tense_vertigo",
+      "breakpoints": true
     }
   ]
 }

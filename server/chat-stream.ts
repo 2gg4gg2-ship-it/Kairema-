@@ -1,18 +1,19 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
-import { appendChatMessage, enqueueMemoryExtractionJob, getOwnedChatSession, getStoredAssistantForClientMessage, listSessionMessages, updateChatTitle } from "./db";
+import { appendChatMessage, consumeChatStreamRequestQuota, enqueueMemoryExtractionJob, getOwnedChatSession, getStoredAssistantForClientMessage, listSessionMessages, updateChatTitle } from "./db";
 import { sdk } from "./_core/sdk";
 import { MODEL_IDS, chatWithRoleStream, publicChatError, type Provider, type RoleId } from "./providers";
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
 
 export const CHAT_STREAM_RATE_LIMIT = 60;
+export const CHAT_STREAM_MAX_ACTIVE_PER_INSTANCE = 12;
+export const CHAT_STREAM_MAX_ACTIVE_PER_USER = 2;
 const CHAT_STREAM_RATE_WINDOW_MS = 60_000;
 const CHAT_STREAM_REPLAY_TTL_MS = 5 * 60_000;
 type StreamResult = Awaited<ReturnType<typeof chatWithRoleStream>>;
 type StoredReplay = Pick<StreamResult, "content" | "modelUsed" | "label" | "searchStatus" | "sources">;
 type PendingReplay = { promise: Promise<StreamResult | null>; resolve: (result: StreamResult | null) => void };
 
-type RateWindow = { count: number; windowStart: number };
 type ChatStreamAuditRecord = {
   event: "chat_stream.completed" | "chat_stream.rate_limited";
   userId: number;
@@ -27,40 +28,38 @@ type ChatStreamAuditRecord = {
   retryAfterSeconds?: number;
 };
 
-/** Process-local protection for the SSE entry point. Entries are keyed only by authenticated user ID. */
-const chatStreamRateWindows = new Map<number, RateWindow>();
+/** Local replay state only avoids repeat work inside one process; durable message idempotency remains authoritative across replicas. */
 const completedChatStreamReplays = new Map<string, { result: StreamResult; expiresAt: number }>();
 const pendingChatStreamReplays = new Map<string, PendingReplay>();
-let lastRateWindowPruneAt = 0;
+const activeChatStreamsByUser = new Map<number, number>();
+let activeChatStreams = 0;
 
-function pruneExpiredRateWindows(now: number) {
-  if (now - lastRateWindowPruneAt < CHAT_STREAM_RATE_WINDOW_MS) return;
-  lastRateWindowPruneAt = now;
-  chatStreamRateWindows.forEach((window, userId) => {
-    if (now - window.windowStart >= CHAT_STREAM_RATE_WINDOW_MS) chatStreamRateWindows.delete(userId);
-  });
-}
-
-export function consumeChatStreamRateLimit(userId: number, now = Date.now()): { allowed: boolean; retryAfterSeconds: number } {
-  pruneExpiredRateWindows(now);
-  const current = chatStreamRateWindows.get(userId);
-  if (!current || now - current.windowStart >= CHAT_STREAM_RATE_WINDOW_MS) {
-    chatStreamRateWindows.set(userId, { count: 1, windowStart: now });
-    return { allowed: true, retryAfterSeconds: 0 };
-  }
-  if (current.count >= CHAT_STREAM_RATE_LIMIT) {
-    return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((CHAT_STREAM_RATE_WINDOW_MS - (now - current.windowStart)) / 1_000)) };
-  }
-  current.count += 1;
-  return { allowed: true, retryAfterSeconds: 0 };
-}
-
-/** Test-only reset; production instances naturally discard this in-memory state on restart. */
+/** Test-only reset of local replay optimization; durable quota state is deliberately not process-local. */
 export function resetChatStreamRateLimits() {
-  chatStreamRateWindows.clear();
   completedChatStreamReplays.clear();
   pendingChatStreamReplays.clear();
-  lastRateWindowPruneAt = 0;
+  activeChatStreamsByUser.clear();
+  activeChatStreams = 0;
+}
+
+function reserveActiveChatStream(userId: number): { allowed: true; release: () => void } | { allowed: false } {
+  if (activeChatStreams >= CHAT_STREAM_MAX_ACTIVE_PER_INSTANCE) return { allowed: false };
+  const userActiveStreams = activeChatStreamsByUser.get(userId) ?? 0;
+  if (userActiveStreams >= CHAT_STREAM_MAX_ACTIVE_PER_USER) return { allowed: false };
+  activeChatStreams += 1;
+  activeChatStreamsByUser.set(userId, userActiveStreams + 1);
+  let released = false;
+  return {
+    allowed: true,
+    release: () => {
+      if (released) return;
+      released = true;
+      activeChatStreams = Math.max(0, activeChatStreams - 1);
+      const remaining = (activeChatStreamsByUser.get(userId) ?? 1) - 1;
+      if (remaining > 0) activeChatStreamsByUser.set(userId, remaining);
+      else activeChatStreamsByUser.delete(userId);
+    },
+  };
 }
 
 function replayKey(userId: number, sessionId: string, clientMessageId: string) { return `${userId}:${sessionId}:${clientMessageId}`; }
@@ -76,6 +75,16 @@ function createPendingReplay(key: string): PendingReplay {
   const pending = { promise, resolve };
   pendingChatStreamReplays.set(key, pending);
   return pending;
+}
+
+function replayFromStoredAssistant(stored: Awaited<ReturnType<typeof getStoredAssistantForClientMessage>>, fallbackModelId: RoleId): StoredReplay | undefined {
+  if (!stored) return undefined;
+  return {
+    content: stored.content,
+    modelUsed: stored.modelId ?? fallbackModelId,
+    label: "Kairema",
+    ...(stored.metadata ? (() => { try { return JSON.parse(stored.metadata) as Pick<StoredReplay, "searchStatus" | "sources">; } catch { return {}; } })() : {}),
+  };
 }
 
 /** Writes metadata only: no prompt, reply, session ID, headers, credentials, or client address. */
@@ -168,6 +177,7 @@ type StreamDependencies = {
   authenticateRequest: (request: Request) => Promise<{ id: number } | null>;
   getOwnedChatSession: typeof getOwnedChatSession;
   getStoredAssistantForClientMessage: typeof getStoredAssistantForClientMessage;
+  consumeChatStreamRequestQuota: typeof consumeChatStreamRequestQuota;
   appendChatMessage: typeof appendChatMessage;
   updateChatTitle: typeof updateChatTitle;
   listSessionMessages: typeof listSessionMessages;
@@ -182,6 +192,7 @@ const defaultDependencies: StreamDependencies = {
   authenticateRequest: async (request) => sdk.authenticateRequest(request) as Promise<{ id: number }>,
   getOwnedChatSession,
   getStoredAssistantForClientMessage,
+  consumeChatStreamRequestQuota,
   appendChatMessage,
   updateChatTitle,
   listSessionMessages,
@@ -211,6 +222,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
     let pendingReplay: PendingReplay | undefined;
     let activeIdempotencyKey: string | undefined;
     let savedUserMessageId: number | undefined;
+    let releaseActiveStream: (() => void) | undefined;
     try {
       const session = await dependencies.getOwnedChatSession(user.id, input.sessionId);
       if (!session) throw new Error("Чат не найден или недоступен.");
@@ -229,12 +241,34 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
         res.end();
         return;
       }
-      const rateLimit = consumeChatStreamRateLimit(user.id);
+      const persistedReplay = idempotencyKey ? replayFromStoredAssistant(await dependencies.getStoredAssistantForClientMessage(user.id, input.sessionId, input.clientMessageId!), input.modelId) : undefined;
+      if (persistedReplay) {
+        res.status(200);
+        res.set({ "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
+        res.flushHeaders();
+        writeEvent(res, "start", { sessionId: input.sessionId, replayed: true });
+        writeEvent(res, "done", publicStreamResult(persistedReplay));
+        res.end();
+        return;
+      }
+      let rateLimit: { allowed: boolean; retryAfterSeconds: number };
+      try {
+        rateLimit = await dependencies.consumeChatStreamRequestQuota(user.id, CHAT_STREAM_RATE_LIMIT, CHAT_STREAM_RATE_WINDOW_MS);
+      } catch {
+        res.status(503).json({ error: "Проверка лимита временно недоступна. Повторите попытку позже." });
+        return;
+      }
       if (!rateLimit.allowed) {
         void Promise.resolve(dependencies.auditChatStream({ event: "chat_stream.rate_limited", userId: user.id, timestamp: new Date().toISOString(), retryAfterSeconds: rateLimit.retryAfterSeconds })).catch(() => undefined);
         res.set("Retry-After", String(rateLimit.retryAfterSeconds)).status(429).json({ error: "Слишком много запросов. Подождите минуту." });
         return;
       }
+      const activeStream = reserveActiveChatStream(user.id);
+      if (!activeStream.allowed) {
+        res.status(503).json({ error: "Сервис временно занят. Повторите попытку позже." });
+        return;
+      }
+      releaseActiveStream = activeStream.release;
       let history: Awaited<ReturnType<typeof dependencies.listSessionMessages>> | undefined;
       if (input.regenerateMessageId) {
         const currentHistory = await dependencies.listSessionMessages(user.id, input.sessionId);
@@ -254,12 +288,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
           pendingReplay?.resolve(null);
           pendingChatStreamReplays.delete(idempotencyKey);
           const stored = !completed ? await dependencies.getStoredAssistantForClientMessage(user.id, input.sessionId, input.clientMessageId!) : undefined;
-          const replay: StreamResult | StoredReplay | null = completed ?? (stored ? {
-            content: stored.content,
-            modelUsed: stored.modelId ?? input.modelId,
-            label: "Kairema",
-            ...(stored.metadata ? (() => { try { return JSON.parse(stored.metadata) as Pick<StoredReplay, "searchStatus" | "sources">; } catch { return {}; } })() : {}),
-          } : null);
+          const replay: StreamResult | StoredReplay | undefined = completed ?? replayFromStoredAssistant(stored, input.modelId);
           if (!replay) throw new Error("Предыдущее сообщение ещё не дало готового ответа. Повторите отправку через несколько секунд.");
           res.status(200);
           res.set({ "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
@@ -373,6 +402,8 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
       pendingReplay?.resolve(null);
       if (activeIdempotencyKey) pendingChatStreamReplays.delete(activeIdempotencyKey);
       res.status(400).json({ error: historyError(error) });
+    } finally {
+      releaseActiveStream?.();
     }
   };
 }

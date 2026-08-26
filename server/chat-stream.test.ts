@@ -1,6 +1,12 @@
 import { EventEmitter } from "node:events";
 import type { Request, Response } from "express";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { chatQuota } = vi.hoisted(() => ({ chatQuota: vi.fn() }));
+vi.mock("./db", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./db")>()),
+  consumeChatStreamRequestQuota: chatQuota,
+}));
 import { CHAT_STREAM_RATE_LIMIT, createChatStreamHandler, resetChatStreamRateLimits } from "./chat-stream";
 
 const context = { style: "default" as const, responseLength: "normal" as const, quickReplies: true, effort: "standard" as const, thinking: false };
@@ -13,7 +19,10 @@ function response() {
 }
 
 describe("chat stream happy-path", () => {
-  beforeEach(() => resetChatStreamRateLimits());
+  beforeEach(() => {
+    resetChatStreamRateLimits();
+    chatQuota.mockReset().mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
+  });
 
   it("persists post-turn memory before emitting the client-visible done event", async () => {
     const writes: string[] = [];
@@ -121,6 +130,7 @@ describe("chat stream happy-path", () => {
     const handler = createChatStreamHandler({
       authenticateRequest: vi.fn().mockResolvedValue({ id: 42 }),
       getOwnedChatSession: vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Обычный разговор" }),
+      getStoredAssistantForClientMessage: vi.fn().mockResolvedValue(undefined),
       appendChatMessage,
       listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
       buildChatContext: vi.fn().mockResolvedValue(context),
@@ -136,9 +146,34 @@ describe("chat stream happy-path", () => {
 
     expect(chatWithRoleStream).toHaveBeenCalledOnce();
     expect(appendChatMessage).toHaveBeenCalledTimes(2);
+    expect(chatQuota).toHaveBeenCalledTimes(1);
     expect(appendChatMessage.mock.calls[0].at(-1)).toBe(request.clientMessageId);
     expect(replayResponse.write).toHaveBeenCalledWith(expect.stringContaining('"replayed":true'));
     expect(replayResponse.write).toHaveBeenCalledWith(expect.stringContaining("Готовый ответ"));
+  });
+
+  it("replays a durably stored idempotent assistant response before quota, history or provider work", async () => {
+    const request = { ...validRequestBody, clientMessageId: "33333333-3333-4333-8333-333333333333" };
+    const getStoredAssistantForClientMessage = vi.fn().mockResolvedValue({ id: 11, role: "assistant", content: "Сохранённый ответ", modelId: "llama-3.1-8b-instant", metadata: undefined });
+    const listSessionMessages = vi.fn();
+    const chatWithRoleStream = vi.fn();
+    const handler = createChatStreamHandler({
+      authenticateRequest: vi.fn().mockResolvedValue({ id: 42 }),
+      getOwnedChatSession: vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Обычный разговор" }),
+      getStoredAssistantForClientMessage,
+      listSessionMessages,
+      chatWithRoleStream,
+    });
+    const replayResponse = response();
+
+    await handler({ body: request } as Request, replayResponse, vi.fn());
+
+    expect(replayResponse.status).toHaveBeenCalledWith(200);
+    expect(replayResponse.write).toHaveBeenCalledWith(expect.stringContaining("Сохранённый ответ"));
+    expect(getStoredAssistantForClientMessage).toHaveBeenCalledWith(42, request.sessionId, request.clientMessageId);
+    expect(chatQuota).not.toHaveBeenCalled();
+    expect(listSessionMessages).not.toHaveBeenCalled();
+    expect(chatWithRoleStream).not.toHaveBeenCalled();
   });
 
   it("rejects an invalid client message UUID before reading chat history", async () => {
@@ -183,33 +218,94 @@ describe("chat stream happy-path", () => {
     expect(writes.join("")).toContain("event: done");
   });
 
-  it("limits each authenticated user to 60 stream requests per rolling in-memory minute", async () => {
+  it("denies a durable quota-exhausted user before history or provider work", async () => {
     const auditChatStream = vi.fn();
+    const getOwnedChatSession = vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Обычный разговор" });
+    const listSessionMessages = vi.fn();
+    const chatWithRoleStream = vi.fn();
+    chatQuota.mockResolvedValueOnce({ allowed: false, retryAfterSeconds: 37 });
     const handler = createChatStreamHandler({
       authenticateRequest: vi.fn().mockResolvedValue({ id: 73 }),
-      getOwnedChatSession: vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Обычный разговор" }),
-      appendChatMessage: vi.fn().mockResolvedValue({ id: 1, created: true }), updateChatTitle: vi.fn(),
-      listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
-      buildChatContext: vi.fn().mockResolvedValue(context), enqueueMemoryExtractionJob: vi.fn().mockResolvedValue({ created: true }), processMemoryExtractionJob: vi.fn().mockResolvedValue(undefined),
-      chatWithRoleStream: vi.fn().mockResolvedValue({ content: "Готово", modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Llama 3.1 8B Instant" }),
+      getOwnedChatSession,
+      listSessionMessages,
+      chatWithRoleStream,
       auditChatStream,
     });
 
-    for (let index = 0; index < CHAT_STREAM_RATE_LIMIT; index += 1) {
-      await handler({ body: validRequestBody } as Request, response(), vi.fn());
-    }
     const limitedResponse = response();
     await handler({ body: validRequestBody } as Request, limitedResponse, vi.fn());
 
     expect(limitedResponse.status).toHaveBeenCalledWith(429);
-    expect(limitedResponse.set).toHaveBeenCalledWith("Retry-After", "60");
+    expect(limitedResponse.set).toHaveBeenCalledWith("Retry-After", "37");
     expect(limitedResponse.json).toHaveBeenCalledWith({ error: "Слишком много запросов. Подождите минуту." });
     expect(auditChatStream).toHaveBeenLastCalledWith(expect.objectContaining({ event: "chat_stream.rate_limited", userId: 73 }));
+    expect(getOwnedChatSession).toHaveBeenCalledOnce();
+    expect(listSessionMessages).not.toHaveBeenCalled();
+    expect(chatWithRoleStream).not.toHaveBeenCalled();
   });
 
-  it("keeps quotas isolated between authenticated users", async () => {
+  it("fails closed when durable quota storage is unavailable before history or provider work", async () => {
+    const getOwnedChatSession = vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Обычный разговор" });
+    const listSessionMessages = vi.fn();
+    const chatWithRoleStream = vi.fn();
+    chatQuota.mockRejectedValueOnce(new Error("quota database unavailable"));
+    const handler = createChatStreamHandler({ authenticateRequest: vi.fn().mockResolvedValue({ id: 77 }), getOwnedChatSession, listSessionMessages, chatWithRoleStream });
+
+    const unavailableResponse = response();
+    await handler({ body: validRequestBody } as Request, unavailableResponse, vi.fn());
+
+    expect(unavailableResponse.status).toHaveBeenCalledWith(503);
+    expect(unavailableResponse.json).toHaveBeenCalledWith({ error: "Проверка лимита временно недоступна. Повторите попытку позже." });
+    expect(listSessionMessages).not.toHaveBeenCalled();
+    expect(chatWithRoleStream).not.toHaveBeenCalled();
+  });
+
+  it("limits per-instance active streams per user before history work and releases capacity after completion", async () => {
+    const resolvers: Array<(result: { content: string; modelUsed: string; provider: "groq"; label: string }) => void> = [];
+    const chatWithRoleStream = vi.fn().mockImplementation(() => {
+      if (resolvers.length < 2) return new Promise((resolve) => { resolvers.push(resolve); });
+      return Promise.resolve({ content: "Готово", modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Модель" });
+    });
+    const listSessionMessages = vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]);
+    const appendChatMessage = vi.fn().mockResolvedValue({ id: 1, created: true });
+    const handler = createChatStreamHandler({
+      authenticateRequest: vi.fn().mockResolvedValue({ id: 91 }),
+      getOwnedChatSession: vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Обычный разговор" }),
+      appendChatMessage,
+      listSessionMessages,
+      buildChatContext: vi.fn().mockResolvedValue(context),
+      chatWithRoleStream,
+      enqueueMemoryExtractionJob: vi.fn().mockResolvedValue({ created: true }),
+      processMemoryExtractionJob: vi.fn().mockResolvedValue(undefined),
+      auditChatStream: vi.fn(),
+    });
+
+    const first = handler({ body: validRequestBody } as Request, response(), vi.fn());
+    const second = handler({ body: validRequestBody } as Request, response(), vi.fn());
+    await vi.waitFor(() => expect(chatWithRoleStream).toHaveBeenCalledTimes(2));
+    const limitedResponse = response();
+    await handler({ body: validRequestBody } as Request, limitedResponse, vi.fn());
+
+    expect(limitedResponse.status).toHaveBeenCalledWith(503);
+    expect(limitedResponse.json).toHaveBeenCalledWith({ error: "Сервис временно занят. Повторите попытку позже." });
+    expect(listSessionMessages).toHaveBeenCalledTimes(2);
+    expect(appendChatMessage).toHaveBeenCalledTimes(2);
+
+    resolvers.forEach((resolve, index) => resolve({ content: `Ответ ${index + 1}`, modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Модель" }));
+    await Promise.all([first, second]);
+
+    const resumedResponse = response();
+    await handler({ body: validRequestBody } as Request, resumedResponse, vi.fn());
+    expect(resumedResponse.status).toHaveBeenCalledWith(200);
+    expect(chatWithRoleStream).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps durable quotas isolated between authenticated users", async () => {
     const authenticateRequest = vi.fn().mockResolvedValue({ id: 81 });
     const chatWithRoleStream = vi.fn().mockResolvedValue({ content: "Готово", modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Llama 3.1 8B Instant" });
+    chatQuota.mockImplementation(async (userId: number) => userId === 81
+      ? { allowed: false, retryAfterSeconds: 11 }
+      : { allowed: true, retryAfterSeconds: 0 });
     const handler = createChatStreamHandler({
       authenticateRequest,
       getOwnedChatSession: vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Обычный разговор" }),
@@ -220,14 +316,16 @@ describe("chat stream happy-path", () => {
       auditChatStream: vi.fn(),
     });
 
-    for (let index = 0; index < CHAT_STREAM_RATE_LIMIT; index += 1) {
-      await handler({ body: validRequestBody } as Request, response(), vi.fn());
-    }
+    const firstUserResponse = response();
+    await handler({ body: validRequestBody } as Request, firstUserResponse, vi.fn());
     authenticateRequest.mockResolvedValueOnce({ id: 82 });
     const secondUserResponse = response();
     await handler({ body: validRequestBody } as Request, secondUserResponse, vi.fn());
 
+    expect(firstUserResponse.status).toHaveBeenCalledWith(429);
     expect(secondUserResponse.status).toHaveBeenCalledWith(200);
-    expect(chatWithRoleStream).toHaveBeenCalledTimes(CHAT_STREAM_RATE_LIMIT + 1);
+    expect(chatWithRoleStream).toHaveBeenCalledOnce();
+    expect(chatQuota).toHaveBeenNthCalledWith(1, 81, CHAT_STREAM_RATE_LIMIT, 60_000);
+    expect(chatQuota).toHaveBeenNthCalledWith(2, 82, CHAT_STREAM_RATE_LIMIT, 60_000);
   });
 });

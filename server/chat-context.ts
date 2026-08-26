@@ -8,6 +8,8 @@ import { getAttachmentPromptText, getOwnedAttachmentVisionDataUrl } from "./atta
 /** All four public roles may use live research when the user asks for external current facts. */
 export const WEB_RESEARCH_ROLE_POLICY: ReadonlySet<RagRole> = new Set<RagRole>(["fast", "smart", "context", "flagship"]);
 export const FLASH_WEB_RESEARCH_BUDGET_MS = 1_500;
+const MEMORY_CONTEXT_FACT_LIMIT = 30;
+const MEMORY_CONTEXT_TOPIC_LIMIT = 15;
 const FRESHNESS_QUERY_PATTERN = /(?:сегодня|сейчас|нынешн|текущ|последн|новост|свеж|актуальн|обновлен|нов(?:ый|ая|ые|ое)|верси[яиюе]|релиз|курс|цен[аы]|погод|врем[яени]|дата|событи|\bnow\b|\btoday\b|\bcurrent\b|\blatest\b|\brecent\b|\bnew\b|\bnews\b|\bupdate\b|\bversion\b|\brelease\b|\bprice\b|\bweather\b)/i;
 const TODAY_QUERY_PATTERN = /(?:сегодня|сейчас|\bnow\b|\btoday\b)/i;
 const RECENT_QUERY_PATTERN = /(?:последн|новост|свеж|актуальн|текущ|обновлен|нов(?:ый|ая|ые|ое)|релиз|\bcurrent\b|\blatest\b|\brecent\b|\bnew\b|\bnews\b|\bupdate\b|\brelease\b)/i;
@@ -59,8 +61,8 @@ export async function buildChatContext(userId: number, sessionId: string, input:
     getUserSettings(userId).catch(() => DEFAULT_CONTEXT_PREFERENCES),
     getMemorySettings(userId).catch(() => null),
     getMemoryProfile(userId).catch(() => null),
-    listMemoryEntries(userId, "fact").catch(() => []),
-    listMemoryEntries(userId, "dialog_topic").catch(() => []),
+    listMemoryEntries(userId, "fact", { limit: MEMORY_CONTEXT_FACT_LIMIT }).catch(() => []),
+    listMemoryEntries(userId, "dialog_topic", { limit: MEMORY_CONTEXT_TOPIC_LIMIT }).catch(() => []),
   ]);
   const attachments = preferences.toolAccess && input.attachmentIds?.length
     ? await getOwnedChatAttachments(userId, sessionId, input.attachmentIds.slice(0, 4)).catch(() => [])

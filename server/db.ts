@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, isNull, like, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createHash, randomUUID } from "node:crypto";
-import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryExtractionJob, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatDrafts, chatExports, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryExtractionJobs, memoryFacts, memoryProfiles, memorySettings, messages, providerControlFlags, providerDailyUsage, providerHealth, providerIdentities, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, technicalEvents, userSettings, users, webSearchStatus } from "../drizzle/schema";
+import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryExtractionJob, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatDrafts, chatExports, chatSessions, chatStreamRateWindows, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryExtractionJobs, memoryFacts, memoryProfiles, memorySettings, messages, providerControlFlags, providerDailyUsage, providerHealth, providerIdentities, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, technicalEvents, userSettings, users, webSearchStatus } from "../drizzle/schema";
 import { providerHealthHistory } from "../drizzle/schema";
 import { stytchLinkIntents } from "../drizzle/schema";
 import { ENV } from "./_core/env";
@@ -285,10 +285,24 @@ export async function appendChatMessage(userId: number, sessionId: string, role:
 
 /** Retrieves only the assistant message immediately following an idempotent user send. */
 export async function getStoredAssistantForClientMessage(userId: number, sessionId: string, clientMessageId: string): Promise<ChatMessageRecord | undefined> {
-  const history = await listSessionMessages(userId, sessionId);
-  const userIndex = history.findIndex((message) => message.clientMessageId === clientMessageId && message.role === "user");
-  const candidate = userIndex >= 0 ? history[userIndex + 1] : undefined;
-  return candidate?.role === "assistant" ? candidate : undefined;
+  const db = requireDatabase(await getDb());
+  requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
+  const [userMessage] = await db.select({ id: messages.id }).from(messages)
+    .where(and(
+      eq(messages.sessionId, sessionId),
+      eq(messages.clientMessageId, clientMessageId),
+      eq(messages.role, "user"),
+    ))
+    .limit(1);
+  if (!userMessage) return undefined;
+  const [followingMessage] = await db.select().from(messages)
+    .where(and(
+      eq(messages.sessionId, sessionId),
+      gt(messages.id, userMessage.id),
+    ))
+    .orderBy(asc(messages.id))
+    .limit(1);
+  return followingMessage?.role === "assistant" ? followingMessage : undefined;
 }
 
 export async function updateChatTitle(userId: number, sessionId: string, title: string): Promise<boolean> {
@@ -896,6 +910,22 @@ export async function consumeDevApiRequestQuota(userId: number, limit = 30, wind
   return { allowed: current.requestCount <= limit, retryAfterSeconds: Math.max(1, Math.ceil((windowMs - elapsed) / 1_000)) };
 }
 
+/** Atomically increments a user's ordinary chat ingress bucket without sharing admin Dev API quota state. */
+export async function consumeChatStreamRequestQuota(userId: number, limit = 60, windowMs = 60_000): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+  const db = requireDatabase(await getDb());
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - windowMs);
+  await db.insert(chatStreamRateWindows).values({ userId, windowStarted: now, requestCount: 1 }).onDuplicateKeyUpdate({ set: {
+    requestCount: sql`if(${chatStreamRateWindows.windowStarted} <= ${cutoff}, 1, ${chatStreamRateWindows.requestCount} + 1)`,
+    windowStarted: sql`if(${chatStreamRateWindows.windowStarted} <= ${cutoff}, ${now}, ${chatStreamRateWindows.windowStarted})`,
+  } });
+  const rows = await db.select().from(chatStreamRateWindows).where(eq(chatStreamRateWindows.userId, userId)).limit(1);
+  const current = rows[0];
+  if (!current) throw new Error("Не удалось проверить лимит chat stream.");
+  const elapsed = Math.max(0, now.getTime() - current.windowStarted.getTime());
+  return { allowed: current.requestCount <= limit, retryAfterSeconds: Math.max(1, Math.ceil((windowMs - elapsed) / 1_000)) };
+}
+
 /** Writes only outcome metadata; prompts, responses, credentials, headers and IP addresses are never persisted. */
 export async function recordDevApiAudit(input: DevApiAuditInput): Promise<void> {
   const db = requireDatabase(await getDb());
@@ -992,12 +1022,15 @@ function normalizeMemoryEntry(value: string) {
   return value.trim().replace(/\s+/g, " ").slice(0, 500);
 }
 
-/** Lists all entries belonging to the authenticated user, newest first, without capacity pruning. */
-export async function listMemoryEntries(userId: number, category?: MemoryEntryCategory): Promise<MemoryEntry[]> {
+/** Lists entries belonging to the authenticated user, newest first, without capacity pruning. */
+export async function listMemoryEntries(userId: number, category?: MemoryEntryCategory, options: { limit?: number } = {}): Promise<MemoryEntry[]> {
   const db = requireDatabase(await getDb());
-  const rows = await db.select().from(memoryEntries).where(category
+  const query = db.select().from(memoryEntries).where(category
     ? and(eq(memoryEntries.userId, userId), eq(memoryEntries.category, category))
     : eq(memoryEntries.userId, userId)).orderBy(desc(memoryEntries.lastSeenAt), desc(memoryEntries.updatedAt), desc(memoryEntries.createdAt));
+  const requestedLimit = Number.isSafeInteger(options.limit) ? Math.max(0, options.limit ?? 0) : 0;
+  const limit = Math.min(requestedLimit, 100);
+  const rows = limit > 0 ? await query.limit(limit) : await query;
   return rows;
 }
 
@@ -1132,13 +1165,23 @@ export async function claimMemoryExtractionJob(userId: number, assistantMessageI
   const db = requireDatabase(await getDb());
   const now = new Date();
   const staleAt = new Date(now.getTime() - 5 * 60 * 1_000);
-  const rows = await db.select().from(memoryExtractionJobs).where(eq(memoryExtractionJobs.userId, userId))
-    .orderBy(asc(memoryExtractionJobs.runAfter), asc(memoryExtractionJobs.createdAt));
-  const candidate = rows.find((job) => (!assistantMessageId || job.assistantMessageId === assistantMessageId)
-    && ((job.status === "pending" && job.runAfter <= now) || (job.status === "processing" && job.updatedAt <= staleAt)));
+  const due = or(
+    and(eq(memoryExtractionJobs.status, "pending"), lte(memoryExtractionJobs.runAfter, now)),
+    and(eq(memoryExtractionJobs.status, "processing"), lte(memoryExtractionJobs.updatedAt, staleAt)),
+  );
+  const conditions = [eq(memoryExtractionJobs.userId, userId), due];
+  if (assistantMessageId) conditions.push(eq(memoryExtractionJobs.assistantMessageId, assistantMessageId));
+  const [candidate] = await db.select().from(memoryExtractionJobs).where(and(...conditions))
+    .orderBy(asc(memoryExtractionJobs.runAfter), asc(memoryExtractionJobs.createdAt))
+    .limit(1);
   if (!candidate) return null;
   const claimed = await db.update(memoryExtractionJobs).set({ status: "processing", attempts: candidate.attempts + 1, lastErrorClass: null, updatedAt: now })
-    .where(and(eq(memoryExtractionJobs.id, candidate.id), eq(memoryExtractionJobs.userId, userId), eq(memoryExtractionJobs.status, candidate.status)));
+    .where(and(
+      eq(memoryExtractionJobs.id, candidate.id),
+      eq(memoryExtractionJobs.userId, userId),
+      eq(memoryExtractionJobs.status, candidate.status),
+      eq(memoryExtractionJobs.attempts, candidate.attempts),
+    ));
   if (!Number(claimed[0]?.affectedRows ?? 0)) return null;
   return { ...candidate, status: "processing", attempts: candidate.attempts + 1, lastErrorClass: null, updatedAt: now };
 }
@@ -1169,9 +1212,18 @@ export async function getMemoryExtractionJobTurn(userId: number, job: MemoryExtr
   const db = requireDatabase(await getDb());
   const session = await getOwnedChatSession(userId, job.sessionId);
   if (!session) return null;
-  const rows = await db.select().from(messages).where(eq(messages.sessionId, job.sessionId));
-  const userMessage = rows.find((message) => message.id === job.userMessageId && message.role === "user");
-  const assistantMessage = rows.find((message) => message.id === job.assistantMessageId && message.role === "assistant");
+  const [[userMessage], [assistantMessage]] = await Promise.all([
+    db.select().from(messages).where(and(
+      eq(messages.id, job.userMessageId),
+      eq(messages.sessionId, job.sessionId),
+      eq(messages.role, "user"),
+    )).limit(1),
+    db.select().from(messages).where(and(
+      eq(messages.id, job.assistantMessageId),
+      eq(messages.sessionId, job.sessionId),
+      eq(messages.role, "assistant"),
+    )).limit(1),
+  ]);
   if (!userMessage || !assistantMessage) return null;
   let hadLiveSearch = false;
   try {
