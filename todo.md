@@ -127,6 +127,15 @@
 - [x] scale-sql-review/SECURITY: source-level user isolation and owner-only boundaries reviewed against each candidate; no authorization predicate or owner control changed.
 - [x] scale-sql-review/REPORT: published requested evidence-only SQL/index review at `reports/evidence/scale-stability-sql-index-review-2026-08.md` with benefit/cost/risk candidates and stop condition before implementation.
 
+## SCALE & STABILITY — metadata-only DB cardinality and EXPLAIN review
+
+- [x] scale-db-evidence/SCOPE: used only aggregate metadata, information_schema and safe read-only plans; no private payload, data/schema/index/runtime/auth/provider/storage action occurred.
+- [x] scale-db-evidence/CARDINALITY: recorded exact aggregate counts for authorised collections with no row payload; current data remains too small for capacity conclusions.
+- [x] scale-db-evidence/EXPLAIN: executed non-mutating representative EXPLAIN plans and one zero-row EXPLAIN ANALYZE; planner statistics caveat is recorded.
+- [x] scale-db-evidence/PATHS: mapped chats, messages, memory, attachments, exports, drafts and owner events to current scopes, filters/orders/indexes/pagination and owner boundaries.
+- [x] scale-db-evidence/RECOMMENDATIONS: ranked exactly three additive index candidates as deferred and documented backward-compatible opt-in history pagination only; neither is implemented.
+- [x] scale-db-evidence/VALIDATION-REPORT: published strict evidence-only report at `reports/evidence/scale-stability-db-cardinality-explain-2026-08.md`; focused deterministic no-network suite PASS (25 tests / 4 files), `pnpm check` PASS and `git diff --check` PASS.
+
 ## Multi-user foundation — 2026-08
 
 - [x] multiuser/PLATFORM-BLOCKER-REGISTRY: все 24 исторических browser/OAuth/owner/provider/build пункта перенесены в `reports/evidence/platform-blocker-registry-2026-08.md` с причиной, статусом и условием разблокировки. Приёмки не возобновлялись; OAuth/owner mapping не менялись.
