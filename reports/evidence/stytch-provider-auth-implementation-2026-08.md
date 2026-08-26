@@ -56,10 +56,15 @@ Data-free Welcome сохраняет Google/Manus CTA и добавляет до
 
 ## Ограничения и следующий безопасный шаг
 
-Provider configuration и code-level contract готовы. Ограниченная live acceptance выявила provider acceptance blocker: public registration и same-browser login вернули generic safe error уже до подтверждения delivery. No raw provider error, credentials, password, token, mailbox content или user records не извлекались. До исправления provider-side acceptance нельзя утверждать delivery, callback, session, reset или logout live PASS.
+Provider password configuration и code-level contract готовы. Ограниченная live acceptance выявила provider acceptance blocker: public registration и same-browser login вернули generic safe error уже до подтверждения delivery. A separate documented non-delivery Stytch sandbox diagnostic confirmed Password Create and Authenticate, then returned the safe category `no_match_for_provided_magic_link_url` for the Magic Link request. Это означает, что server-derived callback URL отсутствует в Stytch project allowlist. No raw provider error message, request ID, credentials, password, token, mailbox content или user records не извлекались. До добавления exact callback URL в Stytch Dashboard нельзя утверждать delivery, callback, session, reset или logout live PASS.
+
+Официальная документация Stytch предоставляет sandbox values только в Test environment и только для прямых API calls. Email `sandbox@stytch.com` вызывает predetermined `200` в Password Create/Authenticate независимо от пароля, а также в Password Reset Start без фактической email delivery.[4] Такой путь позволяет проверить provider request semantics через текущий server adapter без повторной доставки на реальный mailbox, но не заменяет реальную email delivery acceptance. Для реальной delivery Stytch документирует отдельный E2E mailbox flow.[5]
 
 ## References
 
 [1]: https://stytch.com/docs/api-reference/consumer/api/passwords/strength-check "Stytch Consumer Password Strength Check"
 [2]: https://stytch.com/docs/api-reference/consumer/api/overview "Stytch Consumer API overview"
 [3]: https://supabase.com/docs/guides/auth/auth-identity-linking "Supabase Auth identity linking"
+[4]: https://stytch.com/docs/api-reference/consumer/api/magic-links-email/login-or-create "Stytch Consumer Magic Link Login or Create"
+[4]: https://stytch.com/docs/api-reference/consumer/api/resources/sandbox-values "Stytch Consumer Sandbox Values"
+[5]: https://stytch.com/docs/api-reference/consumer/api/resources/e2e-testing "Stytch Consumer E2E Testing"

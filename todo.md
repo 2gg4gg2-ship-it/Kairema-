@@ -45,9 +45,11 @@
 - [x] email-auth/STYTCH-PROVIDER-FLOWS: server-only registration/login, verification, recovery, reset и revoke реализованы официальным SDK без password/token persistence или raw provider errors.
 - [x] email-auth/STYTCH-EXPLICIT-LINKING: short-lived opaque link reference bound server-side к initiating canonical user, callback atomically consumes её только при same user + expiry; session-switch отклоняется, same-email auto-linking отсутствует.
 - [x] email-auth/STYTCH-UI: real provider-backed email login/register/verification/recovery states добавлены рядом с сохранённым Google/Manus CTA; public mobile visual check PASS без private data.
-- [ ] email-auth/LIVE-EMAIL-ACCEPTANCE: FAIL / BLOCKED BY PROVIDER ACCEPTANCE — 2026-08-26 согласованные public registration и same-browser login attempts на отдельном test mailbox вернули generic safe error; inbox не открывался, delivery/reset/callback/logout не подтверждены, дальнейшие attempts остановлены.
+- [ ] email-auth/LIVE-EMAIL-ACCEPTANCE: BLOCKED BY PROVIDER CALLBACK ALLOWLIST — public registration/login returned generic safe error; documented sandbox Password Create/Authenticate PASS, Magic Link stage returns safe `no_match_for_provided_magic_link_url`. Add exact server-derived `/api/stytch/callback` URL to Stytch project allowlist, then retry one delivery-only acceptance.
 - [x] email-auth/STYTCH-LINK-SESSION-SWITCH-REGRESSION: dedicated `server/stytch.security.test.ts` подтверждает canonical-user binding at creation, same-user atomic consume и expiry condition для denial после session-switch.
 - [x] email-auth/STYTCH-SDK-ENV-NORMALIZATION: server-only project-scoped environment нормализован к official SDK test/live base URLs, regression добавлен; confirmed focused `stytch.secret` + `stytch.security` + `auth.logout` suite PASS (3 files, 8 tests). Повторная public delivery acceptance выполнена, но остановлена generic provider acceptance error без раскрытия response.
+- [x] email-auth/STYTCH-SANDBOX-SEMANTICS: documented non-delivery server-adapter diagnostic PASS for Password Create and Authenticate; Magic Link safely classified `no_match_for_provided_magic_link_url`, isolating Stytch redirect allowlist as the delivery blocker.
+- [ ] email-auth/STYTCH-CALLBACK-ALLOWLIST: add exact configured HTTPS callback `{STYTCH_CALLBACK_BASE_URL}/api/stytch/callback` to Stytch Consumer Magic Link redirect/URL allowlist; do not use wildcard, query or untrusted host. Verify only through a new sandbox request after confirmation.
 
 ## Multi-user foundation — 2026-08
 
