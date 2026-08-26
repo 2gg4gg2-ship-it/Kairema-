@@ -100,6 +100,14 @@
 - [x] scale-load/VALIDATION: focused no-network harness test PASS (2 tests); `pnpm check`, `git diff --check` and evidence contract PASS. A later broad Vitest command had incomplete provider-test exclusions, so it is explicitly excluded from no-network evidence and no further provider-oriented test runs were performed. Production build was not run.
 - [x] scale-load/REPORT: Russian evidence at `reports/evidence/synthetic-load-test-results-2026-08.md` separates measured, simulated and unavailable metrics, limits, bottleneck interpretation and next low-risk step; it makes no 10K/50K readiness claim.
 
+## SCALE & STABILITY — instrumented non-production benchmark
+
+- [x] scale-instrumented/PLAN-SEAMS: documented no-network/non-production guardrails, workload tiers, metadata-only telemetry and real server-safe seams in `reports/evidence/instrumented-nonproduction-benchmark-plan-2026-08.md`.
+- [x] scale-instrumented/HARNESS: added isolated metadata-only harness that exercises the real chat-stream handler with injected in-memory repository/quota/provider adapters; production runtime, real DB/storage and providers are untouched.
+- [x] scale-instrumented/MEASURE: ran bounded 10/100/1K/10K/50K tiers plus actual 64-worker and 12-per-instance/2-per-user held-stream probes; raw results are in `reports/evidence/instrumented-nonproduction-local-results-2026-08.json`.
+- [x] scale-instrumented/VALIDATION: focused no-network harness regression PASS (2 tests), `pnpm check` PASS and `git diff --check` PASS; provider-oriented/real-network tests are excluded from evidence and production build was not run.
+- [x] scale-instrumented/REPORT: factual results, measured/simulated/unavailable metrics and the recorded 12-stream local saturation boundary are documented at `reports/evidence/instrumented-nonproduction-benchmark-results-2026-08.md`; no architecture or transcript-window work followed.
+
 ## Multi-user foundation — 2026-08
 
 - [x] multiuser/PLATFORM-BLOCKER-REGISTRY: все 24 исторических browser/OAuth/owner/provider/build пункта перенесены в `reports/evidence/platform-blocker-registry-2026-08.md` с причиной, статусом и условием разблокировки. Приёмки не возобновлялись; OAuth/owner mapping не менялись.
