@@ -51,6 +51,9 @@ type AIChatBoxProps = {
   uploadStatus?: string;
   composerSessionId?: string;
   language?: Language;
+  hasOlderHistory?: boolean;
+  isLoadingOlderHistory?: boolean;
+  onLoadOlderHistory?: () => void;
 };
 
 const copy = {
@@ -96,7 +99,7 @@ export function AIChatBox({
   messages, onSendMessage, onUploadFiles, isLoading = false, placeholder, className, height, emptyStateMessage,
   guestLoginAction,
   onExportMarkdown, onExportPdf, canExport = false, exportBusy = null, exportError = "",
-  onCopyAssistant, onCopyUser, onCancelStream, composerValue, onComposerValueChange, onOpenTemplates, uploadStatus = "", composerSessionId = "new-composer", language = "ru", onRemoveAttachment,
+  onCopyAssistant, onCopyUser, onCancelStream, composerValue, onComposerValueChange, onOpenTemplates, uploadStatus = "", composerSessionId = "new-composer", language = "ru", onRemoveAttachment, hasOlderHistory = false, isLoadingOlderHistory = false, onLoadOlderHistory,
 }: AIChatBoxProps) {
   const t = copy[language];
   const attachmentInputLabel = language === "ru" ? "Выбрать файл для вложения" : "Choose a file to attach";
@@ -108,6 +111,7 @@ export function AIChatBox({
   const [isPreparingAttachments, setIsPreparingAttachments] = useState(false);
   const [attachmentNotice, setAttachmentNotice] = useState("");
   const viewportRef = useRef<HTMLDivElement>(null);
+  const preserveHistoryScrollRef = useRef<{ height: number; top: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -189,7 +193,24 @@ export function AIChatBox({
   };
   const closeTextSelection = () => { window.getSelection()?.removeAllRanges(); setSelectedText(""); setLongPressMessageIndex(null); setSelectionModeMessageIndex(null); setSelectionNotice(""); };
 
-  useEffect(() => { viewportRef.current?.scrollTo?.({ top: viewportRef.current.scrollHeight, behavior: "smooth" }); }, [displayMessages.length, isLoading]);
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const pending = preserveHistoryScrollRef.current;
+    if (pending) {
+      if (!isLoadingOlderHistory && viewport.scrollHeight > pending.height) {
+        viewport.scrollTop = pending.top + (viewport.scrollHeight - pending.height);
+        preserveHistoryScrollRef.current = null;
+      }
+      return;
+    }
+    if (!isLoadingOlderHistory) viewport.scrollTo?.({ top: viewport.scrollHeight, behavior: "smooth" });
+  }, [displayMessages.length, isLoading, isLoadingOlderHistory]);
+  const loadOlderHistory = () => {
+    const viewport = viewportRef.current;
+    if (viewport) preserveHistoryScrollRef.current = { height: viewport.scrollHeight, top: viewport.scrollTop };
+    onLoadOlderHistory?.();
+  };
   useEffect(() => {
     const syncSelection = () => { if (selectionModeMessageIndex !== null) captureSelectedText(selectionModeMessageIndex); };
     document.addEventListener("selectionchange", syncSelection);
@@ -294,7 +315,7 @@ export function AIChatBox({
       {(onExportMarkdown || onExportPdf) && <div className="kairema-chat-tools"><span>{t.history}</span><div className="kairema-export-actions"><button type="button" onClick={onExportMarkdown} disabled={!canExport || Boolean(exportBusy)} className="kairema-export-button"><FileText className="size-3.5" />{exportBusy === "markdown" ? t.preparing : t.markdown}</button><button type="button" onClick={onExportPdf} disabled={!canExport || Boolean(exportBusy)} className="kairema-export-button"><Download className="size-3.5" />{exportBusy === "pdf" ? t.preparing : t.pdf}</button></div></div>}
       {exportError && <p className="kairema-export-error" role="status">{exportError}</p>}
       <div ref={viewportRef} className="min-h-0 flex-1 overflow-y-auto">
-        {displayMessages.length === 0 ? <div className="flex min-h-[420px] flex-col items-center justify-center px-6 text-center"><div className="kairema-orb mb-6"><Sparkles className="size-7" /></div><h2 className="text-2xl font-semibold tracking-tight text-foreground">{emptyStateMessage}</h2><p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">{t.fourRoles}</p>{guestLoginAction && <button type="button" className="kairema-guest-login kairema-guest-login-empty" onClick={guestLoginAction.onClick}><LogIn className="size-4" /><span>{guestLoginAction.label}</span></button>}</div> : <div className="mx-auto flex w-full max-w-4xl flex-col gap-7 px-4 py-7 sm:px-8">{displayMessages.map((message, index) => <article key={message.id ?? `${message.role}-${index}`} className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
+        {displayMessages.length === 0 ? <div className="flex min-h-[420px] flex-col items-center justify-center px-6 text-center"><div className="kairema-orb mb-6"><Sparkles className="size-7" /></div><h2 className="text-2xl font-semibold tracking-tight text-foreground">{emptyStateMessage}</h2><p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">{t.fourRoles}</p>{guestLoginAction && <button type="button" className="kairema-guest-login kairema-guest-login-empty" onClick={guestLoginAction.onClick}><LogIn className="size-4" /><span>{guestLoginAction.label}</span></button>}</div> : <div className="mx-auto flex w-full max-w-4xl flex-col gap-7 px-4 py-7 sm:px-8">{hasOlderHistory && <div className="flex justify-center"><button type="button" className="kairema-export-button" onClick={loadOlderHistory} disabled={isLoadingOlderHistory}>{isLoadingOlderHistory ? (language === "ru" ? "Загрузка…" : "Loading…") : (language === "ru" ? "Загрузить более ранние сообщения" : "Load older messages")}</button></div>}{displayMessages.map((message, index) => <article key={message.id ?? `${message.role}-${index}`} className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
           {message.role === "assistant" && <div className="kairema-avatar kairema-avatar-ai"><Sparkles className="size-4" /></div>}<div onPointerDown={(event) => startLongPress(index, event.pointerType || "touch")} onPointerUp={clearLongPress} onPointerCancel={clearLongPress} onPointerMove={clearLongPress} onTouchStart={() => startLongPress(index, "touch")} onTouchEnd={clearLongPress} onTouchCancel={clearLongPress} onContextMenu={(event) => handleMessageContextMenu(index, event)} className={cn("max-w-[86%] sm:max-w-[76%]", message.role === "user" && "flex flex-col items-end")}><div ref={(node) => { if (node) messageTextRefs.current.set(index, node); else messageTextRefs.current.delete(index); }} onPointerUp={() => captureSelectedText(index)} onTouchEnd={() => captureSelectedText(index)} onContextMenu={(event) => handleMessageContextMenu(index, event)} tabIndex={selectionModeMessageIndex === index ? 0 : undefined} className={cn("kairema-message", message.role === "user" ? "kairema-message-user" : "kairema-message-ai", message.isError && "kairema-message-error", selectionModeMessageIndex === index && "kairema-message-selection-mode")}>{message.role === "assistant" && !message.isError ? <div className="kairema-markdown text-sm leading-6"><InlineMarkdown text={redactLegacyAssistantReferences(message.content)} language={language} /></div> : <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>}</div>
           {message.role === "user" && Boolean(message.attachments?.length) && <div className="kairema-message-attachments" aria-label={language === "ru" ? "Вложения сообщения" : "Message attachments"}>{message.attachments?.map((attachment) => <button key={attachment.id} type="button" className="kairema-attachment-chip kairema-attachment-open" onClick={() => { if (!consumeLongPressClick(index)) setPreviewAttachment(attachment); }} aria-label={`${t.preview}: ${attachment.fileName}`}>{attachment.kind === "image" && attachment.previewUrl ? <img src={attachment.previewUrl} alt="" className="kairema-message-image" /> : attachment.kind === "image" ? <FileImage className="size-3.5" /> : <FileText className="size-3.5" />}{attachment.kind === "document" && <span>{attachment.fileName}{formatAttachmentSize(attachment.sizeBytes) ? ` · ${formatAttachmentSize(attachment.sizeBytes)}` : ""}</span>}</button>)}</div>}
           {message.role === "assistant" && message.providerLabel && <p className="mt-2 px-1 text-xs text-muted-foreground">{message.providerLabel} · {message.model} · {message.status}</p>}

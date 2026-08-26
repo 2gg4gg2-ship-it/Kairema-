@@ -5,6 +5,7 @@ import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAudit
 import { providerHealthHistory } from "../drizzle/schema";
 import { stytchLinkIntents } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { decodeHistoryPageCursor, encodeHistoryPageCursor, normalizeHistoryPageLimit } from "./history-pagination";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -251,6 +252,37 @@ export async function listSessionMessages(userId: number, sessionId: string): Pr
   const db = requireDatabase(await getDb());
   requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
   return db.select().from(messages).where(eq(messages.sessionId, sessionId)).orderBy(asc(messages.createdAt), asc(messages.id));
+}
+
+function historyCursorSecret() {
+  if (!ENV.cookieSecret) throw new Error("Безопасная пагинация истории временно недоступна.");
+  return ENV.cookieSecret;
+}
+
+/**
+ * Opt-in user-scoped history page. The legacy full-history helper remains the
+ * contract for provider context, exports and existing API callers.
+ */
+export async function listSessionMessagesPage(userId: number, sessionId: string, input: { before?: string; limit?: number } = {}) {
+  const db = requireDatabase(await getDb());
+  requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
+  const cursorSecret = historyCursorSecret();
+  const limit = normalizeHistoryPageLimit(input.limit);
+  const cursor = input.before ? decodeHistoryPageCursor(cursorSecret, sessionId, input.before) : null;
+  if (input.before && !cursor) throw new Error("Некорректный курсор истории.");
+  const beforeDate = cursor ? new Date(cursor.createdAt) : null;
+  const where = cursor && beforeDate
+    ? and(eq(messages.sessionId, sessionId), or(lt(messages.createdAt, beforeDate), and(eq(messages.createdAt, beforeDate), lt(messages.id, cursor.id))))
+    : eq(messages.sessionId, sessionId);
+  const rows = await db.select().from(messages).where(where).orderBy(desc(messages.createdAt), desc(messages.id)).limit(limit + 1);
+  const hasOlder = rows.length > limit;
+  const newestFirstPage = hasOlder ? rows.slice(0, limit) : rows;
+  const oldest = newestFirstPage[newestFirstPage.length - 1];
+  return {
+    messages: [...newestFirstPage].reverse(),
+    nextCursor: hasOlder && oldest ? encodeHistoryPageCursor(cursorSecret, sessionId, { createdAt: oldest.createdAt.getTime(), id: oldest.id }) : null,
+    pageSize: limit,
+  };
 }
 
 /**

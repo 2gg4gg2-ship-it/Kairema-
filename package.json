@@ -13,6 +13,7 @@
     "benchmark:synthetic": "node scripts/synthetic-load-benchmark.mjs",
     "benchmark:instrumented": "tsx scripts/instrumented-nonproduction-benchmark.ts",
     "benchmark:db-storage": "tsx scripts/db-storage-benchmark.ts",
+    "benchmark:history-pagination": "tsx scripts/history-pagination-benchmark.ts",
     "db:push": "drizzle-kit generate && drizzle-kit migrate"
   },
   "dependencies": {

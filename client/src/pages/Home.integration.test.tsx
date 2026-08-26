@@ -8,11 +8,13 @@ const fixtures = vi.hoisted(() => ({
   sessionId: "11111111-1111-4111-8111-111111111111",
   sessions: [] as Array<{ id: string; modelId: string; title: string }>,
   messages: [] as Array<{ id: number; role: "user" | "assistant"; content: string; modelId: string | null; createdAt: Date; metadata?: string }>,
+  historyNextCursor: null as string | null,
   attachments: [] as Array<{ id: string; fileName: string; contentType: string; byteSize: number; kind: "image" | "document"; previewUrl: string }>,
   prepareMarkdown: vi.fn(),
   preparePdf: vi.fn(),
   downloadPrepared: vi.fn(),
   invalidateMessages: vi.fn(),
+  historyPageFetch: vi.fn(),
   invalidateSessions: vi.fn(),
   createChat: vi.fn(),
   deleteChat: vi.fn(),
@@ -81,6 +83,7 @@ vi.mock("@/lib/trpc", () => ({
     chats: {
       list: { useQuery: () => ({ data: fixtures.sessions, isLoading: false }) },
       messages: { useQuery: () => ({ data: fixtures.messages }) },
+      historyPage: { useQuery: () => ({ data: { messages: fixtures.messages, nextCursor: fixtures.historyNextCursor }, isLoading: false }) },
       draft: { useQuery: (input: { sessionId: string }) => { fixtures.draftQueryInput = input; return { data: fixtures.draft, isLoading: false }; } },
       create: { useMutation: () => ({ mutateAsync: fixtures.createChat, isPending: false }) },
       delete: { useMutation: () => ({ mutateAsync: fixtures.deleteChat, isPending: false }) },
@@ -88,7 +91,7 @@ vi.mock("@/lib/trpc", () => ({
       saveDraft: { useMutation: () => ({ mutateAsync: fixtures.saveDraft, isPending: false }) },
       clearDraft: { useMutation: () => ({ mutateAsync: fixtures.clearDraft, isPending: false }) },
     },
-    useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: fixtures.downloadExport } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, list: { invalidate: fixtures.invalidateSessions } } }),
+    useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: fixtures.downloadExport } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, historyPage: { invalidate: fixtures.invalidateMessages, fetch: fixtures.historyPageFetch }, list: { invalidate: fixtures.invalidateSessions } } }),
   },
 }));
 vi.mock("@/components/ui/dialog", () => ({
@@ -113,6 +116,7 @@ function resetFixtures() {
     { id: 1, role: "user", content: "Старое сообщение пользователя", modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:00:00.000Z") },
     { id: 2, role: "assistant", content: "Старый ответ Kairema", modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:01:00.000Z") },
   ];
+  fixtures.historyNextCursor = null;
   fixtures.attachments = [];
   fixtures.createExport.mockReset().mockImplementation(async ({ sessionId, format }: { sessionId: string; format: "markdown" | "pdf" }) => ({ id: format === "markdown" ? "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" : "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", sessionId, fileName: `Активная история.${format === "markdown" ? "md" : "pdf"}`, format, byteSize: 100, createdAt: new Date("2026-08-25T00:00:00.000Z") }));
   fixtures.deleteExport.mockReset().mockResolvedValue({ success: true });
@@ -132,6 +136,7 @@ function resetFixtures() {
   fixtures.createChat.mockReset().mockResolvedValue({ id: "22222222-2222-4222-8222-222222222222", modelId: "fast", title: "Новый разговор" });
   fixtures.deleteChat.mockReset().mockResolvedValue({ success: true });
   fixtures.clearHistory.mockReset().mockResolvedValue({ success: true, deletedCount: 1 });
+  fixtures.historyPageFetch.mockReset().mockResolvedValue({ messages: [], nextCursor: null });
   fixtures.updateSettings.mockReset().mockResolvedValue(undefined);
   fixtures.draft = null;
   fixtures.draftQueryInput = null;
@@ -251,7 +256,7 @@ describe("Home integration flows", () => {
     await user.click(screen.getByRole("button", { name: "Удалить чат" }));
     await waitFor(() => expect(fixtures.deleteChat).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
     await waitFor(() => expect(fixtures.invalidateSessions).toHaveBeenCalled());
-    expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId });
+    expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 });
   });
 
   it("submits an active chat deletion only once when confirmation is activated repeatedly", async () => {
@@ -286,7 +291,7 @@ describe("Home integration flows", () => {
     await user.dblClick(screen.getByRole("button", { name: "Да, удалить всё" }));
     await waitFor(() => expect(fixtures.clearHistory).toHaveBeenCalledOnce());
     await waitFor(() => expect(fixtures.invalidateSessions).toHaveBeenCalled());
-    expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId });
+    expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 });
   });
 
   it("creates server-side Markdown and PDF exports for only the active persisted history", async () => {
@@ -451,7 +456,7 @@ describe("Home integration flows", () => {
     expect(screen.queryByText("Первый фрагмент ответа")).toBeNull();
     fixtures.releaseSecondDelta?.();
 
-    await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
+    await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 }));
     await waitFor(() => expect(screen.getByText("Первый фрагмент ответа")).toBeTruthy());
     await waitFor(() => expect(fixtures.clearDraft).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
     expect((composer as HTMLTextAreaElement).value).toBe("");
@@ -487,7 +492,7 @@ describe("Home integration flows", () => {
 
     await waitFor(() => expect(screen.getByText(/Не удалось начать потоковый ответ|Service Unavailable/)).toBeTruthy());
     expect(screen.getAllByRole("button", { name: "Открыть предпросмотр: vision.png" }).length).toBeGreaterThanOrEqual(1);
-    await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
+    await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 }));
     expect((screen.getByPlaceholderText("Напишите сообщение…") as HTMLTextAreaElement).value).toBe("Проверь вложение");
     expect(fixtures.clearDraft).not.toHaveBeenCalled();
   });
@@ -517,7 +522,7 @@ describe("Home integration flows", () => {
     await user.type(screen.getByPlaceholderText("Напишите сообщение…"), "Проверь вложение");
     await user.keyboard("{Enter}");
 
-    await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
+    await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 }));
     expect(screen.getByRole("button", { name: "Открыть предпросмотр: vision.png" })).toBeTruthy();
   });
 
@@ -548,7 +553,7 @@ describe("Home integration flows", () => {
     await screen.findByRole("button", { name: "Отменить генерацию" });
     await user.click(screen.getByRole("button", { name: "Отменить генерацию" }));
 
-    await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
+    await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Отменить генерацию" })).toBeNull());
     expect((composer as HTMLTextAreaElement).value).toBe("Отменяемый запрос");
     expect(fixtures.clearDraft).not.toHaveBeenCalled();

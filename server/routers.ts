@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag } from "./db";
+import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { clearStytchLinkIntentCookie, clearStytchResetCookie, clearStytchSessionCookie, getSafeStytchDeliveryFailure, getStytchCallbackUrl, getStytchClient, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
 import { resolveOrCreateProviderUser } from "./db";
@@ -421,6 +421,18 @@ export const appRouter = router({
         try {
           return await listSessionMessages(ctx.user.id, input.sessionId);
         } catch (error) {
+          throw new TRPCError({ code: "NOT_FOUND", message: storageError(error) });
+        }
+      }),
+    historyPage: protectedProcedure
+      .input(z.object({ sessionId: z.string().uuid(), before: z.string().min(1).max(512).optional(), limit: z.number().int().min(1).max(100).default(60) }))
+      .query(async ({ ctx, input }) => {
+        try {
+          return await listSessionMessagesPage(ctx.user.id, input.sessionId, { before: input.before, limit: input.limit });
+        } catch (error) {
+          if (error instanceof Error && error.message.includes("Курсор истории")) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Некорректный курсор истории." });
+          }
           throw new TRPCError({ code: "NOT_FOUND", message: storageError(error) });
         }
       }),

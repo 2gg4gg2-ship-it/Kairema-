@@ -1,0 +1,117 @@
+{
+  "generatedAt": "2026-08-26T09:39:06.855Z",
+  "scope": "isolated-in-memory-simulation",
+  "networkGuardBlockedAttempts": 0,
+  "pageLimit": 60,
+  "tiers": [
+    {
+      "historyRecords": 100,
+      "iterations": 200,
+      "pageLimit": 60,
+      "legacy": {
+        "resultRecords": 100,
+        "metadataBytes": 3593,
+        "logicalRecordsReturned": 20000,
+        "p50Ms": 0.00018099999999776628,
+        "p95Ms": 0.0009009999999989304,
+        "p99Ms": 0.004446000000001504
+      },
+      "paged": {
+        "firstPageRecords": 60,
+        "nextPageRecords": 40,
+        "pagePairMetadataBytes": 3593,
+        "logicalRecordsReturned": 20000,
+        "binarySearchComparisonsPerNextPage": 6,
+        "p50Ms": 0.012137999999993099,
+        "p95Ms": 0.022244000000000597,
+        "p99Ms": 0.1747530000000097
+      },
+      "boundedResponseRatio": 1,
+      "rssDeltaBytes": 1421312,
+      "cpuMs": 4.348
+    },
+    {
+      "historyRecords": 1000,
+      "iterations": 200,
+      "pageLimit": 60,
+      "legacy": {
+        "resultRecords": 1000,
+        "metadataBytes": 36894,
+        "logicalRecordsReturned": 200000,
+        "p50Ms": 0.001040999999986525,
+        "p95Ms": 0.0023429999999962092,
+        "p99Ms": 0.005268000000000939
+      },
+      "paged": {
+        "firstPageRecords": 60,
+        "nextPageRecords": 60,
+        "pagePairMetadataBytes": 4442,
+        "logicalRecordsReturned": 24000,
+        "binarySearchComparisonsPerNextPage": 10,
+        "p50Ms": 0.01175800000001459,
+        "p95Ms": 0.024607000000003154,
+        "p99Ms": 0.05348000000000752
+      },
+      "boundedResponseRatio": 0.12,
+      "rssDeltaBytes": 405504,
+      "cpuMs": 5.531
+    },
+    {
+      "historyRecords": 10000,
+      "iterations": 200,
+      "pageLimit": 60,
+      "legacy": {
+        "resultRecords": 10000,
+        "metadataBytes": 378895,
+        "logicalRecordsReturned": 2000000,
+        "p50Ms": 0.007001999999999953,
+        "p95Ms": 0.028672999999997728,
+        "p99Ms": 0.22692200000000184
+      },
+      "paged": {
+        "firstPageRecords": 60,
+        "nextPageRecords": 60,
+        "pagePairMetadataBytes": 4562,
+        "logicalRecordsReturned": 24000,
+        "binarySearchComparisonsPerNextPage": 14,
+        "p50Ms": 0.011117000000012922,
+        "p95Ms": 0.02499700000001326,
+        "p99Ms": 0.034072000000008984
+      },
+      "boundedResponseRatio": 0.012,
+      "rssDeltaBytes": 5128192,
+      "cpuMs": 10.702
+    },
+    {
+      "historyRecords": 50000,
+      "iterations": 200,
+      "pageLimit": 60,
+      "legacy": {
+        "resultRecords": 50000,
+        "metadataBytes": 1938895,
+        "logicalRecordsReturned": 10000000,
+        "p50Ms": 0.10608100000001741,
+        "p95Ms": 0.41269300000001863,
+        "p99Ms": 1.7736459999999852
+      },
+      "paged": {
+        "firstPageRecords": 60,
+        "nextPageRecords": 60,
+        "pagePairMetadataBytes": 4681,
+        "logicalRecordsReturned": 24000,
+        "binarySearchComparisonsPerNextPage": 16,
+        "p50Ms": 0.012247999999999593,
+        "p95Ms": 0.02842300000000364,
+        "p99Ms": 0.062404000000015
+      },
+      "boundedResponseRatio": 0.0024,
+      "rssDeltaBytes": 11350016,
+      "cpuMs": 63.557
+    }
+  ],
+  "notes": [
+    "Synthetic records contain only numeric id/createdAt metadata; no user data, DB, S3, router, provider or external network is imported.",
+    "Latency/RSS/CPU are local process measurements of this model, not production DB, storage, network, socket or LLM metrics.",
+    "The paged model performs two 60-record pages (or fewer at end); legacy model returns the whole synthetic history."
+  ]
+}

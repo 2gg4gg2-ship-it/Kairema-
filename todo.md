@@ -136,6 +136,16 @@
 - [x] scale-db-evidence/RECOMMENDATIONS: ranked exactly three additive index candidates as deferred and documented backward-compatible opt-in history pagination only; neither is implemented.
 - [x] scale-db-evidence/VALIDATION-REPORT: published strict evidence-only report at `reports/evidence/scale-stability-db-cardinality-explain-2026-08.md`; focused deterministic no-network suite PASS (25 tests / 4 files), `pnpm check` PASS and `git diff --check` PASS.
 
+## SCALE & STABILITY — opt-in history pagination
+
+- [x] scale-pagination/AUDIT: inventoried full-history/list callers, existing UX contract and stable ordering; LLM context, exports and memory semantics are unchanged.
+- [x] scale-pagination/DESIGN: implemented scoped opaque signed cursor, default 60/hard max 100 page sizes, first/next/end/invalid/stale behavior and opt-in backwards-compatible boundary.
+- [x] scale-pagination/IMPLEMENTATION: added only user/chat-scoped paged history path and client lazy loading; legacy full-history callers, data, indexes and schema remain unchanged.
+- [x] scale-pagination/TESTS: no-network regression covers ordering, first/next/end/empty/duplicate/concurrent-insert/invalid-or-stale cursor, user/chat isolation, response bound, legacy path and Home lazy history integration.
+- [x] scale-pagination/BENCHMARK: deterministic no-network synthetic comparison added and executed; strict JSON artifact records legacy/page records, latency proxy, comparisons, RSS and CPU without DB/storage/provider access.
+- [x] scale-pagination/CARDINALITY-POLICY: report documents relative cardinality/EXPLAIN re-review triggers and deferred index candidates; no index was created.
+- [x] scale-pagination/REPORT: Russian evidence report at `reports/evidence/scale-stability-opt-in-history-pagination-2026-08.md` completed; focused 66-test suite, `pnpm check` and `git diff --check` PASS; work stopped before transcript-window or index work.
+
 ## Multi-user foundation — 2026-08
 
 - [x] multiuser/PLATFORM-BLOCKER-REGISTRY: все 24 исторических browser/OAuth/owner/provider/build пункта перенесены в `reports/evidence/platform-blocker-registry-2026-08.md` с причиной, статусом и условием разблокировки. Приёмки не возобновлялись; OAuth/owner mapping не менялись.
