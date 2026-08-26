@@ -35,7 +35,7 @@
 - [x] email-auth/NO-MIGRATION-GUARD: рекомендуемый Stytch path не требует переноса Kairema database/chats/memory/attachments/exports/backend; canonical internal user remains server-owned.
 - [x] email-auth/SAFE-PATH-DECISION: пользователь подтвердил Stytch Consumer Authentication; server-only configuration validation PASS через non-mutating Password Strength Check. Фиктивные forms/email delivery не добавлялись.
 - [x] email-auth/IMPLEMENTATION: provider-backed register/login/verification/reset/logout/linking реализованы через existing canonical users model, server-side verified Stytch session, short-lived server-bound link intent и fixed trusted callback origin; Manus OAuth сохранён.
-- [x] email-auth/SECURITY-REGRESSIONS: PASS: OAuth precedence/preservation, guest/private server boundary, generic delivery response, verified user scope, explicit linking/session-switch denial и logout/session cleanup; full suite 58 passed, 1 skipped; 278 passed, 4 skipped.
+- [x] email-auth/SECURITY-REGRESSIONS: PASS: OAuth precedence/preservation, guest/private server boundary, generic delivery response, verified user scope, explicit linking/session-switch denial и logout/session cleanup; final full suite 58 passed, 1 skipped; 279 passed, 4 skipped.
 - [x] email-auth/VALIDATION-REPORT: `reports/evidence/stytch-provider-auth-implementation-2026-08.md` фиксирует exact PASS/NOT VERIFIED. Live email delivery и browser acceptance честно не заявлены.
 
 ### Stytch implementation detail — 2026-08
@@ -45,8 +45,9 @@
 - [x] email-auth/STYTCH-PROVIDER-FLOWS: server-only registration/login, verification, recovery, reset и revoke реализованы официальным SDK без password/token persistence или raw provider errors.
 - [x] email-auth/STYTCH-EXPLICIT-LINKING: short-lived opaque link reference bound server-side к initiating canonical user, callback atomically consumes её только при same user + expiry; session-switch отклоняется, same-email auto-linking отсутствует.
 - [x] email-auth/STYTCH-UI: real provider-backed email login/register/verification/recovery states добавлены рядом с сохранённым Google/Manus CTA; public mobile visual check PASS без private data.
-- [ ] email-auth/LIVE-EMAIL-ACCEPTANCE: NOT VERIFIED — отдельный test mailbox ещё не использовался; выполнить только с явным disposable address и без открытия существующей пользовательской переписки.
+- [ ] email-auth/LIVE-EMAIL-ACCEPTANCE: FAIL / BLOCKED BY PROVIDER ACCEPTANCE — 2026-08-26 согласованные public registration и same-browser login attempts на отдельном test mailbox вернули generic safe error; inbox не открывался, delivery/reset/callback/logout не подтверждены, дальнейшие attempts остановлены.
 - [x] email-auth/STYTCH-LINK-SESSION-SWITCH-REGRESSION: dedicated `server/stytch.security.test.ts` подтверждает canonical-user binding at creation, same-user atomic consume и expiry condition для denial после session-switch.
+- [x] email-auth/STYTCH-SDK-ENV-NORMALIZATION: server-only project-scoped environment нормализован к official SDK test/live base URLs, regression добавлен; confirmed focused `stytch.secret` + `stytch.security` + `auth.logout` suite PASS (3 files, 8 tests). Повторная public delivery acceptance выполнена, но остановлена generic provider acceptance error без раскрытия response.
 
 ## Multi-user foundation — 2026-08
 

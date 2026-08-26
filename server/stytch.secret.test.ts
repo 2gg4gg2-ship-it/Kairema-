@@ -6,6 +6,16 @@ function getStytchProjectEndpoint(environment: string) {
   throw new Error("STYTCH_ENVIRONMENT должен обозначать test или live environment");
 }
 
+describe("Stytch SDK environment normalization", () => {
+  it("maps project-scoped labels to official SDK API base URLs", async () => {
+    const { stytchSdkEnvironment } = await import("./stytch");
+
+    expect(stytchSdkEnvironment("test")).toBe("https://test.stytch.com/");
+    expect(stytchSdkEnvironment("test-project")).toBe("https://test.stytch.com/");
+    expect(stytchSdkEnvironment("live-project")).toBe("https://api.stytch.com/");
+  });
+});
+
 describe("Stytch Consumer configuration", () => {
   it("accepts a lightweight server-side project health check without exposing credentials", async () => {
     const projectId = process.env.STYTCH_PROJECT_ID?.trim();

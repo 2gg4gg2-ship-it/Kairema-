@@ -25,12 +25,23 @@ function requiredEnv(name: "STYTCH_PROJECT_ID" | "STYTCH_SECRET" | "STYTCH_ENVIR
   return value;
 }
 
+/**
+ * The secure form stores Stytch project environments as `test-*` or `live-*`.
+ * The official SDK accepts base URLs, not project-scoped labels: passing
+ * `test-foo` directly turns it into an invalid custom base URL.
+ */
+export function stytchSdkEnvironment(environment: string) {
+  if (environment === "test" || environment.startsWith("test-")) return "https://test.stytch.com/";
+  if (environment === "live" || environment.startsWith("live-")) return "https://api.stytch.com/";
+  throw new StytchProviderError("UNAVAILABLE");
+}
+
 /** Server-only official SDK client. Credentials never reach the client bundle. */
 export function getStytchClient() {
   return new Stytch.Client({
     project_id: requiredEnv("STYTCH_PROJECT_ID"),
     secret: requiredEnv("STYTCH_SECRET"),
-    env: requiredEnv("STYTCH_ENVIRONMENT"),
+    env: stytchSdkEnvironment(requiredEnv("STYTCH_ENVIRONMENT")),
   });
 }
 
