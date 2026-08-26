@@ -119,6 +119,14 @@
 - [x] scale-db-benchmark/VALIDATION: focused no-network admission/gauge/benchmark/security tests PASS (3 files, 19 tests), `pnpm check` PASS and `git diff --check` PASS; provider suites and production build were not run.
 - [x] scale-db-benchmark/REPORT: unified Russian evidence report at `reports/evidence/scale-stability-admission-db-storage-evidence-2026-08.md` separates measured/simulated/unmeasured results, bottlenecks, external blockers and low-risk next steps; work stopped before transcript-window/memory-dedup/new infrastructure.
 
+## SCALE & STABILITY — read-only SQL/index review
+
+- [x] scale-sql-review/SCOPE: preserved all published hardening/admission/gauge/benchmark results; completed source/schema/deterministic evidence review only, with no migration, index, schema, transcript-window, memory-dedup, provider or storage-system change.
+- [x] scale-sql-review/INVENTORY: mapped declared schema indexes and actual server-side filters/order/pagination for full-history and growing user-scoped collections.
+- [x] scale-sql-review/ANALYSIS: documented evidence for full-history reads, repeated reads, N-per-item storage fan-out, aggregates, CAS/duplicate patterns and scale dimensions; unobservable DB/storage costs are explicitly marked not measured.
+- [x] scale-sql-review/SECURITY: source-level user isolation and owner-only boundaries reviewed against each candidate; no authorization predicate or owner control changed.
+- [x] scale-sql-review/REPORT: published requested evidence-only SQL/index review at `reports/evidence/scale-stability-sql-index-review-2026-08.md` with benefit/cost/risk candidates and stop condition before implementation.
+
 ## Multi-user foundation — 2026-08
 
 - [x] multiuser/PLATFORM-BLOCKER-REGISTRY: все 24 исторических browser/OAuth/owner/provider/build пункта перенесены в `reports/evidence/platform-blocker-registry-2026-08.md` с причиной, статусом и условием разблокировки. Приёмки не возобновлялись; OAuth/owner mapping не менялись.
