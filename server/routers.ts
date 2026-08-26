@@ -330,12 +330,16 @@ export const appRouter = router({
   }),
   webSearch: router({
     status: protectedProcedure.query(async () => getWebSearchStatus()),
-    probe: protectedProcedure.mutation(async () => probeWebSearchStatus()),
+    probe: protectedProcedure.mutation(async ({ ctx }) => {
+      requireOwner(ctx);
+      return probeWebSearchStatus();
+    }),
   }),
   knowledge: router({
     status: protectedProcedure.query(async () => getKnowledgeStatus()),
     audit: protectedProcedure.query(async ({ ctx }) => getKnowledgeAudit(Boolean(ENV.ownerOpenId && ctx.user.openId === ENV.ownerOpenId))),
-    refresh: protectedProcedure.mutation(async () => {
+    refresh: protectedProcedure.mutation(async ({ ctx }) => {
+      requireOwner(ctx);
       const current = await getKnowledgeStatus();
       const latest = current.runs[0];
       if (latest && Date.now() - latest.startedAt.getTime() < 60_000) {

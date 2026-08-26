@@ -153,6 +153,13 @@
 - [x] transcript-window/BENCHMARK: execute strict local no-network synthetic before/after comparison across history sizes, recording reads/query proxy, selection size, context growth, latency proxy, RSS/CPU when available.
 - [x] transcript-window/REPORT: write the required Russian evidence report, complete focused validation, `pnpm check`, and `git diff --check`; do not run production build or start index/memory-policy work.
 
+- [x] final-security-audit/INVENTORY: complete source-level, read-only inventory of auth/session, user-scoped entities, critical mutations, provider/search/error paths, telemetry and ownership boundaries.
+- [x] final-security-audit/SYNTHETIC-ISOLATION: execute deterministic no-network audit coverage with at least two isolated synthetic identities, direct foreign-ID denial, concurrent/retry and graceful-degradation scenarios.
+- [x] final-security-audit/FINDINGS: document each verified finding and apply only evidence-backed, minimal low-risk fixes; do not add features, infrastructure, migrations, provider calls or Stytch delivery attempts.
+- [x] final-security-audit/FIX-OPERATIONAL-PROBES: restrict external `webSearch.probe` and RSS-writing `knowledge.refresh` mutations to the existing verified owner guard; retain read-only status/audit DTO access and do not invoke either external operation.
+- [x] final-security-audit/VALIDATION: run focused security/isolation/concurrency suite, `pnpm check`, `git diff --check`, and strict report/tracker checks; do not run production build.
+- [x] final-security-audit/REPORT: publish the Russian final audit report with all required headings and explicit PASS/FAIL/FIXED/UNMEASURED/EXTERNAL BLOCKER statuses, then stop before export/index/production work.
+
 ## Multi-user foundation — 2026-08
 
 - [x] multiuser/PLATFORM-BLOCKER-REGISTRY: все 24 исторических browser/OAuth/owner/provider/build пункта перенесены в `reports/evidence/platform-blocker-registry-2026-08.md` с причиной, статусом и условием разблокировки. Приёмки не возобновлялись; OAuth/owner mapping не менялись.
