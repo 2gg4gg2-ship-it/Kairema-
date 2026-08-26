@@ -160,6 +160,14 @@
 - [x] final-security-audit/VALIDATION: run focused security/isolation/concurrency suite, `pnpm check`, `git diff --check`, and strict report/tracker checks; do not run production build.
 - [x] final-security-audit/REPORT: publish the Russian final audit report with all required headings and explicit PASS/FAIL/FIXED/UNMEASURED/EXTERNAL BLOCKER statuses, then stop before export/index/production work.
 
+- [x] failure-audit/INVENTORY: source-level inventory of current failure guards, error contracts, cancellation/replay rules and focused no-network tests across chat, search, memory, attachments, exports, drafts, auth, telemetry, SSE and persistence.
+- [x] failure-audit/SIMULATION: run or add deterministic no-network failure simulations for required component failures, malformed responses, HTTP classifications, oversized/invalid input, duplicate retry, timeout/cancellation and capacity exhaustion.
+- [x] failure-audit/FIXES: record each actual defect and apply only a minimal evidence-backed low-risk fix with regression coverage; do not alter auth, Stytch, OAuth, roles, router, providers, schema or infrastructure unless a mandatory safety fix requires it.
+- [x] failure-audit/FIX-UPLOAD-SAFE-ERROR: preserve client-safe attachment validation messages, but replace unknown storage/database upload errors at the binary HTTP boundary with a generic retry-safe response; add a no-network regression proving no raw internal message escapes.
+- [x] failure-audit/FIX-TRPC-UNEXPECTED-ERROR: replace raw messages of unexpected tRPC internal errors with a stable generic JSON-safe message while preserving deliberate `TRPCError` contracts; add deterministic formatter coverage.
+- [x] failure-audit/VALIDATION: complete focused failure/degradation suite, `pnpm check`, `git diff --check`, report heading and closed-tracker checks; do not run production build or real external calls.
+- [x] failure-audit/REPORT: write Russian evidence with COMPONENT, FAILURE SIMULATION, EXPECTED BEHAVIOR, ACTUAL RESULT, FIXED ISSUES, REGRESSION TESTS and UNMEASURED LIMITATIONS, then stop before index work or new features.
+
 ## Multi-user foundation — 2026-08
 
 - [x] multiuser/PLATFORM-BLOCKER-REGISTRY: все 24 исторических browser/OAuth/owner/provider/build пункта перенесены в `reports/evidence/platform-blocker-registry-2026-08.md` с причиной, статусом и условием разблокировки. Приёмки не возобновлялись; OAuth/owner mapping не менялись.

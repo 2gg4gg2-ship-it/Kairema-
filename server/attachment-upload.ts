@@ -1,10 +1,22 @@
 import type { Express, Request, Response } from "express";
 import express from "express";
-import { uploadOwnedChatAttachmentBytes } from "./attachments";
+import { AttachmentPublicError, uploadOwnedChatAttachmentBytes } from "./attachments";
 import { sdk } from "./_core/sdk";
 
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const uploadParser = express.raw({ type: "application/octet-stream", limit: MAX_ATTACHMENT_BYTES });
+
+class UploadRequestError extends Error {}
+
+type UploadDependencies = {
+  authenticateRequest: (request: Request) => Promise<{ id: number } | null>;
+  upload: typeof uploadOwnedChatAttachmentBytes;
+};
+
+const productionUploadDependencies: UploadDependencies = {
+  authenticateRequest: request => sdk.authenticateRequest(request),
+  upload: uploadOwnedChatAttachmentBytes,
+};
 
 function reject(res: Response, status: number, error: string) {
   res.status(status).set("Cache-Control", "no-store").set("X-Content-Type-Options", "nosniff").json({ error });
@@ -12,7 +24,7 @@ function reject(res: Response, status: number, error: string) {
 
 function requiredHeader(req: Request, name: string) {
   const value = req.get(name)?.trim();
-  if (!value) throw new Error("Некорректный запрос загрузки.");
+  if (!value) throw new UploadRequestError("Некорректный запрос загрузки.");
   return value;
 }
 
@@ -20,15 +32,15 @@ function decodedFileName(req: Request) {
   try {
     return decodeURIComponent(requiredHeader(req, "X-Attachment-File-Name"));
   } catch {
-    throw new Error("Некорректное имя прикрепляемого файла.");
+    throw new UploadRequestError("Некорректное имя прикрепляемого файла.");
   }
 }
 
-async function handleUpload(req: Request, res: Response) {
+export async function handleAttachmentUpload(req: Request, res: Response, dependencies: UploadDependencies = productionUploadDependencies) {
   try {
     let user;
     try {
-      user = await sdk.authenticateRequest(req);
+      user = await dependencies.authenticateRequest(req);
     } catch {
       return reject(res, 401, "Войдите, чтобы загрузить вложение.");
     }
@@ -36,11 +48,13 @@ async function handleUpload(req: Request, res: Response) {
     const sessionId = requiredHeader(req, "X-Attachment-Session-Id");
     const contentType = requiredHeader(req, "X-Attachment-Content-Type");
     const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
-    const attachment = await uploadOwnedChatAttachmentBytes(user.id, { sessionId, fileName: decodedFileName(req), contentType, bytes });
+    const attachment = await dependencies.upload(user.id, { sessionId, fileName: decodedFileName(req), contentType, bytes });
     return res.status(201).set("Cache-Control", "no-store").set("X-Content-Type-Options", "nosniff").json(attachment);
   } catch (error) {
-    const message = error instanceof Error && error.message ? error.message : "Не удалось обработать вложение.";
-    return reject(res, 400, message);
+    if (error instanceof AttachmentPublicError || error instanceof UploadRequestError) {
+      return reject(res, 400, error.message);
+    }
+    return reject(res, 503, "Не удалось загрузить вложение. Повторите попытку позже.");
   }
 }
 
@@ -48,6 +62,6 @@ async function handleUpload(req: Request, res: Response) {
 export function registerAttachmentUploadRoute(app: Express) {
   app.post("/api/attachments/upload", (req, res, next) => uploadParser(req, res, (error?: unknown) => {
     if (error) return reject(res, 413, "Размер вложения должен быть от 1 байта до 8 МБ.");
-    void handleUpload(req, res).catch(next);
+    void handleAttachmentUpload(req, res).catch(next);
   }));
 }

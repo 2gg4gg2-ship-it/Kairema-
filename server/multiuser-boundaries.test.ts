@@ -12,8 +12,9 @@ describe("multi-user server boundaries", () => {
   it("keeps attachment upload, download and vision paths bound to the authenticated server user", () => {
     const uploadRoute = source("attachment-upload.ts");
     const attachmentService = source("attachments.ts");
-    expect(uploadRoute).toContain("sdk.authenticateRequest(req)");
-    expect(uploadRoute).toContain("uploadOwnedChatAttachmentBytes(user.id");
+    expect(uploadRoute).toContain("authenticateRequest: request => sdk.authenticateRequest(request)");
+    expect(uploadRoute).toContain("user = await dependencies.authenticateRequest(req)");
+    expect(uploadRoute).toContain("dependencies.upload(user.id");
     expect(attachmentService).toContain("attachments/${userId}/${input.sessionId}/");
     expect(attachmentService).toContain("getOwnedChatAttachment(userId, attachmentId)");
   });

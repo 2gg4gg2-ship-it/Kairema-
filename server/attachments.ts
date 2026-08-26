@@ -18,8 +18,15 @@ const ACCEPTED_TYPES = {
 export type AcceptedAttachmentType = keyof typeof ACCEPTED_TYPES;
 export type PreparedAttachment = { id: string; fileName: string; contentType: AcceptedAttachmentType; byteSize: number; kind: "image" | "document"; processingStatus: "ready" | "unsupported" | "failed"; extractedText: string | null; previewUrl?: string };
 
+export class AttachmentPublicError extends Error {
+  constructor(message = "Не удалось обработать вложение. Проверьте формат и размер файла.") {
+    super(message);
+    this.name = "AttachmentPublicError";
+  }
+}
+
 function publicAttachmentError(message = "Не удалось обработать вложение. Проверьте формат и размер файла.") {
-  return new Error(message);
+  return new AttachmentPublicError(message);
 }
 
 function safeFileName(value: string) {
