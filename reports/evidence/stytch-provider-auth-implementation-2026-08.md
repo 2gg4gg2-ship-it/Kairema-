@@ -15,7 +15,7 @@
 | Session | В HttpOnly/Secure/SameSite cookie хранится только opaque provider-issued Stytch session token; на каждом request сервер проверяет его через SDK. Kairema session token не выпускается. | **PASS** |
 | Manus/Google OAuth | Existing cookie/callback/nonce contract сохранён. При успешном Stytch sign-in активная Manus cookie очищается как явное переключение principal, а не как identity merge. | **PASS** |
 | Account linking | Protected `beginLink` выдаёт short-lived opaque reference, привязанный server-side к initiating canonical user; callback atomically consumes его только для того же `ctx.user.id`. Same-email lookup отсутствует. | **PASS** |
-| Реальная доставка email / переход по ссылке | 2026-08-26 выполнены согласованные public registration и same-browser login attempts на отдельном разрешённом test mailbox с ephemeral password. Оба завершились generic safe UI error; inbox не открывался, delivery не подтверждена, дальнейшие attempts остановлены. | **FAIL / BLOCKED BY PROVIDER ACCEPTANCE** |
+| Реальная доставка email / переход по ссылке | 2026-08-26 выполнены согласованные public registration и same-browser login attempts на отдельном разрешённом test mailbox с ephemeral password. Inbox не открывался. Один delivery-only resend был принят безопасным public API response, но письмо не наблюдалось; Stytch Dashboard показал `EmailDelivery` HTTP 400 без доступного `message_status` или error category. Новые отправки остановлены. | **BLOCKED BY PROVIDER DELIVERY DIAGNOSTICS** |
 
 ## Server trust model
 
@@ -52,17 +52,23 @@ Data-free Welcome сохраняет Google/Manus CTA и добавляет до
 | Полный `pnpm test` | **PASS** — 58 files passed, 1 skipped; 279 tests passed, 4 skipped. |
 | `pnpm check` и `git diff --check` | **PASS**. |
 | Production build | **NOT RUN** — сохранён ранее согласованный sandbox SIGTERM/resource blocker. |
-| Live register → inbox → magic link → session → reset → logout | **FAIL / BLOCKED BY PROVIDER ACCEPTANCE** — registration и same-browser login завершились generic safe error; inbox не открывался, link/reset/logout не выполнялись. |
+| Live register → inbox → magic link → session → reset → logout | **BLOCKED BY PROVIDER DELIVERY DIAGNOSTICS** — API acceptance не доказывает delivery; Dashboard `EmailDelivery` HTTP 400 не содержит доступной safe category. Inbox, link/reset/logout не открывались и не выполнялись. |
 
 ## Ограничения и следующий безопасный шаг
 
-Provider password configuration и code-level contract готовы. Ограниченная live acceptance выявила provider acceptance blocker: public registration и same-browser login вернули generic safe error уже до подтверждения delivery. A separate documented non-delivery Stytch sandbox diagnostic confirmed Password Create and Authenticate, then returned the safe category `no_match_for_provided_magic_link_url` for the Magic Link request. После подтверждения добавления exact production callback в Test Redirect URLs выполнен один process-local sandbox recheck с именно этим URL; он вернул ту же safe category. Это означает, что allowlist update ещё не виден credentialed Stytch Consumer project либо URL добавлен не в соответствующий Consumer Magic Link allowlist. No raw provider error message, request ID, credentials, password, token, mailbox content или user records не извлекались. Дополнительные provider requests остановлены; delivery, callback, session, reset и logout live PASS не заявляются.
+Provider password configuration и code-level contract готовы. Первоначальный non-delivery sandbox diagnostic вернул safe category `no_match_for_provided_magic_link_url` для Magic Link request. После добавления exact production callback в Test Redirect URLs process-local recheck с тем же trusted URL прошёл. Следовательно, callback allowlist **не является подтверждённым текущим blocker**. Отдельный delivery-only resend затем получил generic anti-enumeration response от Kairema, но в Stytch Dashboard появился `EmailDelivery` HTTP 400; доступная пользователю Event Log view не содержит `message_status` или error category. No raw provider error message, request ID, credentials, password, token, mailbox content или user records не извлекались. Новые provider requests остановлены; delivery, callback, session, reset и logout live PASS не заявляются.
 
 Официальная документация Stytch предоставляет sandbox values только в Test environment и только для прямых API calls. Email `sandbox@stytch.com` вызывает predetermined `200` в Password Create/Authenticate независимо от пароля, а также в Password Reset Start без фактической email delivery.[4] Такой путь позволяет проверить provider request semantics через текущий server adapter без повторной доставки на реальный mailbox, но не заменяет реальную email delivery acceptance. Для реальной delivery Stytch документирует отдельный E2E mailbox flow.[5]
 
 ### Read-only delivery status path
 
 Stytch документирует delivery events с action `EmailDelivery` в Dashboard Event Logs; события появляются в течение минуты после request completion и хранятся 30 дней.[6] Consumer API не предоставляет отдельного safe application endpoint для чтения delivery status в данном integration scope. Поэтому без новой отправки единственный доступный путь — просмотреть Event Logs в том же Stytch Test project и записать только технический delivery outcome, не экспортируя email address, link, token или raw event payload.
+
+Официальная deliverability-документация указывает, что одно email request может создавать несколько `EmailDelivery` events, а диагностически значимым полем является `message_status` в dropdown view, а не HTTP status code сам по себе.[6] Для 4XX Stytch называет среди возможных категорий `invalid_email` и `inactive_email`, но доступный `400` без category не различает их и не доказывает ни одну из причин. Поэтому исправление адреса, reactivation либо inbox/spam remediation **не выполнялись и не рекомендуются как установленный диагноз**.
+
+### Test-environment acceptance boundary
+
+`sandbox@stytch.com` — специальное значение для прямых Consumer API calls в Test environment: корректный Magic Link request возвращает predefined `200`, но email не отправляется. Это безопасная проверка server request contract, не замена inbox delivery.[5] Stytch рекомендует sandbox values для backend endpoint tests в Test environment, а для flows, требующих реального inbox или Live environment behavior, — программно доступный test mailbox.[7] Следовательно, следующий live email resend допускается только после получения provider-side category/remediation и отдельного разрешения пользователя.
 
 ## References
 
@@ -71,5 +77,6 @@ Stytch документирует delivery events с action `EmailDelivery` в D
 [3]: https://supabase.com/docs/guides/auth/auth-identity-linking "Supabase Auth identity linking"
 [4]: https://stytch.com/docs/api-reference/consumer/api/magic-links-email/login-or-create "Stytch Consumer Magic Link Login or Create"
 [5]: https://stytch.com/docs/api-reference/consumer/api/resources/sandbox-values "Stytch Consumer Sandbox Values"
-[5]: https://stytch.com/docs/api-reference/consumer/api/resources/e2e-testing "Stytch Consumer E2E Testing"
+[5]: https://stytch.com/docs/api-reference/consumer/api/resources/sandbox-values "Stytch Consumer Sandbox Values"
 [6]: https://stytch.com/docs/resources/policies/messaging/deliverability/email-deliverability "Stytch Email deliverability"; https://stytch.com/docs/resources/workspace-management/event-logs "Stytch Event Logs"
+[7]: https://stytch.com/docs/api-reference/consumer/api/resources/e2e-testing "Stytch Consumer E2E Testing"
