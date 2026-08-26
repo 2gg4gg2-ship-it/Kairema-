@@ -3,7 +3,7 @@ import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
 import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
-import { clearStytchLinkIntentCookie, clearStytchResetCookie, clearStytchSessionCookie, getStytchCallbackUrl, getStytchClient, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
+import { clearStytchLinkIntentCookie, clearStytchResetCookie, clearStytchSessionCookie, getSafeStytchDeliveryFailure, getStytchCallbackUrl, getStytchClient, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
 import { resolveOrCreateProviderUser } from "./db";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -124,6 +124,16 @@ export const appRouter = router({
           const callbackUrl = getStytchCallbackUrl();
           await getStytchClient().magicLinks.email.loginOrCreate({ email: input.email, locale: "en", login_magic_link_url: callbackUrl, signup_magic_link_url: callbackUrl });
         } catch (error) {
+          const deliveryFailure = getSafeStytchDeliveryFailure(error);
+          try {
+            // Best-effort operational telemetry. It never receives request data
+            // or provider identifiers, and cannot alter the public response.
+            await recordTechnicalEvent({ kind: "provider", title: "Stytch verification delivery request rejected", code: deliveryFailure });
+          } catch {
+            // Observability must not affect an anti-enumeration auth flow.
+          }
+          // Keep the pre-observability availability decision exactly aligned
+          // with the established provider error normalizer.
           if (toSafeStytchError(error).safeCode === "UNAVAILABLE") throw stytchErrorToTrpc(error);
         }
         // Deliberately generic to avoid account enumeration.

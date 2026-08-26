@@ -19,6 +19,37 @@ export class StytchProviderError extends Error {
   }
 }
 
+/**
+ * Fixed internal categories for metadata-only delivery observability. These
+ * labels are intentionally Kairema-owned abstractions: no Stytch request ID,
+ * raw error type/message/details, email, link or token may be persisted.
+ */
+export type StytchDeliveryFailureCode =
+  | "ADDRESS_INVALID"
+  | "ADDRESS_INACTIVE"
+  | "CALLBACK_URL_REJECTED"
+  | "REQUEST_REJECTED"
+  | "PROVIDER_UNAVAILABLE"
+  | "UNKNOWN";
+
+export function getSafeStytchDeliveryFailure(error: unknown): StytchDeliveryFailureCode {
+  if (error instanceof StytchError) {
+    // Map only documented delivery-relevant values into fixed local labels.
+    if (error.error_type === "invalid_email") return "ADDRESS_INVALID";
+    if (error.error_type === "inactive_email") return "ADDRESS_INACTIVE";
+    if (error.error_type === "no_match_for_provided_magic_link_url") return "CALLBACK_URL_REJECTED";
+    if (error.status_code === 408 || error.status_code >= 500) return "PROVIDER_UNAVAILABLE";
+    if (error.status_code >= 400 && error.status_code < 500) return "REQUEST_REJECTED";
+    return "UNKNOWN";
+  }
+  // Preserve the existing authentication contract: SDK RequestError and other
+  // transport/client failures normalize to UNAVAILABLE rather than producing a
+  // generic anti-enumeration delivery response.
+  return toSafeStytchError(error).safeCode === "UNAVAILABLE"
+    ? "PROVIDER_UNAVAILABLE"
+    : "UNKNOWN";
+}
+
 function requiredEnv(name: "STYTCH_PROJECT_ID" | "STYTCH_SECRET" | "STYTCH_ENVIRONMENT") {
   const value = process.env[name]?.trim();
   if (!value) throw new StytchProviderError("UNAVAILABLE");
