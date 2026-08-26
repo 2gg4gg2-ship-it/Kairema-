@@ -12,6 +12,7 @@ import { registerProviderHealthScheduleRoute } from "../provider-health-schedule
 import { registerKnowledgeScheduleRoute } from "../knowledge-schedule";
 import { registerMemoryExtractionScheduleRoute } from "../memory-extraction-schedule";
 import { registerDevRoute } from "../dev-api";
+import { registerStytchAuthRoutes } from "../stytch-auth";
 import { refreshProviderHealth } from "../providers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -43,6 +44,7 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
   registerOAuthRoutes(app);
+  registerStytchAuthRoutes(app);
   registerAttachmentUploadRoute(app);
   registerChatStreamRoute(app);
   registerProviderHealthScheduleRoute(app);

@@ -27,6 +27,27 @@
 - [x] draft-autosave/REGRESSIONS: deterministic reload/scope/send-success/failure coverage PASS; live mobile browser acceptance intentionally NOT VERIFIED without OAuth/owner-session action.
 - [x] owner-tools/VALIDATION-REPORT: `reports/evidence/owner-observability-drafts-audit.md` фиксирует exact results: full suite 56 files/269 tests PASS, `pnpm check`, diff-check и dev HTTP 200 PASS; production build не запускался по existing SIGTERM blocker.
 
+## Provider-managed email auth — 2026-08
+
+- [x] email-auth/REQUIREMENTS-AUDIT: требования files 7–8 сверены; Google/Manus OAuth, owner mapping, users identity, server-derived user scope, drafts и multi-user boundaries остаются immutable baseline.
+- [x] email-auth/PROVIDER-INVENTORY: read-only audit подтвердил отсутствие enabled managed email auth; local JWT/password/session/reset mechanism не создан. Stytch Consumer connector обнаружен disabled/unconfigured.
+- [x] email-auth/STYTCH-SUPABASE-COMPARISON: official comparison завершён в `reports/evidence/email-auth-provider-comparison-research.md`; Stytch recommended due managed consumer flow and explicit-link compatibility, Supabase automatic same-email linking incompatible by default.
+- [x] email-auth/NO-MIGRATION-GUARD: рекомендуемый Stytch path не требует переноса Kairema database/chats/memory/attachments/exports/backend; canonical internal user remains server-owned.
+- [x] email-auth/SAFE-PATH-DECISION: пользователь подтвердил Stytch Consumer Authentication; server-only configuration validation PASS через non-mutating Password Strength Check. Фиктивные forms/email delivery не добавлялись.
+- [x] email-auth/IMPLEMENTATION: provider-backed register/login/verification/reset/logout/linking реализованы через existing canonical users model, server-side verified Stytch session, short-lived server-bound link intent и fixed trusted callback origin; Manus OAuth сохранён.
+- [x] email-auth/SECURITY-REGRESSIONS: PASS: OAuth precedence/preservation, guest/private server boundary, generic delivery response, verified user scope, explicit linking/session-switch denial и logout/session cleanup; full suite 58 passed, 1 skipped; 278 passed, 4 skipped.
+- [x] email-auth/VALIDATION-REPORT: `reports/evidence/stytch-provider-auth-implementation-2026-08.md` фиксирует exact PASS/NOT VERIFIED. Live email delivery и browser acceptance честно не заявлены.
+
+### Stytch implementation detail — 2026-08
+
+- [x] email-auth/STYTCH-IDENTITY-MAPPING: additive migration `0033_military_stranger.sql` создаёт unique `(provider, providerSubject)` → canonical `users.id`; existing users/openId не изменены, email lookup/auto-linking отсутствуют.
+- [x] email-auth/STYTCH-SERVER-SESSION: отдельная HttpOnly/Secure/SameSite cookie несёт только provider-issued opaque session token; context re-verifies it server-side official SDK, Kairema JWT/session token не выпускается.
+- [x] email-auth/STYTCH-PROVIDER-FLOWS: server-only registration/login, verification, recovery, reset и revoke реализованы официальным SDK без password/token persistence или raw provider errors.
+- [x] email-auth/STYTCH-EXPLICIT-LINKING: short-lived opaque link reference bound server-side к initiating canonical user, callback atomically consumes её только при same user + expiry; session-switch отклоняется, same-email auto-linking отсутствует.
+- [x] email-auth/STYTCH-UI: real provider-backed email login/register/verification/recovery states добавлены рядом с сохранённым Google/Manus CTA; public mobile visual check PASS без private data.
+- [ ] email-auth/LIVE-EMAIL-ACCEPTANCE: NOT VERIFIED — отдельный test mailbox ещё не использовался; выполнить только с явным disposable address и без открытия существующей пользовательской переписки.
+- [x] email-auth/STYTCH-LINK-SESSION-SWITCH-REGRESSION: dedicated `server/stytch.security.test.ts` подтверждает canonical-user binding at creation, same-user atomic consume и expiry condition для denial после session-switch.
+
 ## Multi-user foundation — 2026-08
 
 - [x] multiuser/PLATFORM-BLOCKER-REGISTRY: все 24 исторических browser/OAuth/owner/provider/build пункта перенесены в `reports/evidence/platform-blocker-registry-2026-08.md` с причиной, статусом и условием разблокировки. Приёмки не возобновлялись; OAuth/owner mapping не менялись.

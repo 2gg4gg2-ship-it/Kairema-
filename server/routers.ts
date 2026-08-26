@@ -1,8 +1,10 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag } from "./db";
+import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { clearStytchLinkIntentCookie, clearStytchResetCookie, clearStytchSessionCookie, getStytchCallbackUrl, getStytchClient, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
+import { resolveOrCreateProviderUser } from "./db";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { ENV } from "./_core/env";
@@ -60,6 +62,33 @@ const attachmentInputSchema = z.object({
   contentBase64: z.string().min(1).max(11_200_000),
 });
 
+const stytchCredentialsSchema = z.object({
+  email: z.string().trim().email().max(320),
+  password: z.string().min(8).max(256),
+});
+const stytchEmailSchema = z.object({ email: z.string().trim().email().max(320) });
+
+function stytchErrorToTrpc(error: unknown) {
+  const safe = toSafeStytchError(error);
+  if (safe.safeCode === "UNAVAILABLE") {
+    return new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Вход через защищённый email временно недоступен. Повторите попытку позже." });
+  }
+  return new TRPCError({ code: "UNAUTHORIZED", message: "Не удалось подтвердить email или пароль. Проверьте данные либо используйте восстановление пароля." });
+}
+
+async function resolveVerifiedStytchUser(user: { user_id: string; emails: { email: string; verified: boolean }[]; name?: { first_name?: string | null } | null }) {
+  const verifiedEmail = getVerifiedStytchEmail(user);
+  if (!verifiedEmail) return null;
+  return resolveOrCreateProviderUser({
+    provider: STYTCH_PROVIDER,
+    providerSubject: user.user_id,
+    canonicalOpenId: stytchCanonicalOpenId(user.user_id),
+    verifiedEmail,
+    displayName: user.name?.first_name ?? null,
+    loginMethod: "stytch-password",
+  });
+}
+
 function storageError(error: unknown) {
   return error instanceof Error && /чат|хранилище/i.test(error.message)
     ? error.message
@@ -70,10 +99,105 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
+    logout: publicProcedure.mutation(async ({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
+      await revokeStytchSessionToken(getStytchSessionToken(ctx.req));
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      clearStytchSessionCookie(ctx.res, ctx.req);
+      clearStytchResetCookie(ctx.res, ctx.req);
+      clearStytchLinkIntentCookie(ctx.res, ctx.req);
       return { success: true } as const;
+    }),
+    stytch: router({
+      register: publicProcedure.input(stytchCredentialsSchema).mutation(async ({ input }) => {
+        try {
+          await getStytchClient().passwords.create({ email: input.email, password: input.password });
+          const callbackUrl = getStytchCallbackUrl();
+          await getStytchClient().magicLinks.email.loginOrCreate({ email: input.email, locale: "en", login_magic_link_url: callbackUrl, signup_magic_link_url: callbackUrl });
+          return { state: "VERIFICATION_REQUIRED" as const };
+        } catch (error) {
+          throw stytchErrorToTrpc(error);
+        }
+      }),
+      resendVerification: publicProcedure.input(stytchEmailSchema).mutation(async ({ input }) => {
+        try {
+          const callbackUrl = getStytchCallbackUrl();
+          await getStytchClient().magicLinks.email.loginOrCreate({ email: input.email, locale: "en", login_magic_link_url: callbackUrl, signup_magic_link_url: callbackUrl });
+        } catch (error) {
+          if (toSafeStytchError(error).safeCode === "UNAVAILABLE") throw stytchErrorToTrpc(error);
+        }
+        // Deliberately generic to avoid account enumeration.
+        return { state: "DELIVERY_REQUESTED" as const };
+      }),
+      login: publicProcedure.input(stytchCredentialsSchema).mutation(async ({ ctx, input }) => {
+        try {
+          const result = await getStytchClient().passwords.authenticate({
+            email: input.email,
+            password: input.password,
+            session_duration_minutes: STYTCH_SESSION_DURATION_MINUTES,
+          });
+          const canonicalUser = await resolveVerifiedStytchUser(result.user);
+          if (!canonicalUser) {
+            await revokeStytchSessionToken(result.session_token);
+            const callbackUrl = getStytchCallbackUrl();
+            await getStytchClient().magicLinks.email.loginOrCreate({ email: input.email, locale: "en", login_magic_link_url: callbackUrl, signup_magic_link_url: callbackUrl });
+            return { state: "VERIFICATION_REQUIRED" as const };
+          }
+          setStytchSessionCookie(ctx.res, ctx.req, result.session_token);
+          ctx.res.clearCookie(COOKIE_NAME, { ...getSessionCookieOptions(ctx.req), maxAge: -1 });
+          return { state: "SIGNED_IN" as const };
+        } catch (error) {
+          throw stytchErrorToTrpc(error);
+        }
+      }),
+      requestPasswordReset: publicProcedure.input(stytchEmailSchema).mutation(async ({ input }) => {
+        try {
+          const callbackUrl = getStytchCallbackUrl();
+          await getStytchClient().passwords.email.resetStart({ email: input.email, locale: "en", reset_password_redirect_url: callbackUrl, login_redirect_url: callbackUrl });
+        } catch (error) {
+          if (toSafeStytchError(error).safeCode === "UNAVAILABLE") throw stytchErrorToTrpc(error);
+        }
+        return { state: "DELIVERY_REQUESTED" as const };
+      }),
+      completePasswordReset: publicProcedure.input(z.object({ password: z.string().min(8).max(256) })).mutation(async ({ ctx, input }) => {
+        const providerResetToken = getStytchResetToken(ctx.req);
+        if (!providerResetToken) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Ссылка для восстановления истекла или уже использована. Запросите новую." });
+        }
+        try {
+          const result = await getStytchClient().passwords.email.reset({
+            token: providerResetToken,
+            password: input.password,
+            session_duration_minutes: STYTCH_SESSION_DURATION_MINUTES,
+          });
+          const canonicalUser = await resolveVerifiedStytchUser(result.user);
+          if (!canonicalUser) {
+            await revokeStytchSessionToken(result.session_token);
+            throw new TRPCError({ code: "FORBIDDEN", message: "Подтвердите email по ссылке провайдера, затем войдите снова." });
+          }
+          setStytchSessionCookie(ctx.res, ctx.req, result.session_token);
+          ctx.res.clearCookie(COOKIE_NAME, { ...getSessionCookieOptions(ctx.req), maxAge: -1 });
+          clearStytchResetCookie(ctx.res, ctx.req);
+          return { state: "SIGNED_IN" as const };
+        } catch (error) {
+          clearStytchResetCookie(ctx.res, ctx.req);
+          if (error instanceof TRPCError) throw error;
+          throw stytchErrorToTrpc(error);
+        }
+      }),
+      beginLink: protectedProcedure.input(stytchEmailSchema).mutation(async ({ ctx, input }) => {
+        try {
+          const linkIntent = await createStytchLinkIntent(ctx.user.id);
+          const callbackUrl = getStytchCallbackUrl();
+          await getStytchClient().magicLinks.email.loginOrCreate({ email: input.email, locale: "en", login_magic_link_url: callbackUrl, signup_magic_link_url: callbackUrl });
+          // No user ID is stored in the browser: callback re-verifies the
+          // source session, then atomically consumes its server-bound intent.
+          setStytchLinkIntentCookie(ctx.res, ctx.req, linkIntent);
+        } catch (error) {
+          if (toSafeStytchError(error).safeCode === "UNAVAILABLE") throw stytchErrorToTrpc(error);
+        }
+        return { state: "LINK_CONFIRMATION_REQUESTED" as const };
+      }),
     }),
   }),
   models: router({

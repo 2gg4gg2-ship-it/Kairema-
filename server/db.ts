@@ -1,8 +1,9 @@
 import { and, asc, desc, eq, gt, inArray, isNull, like, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { randomUUID } from "node:crypto";
-import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryExtractionJob, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatDrafts, chatExports, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryExtractionJobs, memoryFacts, memoryProfiles, memorySettings, messages, providerControlFlags, providerDailyUsage, providerHealth, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, technicalEvents, userSettings, users, webSearchStatus } from "../drizzle/schema";
+import { createHash, randomUUID } from "node:crypto";
+import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryExtractionJob, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatDrafts, chatExports, chatSessions, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryExtractionJobs, memoryFacts, memoryProfiles, memorySettings, messages, providerControlFlags, providerDailyUsage, providerHealth, providerIdentities, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, technicalEvents, userSettings, users, webSearchStatus } from "../drizzle/schema";
 import { providerHealthHistory } from "../drizzle/schema";
+import { stytchLinkIntents } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -46,6 +47,147 @@ export async function getUserByOpenId(openId: string) {
   if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
   return result[0];
+}
+
+export async function getUserById(userId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  return result[0];
+}
+
+export async function getUserByProviderIdentity(provider: string, providerSubject: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const identity = await db.select().from(providerIdentities)
+    .where(and(eq(providerIdentities.provider, provider), eq(providerIdentities.providerSubject, providerSubject)))
+    .limit(1);
+  return identity[0] ? getUserById(identity[0].userId) : undefined;
+}
+
+/**
+ * Attach a verified provider subject to a canonical user only by its immutable
+ * provider subject. Email is intentionally not an input to this operation.
+ */
+export async function linkProviderIdentityToUser(input: {
+  provider: string;
+  providerSubject: string;
+  userId: number;
+}) {
+  const db = requireDatabase(await getDb());
+  const existing = await db.select().from(providerIdentities)
+    .where(and(
+      eq(providerIdentities.provider, input.provider),
+      eq(providerIdentities.providerSubject, input.providerSubject),
+    ))
+    .limit(1);
+
+  if (existing[0]) {
+    if (existing[0].userId !== input.userId) {
+      throw new Error("Provider identity is already linked to another canonical user");
+    }
+    return;
+  }
+
+  try {
+    await db.insert(providerIdentities).values({
+      provider: input.provider,
+      providerSubject: input.providerSubject,
+      userId: input.userId,
+    });
+  } catch {
+    // Concurrent verification can race here. Re-read the mapping and fail
+    // closed if the immutable provider subject now belongs to another user.
+    const afterRace = await db.select().from(providerIdentities)
+      .where(and(
+        eq(providerIdentities.provider, input.provider),
+        eq(providerIdentities.providerSubject, input.providerSubject),
+      ))
+      .limit(1);
+    if (!afterRace[0] || afterRace[0].userId !== input.userId) {
+      throw new Error("Provider identity could not be linked safely");
+    }
+  }
+}
+
+const STYTCH_LINK_INTENT_TTL_MS = 10 * 60_000;
+
+function hashStytchLinkIntent(reference: string) {
+  return createHash("sha256").update(reference).digest("hex");
+}
+
+/**
+ * Issues only an opaque, short-lived action reference. The binding between that
+ * reference and the initiating canonical user stays in the database.
+ */
+export async function createStytchLinkIntent(userId: number) {
+  const db = requireDatabase(await getDb());
+  const now = new Date();
+  const reference = randomUUID();
+  await db.delete(stytchLinkIntents).where(lt(stytchLinkIntents.expiresAt, now));
+  await db.insert(stytchLinkIntents).values({
+    tokenHash: hashStytchLinkIntent(reference),
+    userId,
+    expiresAt: new Date(now.getTime() + STYTCH_LINK_INTENT_TTL_MS),
+  });
+  return reference;
+}
+
+/**
+ * Atomically consumes the link action only for the same initiating canonical
+ * user. A changed Manus/Stytch session therefore cannot complete another
+ * user's linking flow, and replay/expired references fail closed.
+ */
+export async function consumeStytchLinkIntent(reference: string, userId: number) {
+  if (!reference || reference.length > 128) return false;
+  const db = requireDatabase(await getDb());
+  const result = await db.delete(stytchLinkIntents).where(and(
+    eq(stytchLinkIntents.tokenHash, hashStytchLinkIntent(reference)),
+    eq(stytchLinkIntents.userId, userId),
+    gt(stytchLinkIntents.expiresAt, new Date()),
+  ));
+  return Number(result[0]?.affectedRows ?? 0) > 0;
+}
+
+export async function resolveOrCreateProviderUser(input: {
+  provider: string;
+  providerSubject: string;
+  canonicalOpenId: string;
+  verifiedEmail: string;
+  displayName?: string | null;
+  loginMethod: string;
+}) {
+  const existing = await getUserByProviderIdentity(input.provider, input.providerSubject);
+  if (existing) {
+    const db = requireDatabase(await getDb());
+    await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, existing.id));
+    return existing;
+  }
+
+  await upsertUser({
+    openId: input.canonicalOpenId,
+    email: input.verifiedEmail,
+    name: input.displayName ?? null,
+    loginMethod: input.loginMethod,
+    lastSignedIn: new Date(),
+  });
+
+  const candidate = await getUserByOpenId(input.canonicalOpenId);
+  if (!candidate) {
+    throw new Error("Canonical user could not be resolved");
+  }
+
+  await linkProviderIdentityToUser({
+    provider: input.provider,
+    providerSubject: input.providerSubject,
+    userId: candidate.id,
+  });
+
+  const mapped = await getUserByProviderIdentity(input.provider, input.providerSubject);
+  if (!mapped) {
+    throw new Error("Provider identity mapping could not be resolved");
+  }
+  return mapped;
 }
 
 function requireDatabase(db: Awaited<ReturnType<typeof getDb>>) {

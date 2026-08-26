@@ -232,6 +232,20 @@
       "when": 1787663183666,
       "tag": "0032_tricky_domino",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "5",
+      "when": 1787675008217,
+      "tag": "0033_military_stranger",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "5",
+      "when": 1787720151310,
+      "tag": "0034_aberrant_nemesis",
+      "breakpoints": true
     }
   ]
 }

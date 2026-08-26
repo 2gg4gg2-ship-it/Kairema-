@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import { COOKIE_NAME } from "../shared/const";
+import { STYTCH_LINK_INTENT_COOKIE, STYTCH_RESET_COOKIE, STYTCH_SESSION_COOKIE } from "./stytch";
 import type { TrpcContext } from "./_core/context";
 
 type CookieCall = {
@@ -49,14 +50,21 @@ describe("auth.logout", () => {
     const result = await caller.auth.logout();
 
     expect(result).toEqual({ success: true });
-    expect(clearedCookies).toHaveLength(1);
-    expect(clearedCookies[0]?.name).toBe(COOKIE_NAME);
-    expect(clearedCookies[0]?.options).toMatchObject({
+    expect(clearedCookies.map((call) => call.name)).toEqual([
+      COOKIE_NAME,
+      STYTCH_SESSION_COOKIE,
+      STYTCH_RESET_COOKIE,
+      STYTCH_LINK_INTENT_COOKIE,
+    ]);
+    expect(clearedCookies).toEqual(expect.arrayContaining([expect.objectContaining({
+      name: COOKIE_NAME,
+      options: expect.objectContaining({
       maxAge: -1,
       secure: true,
       sameSite: "none",
       httpOnly: true,
       path: "/",
-    });
+      }),
+    })]));
   });
 });

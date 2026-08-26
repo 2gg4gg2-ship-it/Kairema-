@@ -6,6 +6,21 @@ vi.mock("./_core/hooks/useAuth", () => ({
   useAuth: () => ({ user: null, loading: false }),
 }));
 
+const mutation = { mutateAsync: vi.fn(), isPending: false };
+vi.mock("@/lib/trpc", () => ({
+  trpc: {
+    auth: {
+      stytch: {
+        register: { useMutation: () => mutation },
+        login: { useMutation: () => mutation },
+        resendVerification: { useMutation: () => mutation },
+        requestPasswordReset: { useMutation: () => mutation },
+        completePasswordReset: { useMutation: () => mutation },
+      },
+    },
+  },
+}));
+
 import App from "./App";
 
 describe("gateway-safe welcome entry", () => {

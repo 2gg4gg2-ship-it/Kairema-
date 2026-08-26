@@ -216,7 +216,6 @@ export default function Home() {
     }, 600);
     return () => window.clearTimeout(timer);
   }, [activeId, composerDraft, draftClearMutation, draftHydratedSessionId, draftSaveMutation, isAuthenticated, language]);
-  useEffect(() => { const onKnowledgeRefresh = (event: MouseEvent) => { const target = event.target; if (!(target instanceof Element) || !target.closest(".kairema-rag-refresh") || knowledgeRefreshMutation.isPending) return; event.preventDefault(); void knowledgeRefreshMutation.mutateAsync().then(() => utils.knowledge.status.invalidate()).catch(() => setNotice(language === "ru" ? "Не удалось обновить RAG-источники." : "Could not refresh RAG sources.")); }; document.addEventListener("click", onKnowledgeRefresh); return () => document.removeEventListener("click", onKnowledgeRefresh); }, [knowledgeRefreshMutation, language, utils.knowledge.status]);
   const persistSettings = async (patch: Record<string, unknown>) => { if (typeof patch.highContrast === "boolean") setHighContrast?.(patch.highContrast); setSettingsOverride((current) => ({ ...current, ...patch })); try { await settingMutation.mutateAsync(patch as never); await utils.settings.get.invalidate(); } catch (error) { if ((patch.theme === "dark" || patch.theme === "light") && patch.theme !== theme) toggleTheme?.(); if (typeof patch.highContrast === "boolean") setHighContrast?.(Boolean(settingsQuery.data?.highContrast)); setSettingsOverride({}); setNotice(publicErrorMessage(error, language === "ru" ? "Не удалось сохранить настройку." : "Could not save the setting.")); } };
   const toolAccessEnabled = Boolean((settings as { toolAccess?: boolean | number }).toolAccess ?? true);
   useEffect(() => {
@@ -440,6 +439,21 @@ function CleanSettingsDialog({ open, onOpenChange, models, settings, language, l
   const select = async (value: string, field: string) => onUpdate({ [field]: value });
   const hint = (ru: string, en: string) => language === "ru" ? ru : en;
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [linkEmail, setLinkEmail] = useState("");
+  const [linkNotice, setLinkNotice] = useState("");
+  const beginLinkMutation = trpc.auth.beginLink.useMutation();
+  const requestLink = async () => {
+    const email = linkEmail.trim();
+    if (!email) return;
+    setLinkNotice("");
+    try {
+      await beginLinkMutation.mutateAsync({ email });
+      setLinkEmail("");
+      setLinkNotice(hint("Если адрес доступен, на него отправлено письмо для подтверждения. Откройте ссылку в этом браузере: привязка завершится только после проверки обеих сторон.", "If the address can receive email, a confirmation message has been requested. Open its link in this browser; linking completes only after both sides are verified."));
+    } catch {
+      setLinkNotice(hint("Не удалось запросить подтверждение. Повторите позже.", "The confirmation request could not be started. Please try again later."));
+    }
+  };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="kairema-dialog">
@@ -462,6 +476,7 @@ function CleanSettingsDialog({ open, onOpenChange, models, settings, language, l
             <SettingSwitch label={language === "ru" ? "Веб-поиск" : "Web search"} help={hint("Добавляет только проверяемые свежие источники, когда они доступны; при сбое чат продолжает работу с честным статусом.", "Adds verifiable fresh sources when available; if it fails, chat continues with an honest status.")} checked={Boolean(settings.webSearch)} onChange={(value) => void onUpdate({ webSearch: value })} />
             <label><span>{labels.healthRefresh}</span><AppSelect ariaLabel={labels.healthRefresh} value={String(settings.healthRefreshSeconds ?? 30)} onValueChange={(value) => void onUpdate({ healthRefreshSeconds: Number(value) })} options={[{ value: "0", label: language === "ru" ? "Вручную" : "Manual" }, { value: "15", label: "15 s" }, { value: "30", label: "30 s" }, { value: "60", label: "60 s" }]} /><small className="kairema-setting-help">{hint("Обновляет только публичный индикатор доступности.", "Refreshes only the public availability indicator.")}</small></label>
             <section className="kairema-settings-diagnostics" aria-live="polite"><h3>{language === "ru" ? "Самодиагностика" : "Settings check"}</h3><p className="kairema-setting-help">{hint("Показывает только сохранённые пользовательские параметры, без сообщений, ключей и служебных маршрутов.", "Shows only saved user preferences, never messages, keys, or internal routing.")}</p><button type="button" className="kairema-rag-refresh" onClick={() => setDiagnosticsOpen((value) => !value)}>{language === "ru" ? "Проверить настройки" : "Check settings"}</button>{diagnosticsOpen && <div className="kairema-settings-diagnostics-result"><p>{language === "ru" ? "Тема" : "Theme"}: <b>{settings.theme === "dark" ? (language === "ru" ? "тёмная" : "dark") : (language === "ru" ? "светлая" : "light")}</b></p><p>{language === "ru" ? "Высокая контрастность" : "High contrast"}: <b>{Boolean(settings.highContrast) ? (language === "ru" ? "включена" : "on") : (language === "ru" ? "выключена" : "off")}</b></p><button type="button" className="kairema-danger-button" onClick={() => void onRestoreSafeSettings()}>{language === "ru" ? "Восстановить безопасный режим" : "Restore safe mode"}</button></div>}</section>
+            <section className="kairema-settings-diagnostics" aria-live="polite"><h3>{language === "ru" ? "Привязать email-вход" : "Link email sign-in"}</h3><p className="kairema-setting-help">{hint("По желанию привяжите отдельный Stytch email-вход. Совпадение адреса никогда не объединяет аккаунты автоматически. Kairema не хранит пароль, письма, токены или ссылки сброса.", "Optionally link a separate Stytch email sign-in. Matching email addresses never merge accounts automatically. Kairema does not store passwords, email tokens, or reset links.")}</p><label className="kairema-field-label"><span>{language === "ru" ? "Email для подтверждения" : "Email to confirm"}</span><input type="email" autoComplete="email" value={linkEmail} onChange={(event) => setLinkEmail(event.target.value)} placeholder="name@example.com" /></label><button type="button" className="kairema-rag-refresh" disabled={beginLinkMutation.isPending || !linkEmail.trim()} onClick={() => void requestLink()}>{beginLinkMutation.isPending ? (language === "ru" ? "Запрашиваем…" : "Requesting…") : (language === "ru" ? "Отправить подтверждение" : "Send confirmation")}</button>{linkNotice ? <p className="kairema-setting-help">{linkNotice}</p> : null}</section>
           </section>
         </div>
       </DialogContent>

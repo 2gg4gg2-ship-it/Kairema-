@@ -33,6 +33,7 @@ const fixtures = vi.hoisted(() => ({
   invalidateExports: vi.fn(),
   exports: [] as Array<{ id: string; fileName: string; format: "markdown" | "pdf"; byteSize: number; createdAt: Date }>,
   uploadAttachment: vi.fn(),
+  beginStytchLink: vi.fn(),
   startLogin: vi.fn(),
   isAuthenticated: true,
   authLoading: false,
@@ -61,6 +62,7 @@ vi.mock("@/lib/chat-export", () => ({
 vi.mock("wouter", () => ({ useLocation: () => ["/", fixtures.navigate] }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
+    auth: { beginLink: { useMutation: () => ({ mutateAsync: fixtures.beginStytchLink, isPending: false }) } },
     models: { list: { useQuery: () => ({ data: [
       { key: "fast", modelId: "fast", label: "Kairema Flash", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, runtime: { state: "ready", provider: "OpenRouter", modelUsed: "Fast", checkedAt: "2026-08-19T00:00:00.000Z" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
       { key: "smart", modelId: "smart", label: "Kairema Think", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
@@ -125,6 +127,7 @@ function resetFixtures() {
   fixtures.deleteMemoryEntry.mockReset().mockResolvedValue(undefined);
   fixtures.clearMemory.mockReset().mockResolvedValue(undefined);
   fixtures.uploadAttachment.mockReset().mockResolvedValue({ id: "55555555-5555-4555-8555-555555555555", fileName: "vision.png", contentType: "image/png", byteSize: 100, kind: "image", previewUrl: "https://preview.example.test/vision.png" });
+  fixtures.beginStytchLink.mockReset().mockResolvedValue({ state: "LINK_CONFIRMATION_REQUESTED" });
   fixtures.invalidateSessions.mockReset().mockResolvedValue(undefined);
   fixtures.createChat.mockReset().mockResolvedValue({ id: "22222222-2222-4222-8222-222222222222", modelId: "fast", title: "Новый разговор" });
   fixtures.deleteChat.mockReset().mockResolvedValue({ success: true });
@@ -315,6 +318,18 @@ describe("Home integration flows", () => {
     expect(screen.queryByRole("button", { name: "Аналитика владельца" })).toBeNull();
     expect(screen.queryByLabelText("Графики качества поиска владельца")).toBeNull();
     expect(screen.queryByRole("heading", { name: "Качество веб-поиска" })).toBeNull();
+  });
+
+  it("requests explicit Stytch linking without passing a frontend user identity or auto-linking", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    const email = screen.getByLabelText("Email для подтверждения");
+    await user.type(email, "linked@example.test");
+    await user.click(screen.getByRole("button", { name: "Отправить подтверждение" }));
+
+    await waitFor(() => expect(fixtures.beginStytchLink).toHaveBeenCalledWith({ email: "linked@example.test" }));
+    expect(screen.getByText(/Совпадение адреса никогда не объединяет аккаунты автоматически/)).toBeTruthy();
   });
 
   it("routes an owner to the dedicated analytics page instead of rendering inline metrics", async () => {

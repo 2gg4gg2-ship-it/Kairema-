@@ -12,6 +12,36 @@ export const users = mysqlTable("users", {
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
+/**
+ * Provider subject → canonical Kairema user mapping.
+ *
+ * This deliberately does not use email: equal emails from different identity
+ * providers remain separate until an explicit verified linking flow is added.
+ */
+export const providerIdentities = mysqlTable("provider_identities", {
+  id: int("id").autoincrement().primaryKey(),
+  provider: varchar("provider", { length: 64 }).notNull(),
+  providerSubject: varchar("providerSubject", { length: 128 }).notNull(),
+  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [
+  uniqueIndex("provider_identities_provider_subject_unique").on(table.provider, table.providerSubject),
+  index("provider_identities_user_idx").on(table.userId),
+]);
+
+/**
+ * One-time, short-lived server-side reference for an explicit Stytch account
+ * linking action. The browser receives only an opaque reference; the original
+ * canonical user is retained server-side and verified again at callback time.
+ */
+export const stytchLinkIntents = mysqlTable("stytch_link_intents", {
+  tokenHash: varchar("tokenHash", { length: 64 }).primaryKey(),
+  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: timestamp("expiresAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("stytch_link_intents_user_expiry_idx").on(table.userId, table.expiresAt)]);
+
 export const chatSessions = mysqlTable("chat_sessions", {
   id: varchar("id", { length: 36 }).primaryKey(),
   userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -348,6 +378,7 @@ export const chatAttachments = mysqlTable("chat_attachments", {
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
+export type ProviderIdentity = typeof providerIdentities.$inferSelect;
 export type ChatSession = typeof chatSessions.$inferSelect;
 export type ChatMessageRecord = typeof messages.$inferSelect;
 export type ChatExport = typeof chatExports.$inferSelect;
