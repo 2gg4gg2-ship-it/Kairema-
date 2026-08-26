@@ -92,6 +92,14 @@
 - [x] scale-hardening/REPORT: evidence recorded at `reports/evidence/scale-stability-hardening-package-1-2026-08.md`, with exact eliminated bottlenecks, low-risk rationale, retained limits, validation and no 10K–50K readiness claim.
 - [x] scale-hardening/NETWORK-TEST-EXCEPTION: documented the one unintended external OrcaRouter test-side connection (`ECONNRESET` before TLS, no provider response/content); all subsequent validation explicitly excluded known network provider tests.
 
+## SCALE & STABILITY — isolated synthetic load test
+
+- [x] scale-load/WORKLOAD-SLO: documented synthetic actors, operations, concurrency tiers (10/100/1K/10K/50K), no-network guardrails and non-capacity-certification measurement gates in `reports/evidence/synthetic-load-test-plan-2026-08.md` before execution.
+- [x] scale-load/DETERMINISTIC-HARNESS: added isolated `scripts/synthetic-load-benchmark.mjs` with synthetic-only records, no production imports and fail-fast network guards; added package entrypoint and server regression without production runtime/DB/quota changes.
+- [x] scale-load/MEASUREMENTS: ran all 10/100/1K/10K/50K tiers (6,111,000 logical operations); raw no-network results are saved at `reports/evidence/synthetic-load-local-results-2026-08.json` with local throughput/latency/errors/RSS/CPU, explicit query/storage model and saturation/idempotency results.
+- [x] scale-load/VALIDATION: focused no-network harness test PASS (2 tests); `pnpm check`, `git diff --check` and evidence contract PASS. A later broad Vitest command had incomplete provider-test exclusions, so it is explicitly excluded from no-network evidence and no further provider-oriented test runs were performed. Production build was not run.
+- [x] scale-load/REPORT: Russian evidence at `reports/evidence/synthetic-load-test-results-2026-08.md` separates measured, simulated and unavailable metrics, limits, bottleneck interpretation and next low-risk step; it makes no 10K/50K readiness claim.
+
 ## Multi-user foundation — 2026-08
 
 - [x] multiuser/PLATFORM-BLOCKER-REGISTRY: все 24 исторических browser/OAuth/owner/provider/build пункта перенесены в `reports/evidence/platform-blocker-registry-2026-08.md` с причиной, статусом и условием разблокировки. Приёмки не возобновлялись; OAuth/owner mapping не менялись.

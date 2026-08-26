@@ -1,0 +1,613 @@
+{
+  "generatedAt": "2026-08-26T07:50:32.597Z",
+  "runtime": {
+    "node": "v22.13.0",
+    "platform": "linux",
+    "arch": "x64"
+  },
+  "guardrails": {
+    "noNetwork": true,
+    "realDatabase": false,
+    "realStorage": false,
+    "realProviders": false,
+    "productionRuntimeChanged": false
+  },
+  "results": [
+    {
+      "population": 10,
+      "totalOperations": 1000,
+      "workers": 10,
+      "durationMs": 1.379,
+      "logicalRps": 725384.617,
+      "unexpectedErrors": 0,
+      "p99GateMs": 250,
+      "p99GatePassed": true,
+      "latency": {
+        "session_validation": {
+          "samples": 120,
+          "p50Ms": 0.0003,
+          "p95Ms": 0.0011,
+          "p99Ms": 0.0571
+        },
+        "chat_list_read": {
+          "samples": 180,
+          "p50Ms": 0.0003,
+          "p95Ms": 0.0003,
+          "p99Ms": 0.0224
+        },
+        "chat_create": {
+          "samples": 80,
+          "p50Ms": 0.0004,
+          "p95Ms": 0.0006,
+          "p99Ms": 0.0036
+        },
+        "message_ingress_mutation": {
+          "samples": 200,
+          "p50Ms": 0.0007,
+          "p95Ms": 0.001,
+          "p99Ms": 0.0017
+        },
+        "memory_read_extraction": {
+          "samples": 150,
+          "p50Ms": 0.0003,
+          "p95Ms": 0.0003,
+          "p99Ms": 0.001
+        },
+        "attachment_metadata": {
+          "samples": 80,
+          "p50Ms": 0.0003,
+          "p95Ms": 0.0003,
+          "p99Ms": 0.0012
+        },
+        "export_history_create": {
+          "samples": 50,
+          "p50Ms": 0.0003,
+          "p95Ms": 0.0003,
+          "p99Ms": 0.0007
+        },
+        "drafts": {
+          "samples": 80,
+          "p50Ms": 0.0005,
+          "p95Ms": 0.0008,
+          "p99Ms": 0.0029
+        },
+        "owner_aggregate_metrics": {
+          "samples": 20,
+          "p50Ms": 0.0003,
+          "p95Ms": 0.0003,
+          "p99Ms": 0.0007
+        },
+        "duplicate_retry": {
+          "samples": 40,
+          "p50Ms": 0.0006,
+          "p95Ms": 0.0011,
+          "p99Ms": 0.003
+        }
+      },
+      "queryModel": {
+        "total": 13300,
+        "byOperation": {
+          "session_validation": 1440,
+          "chat_list_read": 3240,
+          "chat_create": 640,
+          "message_ingress_mutation": 4000,
+          "memory_read_extraction": 2250,
+          "attachment_metadata": 640,
+          "export_history_create": 250,
+          "drafts": 640,
+          "owner_aggregate_metrics": 40,
+          "duplicate_retry": 160
+        },
+        "classification": "simulated"
+      },
+      "storageModel": {
+        "logicalBytes": 2240,
+        "sessions": 10,
+        "drafts": 8,
+        "classification": "simulated"
+      },
+      "logicalMutations": 660,
+      "idempotencyModel": {
+        "duplicateAttempts": 120,
+        "duplicatesPrevented": 120,
+        "classification": "simulated"
+      },
+      "process": {
+        "rssDeltaBytes": 0,
+        "heapUsedDeltaBytes": 42064,
+        "cpuUserMicros": 1769,
+        "cpuSystemMicros": 0,
+        "classification": "local-sandbox-sample"
+      },
+      "saturation": {
+        "instanceAccepted": 14,
+        "instanceRejected": 4,
+        "perUserRejected": 1,
+        "expectedInstanceLimit": 12,
+        "expectedPerUserLimit": 2
+      },
+      "network": {
+        "guardEnabled": true,
+        "blockedAttempts": 0
+      },
+      "classification": "local-model-measured"
+    },
+    {
+      "population": 100,
+      "totalOperations": 10000,
+      "workers": 64,
+      "durationMs": 6.218,
+      "logicalRps": 1608180.622,
+      "unexpectedErrors": 0,
+      "p99GateMs": 250,
+      "p99GatePassed": true,
+      "latency": {
+        "session_validation": {
+          "samples": 1200,
+          "p50Ms": 0.0002,
+          "p95Ms": 0.0006,
+          "p99Ms": 0.0015
+        },
+        "chat_list_read": {
+          "samples": 1800,
+          "p50Ms": 0.0002,
+          "p95Ms": 0.0005,
+          "p99Ms": 0.0012
+        },
+        "chat_create": {
+          "samples": 800,
+          "p50Ms": 0.0003,
+          "p95Ms": 0.0009,
+          "p99Ms": 0.0016
+        },
+        "message_ingress_mutation": {
+          "samples": 2000,
+          "p50Ms": 0.0006,
+          "p95Ms": 0.0012,
+          "p99Ms": 0.0021
+        },
+        "memory_read_extraction": {
+          "samples": 1500,
+          "p50Ms": 0.0002,
+          "p95Ms": 0.0005,
+          "p99Ms": 0.0013
+        },
+        "attachment_metadata": {
+          "samples": 800,
+          "p50Ms": 0.0002,
+          "p95Ms": 0.0005,
+          "p99Ms": 0.0012
+        },
+        "export_history_create": {
+          "samples": 500,
+          "p50Ms": 0.0002,
+          "p95Ms": 0.0005,
+          "p99Ms": 0.0011
+        },
+        "drafts": {
+          "samples": 800,
+          "p50Ms": 0.0004,
+          "p95Ms": 0.001,
+          "p99Ms": 0.0016
+        },
+        "owner_aggregate_metrics": {
+          "samples": 200,
+          "p50Ms": 0.0002,
+          "p95Ms": 0.0008,
+          "p99Ms": 0.0014
+        },
+        "duplicate_retry": {
+          "samples": 400,
+          "p50Ms": 0.0005,
+          "p95Ms": 0.0011,
+          "p99Ms": 0.0016
+        }
+      },
+      "queryModel": {
+        "total": 133000,
+        "byOperation": {
+          "session_validation": 14400,
+          "chat_list_read": 32400,
+          "chat_create": 6400,
+          "message_ingress_mutation": 40000,
+          "memory_read_extraction": 22500,
+          "attachment_metadata": 6400,
+          "export_history_create": 2500,
+          "drafts": 6400,
+          "owner_aggregate_metrics": 400,
+          "duplicate_retry": 1600
+        },
+        "classification": "simulated"
+      },
+      "storageModel": {
+        "logicalBytes": 22400,
+        "sessions": 36,
+        "drafts": 8,
+        "classification": "simulated"
+      },
+      "logicalMutations": 6600,
+      "idempotencyModel": {
+        "duplicateAttempts": 1200,
+        "duplicatesPrevented": 1200,
+        "classification": "simulated"
+      },
+      "process": {
+        "rssDeltaBytes": 9187328,
+        "heapUsedDeltaBytes": 873672,
+        "cpuUserMicros": 11410,
+        "cpuSystemMicros": 3150,
+        "classification": "local-sandbox-sample"
+      },
+      "saturation": {
+        "instanceAccepted": 14,
+        "instanceRejected": 4,
+        "perUserRejected": 1,
+        "expectedInstanceLimit": 12,
+        "expectedPerUserLimit": 2
+      },
+      "network": {
+        "guardEnabled": true,
+        "blockedAttempts": 0
+      },
+      "classification": "local-model-measured"
+    },
+    {
+      "population": 1000,
+      "totalOperations": 100000,
+      "workers": 64,
+      "durationMs": 25.908,
+      "logicalRps": 3859739.536,
+      "unexpectedErrors": 0,
+      "p99GateMs": 250,
+      "p99GatePassed": true,
+      "latency": {
+        "session_validation": {
+          "samples": 12000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0001
+        },
+        "chat_list_read": {
+          "samples": 18000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0001
+        },
+        "chat_create": {
+          "samples": 8000,
+          "p50Ms": 0.0002,
+          "p95Ms": 0.0003,
+          "p99Ms": 0.0006
+        },
+        "message_ingress_mutation": {
+          "samples": 20000,
+          "p50Ms": 0.0003,
+          "p95Ms": 0.0006,
+          "p99Ms": 0.001
+        },
+        "memory_read_extraction": {
+          "samples": 15000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0001
+        },
+        "attachment_metadata": {
+          "samples": 8000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0002
+        },
+        "export_history_create": {
+          "samples": 5000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0002
+        },
+        "drafts": {
+          "samples": 8000,
+          "p50Ms": 0.0002,
+          "p95Ms": 0.0003,
+          "p99Ms": 0.0007
+        },
+        "owner_aggregate_metrics": {
+          "samples": 2000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0002
+        },
+        "duplicate_retry": {
+          "samples": 4000,
+          "p50Ms": 0.0002,
+          "p95Ms": 0.0005,
+          "p99Ms": 0.0008
+        }
+      },
+      "queryModel": {
+        "total": 1330000,
+        "byOperation": {
+          "session_validation": 144000,
+          "chat_list_read": 324000,
+          "chat_create": 64000,
+          "message_ingress_mutation": 400000,
+          "memory_read_extraction": 225000,
+          "attachment_metadata": 64000,
+          "export_history_create": 25000,
+          "drafts": 64000,
+          "owner_aggregate_metrics": 4000,
+          "duplicate_retry": 16000
+        },
+        "classification": "simulated"
+      },
+      "storageModel": {
+        "logicalBytes": 224000,
+        "sessions": 360,
+        "drafts": 80,
+        "classification": "simulated"
+      },
+      "logicalMutations": 66000,
+      "idempotencyModel": {
+        "duplicateAttempts": 12000,
+        "duplicatesPrevented": 12000,
+        "classification": "simulated"
+      },
+      "process": {
+        "rssDeltaBytes": 6410240,
+        "heapUsedDeltaBytes": 3013512,
+        "cpuUserMicros": 23319,
+        "cpuSystemMicros": 3256,
+        "classification": "local-sandbox-sample"
+      },
+      "saturation": {
+        "instanceAccepted": 14,
+        "instanceRejected": 4,
+        "perUserRejected": 1,
+        "expectedInstanceLimit": 12,
+        "expectedPerUserLimit": 2
+      },
+      "network": {
+        "guardEnabled": true,
+        "blockedAttempts": 0
+      },
+      "classification": "local-model-measured"
+    },
+    {
+      "population": 10000,
+      "totalOperations": 1000000,
+      "workers": 64,
+      "durationMs": 273.308,
+      "logicalRps": 3658879.034,
+      "unexpectedErrors": 0,
+      "p99GateMs": 1000,
+      "p99GatePassed": true,
+      "latency": {
+        "session_validation": {
+          "samples": 24000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0002
+        },
+        "chat_list_read": {
+          "samples": 36000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0002
+        },
+        "chat_create": {
+          "samples": 16000,
+          "p50Ms": 0.0002,
+          "p95Ms": 0.0003,
+          "p99Ms": 0.0006
+        },
+        "message_ingress_mutation": {
+          "samples": 40000,
+          "p50Ms": 0.0004,
+          "p95Ms": 0.0009,
+          "p99Ms": 0.0012
+        },
+        "memory_read_extraction": {
+          "samples": 30000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0002
+        },
+        "attachment_metadata": {
+          "samples": 16000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0002
+        },
+        "export_history_create": {
+          "samples": 10000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0002
+        },
+        "drafts": {
+          "samples": 16000,
+          "p50Ms": 0.0002,
+          "p95Ms": 0.0004,
+          "p99Ms": 0.0007
+        },
+        "owner_aggregate_metrics": {
+          "samples": 4000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0002
+        },
+        "duplicate_retry": {
+          "samples": 8000,
+          "p50Ms": 0.0003,
+          "p95Ms": 0.0007,
+          "p99Ms": 0.001
+        }
+      },
+      "queryModel": {
+        "total": 13300000,
+        "byOperation": {
+          "session_validation": 1440000,
+          "chat_list_read": 3240000,
+          "chat_create": 640000,
+          "message_ingress_mutation": 4000000,
+          "memory_read_extraction": 2250000,
+          "attachment_metadata": 640000,
+          "export_history_create": 250000,
+          "drafts": 640000,
+          "owner_aggregate_metrics": 40000,
+          "duplicate_retry": 160000
+        },
+        "classification": "simulated"
+      },
+      "storageModel": {
+        "logicalBytes": 2240000,
+        "sessions": 3600,
+        "drafts": 800,
+        "classification": "simulated"
+      },
+      "logicalMutations": 660000,
+      "idempotencyModel": {
+        "duplicateAttempts": 120000,
+        "duplicatesPrevented": 120000,
+        "classification": "simulated"
+      },
+      "process": {
+        "rssDeltaBytes": 35532800,
+        "heapUsedDeltaBytes": 14199752,
+        "cpuUserMicros": 281234,
+        "cpuSystemMicros": 13051,
+        "classification": "local-sandbox-sample"
+      },
+      "saturation": {
+        "instanceAccepted": 14,
+        "instanceRejected": 4,
+        "perUserRejected": 1,
+        "expectedInstanceLimit": 12,
+        "expectedPerUserLimit": 2
+      },
+      "network": {
+        "guardEnabled": true,
+        "blockedAttempts": 0
+      },
+      "classification": "population-measured-concurrency-simulated"
+    },
+    {
+      "population": 50000,
+      "totalOperations": 5000000,
+      "workers": 64,
+      "durationMs": 1599.345,
+      "logicalRps": 3126279.907,
+      "unexpectedErrors": 0,
+      "p99GateMs": 1000,
+      "p99GatePassed": true,
+      "latency": {
+        "session_validation": {
+          "samples": 24000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0002
+        },
+        "chat_list_read": {
+          "samples": 36000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0001
+        },
+        "chat_create": {
+          "samples": 16000,
+          "p50Ms": 0.0002,
+          "p95Ms": 0.0004,
+          "p99Ms": 0.0006
+        },
+        "message_ingress_mutation": {
+          "samples": 40000,
+          "p50Ms": 0.0005,
+          "p95Ms": 0.0011,
+          "p99Ms": 0.0015
+        },
+        "memory_read_extraction": {
+          "samples": 30000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0001
+        },
+        "attachment_metadata": {
+          "samples": 16000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0001
+        },
+        "export_history_create": {
+          "samples": 10000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0001
+        },
+        "drafts": {
+          "samples": 16000,
+          "p50Ms": 0.0002,
+          "p95Ms": 0.0005,
+          "p99Ms": 0.0007
+        },
+        "owner_aggregate_metrics": {
+          "samples": 4000,
+          "p50Ms": 0.0001,
+          "p95Ms": 0.0001,
+          "p99Ms": 0.0001
+        },
+        "duplicate_retry": {
+          "samples": 8000,
+          "p50Ms": 0.0004,
+          "p95Ms": 0.0009,
+          "p99Ms": 0.0012
+        }
+      },
+      "queryModel": {
+        "total": 66500000,
+        "byOperation": {
+          "session_validation": 7200000,
+          "chat_list_read": 16200000,
+          "chat_create": 3200000,
+          "message_ingress_mutation": 20000000,
+          "memory_read_extraction": 11250000,
+          "attachment_metadata": 3200000,
+          "export_history_create": 1250000,
+          "drafts": 3200000,
+          "owner_aggregate_metrics": 200000,
+          "duplicate_retry": 800000
+        },
+        "classification": "simulated"
+      },
+      "storageModel": {
+        "logicalBytes": 11200000,
+        "sessions": 18000,
+        "drafts": 4000,
+        "classification": "simulated"
+      },
+      "logicalMutations": 3300000,
+      "idempotencyModel": {
+        "duplicateAttempts": 600000,
+        "duplicatesPrevented": 600000,
+        "classification": "simulated"
+      },
+      "process": {
+        "rssDeltaBytes": 52588544,
+        "heapUsedDeltaBytes": 51922280,
+        "cpuUserMicros": 1661474,
+        "cpuSystemMicros": 31631,
+        "classification": "local-sandbox-sample"
+      },
+      "saturation": {
+        "instanceAccepted": 14,
+        "instanceRejected": 4,
+        "perUserRejected": 1,
+        "expectedInstanceLimit": 12,
+        "expectedPerUserLimit": 2
+      },
+      "network": {
+        "guardEnabled": true,
+        "blockedAttempts": 0
+      },
+      "classification": "population-measured-concurrency-simulated"
+    }
+  ],
+  "networkGuardBlockedAttempts": 0
+}
