@@ -1,6 +1,6 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
-import { appendChatMessage, consumeChatStreamRequestQuota, enqueueMemoryExtractionJob, getOwnedChatSession, getStoredAssistantForClientMessage, listSessionMessages, updateChatTitle } from "./db";
+import { appendChatMessage, consumeChatStreamRequestQuota, enqueueMemoryExtractionJob, getOwnedChatSession, getOwnedSessionMessage, getStoredAssistantForClientMessage, listSessionTranscriptWindow, updateChatTitle } from "./db";
 import { sdk } from "./_core/sdk";
 import { MODEL_IDS, chatWithRoleStream, publicChatError, type Provider, type RoleId } from "./providers";
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
@@ -248,7 +248,8 @@ type StreamDependencies = {
   consumeChatStreamRequestQuota: typeof consumeChatStreamRequestQuota;
   appendChatMessage: typeof appendChatMessage;
   updateChatTitle: typeof updateChatTitle;
-  listSessionMessages: typeof listSessionMessages;
+  getOwnedSessionMessage: typeof getOwnedSessionMessage;
+  listSessionTranscriptWindow: typeof listSessionTranscriptWindow;
   chatWithRoleStream: typeof chatWithRoleStream;
   buildChatContext: typeof buildChatContext;
   enqueueMemoryExtractionJob: typeof enqueueMemoryExtractionJob;
@@ -263,7 +264,8 @@ const defaultDependencies: StreamDependencies = {
   consumeChatStreamRequestQuota,
   appendChatMessage,
   updateChatTitle,
-  listSessionMessages,
+  getOwnedSessionMessage,
+  listSessionTranscriptWindow,
   chatWithRoleStream,
   buildChatContext,
   enqueueMemoryExtractionJob,
@@ -348,13 +350,12 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
       }
       releaseActiveStream = activeStream.release;
       chatStreamRuntimeGauges.accepted += 1;
-      let history: Awaited<ReturnType<typeof dependencies.listSessionMessages>> | undefined;
+      let transcript: Awaited<ReturnType<typeof dependencies.listSessionTranscriptWindow>> | undefined;
       if (input.regenerateMessageId) {
-        const currentHistory = await dependencies.listSessionMessages(user.id, input.sessionId);
-        const targetIndex = currentHistory.findIndex((message) => message.id === input.regenerateMessageId && message.role === "assistant");
-        const promptIndex = targetIndex < 0 ? -1 : currentHistory.slice(0, targetIndex).map((message) => message.role).lastIndexOf("user");
-        if (promptIndex < 0) throw new Error("Исходный запрос для регенерации не найден.");
-        history = currentHistory.slice(0, targetIndex);
+        const target = await dependencies.getOwnedSessionMessage(user.id, input.sessionId, input.regenerateMessageId);
+        if (!target || target.role !== "assistant") throw new Error("Исходный запрос для регенерации не найден.");
+        transcript = await dependencies.listSessionTranscriptWindow(user.id, input.sessionId, input.modelId, { beforeMessageId: target.id });
+        if (!transcript.messages.some((message) => message.role === "user")) throw new Error("Исходный запрос для регенерации не найден.");
       } else {
         if (idempotencyKey) pendingReplay = createPendingReplay(idempotencyKey);
         const attachmentIds = Array.from(new Set(input.attachmentIds ?? [])).filter((attachmentId) => typeof attachmentId === "string" && attachmentId.length > 0);
@@ -378,7 +379,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
           return;
         }
         if (session.title === "Новый разговор") await dependencies.updateChatTitle(user.id, input.sessionId, input.content.slice(0, 72));
-        history = await dependencies.listSessionMessages(user.id, input.sessionId);
+        transcript = await dependencies.listSessionTranscriptWindow(user.id, input.sessionId, input.modelId, { throughMessageId: append.id });
       }
 
       const storedSettings = await dependencies.buildChatContext(user.id, input.sessionId, { attachmentIds: input.attachmentIds, query: input.content, role: input.modelId });
@@ -409,7 +410,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
       try {
         const result = await dependencies.chatWithRoleStream(
           input.modelId,
-          history.map((message) => ({ role: message.role, content: message.content })),
+          (transcript?.messages ?? []).map((message) => ({ role: message.role, content: message.content })),
           effectiveSettings,
           (delta: string) => {
             if (!closed) writeEvent(res, "delta", { content: delta });

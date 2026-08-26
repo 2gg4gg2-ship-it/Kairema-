@@ -6,6 +6,7 @@ import { providerHealthHistory } from "../drizzle/schema";
 import { stytchLinkIntents } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { decodeHistoryPageCursor, encodeHistoryPageCursor, normalizeHistoryPageLimit } from "./history-pagination";
+import { selectTranscriptWindow, TRANSCRIPT_WINDOW_BUDGETS, type TranscriptRole } from "./transcript-window";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -254,6 +255,39 @@ export async function listSessionMessages(userId: number, sessionId: string): Pr
   return db.select().from(messages).where(eq(messages.sessionId, sessionId)).orderBy(asc(messages.createdAt), asc(messages.id));
 }
 
+/** Resolves exactly one message after the same verified session ownership boundary. */
+export async function getOwnedSessionMessage(userId: number, sessionId: string, messageId: number) {
+  const db = requireDatabase(await getDb());
+  requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
+  return (await db.select().from(messages).where(and(eq(messages.sessionId, sessionId), eq(messages.id, messageId))).limit(1))[0];
+}
+
+/**
+ * Bounded, owner-scoped candidate read for a single LLM request. The separate
+ * legacy listSessionMessages contract intentionally remains full-history for
+ * exports and compatibility callers.
+ */
+export async function listSessionTranscriptWindow(userId: number, sessionId: string, role: TranscriptRole, input: { beforeMessageId?: number; throughMessageId?: number } = {}) {
+  const db = requireDatabase(await getDb());
+  requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
+  if (input.beforeMessageId && input.throughMessageId) throw new Error("Для transcript window разрешён только один boundary.");
+  const boundaryMessageId = input.beforeMessageId ?? input.throughMessageId;
+  const boundaryRecord = boundaryMessageId
+    ? (await db.select({ id: messages.id, createdAt: messages.createdAt }).from(messages)
+      .where(and(eq(messages.sessionId, sessionId), eq(messages.id, boundaryMessageId))).limit(1))[0]
+    : undefined;
+  if (boundaryMessageId && !boundaryRecord) throw new Error("Исходное сообщение для context не найдено.");
+  const boundary = input.beforeMessageId && boundaryRecord
+    ? and(eq(messages.sessionId, sessionId), or(lt(messages.createdAt, boundaryRecord.createdAt), and(eq(messages.createdAt, boundaryRecord.createdAt), lt(messages.id, boundaryRecord.id))))
+    : input.throughMessageId && boundaryRecord
+      ? and(eq(messages.sessionId, sessionId), or(lt(messages.createdAt, boundaryRecord.createdAt), and(eq(messages.createdAt, boundaryRecord.createdAt), lte(messages.id, boundaryRecord.id))))
+    : eq(messages.sessionId, sessionId);
+  const budget = TRANSCRIPT_WINDOW_BUDGETS[role];
+  const newestFirst = await db.select().from(messages).where(boundary)
+    .orderBy(desc(messages.createdAt), desc(messages.id)).limit(budget.maxCandidateMessages);
+  return selectTranscriptWindow(role, [...newestFirst].reverse());
+}
+
 function historyCursorSecret() {
   if (!ENV.cookieSecret) throw new Error("Безопасная пагинация истории временно недоступна.");
   return ENV.cookieSecret;
@@ -261,7 +295,8 @@ function historyCursorSecret() {
 
 /**
  * Opt-in user-scoped history page. The legacy full-history helper remains the
- * contract for provider context, exports and existing API callers.
+ * contract for exports and existing compatibility callers; LLM context uses
+ * the separate bounded transcript helper above.
  */
 export async function listSessionMessagesPage(userId: number, sessionId: string, input: { before?: string; limit?: number } = {}) {
   const db = requireDatabase(await getDb());

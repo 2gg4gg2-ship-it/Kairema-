@@ -146,6 +146,13 @@
 - [x] scale-pagination/CARDINALITY-POLICY: report documents relative cardinality/EXPLAIN re-review triggers and deferred index candidates; no index was created.
 - [x] scale-pagination/REPORT: Russian evidence report at `reports/evidence/scale-stability-opt-in-history-pagination-2026-08.md` completed; focused 66-test suite, `pnpm check` and `git diff --check` PASS; work stopped before transcript-window or index work.
 
+- [x] transcript-window/AUDIT: source-level inventory of the current LLM prompt/context assembly, full-history reads, role paths, memory/search composition, ordering, and uncontrolled growth risks; no behavior change during analysis.
+- [x] transcript-window/DESIGN: document deterministic bounded transcript selection, hard role-specific budgets based on verified current inputs, coherent-context expansion limits, and compatibility boundaries.
+- [x] transcript-window/IMPLEMENTATION: add a server-only bounded selector for LLM request context only, retaining full stored/UI history, cursor pagination, Unified Memory semantics, role chains, and no-more-than-four attempts.
+- [x] transcript-window/TESTS: add focused no-network deterministic coverage for history edge cases, isolation, memory/search interaction, concurrent insert, role/fallback compatibility, and bounded output.
+- [x] transcript-window/BENCHMARK: execute strict local no-network synthetic before/after comparison across history sizes, recording reads/query proxy, selection size, context growth, latency proxy, RSS/CPU when available.
+- [x] transcript-window/REPORT: write the required Russian evidence report, complete focused validation, `pnpm check`, and `git diff --check`; do not run production build or start index/memory-policy work.
+
 ## Multi-user foundation — 2026-08
 
 - [x] multiuser/PLATFORM-BLOCKER-REGISTRY: все 24 исторических browser/OAuth/owner/provider/build пункта перенесены в `reports/evidence/platform-blocker-registry-2026-08.md` с причиной, статусом и условием разблокировки. Приёмки не возобновлялись; OAuth/owner mapping не менялись.

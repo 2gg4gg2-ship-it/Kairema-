@@ -53,7 +53,7 @@ describe("opt-in history pagination", () => {
   });
 
   it("preserves the legacy full-history helper for existing provider, export and compatibility callers", () => {
-    const legacy = sourceBetween("export async function listSessionMessages", "function historyCursorSecret");
+    const legacy = sourceBetween("export async function listSessionMessages", "/** Resolves exactly one message after the same verified session ownership boundary. */");
     expect(legacy).toContain("orderBy(asc(messages.createdAt), asc(messages.id))");
     expect(legacy).not.toContain(".limit(");
   });

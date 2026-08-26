@@ -1,0 +1,564 @@
+{
+  "generatedAt": "2026-08-26T11:19:11.024Z",
+  "scope": "isolated-in-memory-simulation",
+  "networkGuardBlockedAttempts": 0,
+  "tiers": [
+    {
+      "historyRecords": 100,
+      "iterations": 100,
+      "roles": [
+        {
+          "role": "fast",
+          "budget": {
+            "maxContentChars": 18000,
+            "maxCandidateMessages": 12,
+            "maxPriorTurns": 4
+          },
+          "legacyFullHistory": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 100,
+            "selectedMessages": 100,
+            "selectedContentChars": 21401,
+            "p50Ms": 0.0010320000000092477,
+            "p95Ms": 0.002012999999976728,
+            "p99Ms": 0.018316999999996142
+          },
+          "boundedTranscript": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 12,
+            "candidateMessages": 12,
+            "selectedMessages": 8,
+            "selectedContentChars": 2524,
+            "selectedPriorTurns": 4,
+            "truncated": true,
+            "p50Ms": 0.0035160000000189484,
+            "p95Ms": 0.012599999999991951,
+            "p99Ms": 0.05643500000002177
+          },
+          "selectedRecordRatio": 0.08,
+          "selectedCharacterRatio": 0.1179384140927994,
+          "rssDeltaBytes": 1556480,
+          "cpuMs": 1.123
+        },
+        {
+          "role": "smart",
+          "budget": {
+            "maxContentChars": 30000,
+            "maxCandidateMessages": 20,
+            "maxPriorTurns": 8
+          },
+          "legacyFullHistory": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 100,
+            "selectedMessages": 100,
+            "selectedContentChars": 21401,
+            "p50Ms": 0.0006309999999984939,
+            "p95Ms": 0.0013219999999876109,
+            "p99Ms": 0.0016820000000166146
+          },
+          "boundedTranscript": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 20,
+            "candidateMessages": 20,
+            "selectedMessages": 16,
+            "selectedContentChars": 4055,
+            "selectedPriorTurns": 8,
+            "truncated": true,
+            "p50Ms": 0.0060290000000122745,
+            "p95Ms": 0.008843000000013035,
+            "p99Ms": 0.072749999999985
+          },
+          "selectedRecordRatio": 0.16,
+          "selectedCharacterRatio": 0.189477127237045,
+          "rssDeltaBytes": 995328,
+          "cpuMs": 1.983
+        },
+        {
+          "role": "context",
+          "budget": {
+            "maxContentChars": 48000,
+            "maxCandidateMessages": 32,
+            "maxPriorTurns": 14
+          },
+          "legacyFullHistory": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 100,
+            "selectedMessages": 100,
+            "selectedContentChars": 21401,
+            "p50Ms": 0.0006309999999984939,
+            "p95Ms": 0.0008410000000083073,
+            "p99Ms": 0.000981999999993377
+          },
+          "boundedTranscript": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 32,
+            "candidateMessages": 32,
+            "selectedMessages": 28,
+            "selectedContentChars": 6611,
+            "selectedPriorTurns": 14,
+            "truncated": true,
+            "p50Ms": 0.008202000000011367,
+            "p95Ms": 0.018749000000013893,
+            "p99Ms": 0.04572899999999436
+          },
+          "selectedRecordRatio": 0.28,
+          "selectedCharacterRatio": 0.30891079856081494,
+          "rssDeltaBytes": 270336,
+          "cpuMs": 3.042
+        },
+        {
+          "role": "flagship",
+          "budget": {
+            "maxContentChars": 40000,
+            "maxCandidateMessages": 28,
+            "maxPriorTurns": 12
+          },
+          "legacyFullHistory": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 100,
+            "selectedMessages": 100,
+            "selectedContentChars": 21401,
+            "p50Ms": 0.0006110000000205673,
+            "p95Ms": 0.0007919999999899119,
+            "p99Ms": 0.0009119999999995798
+          },
+          "boundedTranscript": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 28,
+            "candidateMessages": 28,
+            "selectedMessages": 24,
+            "selectedContentChars": 5869,
+            "selectedPriorTurns": 12,
+            "truncated": true,
+            "p50Ms": 0.0049579999999878055,
+            "p95Ms": 0.007771000000019512,
+            "p99Ms": 0.020080000000007203
+          },
+          "selectedRecordRatio": 0.24,
+          "selectedCharacterRatio": 0.2742395215176861,
+          "rssDeltaBytes": 0,
+          "cpuMs": 0.647
+        }
+      ]
+    },
+    {
+      "historyRecords": 1000,
+      "iterations": 100,
+      "roles": [
+        {
+          "role": "fast",
+          "budget": {
+            "maxContentChars": 18000,
+            "maxCandidateMessages": 12,
+            "maxPriorTurns": 4
+          },
+          "legacyFullHistory": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 1000,
+            "selectedMessages": 1000,
+            "selectedContentChars": 201071,
+            "p50Ms": 0.004917000000006055,
+            "p95Ms": 0.0052069999999844185,
+            "p99Ms": 0.005649000000005344
+          },
+          "boundedTranscript": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 12,
+            "candidateMessages": 12,
+            "selectedMessages": 8,
+            "selectedContentChars": 2577,
+            "selectedPriorTurns": 4,
+            "truncated": true,
+            "p50Ms": 0.0018230000000016844,
+            "p95Ms": 0.0020529999999894244,
+            "p99Ms": 0.002443999999997004
+          },
+          "selectedRecordRatio": 0.008,
+          "selectedCharacterRatio": 0.012816368347499142,
+          "rssDeltaBytes": 0,
+          "cpuMs": 0.714
+        },
+        {
+          "role": "smart",
+          "budget": {
+            "maxContentChars": 30000,
+            "maxCandidateMessages": 20,
+            "maxPriorTurns": 8
+          },
+          "legacyFullHistory": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 1000,
+            "selectedMessages": 1000,
+            "selectedContentChars": 201071,
+            "p50Ms": 0.0049080000000003565,
+            "p95Ms": 0.00519799999997872,
+            "p99Ms": 0.017246000000000095
+          },
+          "boundedTranscript": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 20,
+            "candidateMessages": 20,
+            "selectedMessages": 16,
+            "selectedContentChars": 4203,
+            "selectedPriorTurns": 8,
+            "truncated": true,
+            "p50Ms": 0.0031150000000081945,
+            "p95Ms": 0.003365000000002283,
+            "p99Ms": 0.005308999999982689
+          },
+          "selectedRecordRatio": 0.016,
+          "selectedCharacterRatio": 0.02090306409178847,
+          "rssDeltaBytes": 0,
+          "cpuMs": 1.77
+        },
+        {
+          "role": "context",
+          "budget": {
+            "maxContentChars": 48000,
+            "maxCandidateMessages": 32,
+            "maxPriorTurns": 14
+          },
+          "legacyFullHistory": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 1000,
+            "selectedMessages": 1000,
+            "selectedContentChars": 201071,
+            "p50Ms": 0.004967000000021926,
+            "p95Ms": 0.007611999999994623,
+            "p99Ms": 0.009464000000008355
+          },
+          "boundedTranscript": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 32,
+            "candidateMessages": 32,
+            "selectedMessages": 28,
+            "selectedContentChars": 6781,
+            "selectedPriorTurns": 14,
+            "truncated": true,
+            "p50Ms": 0.005919000000005781,
+            "p95Ms": 0.010876000000024533,
+            "p99Ms": 0.02126200000000722
+          },
+          "selectedRecordRatio": 0.028,
+          "selectedCharacterRatio": 0.03372440580690403,
+          "rssDeltaBytes": 405504,
+          "cpuMs": 1.758
+        },
+        {
+          "role": "flagship",
+          "budget": {
+            "maxContentChars": 40000,
+            "maxCandidateMessages": 28,
+            "maxPriorTurns": 12
+          },
+          "legacyFullHistory": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 1000,
+            "selectedMessages": 1000,
+            "selectedContentChars": 201071,
+            "p50Ms": 0.006299000000012711,
+            "p95Ms": 0.007742000000007465,
+            "p99Ms": 0.023285000000015543
+          },
+          "boundedTranscript": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 28,
+            "candidateMessages": 28,
+            "selectedMessages": 24,
+            "selectedContentChars": 5871,
+            "selectedPriorTurns": 12,
+            "truncated": true,
+            "p50Ms": 0.006168999999999869,
+            "p95Ms": 0.01423299999999017,
+            "p99Ms": 0.0232549999999776
+          },
+          "selectedRecordRatio": 0.024,
+          "selectedCharacterRatio": 0.029198641275967194,
+          "rssDeltaBytes": 1847296,
+          "cpuMs": 3.557
+        }
+      ]
+    },
+    {
+      "historyRecords": 10000,
+      "iterations": 100,
+      "roles": [
+        {
+          "role": "fast",
+          "budget": {
+            "maxContentChars": 18000,
+            "maxCandidateMessages": 12,
+            "maxPriorTurns": 4
+          },
+          "legacyFullHistory": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 10000,
+            "selectedMessages": 10000,
+            "selectedContentChars": 2001520,
+            "p50Ms": 0.049444999999991524,
+            "p95Ms": 0.06988699999999426,
+            "p99Ms": 0.9908640000000162
+          },
+          "boundedTranscript": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 12,
+            "candidateMessages": 12,
+            "selectedMessages": 8,
+            "selectedContentChars": 2625,
+            "selectedPriorTurns": 4,
+            "truncated": true,
+            "p50Ms": 0.002403000000015254,
+            "p95Ms": 0.003456999999997379,
+            "p99Ms": 0.016755000000017617
+          },
+          "selectedRecordRatio": 0.0008,
+          "selectedCharacterRatio": 0.0013115032575242815,
+          "rssDeltaBytes": 5361664,
+          "cpuMs": 12.556
+        },
+        {
+          "role": "smart",
+          "budget": {
+            "maxContentChars": 30000,
+            "maxCandidateMessages": 20,
+            "maxPriorTurns": 8
+          },
+          "legacyFullHistory": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 10000,
+            "selectedMessages": 10000,
+            "selectedContentChars": 2001520,
+            "p50Ms": 0.061002000000002,
+            "p95Ms": 0.0762239999999963,
+            "p99Ms": 0.08760200000000395
+          },
+          "boundedTranscript": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 20,
+            "candidateMessages": 20,
+            "selectedMessages": 16,
+            "selectedContentChars": 4237,
+            "selectedPriorTurns": 8,
+            "truncated": true,
+            "p50Ms": 0.004467000000005328,
+            "p95Ms": 0.005337999999994736,
+            "p99Ms": 0.012858999999991738
+          },
+          "selectedRecordRatio": 0.0016,
+          "selectedCharacterRatio": 0.0021168911627163357,
+          "rssDeltaBytes": 5406720,
+          "cpuMs": 6.48
+        },
+        {
+          "role": "context",
+          "budget": {
+            "maxContentChars": 48000,
+            "maxCandidateMessages": 32,
+            "maxPriorTurns": 14
+          },
+          "legacyFullHistory": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 10000,
+            "selectedMessages": 10000,
+            "selectedContentChars": 2001520,
+            "p50Ms": 0.04770199999998681,
+            "p95Ms": 0.06447700000001078,
+            "p99Ms": 0.12223500000001764
+          },
+          "boundedTranscript": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 32,
+            "candidateMessages": 32,
+            "selectedMessages": 28,
+            "selectedContentChars": 6553,
+            "selectedPriorTurns": 14,
+            "truncated": true,
+            "p50Ms": 0.0053679999999758365,
+            "p95Ms": 0.006890999999995984,
+            "p99Ms": 0.010134999999991123
+          },
+          "selectedRecordRatio": 0.0028,
+          "selectedCharacterRatio": 0.0032740117510691876,
+          "rssDeltaBytes": 540672,
+          "cpuMs": 5.778
+        },
+        {
+          "role": "flagship",
+          "budget": {
+            "maxContentChars": 40000,
+            "maxCandidateMessages": 28,
+            "maxPriorTurns": 12
+          },
+          "legacyFullHistory": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 10000,
+            "selectedMessages": 10000,
+            "selectedContentChars": 2001520,
+            "p50Ms": 0.04779200000001538,
+            "p95Ms": 0.06150300000001607,
+            "p99Ms": 0.14507900000000973
+          },
+          "boundedTranscript": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 28,
+            "candidateMessages": 28,
+            "selectedMessages": 24,
+            "selectedContentChars": 5891,
+            "selectedPriorTurns": 12,
+            "truncated": true,
+            "p50Ms": 0.004557000000005473,
+            "p95Ms": 0.004817000000002736,
+            "p99Ms": 0.005358000000001084
+          },
+          "selectedRecordRatio": 0.0024,
+          "selectedCharacterRatio": 0.002943263120028778,
+          "rssDeltaBytes": 0,
+          "cpuMs": 5.583
+        }
+      ]
+    },
+    {
+      "historyRecords": 50000,
+      "iterations": 100,
+      "roles": [
+        {
+          "role": "fast",
+          "budget": {
+            "maxContentChars": 18000,
+            "maxCandidateMessages": 12,
+            "maxPriorTurns": 4
+          },
+          "legacyFullHistory": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 50000,
+            "selectedMessages": 50000,
+            "selectedContentChars": 10001422,
+            "p50Ms": 0.3942639999999926,
+            "p95Ms": 0.5857129999999984,
+            "p99Ms": 5.095401999999979
+          },
+          "boundedTranscript": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 12,
+            "candidateMessages": 12,
+            "selectedMessages": 8,
+            "selectedContentChars": 2517,
+            "selectedPriorTurns": 4,
+            "truncated": true,
+            "p50Ms": 0.0036460000000033688,
+            "p95Ms": 0.012799000000001115,
+            "p99Ms": 0.03866800000000126
+          },
+          "selectedRecordRatio": 0.00016,
+          "selectedCharacterRatio": 0.00025166421334886177,
+          "rssDeltaBytes": 23453696,
+          "cpuMs": 80.442
+        },
+        {
+          "role": "smart",
+          "budget": {
+            "maxContentChars": 30000,
+            "maxCandidateMessages": 20,
+            "maxPriorTurns": 8
+          },
+          "legacyFullHistory": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 50000,
+            "selectedMessages": 50000,
+            "selectedContentChars": 10001422,
+            "p50Ms": 0.34742299999999204,
+            "p95Ms": 0.3942739999999958,
+            "p99Ms": 1.239799000000005
+          },
+          "boundedTranscript": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 20,
+            "candidateMessages": 20,
+            "selectedMessages": 16,
+            "selectedContentChars": 4040,
+            "selectedPriorTurns": 8,
+            "truncated": true,
+            "p50Ms": 0.004687000000046737,
+            "p95Ms": 0.0072499999999990905,
+            "p99Ms": 0.011276999999978443
+          },
+          "selectedRecordRatio": 0.00032,
+          "selectedCharacterRatio": 0.00040394255936805786,
+          "rssDeltaBytes": 8118272,
+          "cpuMs": 38.103
+        },
+        {
+          "role": "context",
+          "budget": {
+            "maxContentChars": 48000,
+            "maxCandidateMessages": 32,
+            "maxPriorTurns": 14
+          },
+          "legacyFullHistory": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 50000,
+            "selectedMessages": 50000,
+            "selectedContentChars": 10001422,
+            "p50Ms": 0.35795000000001664,
+            "p95Ms": 0.4415250000000128,
+            "p99Ms": 1.4242770000000178
+          },
+          "boundedTranscript": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 32,
+            "candidateMessages": 32,
+            "selectedMessages": 28,
+            "selectedContentChars": 6584,
+            "selectedPriorTurns": 14,
+            "truncated": true,
+            "p50Ms": 0.006559999999979027,
+            "p95Ms": 0.010986000000002605,
+            "p99Ms": 0.05401200000000017
+          },
+          "selectedRecordRatio": 0.00056,
+          "selectedCharacterRatio": 0.0006583063888315081,
+          "rssDeltaBytes": -8060928,
+          "cpuMs": 45.539
+        },
+        {
+          "role": "flagship",
+          "budget": {
+            "maxContentChars": 40000,
+            "maxCandidateMessages": 28,
+            "maxPriorTurns": 12
+          },
+          "legacyFullHistory": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 50000,
+            "selectedMessages": 50000,
+            "selectedContentChars": 10001422,
+            "p50Ms": 0.3598630000000185,
+            "p95Ms": 0.5148060000000214,
+            "p99Ms": 1.108761999999956
+          },
+          "boundedTranscript": {
+            "queryCountProxy": 1,
+            "recordReadsProxy": 28,
+            "candidateMessages": 28,
+            "selectedMessages": 24,
+            "selectedContentChars": 5846,
+            "selectedPriorTurns": 12,
+            "truncated": true,
+            "p50Ms": 0.005607999999995172,
+            "p95Ms": 0.008352000000002135,
+            "p99Ms": 0.011626999999975851
+          },
+          "selectedRecordRatio": 0.00048,
+          "selectedCharacterRatio": 0.0005845168816994223,
+          "rssDeltaBytes": 8110080,
+          "cpuMs": 39.978
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Synthetic messages contain only generated role/id/timestamp/text-length content; no user data, database, storage, router, provider or external network is imported.",
+    "Both paths use one query-count proxy. Record-read and latency figures model full ordered result versus a descending bounded candidate result plus the production pure selector; they are not TiDB EXPLAIN, production runtime, socket, provider or LLM measurements.",
+    "RSS and CPU are local-process samples for this isolated model and are intentionally not production capacity evidence for 10K/50K users."
+  ]
+}

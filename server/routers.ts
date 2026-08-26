@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag } from "./db";
+import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { clearStytchLinkIntentCookie, clearStytchResetCookie, clearStytchSessionCookie, getSafeStytchDeliveryFailure, getStytchCallbackUrl, getStytchClient, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
 import { resolveOrCreateProviderUser } from "./db";
@@ -493,9 +493,9 @@ export const appRouter = router({
           const attachmentMetadata = input.attachmentIds?.length ? JSON.stringify({ attachmentIds: Array.from(new Set(input.attachmentIds)) }) : undefined;
           const savedUser = await appendChatMessage(ctx.user.id, input.sessionId, "user", input.content, input.modelId, attachmentMetadata);
           if (session.title === "Новый разговор") await updateChatTitle(ctx.user.id, input.sessionId, input.content.slice(0, 72));
-          const history = await listSessionMessages(ctx.user.id, input.sessionId);
+          const transcript = await listSessionTranscriptWindow(ctx.user.id, input.sessionId, input.modelId, { throughMessageId: savedUser.id });
           const storedSettings = await buildChatContext(ctx.user.id, input.sessionId, { attachmentIds: input.attachmentIds, query: input.content, role: input.modelId });
-          const result = await chatWithRole(input.modelId, history.map((message) => ({ role: message.role, content: message.content })), { ...storedSettings, ...input.settings });
+          const result = await chatWithRole(input.modelId, transcript.messages.map((message) => ({ role: message.role, content: message.content })), { ...storedSettings, ...input.settings });
           const sourceMetadata = result.sources?.length || result.evidence?.length || result.ragSources?.length || result.searchStatus
             ? JSON.stringify({
               ...(result.sources?.length ? { sources: result.sources } : {}),

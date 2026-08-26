@@ -11,6 +11,14 @@ import { CHAT_STREAM_RATE_LIMIT, createChatStreamHandler, getChatStreamRuntimeGa
 
 const context = { style: "default" as const, responseLength: "normal" as const, quickReplies: true, effort: "standard" as const, thinking: false };
 const validRequestBody = { sessionId: "550e8400-e29b-41d4-a716-446655440000", modelId: "fast", content: "Привет" };
+const transcriptWindow = (messages = [{ id: 1, role: "user" as const, content: "Привет", createdAt: new Date(0) }]) => ({
+  messages,
+  budget: { maxContentChars: 18_000, maxCandidateMessages: 12, maxPriorTurns: 4 },
+  candidateCount: messages.length,
+  selectedContentChars: messages.reduce((total, message) => total + message.content.length, 0),
+  selectedPriorTurns: 0,
+  truncated: false,
+});
 
 function response() {
   return Object.assign(new EventEmitter(), {
@@ -38,7 +46,7 @@ describe("chat stream happy-path", () => {
       authenticateRequest: vi.fn().mockResolvedValue({ id: 42 }),
       getOwnedChatSession: vi.fn().mockResolvedValue({ id: "550e8400-e29b-41d4-a716-446655440000", title: "Новый разговор" }),
       appendChatMessage: vi.fn(async (_userId, _sessionId, role, content, _modelId, metadata) => { appended.push({ role, content, metadata }); if (role === "assistant") order.push("assistant-saved"); return { id: appended.length, created: true }; }),
-      updateChatTitle: vi.fn(), listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
+      updateChatTitle: vi.fn(), listSessionTranscriptWindow: vi.fn().mockResolvedValue(transcriptWindow()),
       buildChatContext: vi.fn().mockResolvedValue(context), enqueueMemoryExtractionJob, processMemoryExtractionJob,
       chatWithRoleStream: vi.fn(async (_modelId, _history, _settings, onDelta) => { onDelta("При"); onDelta("вет"); return { content: "Привет", modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Llama 3.1 8B Instant", sources: [{ title: "Официальный источник", url: "https://example.com/fresh", domain: "example.com", publishedAt: "2026-08-23T00:00:00.000Z" }], evidence: [{ sourceUrl: "https://example.com/evidence", excerpt: "private snippet" }], ragSources: [{ title: "Private RAG", url: "https://example.com/rag", publishedAt: "2026-08-19T00:00:00.000Z" }], searchStatus: { cascadeUsed: "you", state: "found", verificationStatus: "verified", sourcesCount: 2 } }; }),
       auditChatStream,
@@ -78,7 +86,7 @@ describe("chat stream happy-path", () => {
       authenticateRequest: vi.fn().mockResolvedValue({ id: 42 }),
       getOwnedChatSession: vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Новый разговор" }),
       appendChatMessage: vi.fn().mockResolvedValueOnce({ id: 1, created: true }).mockResolvedValueOnce({ id: 2, created: true }),
-      updateChatTitle: vi.fn(), listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
+      updateChatTitle: vi.fn(), listSessionTranscriptWindow: vi.fn().mockResolvedValue(transcriptWindow()),
       buildChatContext: vi.fn().mockResolvedValue(context),
       chatWithRoleStream: vi.fn().mockResolvedValue({ content: "Готово", modelUsed: "model", provider: "provider", label: "Модель" }),
       enqueueMemoryExtractionJob: vi.fn().mockRejectedValue(new Error("queue unavailable")),
@@ -98,7 +106,7 @@ describe("chat stream happy-path", () => {
       authenticateRequest: vi.fn().mockResolvedValue({ id: 42 }),
       getOwnedChatSession: vi.fn().mockResolvedValue({ id: "550e8400-e29b-41d4-a716-446655440000", title: "Обычный разговор" }),
       appendChatMessage: vi.fn(async (_userId, _sessionId, role, content) => { appended.push({ role, content }); }),
-      updateChatTitle: vi.fn(), listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
+      updateChatTitle: vi.fn(), listSessionTranscriptWindow: vi.fn().mockResolvedValue(transcriptWindow()),
       buildChatContext: vi.fn().mockResolvedValue(context), extractMemoryFacts: vi.fn().mockResolvedValue(undefined),
       chatWithRoleStream: vi.fn(async (_modelId, _history, _settings, onDelta) => { onDelta("Неполный "); (streamResponse as unknown as EventEmitter).emit("close"); throw new DOMException("aborted", "AbortError"); }),
     });
@@ -132,7 +140,7 @@ describe("chat stream happy-path", () => {
       getOwnedChatSession: vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Обычный разговор" }),
       getStoredAssistantForClientMessage: vi.fn().mockResolvedValue(undefined),
       appendChatMessage,
-      listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
+      listSessionTranscriptWindow: vi.fn().mockResolvedValue(transcriptWindow()),
       buildChatContext: vi.fn().mockResolvedValue(context),
       chatWithRoleStream,
       enqueueMemoryExtractionJob: vi.fn().mockResolvedValue({ created: true }),
@@ -155,13 +163,13 @@ describe("chat stream happy-path", () => {
   it("replays a durably stored idempotent assistant response before quota, history or provider work", async () => {
     const request = { ...validRequestBody, clientMessageId: "33333333-3333-4333-8333-333333333333" };
     const getStoredAssistantForClientMessage = vi.fn().mockResolvedValue({ id: 11, role: "assistant", content: "Сохранённый ответ", modelId: "llama-3.1-8b-instant", metadata: undefined });
-    const listSessionMessages = vi.fn();
+    const listSessionTranscriptWindow = vi.fn();
     const chatWithRoleStream = vi.fn();
     const handler = createChatStreamHandler({
       authenticateRequest: vi.fn().mockResolvedValue({ id: 42 }),
       getOwnedChatSession: vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Обычный разговор" }),
       getStoredAssistantForClientMessage,
-      listSessionMessages,
+      listSessionTranscriptWindow,
       chatWithRoleStream,
     });
     const replayResponse = response();
@@ -172,7 +180,7 @@ describe("chat stream happy-path", () => {
     expect(replayResponse.write).toHaveBeenCalledWith(expect.stringContaining("Сохранённый ответ"));
     expect(getStoredAssistantForClientMessage).toHaveBeenCalledWith(42, request.sessionId, request.clientMessageId);
     expect(chatQuota).not.toHaveBeenCalled();
-    expect(listSessionMessages).not.toHaveBeenCalled();
+    expect(listSessionTranscriptWindow).not.toHaveBeenCalled();
     expect(chatWithRoleStream).not.toHaveBeenCalled();
   });
 
@@ -201,7 +209,7 @@ describe("chat stream happy-path", () => {
       getOwnedChatSession: vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Новый разговор" }),
       appendChatMessage,
       updateChatTitle: vi.fn().mockResolvedValue(undefined),
-      listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
+      listSessionTranscriptWindow: vi.fn().mockResolvedValue(transcriptWindow()),
       buildChatContext,
       chatWithRoleStream,
       enqueueMemoryExtractionJob: vi.fn().mockResolvedValue({ created: true }),
@@ -221,13 +229,13 @@ describe("chat stream happy-path", () => {
   it("denies a durable quota-exhausted user before history or provider work", async () => {
     const auditChatStream = vi.fn();
     const getOwnedChatSession = vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Обычный разговор" });
-    const listSessionMessages = vi.fn();
+    const listSessionTranscriptWindow = vi.fn();
     const chatWithRoleStream = vi.fn();
     chatQuota.mockResolvedValueOnce({ allowed: false, retryAfterSeconds: 37 });
     const handler = createChatStreamHandler({
       authenticateRequest: vi.fn().mockResolvedValue({ id: 73 }),
       getOwnedChatSession,
-      listSessionMessages,
+      listSessionTranscriptWindow,
       chatWithRoleStream,
       auditChatStream,
     });
@@ -240,23 +248,23 @@ describe("chat stream happy-path", () => {
     expect(limitedResponse.json).toHaveBeenCalledWith({ error: "Слишком много запросов. Подождите минуту." });
     expect(auditChatStream).toHaveBeenLastCalledWith(expect.objectContaining({ event: "chat_stream.rate_limited", userId: 73 }));
     expect(getOwnedChatSession).toHaveBeenCalledOnce();
-    expect(listSessionMessages).not.toHaveBeenCalled();
+    expect(listSessionTranscriptWindow).not.toHaveBeenCalled();
     expect(chatWithRoleStream).not.toHaveBeenCalled();
   });
 
   it("fails closed when durable quota storage is unavailable before history or provider work", async () => {
     const getOwnedChatSession = vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Обычный разговор" });
-    const listSessionMessages = vi.fn();
+    const listSessionTranscriptWindow = vi.fn();
     const chatWithRoleStream = vi.fn();
     chatQuota.mockRejectedValueOnce(new Error("quota database unavailable"));
-    const handler = createChatStreamHandler({ authenticateRequest: vi.fn().mockResolvedValue({ id: 77 }), getOwnedChatSession, listSessionMessages, chatWithRoleStream });
+    const handler = createChatStreamHandler({ authenticateRequest: vi.fn().mockResolvedValue({ id: 77 }), getOwnedChatSession, listSessionTranscriptWindow, chatWithRoleStream });
 
     const unavailableResponse = response();
     await handler({ body: validRequestBody } as Request, unavailableResponse, vi.fn());
 
     expect(unavailableResponse.status).toHaveBeenCalledWith(503);
     expect(unavailableResponse.json).toHaveBeenCalledWith({ error: "Проверка лимита временно недоступна. Повторите попытку позже." });
-    expect(listSessionMessages).not.toHaveBeenCalled();
+    expect(listSessionTranscriptWindow).not.toHaveBeenCalled();
     expect(chatWithRoleStream).not.toHaveBeenCalled();
   });
 
@@ -266,13 +274,13 @@ describe("chat stream happy-path", () => {
       if (resolvers.length < 2) return new Promise((resolve) => { resolvers.push(resolve); });
       return Promise.resolve({ content: "Готово", modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Модель" });
     });
-    const listSessionMessages = vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]);
+    const listSessionTranscriptWindow = vi.fn().mockResolvedValue(transcriptWindow());
     const appendChatMessage = vi.fn().mockResolvedValue({ id: 1, created: true });
     const handler = createChatStreamHandler({
       authenticateRequest: vi.fn().mockResolvedValue({ id: 91 }),
       getOwnedChatSession: vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Обычный разговор" }),
       appendChatMessage,
-      listSessionMessages,
+      listSessionTranscriptWindow,
       buildChatContext: vi.fn().mockResolvedValue(context),
       chatWithRoleStream,
       enqueueMemoryExtractionJob: vi.fn().mockResolvedValue({ created: true }),
@@ -294,7 +302,7 @@ describe("chat stream happy-path", () => {
       active: { streams: 2, userBuckets: 1 },
       outcomes: { accepted: 2, capacityRejected: 1, perUserCapacityRejected: 1 },
     });
-    expect(listSessionMessages).toHaveBeenCalledTimes(2);
+    expect(listSessionTranscriptWindow).toHaveBeenCalledTimes(2);
     expect(appendChatMessage).toHaveBeenCalledTimes(2);
 
     resolvers.forEach((resolve, index) => resolve({ content: `Ответ ${index + 1}`, modelUsed: "llama-3.1-8b-instant", provider: "groq", label: "Модель" }));
@@ -321,7 +329,7 @@ describe("chat stream happy-path", () => {
       authenticateRequest,
       getOwnedChatSession: vi.fn().mockResolvedValue({ id: validRequestBody.sessionId, title: "Обычный разговор" }),
       appendChatMessage: vi.fn().mockResolvedValue({ id: 1, created: true }), updateChatTitle: vi.fn(),
-      listSessionMessages: vi.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
+      listSessionTranscriptWindow: vi.fn().mockResolvedValue(transcriptWindow()),
       buildChatContext: vi.fn().mockResolvedValue(context), enqueueMemoryExtractionJob: vi.fn().mockResolvedValue({ created: true }), processMemoryExtractionJob: vi.fn().mockResolvedValue(undefined),
       chatWithRoleStream,
       auditChatStream: vi.fn(),
