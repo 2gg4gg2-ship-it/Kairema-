@@ -67,6 +67,14 @@
 - [x] email-auth/STYTCH-PROVIDER-DELIVERY-REMEDIATION: EXTERNAL BLOCKER / STOPPED BY USER — exact category remains unavailable. Do not change the test address, reactivate it, continue Support escalation or retry delivery without a new task and explicit authorization.
 - [x] email-auth/NONDELIVERY-INDEPENDENT-REGRESSION: full Kairema suite PASS (59 files, 281 tests; 1 file/4 tests skipped), `pnpm check` and `git diff --check` PASS after external-blocker documentation. No Stytch delivery, mailbox access, provider mutation or resend occurred; existing non-Stytch provider-health tests remain part of the suite.
 
+## SCALE & STABILITY HARDENING — read-only audit 2026-08
+
+- [x] scale-audit/INVARIANTS: preserved authentication, user-isolation, four-role, provider-attempt, search, attachment, export and draft invariants recorded; Stytch Magic Link remains external BLOCKED with no delivery attempts.
+- [x] scale-audit/SERVER-DATA-STORAGE: inspected single-instance state, database/query/index patterns, pagination/history/context growth, S3 access, attachments, exports, drafts, mutations/idempotency and concurrency paths.
+- [x] scale-audit/PROVIDERS-RESILIENCE: inspected provider router/fallback/health, rate limiting, search/RAG, resource limits, graceful degradation and observability without invoking providers.
+- [x] scale-audit/SECURITY-ISOLATION: inspected server-derived authorization, ownership filters, secret/error handling and cross-user boundaries under scale assumptions.
+- [x] scale-audit/REPORT: factual 10K–50K synthetic-user readiness report created at `reports/evidence/scale-stability-read-only-audit-2026-08.md`; it separates strengths, demonstrated bottlenecks, low-risk hardening candidates, deferred changes and unverified load characteristics. `git diff --check` and report structure checks PASS; no hardening was implemented.
+
 ## Multi-user foundation — 2026-08
 
 - [x] multiuser/PLATFORM-BLOCKER-REGISTRY: все 24 исторических browser/OAuth/owner/provider/build пункта перенесены в `reports/evidence/platform-blocker-registry-2026-08.md` с причиной, статусом и условием разблокировки. Приёмки не возобновлялись; OAuth/owner mapping не менялись.
