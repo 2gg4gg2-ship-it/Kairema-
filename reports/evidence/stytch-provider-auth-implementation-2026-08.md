@@ -56,9 +56,13 @@ Data-free Welcome сохраняет Google/Manus CTA и добавляет до
 
 ## Ограничения и следующий безопасный шаг
 
-Provider password configuration и code-level contract готовы. Ограниченная live acceptance выявила provider acceptance blocker: public registration и same-browser login вернули generic safe error уже до подтверждения delivery. A separate documented non-delivery Stytch sandbox diagnostic confirmed Password Create and Authenticate, then returned the safe category `no_match_for_provided_magic_link_url` for the Magic Link request. Это означает, что server-derived callback URL отсутствует в Stytch project allowlist. No raw provider error message, request ID, credentials, password, token, mailbox content или user records не извлекались. До добавления exact callback URL в Stytch Dashboard нельзя утверждать delivery, callback, session, reset или logout live PASS.
+Provider password configuration и code-level contract готовы. Ограниченная live acceptance выявила provider acceptance blocker: public registration и same-browser login вернули generic safe error уже до подтверждения delivery. A separate documented non-delivery Stytch sandbox diagnostic confirmed Password Create and Authenticate, then returned the safe category `no_match_for_provided_magic_link_url` for the Magic Link request. После подтверждения добавления exact production callback в Test Redirect URLs выполнен один process-local sandbox recheck с именно этим URL; он вернул ту же safe category. Это означает, что allowlist update ещё не виден credentialed Stytch Consumer project либо URL добавлен не в соответствующий Consumer Magic Link allowlist. No raw provider error message, request ID, credentials, password, token, mailbox content или user records не извлекались. Дополнительные provider requests остановлены; delivery, callback, session, reset и logout live PASS не заявляются.
 
 Официальная документация Stytch предоставляет sandbox values только в Test environment и только для прямых API calls. Email `sandbox@stytch.com` вызывает predetermined `200` в Password Create/Authenticate независимо от пароля, а также в Password Reset Start без фактической email delivery.[4] Такой путь позволяет проверить provider request semantics через текущий server adapter без повторной доставки на реальный mailbox, но не заменяет реальную email delivery acceptance. Для реальной delivery Stytch документирует отдельный E2E mailbox flow.[5]
+
+### Read-only delivery status path
+
+Stytch документирует delivery events с action `EmailDelivery` в Dashboard Event Logs; события появляются в течение минуты после request completion и хранятся 30 дней.[6] Consumer API не предоставляет отдельного safe application endpoint для чтения delivery status в данном integration scope. Поэтому без новой отправки единственный доступный путь — просмотреть Event Logs в том же Stytch Test project и записать только технический delivery outcome, не экспортируя email address, link, token или raw event payload.
 
 ## References
 
@@ -66,5 +70,6 @@ Provider password configuration и code-level contract готовы. Огран�
 [2]: https://stytch.com/docs/api-reference/consumer/api/overview "Stytch Consumer API overview"
 [3]: https://supabase.com/docs/guides/auth/auth-identity-linking "Supabase Auth identity linking"
 [4]: https://stytch.com/docs/api-reference/consumer/api/magic-links-email/login-or-create "Stytch Consumer Magic Link Login or Create"
-[4]: https://stytch.com/docs/api-reference/consumer/api/resources/sandbox-values "Stytch Consumer Sandbox Values"
+[5]: https://stytch.com/docs/api-reference/consumer/api/resources/sandbox-values "Stytch Consumer Sandbox Values"
 [5]: https://stytch.com/docs/api-reference/consumer/api/resources/e2e-testing "Stytch Consumer E2E Testing"
+[6]: https://stytch.com/docs/resources/policies/messaging/deliverability/email-deliverability "Stytch Email deliverability"; https://stytch.com/docs/resources/workspace-management/event-logs "Stytch Event Logs"

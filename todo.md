@@ -49,7 +49,9 @@
 - [x] email-auth/STYTCH-LINK-SESSION-SWITCH-REGRESSION: dedicated `server/stytch.security.test.ts` подтверждает canonical-user binding at creation, same-user atomic consume и expiry condition для denial после session-switch.
 - [x] email-auth/STYTCH-SDK-ENV-NORMALIZATION: server-only project-scoped environment нормализован к official SDK test/live base URLs, regression добавлен; confirmed focused `stytch.secret` + `stytch.security` + `auth.logout` suite PASS (3 files, 8 tests). Повторная public delivery acceptance выполнена, но остановлена generic provider acceptance error без раскрытия response.
 - [x] email-auth/STYTCH-SANDBOX-SEMANTICS: documented non-delivery server-adapter diagnostic PASS for Password Create and Authenticate; Magic Link safely classified `no_match_for_provided_magic_link_url`, isolating Stytch redirect allowlist as the delivery blocker.
-- [ ] email-auth/STYTCH-CALLBACK-ALLOWLIST: add exact configured HTTPS callback `{STYTCH_CALLBACK_BASE_URL}/api/stytch/callback` to Stytch Consumer Magic Link redirect/URL allowlist; do not use wildcard, query or untrusted host. Verify only through a new sandbox request after confirmation.
+- [ ] email-auth/STYTCH-CALLBACK-ALLOWLIST: BLOCKED — user reports exact production callback added to Test Redirect URLs, but one process-local sandbox recheck with that exact callback still returns `no_match_for_provided_magic_link_url`. Confirm the credentialed **Consumer Magic Link** allowlist (not another project/product/environment), exact save/activation and no extra trailing character; then retry one sandbox request only.
+- [ ] email-auth/STYTCH-DELIVERY-STATUS: read-only diagnose the accepted verification-delivery request without triggering another email; determine whether the Stytch project has a provider delivery/transactional-email configuration blocker and record only safe category/status.
+- [ ] email-auth/STYTCH-EVENT-LOG-REVIEW: in the credentialed Stytch Test project, inspect the recent `EmailDelivery` Event Log without exposing email/link/token/raw payload; record only outcome category before any resend.
 
 ## Multi-user foundation — 2026-08
 
