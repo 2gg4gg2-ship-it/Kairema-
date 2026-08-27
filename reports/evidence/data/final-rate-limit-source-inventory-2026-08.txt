@@ -1,0 +1,192 @@
+server/_core/oauth.callback.test.ts:31:      expiresInMs: 60_000,
+server/db.ts:115:const STYTCH_LINK_INTENT_TTL_MS = 10 * 60_000;
+server/db.ts:636:  errorClass: "rate_limited" | "auth" | "not_found" | "http_error" | "network_error" | "no_sources" | "not_configured";
+server/db.ts:965:export async function consumeDevApiRequestQuota(userId: number, limit = 30, windowMs = 60_000): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+server/db.ts:968:  const cutoff = new Date(now.getTime() - windowMs);
+server/db.ts:977:  return { allowed: current.requestCount <= limit, retryAfterSeconds: Math.max(1, Math.ceil((windowMs - elapsed) / 1_000)) };
+server/db.ts:981:export async function consumeChatStreamRequestQuota(userId: number, limit = 60, windowMs = 60_000): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+server/db.ts:984:  const cutoff = new Date(now.getTime() - windowMs);
+server/db.ts:993:  return { allowed: current.requestCount <= limit, retryAfterSeconds: Math.max(1, Math.ceil((windowMs - elapsed) / 1_000)) };
+server/db.ts:1092:/** Lists entries belonging to the authenticated user, newest first, without capacity pruning. */
+server/routers.ts:19:import { getCapacityControllerSnapshot, getCapacityPolicy, listCapacityProviderBudgets, updateCapacityPolicy, updateCapacityProviderBudget } from "./capacity-controller";
+server/routers.ts:39:const capacityPolicySchema = z.object({
+server/routers.ts:59:const capacityProviderBudgetSchema = z.object({
+server/routers.ts:305:    capacitySnapshot: protectedProcedure.query(async ({ ctx }) => {
+server/routers.ts:309:    capacityPolicy: protectedProcedure.query(async ({ ctx }) => {
+server/routers.ts:313:    updateCapacityPolicy: protectedProcedure.input(capacityPolicySchema).mutation(async ({ ctx, input }) => {
+server/routers.ts:316:      await recordTechnicalEvent({ kind: "owner_flag", title: "Политика controller мощности обновлена", code: "capacity-policy", actorUserId: owner.id });
+server/routers.ts:319:    capacityProviderBudgets: protectedProcedure.query(async ({ ctx }) => {
+server/routers.ts:323:    updateCapacityProviderBudget: protectedProcedure.input(capacityProviderBudgetSchema).mutation(async ({ ctx, input }) => {
+server/routers.ts:433:      if (latest && Date.now() - latest.startedAt.getTime() < 60_000) {
+server/routers.ts:593:            capacityActor: { userId: ctx.user.id, requestKey: `message:${ctx.user.id}:${savedUser.id}` },
+server/providers.ts:2:import { beginCapacityGeneration, CapacityAdmissionError, settleCapacityReservation, type CapacityActor, type CapacityGenerationLease } from "./capacity-controller";
+server/providers.ts:11:export type StatusCategory = "AUTH" | "QUOTA" | "RATE_LIMIT" | "PROVIDER_UNAVAILABLE" | "ENDPOINT" | "MODEL" | "NETWORK" | "TIMEOUT" | "PARSE" | "CONFIG" | "UNKNOWN";
+server/providers.ts:149:export type RequestBudget = { remaining: number; used: number; requestId: string; capacityLease?: CapacityGenerationLease };
+server/providers.ts:150:export function createRequestBudget(capacityLease?: CapacityGenerationLease): RequestBudget {
+server/providers.ts:151:  return { remaining: MAX_ATTEMPTS, used: 0, requestId: crypto.randomUUID(), ...(capacityLease ? { capacityLease } : {}) };
+server/providers.ts:160:const DEFAULT_RETRY_AFTER_MS = 60_000;
+server/providers.ts:161:const TRANSIENT_COOLDOWN_MS = 5 * 60_000;
+server/providers.ts:243:  if (http === 429) return { category: "RATE_LIMIT", confirmed: "Подтверждено ограничение частоты запросов.", state: "error" };
+server/providers.ts:244:  if (http === 503 || /load|capacity|overload|unavailable|busy/.test(body)) return { category: "PROVIDER_UNAVAILABLE", confirmed: "Провайдер временно недоступен из-за нагрузки.", state: "unavailable" };
+server/providers.ts:310:  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(Math.max(seconds * 1_000, 1_000), 15 * 60_000);
+server/providers.ts:313:  return match ? Math.min(Math.max(Number(match[1]) * 1_000, 1_000), 15 * 60_000) : DEFAULT_RETRY_AFTER_MS;
+server/providers.ts:364:  else if (status.category === "RATE_LIMIT") { state = "cooldown"; blockedUntil = new Date(Date.now() + (cooldownMs ?? DEFAULT_RETRY_AFTER_MS)); }
+server/providers.ts:431:      reservation = budget.capacityLease ? await budget.capacityLease.reserveAttempt({ provider: candidate.provider, modelId: candidate.modelId }, attemptIndex) : null;
+server/providers.ts:462:      await recordProviderIssue(candidate.provider, status, status.category === "RATE_LIMIT" ? retryAfterMs(response, body) : undefined);
+server/providers.ts:473:function retryable(status: ModelStatus) { return ["RATE_LIMIT", "QUOTA", "PROVIDER_UNAVAILABLE", "NETWORK", "TIMEOUT", "AUTH", "MODEL", "ENDPOINT"].includes(status.category ?? ""); }
+server/providers.ts:482:  const quota = status.category === "RATE_LIMIT" || status.category === "QUOTA" ? "limited" : status.state === "unavailable" || status.state === "not_configured" ? "unavailable" : "ready";
+server/providers.ts:600:    const quota = status.category === "RATE_LIMIT" || status.category === "QUOTA" ? "limited" : status.state === "unavailable" || status.state === "not_configured" ? "unavailable" : "ready";
+server/providers.ts:631:      capacity: health?.state === "ready" ? "available" : health?.state === "cooldown" ? "limited" : "unavailable",
+server/providers.ts:683:  const capacityLease = actor ? await beginCapacityGeneration(actor, role.key, settings ?? {}) : null;
+server/providers.ts:684:  const budget = createRequestBudget(capacityLease ?? undefined);
+server/providers.ts:709:      if (status.category === "RATE_LIMIT") await pause(300);
+server/providers.ts:717:    capacityLease?.release();
+server/providers.ts:733:  const capacityLease = actor ? await beginCapacityGeneration(actor, role.key, settings ?? {}) : null;
+server/providers.ts:734:  const budget = createRequestBudget(capacityLease ?? undefined);
+server/providers.ts:792:      if (status.category === "RATE_LIMIT") await pause(300);
+server/providers.ts:802:    capacityLease?.release();
+server/providers.ts:840:    const why = error.reason === "concurrency" || error.reason === "queue_full" ? "временная локальная перегрузка" : "лимит мощности для этой минуты";
+server/providers.ts:844:  const action = status.category === "RATE_LIMIT" || status.category === "QUOTA" ? "Роль перейдёт к резерву; повторите запрос позже." : "Повторите попытку позже.";
+server/providers.test.ts:83:    expect(statusLabel("RATE_LIMIT", "error")).toBe("Недоступно");
+server/providers.test.ts:90:    expect(classifyOpenRouterFailure(429, {}).category).toBe("RATE_LIMIT");
+server/providers.test.ts:150:      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429, headers: { "retry-after": "60" } }))
+server/providers.test.ts:163:    expect(health.find((item) => item.provider === "orcarouter")).toMatchObject({ state: "cooldown", category: "RATE_LIMIT" });
+server/chat-stream.ts:8:export const CHAT_STREAM_RATE_LIMIT = 60;
+server/chat-stream.ts:11:const CHAT_STREAM_RATE_WINDOW_MS = 60_000;
+server/chat-stream.ts:12:const CHAT_STREAM_REPLAY_TTL_MS = 5 * 60_000;
+server/chat-stream.ts:18:  event: "chat_stream.completed" | "chat_stream.rate_limited";
+server/chat-stream.ts:39:  rateLimited: 0,
+server/chat-stream.ts:41:  capacityRejected: 0,
+server/chat-stream.ts:73:      rateLimited: chatStreamRuntimeGauges.rateLimited,
+server/chat-stream.ts:75:      capacityRejected: chatStreamRuntimeGauges.capacityRejected,
+server/chat-stream.ts:99:  chatStreamRuntimeGauges.rateLimited = 0;
+server/chat-stream.ts:101:  chatStreamRuntimeGauges.capacityRejected = 0;
+server/chat-stream.ts:330:      let rateLimit: { allowed: boolean; retryAfterSeconds: number };
+server/chat-stream.ts:332:        rateLimit = await dependencies.consumeChatStreamRequestQuota(user.id, CHAT_STREAM_RATE_LIMIT, CHAT_STREAM_RATE_WINDOW_MS);
+server/chat-stream.ts:338:      if (!rateLimit.allowed) {
+server/chat-stream.ts:339:        chatStreamRuntimeGauges.rateLimited += 1;
+server/chat-stream.ts:340:        void Promise.resolve(dependencies.auditChatStream({ event: "chat_stream.rate_limited", userId: user.id, timestamp: new Date().toISOString(), retryAfterSeconds: rateLimit.retryAfterSeconds })).catch(() => undefined);
+server/chat-stream.ts:341:        res.set("Retry-After", String(rateLimit.retryAfterSeconds)).status(429).json({ error: "Слишком много запросов. Подождите минуту." });
+server/chat-stream.ts:346:        chatStreamRuntimeGauges.capacityRejected += 1;
+server/chat-stream.ts:389:        capacityActor: { userId: user.id, requestKey: `stream:${user.id}:${input.clientMessageId ?? savedUserMessageId ?? input.regenerateMessageId ?? "generation"}` },
+server/chat-stream.test.ts:10:import { CHAT_STREAM_RATE_LIMIT, createChatStreamHandler, getChatStreamRuntimeGaugeSnapshot, resetChatStreamRateLimits } from "./chat-stream";
+server/chat-stream.test.ts:226:      capacityActor: { userId: 42, requestKey: "stream:42:1" },
+server/chat-stream.test.ts:254:    expect(auditChatStream).toHaveBeenLastCalledWith(expect.objectContaining({ event: "chat_stream.rate_limited", userId: 73 }));
+server/chat-stream.test.ts:276:  it("limits per-instance active streams per user before history work and releases capacity after completion", async () => {
+server/chat-stream.test.ts:308:      outcomes: { accepted: 2, capacityRejected: 1, perUserCapacityRejected: 1 },
+server/chat-stream.test.ts:322:    expect(runtime.outcomes).toMatchObject({ accepted: 3, capacityRejected: 1, completed: 3 });
+server/chat-stream.test.ts:352:    expect(chatQuota).toHaveBeenNthCalledWith(1, 81, CHAT_STREAM_RATE_LIMIT, 60_000);
+server/chat-stream.test.ts:353:    expect(chatQuota).toHaveBeenNthCalledWith(2, 82, CHAT_STREAM_RATE_LIMIT, 60_000);
+server/web-search.ts:56:const LAYER_COOLDOWN_MS: Record<SearchLayer, number> = { you: 10 * 60_000, serper: 10 * 60_000, exa: 10 * 60_000, tavily: 10 * 60_000 };
+server/web-search.ts:96:  return Number.isFinite(timestamp) && timestamp <= Date.now() + 24 * 60 * 60_000 ? new Date(timestamp).toISOString() : null;
+server/web-search.ts:229:function outageClass(http: number | null): SearchOutageInput["errorClass"] { if (http === 429) return "rate_limited"; if (http === 401 || http === 403) return "auth"; if (http === 404) return "not_found"; if (http === null) return "network_error"; if (http >= 400) return "http_error"; return "no_sources"; }
+server/chat-context.ts:5:import { beginCapacitySearch, CapacityAdmissionError, settleCapacityReservation, type CapacityActor } from "./capacity-controller";
+server/chat-context.ts:17:const STALE_RAG_AGE_MS = 90 * 24 * 60 * 60_000;
+server/chat-context.ts:34:  const maxAgeMs = TODAY_QUERY_PATTERN.test(query) ? 48 * 60 * 60_000 : RECENT_QUERY_PATTERN.test(query) ? 30 * 24 * 60 * 60_000 : 365 * 24 * 60 * 60_000;
+server/chat-context.ts:60:export async function buildChatContext(userId: number, sessionId: string, input: { attachmentIds?: string[]; query?: string; role?: RagRole; capacityActor?: CapacityActor }): Promise<ChatSettings> {
+server/chat-context.ts:106:      searchLease = input.capacityActor ? await beginCapacitySearch(input.capacityActor, role) : null;
+server/web-search.test.ts:118:    const staleDate = new Date(Date.now() - 10 * 24 * 60 * 60_000).toISOString();
+server/web-search.test.ts:119:    const freshDate = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
+server/web-search.test.ts:124:    await expect(searchWeb("Последние новости", { requireDatedSources: true, publishedAfter: new Date(Date.now() - 3 * 24 * 60 * 60_000).toISOString() })).resolves.toMatchObject({
+server/web-search.test.ts:133:    const staleDate = new Date(Date.now() - 10 * 24 * 60 * 60_000).toISOString();
+server/web-search.test.ts:136:    await expect(searchWeb("Последние новости", { requireDatedSources: true, publishedAfter: new Date(Date.now() - 3 * 24 * 60 * 60_000).toISOString() })).resolves.toMatchObject({
+server/web-search.test.ts:163:    vi.setSystemTime(new Date(Date.now() + 16 * 60_000));
+server/web-search.test.ts:180:    vi.setSystemTime(new Date(Date.now() + 16 * 60_000));
+server/web-search.test.ts:193:  it("returns an error outcome and cooldown state honestly when the primary layer is rate limited", async () => {
+server/web-search.test.ts:211:    vi.setSystemTime(new Date(Date.now() + 16 * 60_000));
+server/web-search.test.ts:226:    vi.setSystemTime(new Date(Date.now() + 16 * 60_000));
+server/web-search.test.ts:239:    vi.setSystemTime(new Date(Date.now() + 16 * 60_000));
+server/dev-api.ts:15:async function audit(userId: number | undefined, outcome: "allowed" | "denied" | "invalid" | "rate_limited" | "provider_error", status: number): Promise<void> {
+server/dev-api.ts:35:      await audit(user.id, "rate_limited", 429).catch(() => undefined);
+server/dev-api.test.ts:71:    expect(fixtures.recordAudit).toHaveBeenCalledWith({ userId: 17, outcome: "rate_limited", status: 429 });
+server/db.memory.test.ts:71:  it("does not merge a matching topic from another chat and never trims entries by capacity", async () => {
+server/stytch.ts:12:const STYTCH_SESSION_MAX_AGE_MS = STYTCH_SESSION_DURATION_MINUTES * 60_000;
+server/stytch.ts:13:const STYTCH_RESET_MAX_AGE_MS = 30 * 60_000;
+server/stytch.ts:14:const STYTCH_LINK_INTENT_MAX_AGE_MS = 10 * 60_000;
+server/db.scale.test.ts:61:  it("keeps SSE active-stream capacity bounded locally and releases reservation in a finally block", () => {
+server/db.quota.test.ts:38:    const result = await consumeChatStreamRequestQuota(44, 60, 60_000);
+server/db.quota.test.ts:52:    const result = await consumeChatStreamRequestQuota(45, 60, 60_000);
+server/transcript-window.test.ts:96:  it("handles concurrent/newer rows only through an explicit stored upper anchor", () => {
+server/capacity-controller.ts:4:  capacityBudgetWindows,
+server/capacity-controller.ts:5:  capacityControllerSettings,
+server/capacity-controller.ts:6:  capacityInflightCounters,
+server/capacity-controller.ts:7:  capacityProviderBudgets,
+server/capacity-controller.ts:8:  capacityReservations,
+server/capacity-controller.ts:48:const WINDOW_MS = 60_000;
+server/capacity-controller.ts:81:    readonly reason: "capacity" | "concurrency" | "provider_disabled" | "queue_full" | "unavailable",
+server/capacity-controller.ts:92:  constructor(readonly scope: ScopeLimit["blockingScope"]) { super("capacity limit reached"); }
+server/capacity-controller.ts:154:  await db.insert(capacityControllerSettings).values(DEFAULT_POLICY_ROW).onDuplicateKeyUpdate({ set: { id: sql`${capacityControllerSettings.id}` } });
+server/capacity-controller.ts:160:  const row = (await db.select().from(capacityControllerSettings).where(eq(capacityControllerSettings.id, 1)).limit(1))[0];
+server/capacity-controller.ts:189:  const set: Partial<typeof capacityControllerSettings.$inferInsert> = {};
+server/capacity-controller.ts:208:  if (Object.keys(set).length) await db.update(capacityControllerSettings).set(set).where(eq(capacityControllerSettings.id, 1));
+server/capacity-controller.ts:238:  return db.select().from(capacityProviderBudgets).orderBy(capacityProviderBudgets.provider, capacityProviderBudgets.modelId);
+server/capacity-controller.ts:244:  await db.insert(capacityProviderBudgets).values({
+server/capacity-controller.ts:282:  return (await db.select().from(capacityProviderBudgets).where(eq(capacityProviderBudgets.scopeKey, scopeKey)).limit(1))[0] ?? null;
+server/capacity-controller.ts:300:    throw new CapacityAdmissionError(429, "capacity", 30, "global", "Этот режим ответа временно ограничен policy controller до upstream вызова.");
+server/capacity-controller.ts:310:  await tx.insert(capacityBudgetWindows).values({ scopeKey: scope.key, windowStarted: now, usedWcu: 0 }).onDuplicateKeyUpdate({ set: { scopeKey: sql`${capacityBudgetWindows.scopeKey}` } });
+server/capacity-controller.ts:311:  const remainingSql = sql`if(${capacityBudgetWindows.windowStarted} <= ${cutoff}, 0, ${capacityBudgetWindows.usedWcu})`;
+server/capacity-controller.ts:312:  const result = await tx.update(capacityBudgetWindows).set({
+server/capacity-controller.ts:313:    usedWcu: sql`if(${capacityBudgetWindows.windowStarted} <= ${cutoff}, ${wcu}, ${capacityBudgetWindows.usedWcu} + ${wcu})`,
+server/capacity-controller.ts:314:    windowStarted: sql`if(${capacityBudgetWindows.windowStarted} <= ${cutoff}, ${now}, ${capacityBudgetWindows.windowStarted})`,
+server/capacity-controller.ts:316:    ? eq(capacityBudgetWindows.scopeKey, scope.key)
+server/capacity-controller.ts:317:    : and(eq(capacityBudgetWindows.scopeKey, scope.key), sql`${remainingSql} + ${wcu} <= ${scope.limit}`));
+server/capacity-controller.ts:322:  await tx.insert(capacityInflightCounters).values({ scopeKey: scope.key, activeCount: 0, activeWcu: 0 })
+server/capacity-controller.ts:323:    .onDuplicateKeyUpdate({ set: { scopeKey: sql`${capacityInflightCounters.scopeKey}` } });
+server/capacity-controller.ts:324:  const conditions = [eq(capacityInflightCounters.scopeKey, scope.key)];
+server/capacity-controller.ts:325:  if (scope.maxConcurrent !== null) conditions.push(sql`${capacityInflightCounters.activeCount} < ${scope.maxConcurrent}` as any);
+server/capacity-controller.ts:326:  if (scope.maxWcu !== null) conditions.push(sql`${capacityInflightCounters.activeWcu} + ${wcu} <= ${scope.maxWcu}` as any);
+server/capacity-controller.ts:327:  const result = await tx.update(capacityInflightCounters).set({
+server/capacity-controller.ts:328:    activeCount: sql`${capacityInflightCounters.activeCount} + 1`,
+server/capacity-controller.ts:329:    activeWcu: sql`${capacityInflightCounters.activeWcu} + ${wcu}`,
+server/capacity-controller.ts:354:    await tx.update(capacityInflightCounters).set({
+server/capacity-controller.ts:355:      activeCount: sql`if(${capacityInflightCounters.activeCount} > 0, ${capacityInflightCounters.activeCount} - 1, 0)`,
+server/capacity-controller.ts:356:      activeWcu: sql`if(${capacityInflightCounters.activeWcu} >= ${scope.wcu}, ${capacityInflightCounters.activeWcu} - ${scope.wcu}, 0)`,
+server/capacity-controller.ts:357:    }).where(eq(capacityInflightCounters.scopeKey, scope.key));
+server/capacity-controller.ts:363:  const expired = await tx.select().from(capacityReservations)
+server/capacity-controller.ts:364:    .where(and(eq(capacityReservations.state, "reserved"), lt(capacityReservations.createdAt, expiresBefore)));
+server/capacity-controller.ts:367:    const result = await tx.update(capacityReservations).set({ state: "released", finalizedAt: now })
+server/capacity-controller.ts:368:      .where(and(eq(capacityReservations.id, reservation.id), eq(capacityReservations.state, "reserved")));
+server/capacity-controller.ts:402:    ? (await db.select().from(capacityProviderBudgets).where(inArray(capacityProviderBudgets.scopeKey, [providerScope({ provider: target.provider }), providerScope(target)])).limit(2))
+server/capacity-controller.ts:441:      const existing = (await tx.select().from(capacityReservations).where(eq(capacityReservations.requestKey, requestKey)).limit(1))[0];
+server/capacity-controller.ts:446:      await tx.insert(capacityReservations).values({
+server/capacity-controller.ts:464:      throw new CapacityAdmissionError(status, "capacity", Math.ceil(WINDOW_MS / 1_000), error.scope, "Лимит мощности на текущую минуту достигнут до upstream вызова.");
+server/capacity-controller.ts:474:    const reservation = (await tx.select().from(capacityReservations).where(eq(capacityReservations.id, ticket.id)).limit(1))[0];
+server/capacity-controller.ts:476:    const result = await tx.update(capacityReservations).set({ state, finalizedAt: new Date() })
+server/capacity-controller.ts:477:      .where(and(eq(capacityReservations.id, ticket.id), eq(capacityReservations.state, "reserved")));
+server/capacity-controller.ts:516:      throw new CapacityAdmissionError(503, "concurrency", 1, "instance", "Локальная очередь controller отключена или занята; запрос не был отправлен upstream.");
+server/capacity-controller.ts:528:        reject(new CapacityAdmissionError(503, "concurrency", 1, "instance", "Ожидание локальной очереди истекло до upstream вызова."));
+server/capacity-controller.ts:600:/** Registry only. Cloudflare is deliberately not routable, credentialed or counted as active capacity. */
+server/capacity-controller.ts:613:  const currentWindow = await db.select({ scopeKey: capacityBudgetWindows.scopeKey, usedWcu: capacityBudgetWindows.usedWcu, windowStarted: capacityBudgetWindows.windowStarted })
+server/capacity-controller.ts:614:    .from(capacityBudgetWindows)
+server/capacity-controller.ts:615:    .where(inArray(capacityBudgetWindows.scopeKey, ["global:generation", "global:search"]));
+server/capacity-controller.ts:616:  const durableInflight = await db.select({ scopeKey: capacityInflightCounters.scopeKey, activeCount: capacityInflightCounters.activeCount, activeWcu: capacityInflightCounters.activeWcu })
+server/capacity-controller.ts:617:    .from(capacityInflightCounters)
+server/capacity-controller.ts:618:    .where(inArray(capacityInflightCounters.scopeKey, ["global:generation", "global:search"]));
+server/capacity-controller.ts:651:      scope: "single process only; not a global production concurrency claim",
+server/capacity-controller.test.ts:2:import { capacityBudgetWindows, capacityControllerSettings, capacityProviderBudgets, capacityReservations } from "../drizzle/schema";
+server/capacity-controller.test.ts:13:  if (table === capacityControllerSettings) return state.settings ? [state.settings] : [];
+server/capacity-controller.test.ts:14:  if (table === capacityProviderBudgets) return state.providerBudget ? [state.providerBudget] : [];
+server/capacity-controller.test.ts:15:  if (table === capacityReservations) return state.forceReservationLookupMiss ? [] : [...state.reservations.values()];
+server/capacity-controller.test.ts:22:      if (table === capacityControllerSettings && !state.settings) state.settings = { ...values };
+server/capacity-controller.test.ts:23:      if (table === capacityProviderBudgets) state.providerBudget = { ...state.providerBudget, ...values };
+server/capacity-controller.test.ts:24:      if (table === capacityReservations) state.reservations.set(String(values.requestKey), { ...values });
+server/capacity-controller.test.ts:25:      if (table === capacityBudgetWindows) undefined;
+server/capacity-controller.test.ts:46:        if (table === capacityBudgetWindows && state.forceBudgetWindowContention) return [{ affectedRows: 0 }];
+server/capacity-controller.test.ts:47:        if (table === capacityControllerSettings && state.settings) state.settings = { ...state.settings, ...values };
+server/capacity-controller.test.ts:48:        if (table === capacityReservations) {
+server/capacity-controller.test.ts:68:} from "./capacity-controller";
+server/capacity-controller.test.ts:81:describe("capacity controller V1", () => {
+server/capacity-controller.test.ts:89:  it("enforces reusable instance-local per-user generation concurrency without treating it as global capacity", async () => {
+server/capacity-controller.test.ts:92:    await expect(beginCapacityGeneration({ userId: 42, requestKey: "m-3" }, "fast", normal)).rejects.toMatchObject<Partial<CapacityAdmissionError>>({ status: 503, reason: "concurrency", scope: "instance" });
+server/capacity-controller.test.ts:119:      .rejects.toMatchObject<Partial<CapacityAdmissionError>>({ status: 429, reason: "capacity", scope: "global" });
+server/capacity-controller.test.ts:145:    await expect(beginCapacitySearch({ userId: 51, requestKey: "m-52" }, "fast")).rejects.toMatchObject<Partial<CapacityAdmissionError>>({ status: 503, reason: "concurrency", scope: "instance" });
+server/capacity-controller.test.ts:150:  it("allows a large sequential cohort of low-cost users without letting one actor retain local capacity", async () => {
+server/capacity-controller.test.ts:176:      .rejects.toMatchObject<Partial<CapacityAdmissionError>>({ status: 429, reason: "capacity", scope: "global" });
+server/capacity-controller.test.ts:189:      const expectedTimeout = expect(waiting).rejects.toMatchObject<Partial<CapacityAdmissionError>>({ status: 503, reason: "concurrency", scope: "instance" });
+server/capacity-calibration.ts:6: * Kairema account quotas, token counts, costs, or a production capacity claim.
+server/capacity-calibration.ts:161:      search: { capacityWcu: SYNTHETIC_CALIBRATION_CONSTANTS.searchWcuWindow, firstAdmission: true, secondAdmission: false },
+server/capacity-calibration.ts:216:      outcome: "not admitted/rejected because real global provider/account capacity is unknown and no quota is assumed",
+server/capacity-calibration.ts:223:    version: "capacity-calibration-v1",
+server/capacity-calibration.test.ts:10:} from "./capacity-calibration";
+server/capacity-calibration.test.ts:12:describe("capacity calibration synthetic no-network model", () => {
+server/capacity-calibration.test.ts:46:    expect(classifyOpenRouterFailure(429, { error: "slow down" }).category).toBe("RATE_LIMIT");
