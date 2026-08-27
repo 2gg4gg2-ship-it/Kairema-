@@ -11,7 +11,7 @@ export const CHAT_STREAM_MAX_ACTIVE_PER_USER = 2;
 const CHAT_STREAM_RATE_WINDOW_MS = 60_000;
 const CHAT_STREAM_REPLAY_TTL_MS = 5 * 60_000;
 type StreamResult = Awaited<ReturnType<typeof chatWithRoleStream>>;
-type StoredReplay = Pick<StreamResult, "content" | "modelUsed" | "label" | "searchStatus" | "sources">;
+type StoredReplay = Pick<StreamResult, "content" | "modelUsed" | "label" | "searchStatus" | "sources" | "webGrounding">;
 type PendingReplay = { promise: Promise<StreamResult | null>; resolve: (result: StreamResult | null) => void };
 
 type ChatStreamAuditRecord = {
@@ -151,7 +151,7 @@ function replayFromStoredAssistant(stored: Awaited<ReturnType<typeof getStoredAs
     content: stored.content,
     modelUsed: stored.modelId ?? fallbackModelId,
     label: "Kairema",
-    ...(stored.metadata ? (() => { try { return JSON.parse(stored.metadata) as Pick<StoredReplay, "searchStatus" | "sources">; } catch { return {}; } })() : {}),
+    ...(stored.metadata ? (() => { try { return JSON.parse(stored.metadata) as Pick<StoredReplay, "searchStatus" | "sources" | "webGrounding">; } catch { return {}; } })() : {}),
   };
 }
 
@@ -230,14 +230,25 @@ function publicWebSources(sources: StreamResult["sources"]): PublicWebSource[] {
   }).slice(0, 5);
 }
 
-function publicStreamResult(result: Pick<StreamResult, "content" | "modelUsed" | "label" | "searchStatus" | "sources">) {
+/** The public completion payload preserves only the V1 state and validated citation cards, never server-only context or cache metadata. */
+function publicWebGrounding(grounding: StreamResult["webGrounding"], sources: StreamResult["sources"]) {
+  if (!grounding || (grounding.intent !== "PREFERRED" && grounding.intent !== "REQUIRED")) return undefined;
+  const state = grounding.state;
+  if (!(state === "verified" || state === "disabled" || state === "empty" || state === "degraded" || state === "unavailable" || state === "admission_denied")) return undefined;
+  const citations = state === "verified" ? publicWebSources(sources) : [];
+  return { intent: grounding.intent, state, sourcesCount: Math.max(0, Math.min(5, Math.floor(grounding.sourcesCount))), citations, ...(grounding.freshnessBlocked === true ? { freshnessBlocked: true } : {}) };
+}
+
+function publicStreamResult(result: Pick<StreamResult, "content" | "modelUsed" | "label" | "searchStatus" | "sources" | "webGrounding">) {
   const sources = result.searchStatus?.verificationStatus === "verified" && !result.searchStatus.freshnessBlocked ? publicWebSources(result.sources) : [];
+  const webGrounding = publicWebGrounding(result.webGrounding, result.sources);
   return {
     content: result.content,
     modelUsed: result.modelUsed,
     label: result.label,
     ...(result.searchStatus ? { searchStatus: publicSearchStatus(result.searchStatus) } : {}),
     ...(sources.length ? { sources } : {}),
+    ...(webGrounding ? { webGrounding } : {}),
   };
 }
 
@@ -433,7 +444,14 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
           } : undefined;
           const safeSearchStatus = publicSearchStatus(normalizedSearchStatus);
           const publicSources = normalizedSearchStatus?.verificationStatus === "verified" && !normalizedSearchStatus.freshnessBlocked ? publicWebSources(result.sources) : [];
-          const sourceMetadata = safeSearchStatus ? JSON.stringify({ searchStatus: safeSearchStatus, ...(publicSources.length ? { sources: publicSources } : {}) }) : undefined;
+          const safeWebGrounding = publicWebGrounding(result.webGrounding, result.sources);
+          const sourceMetadata = safeSearchStatus || safeWebGrounding
+            ? JSON.stringify({
+              ...(safeSearchStatus ? { searchStatus: safeSearchStatus } : {}),
+              ...(publicSources.length ? { sources: publicSources } : {}),
+              ...(safeWebGrounding ? { webGrounding: safeWebGrounding } : {}),
+            })
+            : undefined;
           const savedAssistant = await dependencies.appendChatMessage(user.id, input.sessionId, "assistant", result.content, result.modelUsed, sourceMetadata);
           if (idempotencyKey) {
             completedChatStreamReplays.set(idempotencyKey, { result, expiresAt: Date.now() + CHAT_STREAM_REPLAY_TTL_MS });

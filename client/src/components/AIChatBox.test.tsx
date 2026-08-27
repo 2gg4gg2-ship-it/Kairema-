@@ -138,6 +138,24 @@ describe("AIChatBox user flows", () => {
     expect(screen.getByText("23.08.2026")).toBeTruthy();
   });
 
+  it("renders V1 structured grounding with only actual public citations", () => {
+    render(<AIChatBox messages={[{
+      id: "assistant-v1-grounding",
+      role: "assistant",
+      content: "Ответ с внешним контекстом",
+      webGrounding: {
+        intent: "REQUIRED",
+        state: "verified",
+        sourcesCount: 1,
+        citations: [{ title: "Первичный источник", url: "https://example.com/primary", publishedAt: "2026-08-24T00:00:00.000Z" }],
+      },
+    }]} onSendMessage={vi.fn()} />);
+
+    expect(screen.getByRole("status").textContent).toContain("Контекст из веб-источников");
+    expect(screen.getByRole("link", { name: "Первичный источник" }).getAttribute("href")).toBe("https://example.com/primary");
+    expect(screen.queryByText(/Serper|Tavily|You\.com|Controller/i)).toBeNull();
+  });
+
   it("renders an explicit honest unavailable badge when fresh sources have no verified dates", () => {
     render(<AIChatBox messages={[{
       id: "assistant-freshness-blocked",

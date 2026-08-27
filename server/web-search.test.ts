@@ -14,7 +14,7 @@ vi.mock("./db", async (importOriginal) => ({
   upsertWebSearchStatus,
 }));
 
-import { buildGlobalDiscoveryQuery, getWebSearchStatus, probeWebSearchStatus, searchWeb } from "./web-search";
+import { buildGlobalDiscoveryQuery, getWebGroundedRuntimeGaugeSnapshot, getWebSearchStatus, probeWebSearchStatus, publicSearchCacheStatsForTests, resetPublicSearchCacheForTests, resetWebGroundedRuntimeGaugeForTests, resetWebSearchRuntimeForTests, searchWeb } from "./web-search";
 
 const originalKeys = { you: process.env.YOU_API_KEY, serper: process.env.SERPER_API_KEY, exa: process.env.EXA_API_KEY };
 
@@ -29,6 +29,9 @@ afterEach(() => {
   recordSearchQuality.mockClear();
   upsertWebSearchStatus.mockClear();
   savedStatus.mockResolvedValue(null);
+  resetPublicSearchCacheForTests();
+  resetWebGroundedRuntimeGaugeForTests();
+  resetWebSearchRuntimeForTests();
 });
 
 describe("v6-K SearchProvider", () => {
@@ -240,5 +243,82 @@ describe("v6-K SearchProvider", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: { web: [{ title: "Источник", url: "https://example.com/health", description: "ok" }] } }), { status: 200 })));
 
     await expect(probeWebSearchStatus()).resolves.toMatchObject({ available: true, reason: "Поиск доступен.", youHttp: 200 });
+  });
+
+  it("uses a bounded public cache only when explicitly requested and returns cloned normalized outcomes", async () => {
+    process.env.YOU_API_KEY = "test-you";
+    process.env.SERPER_API_KEY = "";
+    process.env.EXA_API_KEY = "";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: { web: [{ title: "Публичный источник", url: "https://example.com/public", description: "Проверяемый факт", publishedAt: "2026-08-22T00:00:00.000Z" }] } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await searchWeb("Какая последняя версия браузера?", { publicCache: true, requireDatedSources: true, publishedAfter: "2026-01-01T00:00:00.000Z" });
+    const second = await searchWeb("Какая последняя версия браузера?", { publicCache: true, requireDatedSources: true, publishedAfter: "2026-01-01T00:00:00.000Z" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(second).toEqual(first);
+    expect(second).not.toBe(first);
+    expect(publicSearchCacheStatsForTests()).toEqual({ entries: 1, inFlight: 0 });
+  });
+
+  it("deduplicates concurrent public discovery without changing the one-cascade maximum", async () => {
+    process.env.YOU_API_KEY = "test-you";
+    process.env.SERPER_API_KEY = "";
+    process.env.EXA_API_KEY = "";
+    let resolveFetch: ((value: Response) => void) | undefined;
+    const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => { resolveFetch = resolve; }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = searchWeb("Какие текущие новости?", { publicCache: true, requireDatedSources: true, publishedAfter: "2026-01-01T00:00:00.000Z" });
+    const second = searchWeb("Какие текущие новости?", { publicCache: true, requireDatedSources: true, publishedAfter: "2026-01-01T00:00:00.000Z" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    resolveFetch?.(new Response(JSON.stringify({ results: { web: [{ title: "Текущий источник", url: "https://example.com/current", description: "Краткий факт", publishedAt: "2026-08-22T00:00:00.000Z" }] } }), { status: 200 }));
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ state: "found", cascadeUsed: "you" }),
+      expect.objectContaining({ state: "found", cascadeUsed: "you" }),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reserves and settles exactly one search ticket for each configured real cascade layer", async () => {
+    process.env.YOU_API_KEY = "test-you";
+    process.env.SERPER_API_KEY = "test-serper";
+    process.env.EXA_API_KEY = "";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.now() + 16 * 60_000));
+    const settled: string[] = [];
+    const beforeAttempt = vi.fn().mockImplementation(async () => async (outcome: string) => { settled.push(outcome); });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "busy" }), { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ organic: [{ title: "Проверяемый источник", link: "https://example.com/fallback", snippet: "Проверяемый факт", date: "2026-08-22T00:00:00.000Z" }] }), { status: 200 })));
+
+    await expect(searchWeb("Какие последние новости?", { requireDatedSources: true, publishedAfter: "2026-01-01T00:00:00.000Z", beforeAttempt })).resolves.toMatchObject({ state: "found", cascadeUsed: "serper" });
+    expect(beforeAttempt).toHaveBeenNthCalledWith(1, "you");
+    expect(beforeAttempt).toHaveBeenNthCalledWith(2, "serper");
+    expect(beforeAttempt).toHaveBeenCalledTimes(2);
+    expect(settled).toEqual(["failed", "success"]);
+  });
+
+  it("exposes only aggregate cache, dedup, attempt and outcome counters for owner observability", async () => {
+    process.env.YOU_API_KEY = "test-you";
+    process.env.SERPER_API_KEY = "";
+    process.env.EXA_API_KEY = "";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.now() + 16 * 60_000));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: { web: [{ title: "Публичный источник", url: "https://example.com/telemetry", description: "Проверяемый факт", publishedAt: "2026-08-22T00:00:00.000Z" }] } }), { status: 200 })));
+
+    await searchWeb("Какая текущая версия браузера?", { publicCache: true, requireDatedSources: true, publishedAfter: "2026-01-01T00:00:00.000Z" });
+    await searchWeb("Какая текущая версия браузера?", { publicCache: true, requireDatedSources: true, publishedAfter: "2026-01-01T00:00:00.000Z" });
+
+    expect(getWebGroundedRuntimeGaugeSnapshot()).toEqual(expect.objectContaining({
+      searchRequests: 2,
+      cacheHits: 1,
+      dedupJoins: 0,
+      networkLayerAttempts: 1,
+      outcomes: { found: 2, empty: 0, degraded: 0, unavailable: 0 },
+    }));
+    expect(JSON.stringify(getWebGroundedRuntimeGaugeSnapshot())).not.toContain("browser");
+    expect(JSON.stringify(getWebGroundedRuntimeGaugeSnapshot())).not.toContain("example.com");
   });
 });

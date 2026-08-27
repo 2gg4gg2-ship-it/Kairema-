@@ -41,6 +41,10 @@ export type SearchWebOptions = {
   requireDatedSources?: boolean;
   /** Optional lower bound for publication dates; non-qualifying sources are never passed to the model or UI. */
   publishedAfter?: string;
+  /** Runs immediately before each configured, non-cooling layer makes a real network request. */
+  beforeAttempt?: (layer: SearchCascadeUsed) => Promise<void | ((outcome: SearchAttemptOutcome) => void | Promise<void>)>;
+  /** Opt-in only after the caller establishes that the query has no user-private context. */
+  publicCache?: boolean;
 };
 
 const YOU_ENDPOINT = "https://ydc-index.io/v1/search";
@@ -55,6 +59,56 @@ const PREFERRED_GLOBAL_DOMAINS = [".gov", ".edu", ".int", ".org", "openai.com", 
 const LAYERS: SearchLayer[] = ["you", "serper", "exa", "tavily"];
 const LAYER_COOLDOWN_MS: Record<SearchLayer, number> = { you: 10 * 60_000, serper: 10 * 60_000, exa: 10 * 60_000, tavily: 10 * 60_000 };
 const layerCooldowns: Partial<Record<SearchLayer, number>> = {};
+export const WEB_SEARCH_PUBLIC_CACHE_TTL_MS = 90_000;
+export const WEB_SEARCH_PUBLIC_CACHE_MAX_ENTRIES = 32;
+type CachedPublicSearch = { expiresAt: number; outcome: SearchResult | SearchOutcome };
+const publicSearchCache = new Map<string, CachedPublicSearch>();
+const publicSearchInFlight = new Map<string, Promise<SearchResult | SearchOutcome>>();
+
+/** Test seam only: isolates module-local cooldowns between deterministic mocked cases. */
+export function resetWebSearchRuntimeForTests() {
+  for (const layer of LAYERS) delete layerCooldowns[layer];
+}
+
+type WebGroundedRuntimeGauge = {
+  startedAt: string;
+  searchRequests: number;
+  cacheHits: number;
+  dedupJoins: number;
+  networkLayerAttempts: number;
+  outcomes: { found: number; empty: number; degraded: number; unavailable: number };
+};
+const webGroundedRuntimeGauge: WebGroundedRuntimeGauge = {
+  startedAt: new Date().toISOString(),
+  searchRequests: 0,
+  cacheHits: 0,
+  dedupJoins: 0,
+  networkLayerAttempts: 0,
+  outcomes: { found: 0, empty: 0, degraded: 0, unavailable: 0 },
+};
+
+function noteWebGroundedOutcome(outcome: SearchResult | SearchOutcome) {
+  if (outcome.state === "found") webGroundedRuntimeGauge.outcomes.found += 1;
+  else if (outcome.state === "empty") webGroundedRuntimeGauge.outcomes.empty += 1;
+  else if (outcome.state === "degraded") webGroundedRuntimeGauge.outcomes.degraded += 1;
+  else webGroundedRuntimeGauge.outcomes.unavailable += 1;
+}
+
+/** Aggregate process-local diagnostics only; neither inputs nor source/provider payloads are retained. */
+export function getWebGroundedRuntimeGaugeSnapshot(): WebGroundedRuntimeGauge {
+  return {
+    ...webGroundedRuntimeGauge,
+    outcomes: { ...webGroundedRuntimeGauge.outcomes },
+  };
+}
+export function resetWebGroundedRuntimeGaugeForTests() {
+  webGroundedRuntimeGauge.startedAt = new Date().toISOString();
+  webGroundedRuntimeGauge.searchRequests = 0;
+  webGroundedRuntimeGauge.cacheHits = 0;
+  webGroundedRuntimeGauge.dedupJoins = 0;
+  webGroundedRuntimeGauge.networkLayerAttempts = 0;
+  webGroundedRuntimeGauge.outcomes = { found: 0, empty: 0, degraded: 0, unavailable: 0 };
+}
 
 /** Stable compatibility export: search failure stays an optional context and never throws this error to chat users. */
 export class WebSearchUnavailableError extends Error { constructor(message: string) { super(message); this.name = "WebSearchUnavailableError"; } }
@@ -64,6 +118,7 @@ type SearchAttempt = {
   latencyMs: number;
   outcome: "success" | "empty" | "failed" | "timeout" | "skipped";
 };
+export type SearchAttemptOutcome = SearchAttempt["outcome"];
 type StatusInput = Omit<WebSearchStatus, "layers">;
 
 function noteLayerOutcome(layer: SearchLayer, http: number | null) {
@@ -173,6 +228,9 @@ function tavilyResult(payload: unknown): Omit<SearchResult, "cascadeUsed" | "sta
   return sources.length ? { summary: sourceSummary(evidence), sources, evidence } : null;
 }
 function skippedAttempt(): SearchAttempt { return { result: null, http: null, latencyMs: 0, outcome: "skipped" }; }
+function hasLayerCredentials(layer: SearchLayer) {
+  return Boolean((layer === "you" ? process.env.YOU_API_KEY : layer === "serper" ? process.env.SERPER_API_KEY : layer === "exa" ? process.env.EXA_API_KEY : process.env.TAVILY_API_KEY)?.trim());
+}
 async function requestSearch(layer: SearchLayer, query: string, signal: AbortSignal): Promise<SearchAttempt> {
   const startedAt = Date.now();
   const apiKey = (layer === "you" ? process.env.YOU_API_KEY : layer === "serper" ? process.env.SERPER_API_KEY : layer === "exa" ? process.env.EXA_API_KEY : process.env.TAVILY_API_KEY)?.trim() ?? "";
@@ -212,6 +270,29 @@ function requiredPublishedAfter(options: SearchWebOptions) {
   const timestamp = Date.parse(options.publishedAfter);
   return Number.isFinite(timestamp) ? timestamp : null;
 }
+function publicCacheKey(preparedQuery: string, options: SearchWebOptions) {
+  return createHash("sha256").update(JSON.stringify({ query: preparedQuery, requireDatedSources: Boolean(options.requireDatedSources), publishedAfter: options.publishedAfter ?? null })).digest("hex");
+}
+function clonePublicOutcome(outcome: SearchResult | SearchOutcome) { return structuredClone(outcome); }
+function readPublicSearchCache(key: string) {
+  const cached = publicSearchCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) { publicSearchCache.delete(key); return null; }
+  return clonePublicOutcome(cached.outcome);
+}
+function writePublicSearchCache(key: string, outcome: SearchResult | SearchOutcome) {
+  // Caching temporary faults would mask recovery and provide no grounding value.
+  if (outcome.state !== "found" && outcome.state !== "empty") return;
+  while (publicSearchCache.size >= WEB_SEARCH_PUBLIC_CACHE_MAX_ENTRIES) {
+    const oldest = publicSearchCache.keys().next().value;
+    if (!oldest) break;
+    publicSearchCache.delete(oldest);
+  }
+  publicSearchCache.set(key, { expiresAt: Date.now() + WEB_SEARCH_PUBLIC_CACHE_TTL_MS, outcome: clonePublicOutcome(outcome) });
+}
+/** Test-only lifecycle hooks. Production responses never expose cache records, keys or source bodies. */
+export function resetPublicSearchCacheForTests() { publicSearchCache.clear(); publicSearchInFlight.clear(); }
+export function publicSearchCacheStatsForTests() { return { entries: publicSearchCache.size, inFlight: publicSearchInFlight.size }; }
 function qualifyingFreshResult(result: SearchResult, options: SearchWebOptions): SearchResult | null {
   if (!options.requireDatedSources) return result;
   const minimum = requiredPublishedAfter(options);
@@ -235,8 +316,18 @@ async function runCascade(query: string, options: SearchWebOptions, recordOutage
   const http: Record<SearchLayer, number | null> = { you: null, serper: null, exa: null, tavily: null };
   const outcomes: Array<SearchAttempt["outcome"] | "undated" | "stale"> = [];
   for (const layer of LAYERS) {
-    if (signal.aborted || isCooling(layer)) continue;
-    const attempt = await requestSearch(layer, query, signal);
+    if (signal.aborted || isCooling(layer) || !hasLayerCredentials(layer)) continue;
+    const settleAttempt = await options.beforeAttempt?.(layer);
+    let attempt: SearchAttempt = { result: null, http: null, latencyMs: 0, outcome: "failed" };
+    try {
+      webGroundedRuntimeGauge.networkLayerAttempts += 1;
+      attempt = await requestSearch(layer, query, signal);
+    } catch {
+      attempt = { result: null, http: null, latencyMs: 0, outcome: signal.aborted ? "timeout" : "failed" };
+    } finally {
+      // Controller settlement never changes a search outcome or causes a second provider request.
+      await Promise.resolve(settleAttempt?.(attempt.outcome)).catch(() => undefined);
+    }
     http[layer] = attempt.http;
     const verifiedResult = attempt.result ? qualifyingFreshResult(attempt.result, options) : null;
     const hasAnyDatedSource = Boolean(attempt.result?.sources.some((source) => Boolean(source.publishedAt)));
@@ -276,4 +367,33 @@ async function runCascade(query: string, options: SearchWebOptions, recordOutage
 }
 export async function probeWebSearchStatus(): Promise<WebSearchStatus> { await runCascade("Kairema health check", { timeoutMs: 25_000 }, false); return getWebSearchStatus(); }
 /** Search remains optional context: every outcome is safe for the model and never blocks model generation. */
-export async function searchWeb(query: string, options: SearchWebOptions = {}): Promise<SearchResult | SearchOutcome> { return runCascade(buildGlobalDiscoveryQuery(query), options, true); }
+export async function searchWeb(query: string, options: SearchWebOptions = {}): Promise<SearchResult | SearchOutcome> {
+  const preparedQuery = buildGlobalDiscoveryQuery(query);
+  webGroundedRuntimeGauge.searchRequests += 1;
+  if (!options.publicCache) {
+    const outcome = await runCascade(preparedQuery, options, true);
+    noteWebGroundedOutcome(outcome);
+    return outcome;
+  }
+  const key = publicCacheKey(preparedQuery, options);
+  const cached = readPublicSearchCache(key);
+  if (cached) {
+    webGroundedRuntimeGauge.cacheHits += 1;
+    noteWebGroundedOutcome(cached);
+    return cached;
+  }
+  const existing = publicSearchInFlight.get(key);
+  if (existing) {
+    webGroundedRuntimeGauge.dedupJoins += 1;
+    const outcome = await existing.then(clonePublicOutcome);
+    noteWebGroundedOutcome(outcome);
+    return outcome;
+  }
+  const pending = runCascade(preparedQuery, options, true)
+    .then((outcome) => { writePublicSearchCache(key, outcome); return outcome; })
+    .finally(() => { publicSearchInFlight.delete(key); });
+  publicSearchInFlight.set(key, pending);
+  const outcome = await pending.then(clonePublicOutcome);
+  noteWebGroundedOutcome(outcome);
+  return outcome;
+}

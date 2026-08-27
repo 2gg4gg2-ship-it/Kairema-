@@ -35,7 +35,7 @@ vi.mock("./knowledge", () => ({
 
 vi.mock("./_core/llm", () => ({ invokeLLM: vi.fn() }));
 
-import { buildChatContext, extractMemoryFacts, FLASH_WEB_RESEARCH_BUDGET_MS, freshnessSearchPolicy, FRESHNESS_EMPTY_PROMPT, FRESHNESS_UNAVAILABLE_PROMPT, isKairemaIdentityQuery, needsWebResearch, processMemoryExtractionJob, shouldSkipAutoMemoryExtraction, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
+import { buildChatContext, canUsePublicSearchCache, classifyWebGroundingIntent, extractMemoryFacts, FLASH_WEB_RESEARCH_BUDGET_MS, freshnessSearchPolicy, FRESHNESS_EMPTY_PROMPT, FRESHNESS_UNAVAILABLE_PROMPT, isKairemaIdentityQuery, needsWebResearch, processMemoryExtractionJob, shouldSkipAutoMemoryExtraction, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
 import { claimMemoryExtractionJob, completeMemoryExtractionJob, deleteMemoryEntryByKey, getMemoryExtractionJobTurn, getMemoryProfile, getMemorySettings, getOwnedChatAttachments, getUserSettings, listMemoryEntries, refreshAutoMemoryProfileSummary, retryMemoryExtractionJob, upsertMemoryEntry } from "./db";
 import { invokeLLM } from "./_core/llm";
 import { WebSearchUnavailableError, searchWeb } from "./web-search";
@@ -67,11 +67,30 @@ describe("chat context soft web research", () => {
     expect([...WEB_RESEARCH_ROLE_POLICY]).toEqual(["fast", "smart", "context", "flagship"]);
   });
 
+  it("classifies fresh and source-seeking intent without treating identity or ordinary questions as web requests", () => {
+    expect(classifyWebGroundingIntent("Какие текущие изменения в законе? ")).toBe("REQUIRED");
+    expect(classifyWebGroundingIntent("Где найти официальный отчёт компании?")).toBe("PREFERRED");
+    expect(classifyWebGroundingIntent("Кто ты?")).toBe("NONE");
+    expect(classifyWebGroundingIntent("Сколько будет 2 + 2?")).toBe("NONE");
+  });
+
+  it("uses public cache only for non-personal fresh research with no attachments or memory context", () => {
+    expect(canUsePublicSearchCache("Какая последняя версия браузера?", { hasAttachments: false, hasMemoryContext: false })).toBe(true);
+    expect(canUsePublicSearchCache("Какая текущая цена для моего аккаунта?", { hasAttachments: false, hasMemoryContext: false })).toBe(false);
+    expect(canUsePublicSearchCache("Какая последняя версия браузера?", { hasAttachments: true, hasMemoryContext: false })).toBe(false);
+    expect(canUsePublicSearchCache("Какая последняя версия браузера?", { hasAttachments: false, hasMemoryContext: true })).toBe(false);
+  });
+
   it("injects verified fresh web research for an external-current request when the user enabled web search", async () => {
     await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какая последняя версия браузера?", role: "fast" }))
       .resolves.toMatchObject({ webResearch: "Свежие проверяемые данные.", webSources: [{ title: "Официальный источник", url: "https://example.com", sourceId: "source-001", retrievedAt: "2026-08-21T00:00:00.000Z" }], webEvidence: [{ fact: "Проверяемый факт", sourceId: "source-001" }], searchStatus: { state: "found", verificationStatus: "verified", sourcesCount: 1 } });
     expect(searchWeb).toHaveBeenCalledTimes(1);
-    expect(searchWeb).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS, requireDatedSources: true, publishedAfter: expect.any(String) }));
+    expect(searchWeb).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS, requireDatedSources: true, publishedAfter: expect.any(String), publicCache: true, beforeAttempt: expect.any(Function) }));
+  });
+
+  it("returns only public web-grounding metadata and citations for a verified fresh result", async () => {
+    await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какая последняя версия браузера?", role: "fast" }))
+      .resolves.toMatchObject({ webGrounding: { intent: "REQUIRED", state: "verified", sourcesCount: 1, citations: [{ title: "Официальный источник", url: "https://example.com" }] } });
   });
 
   it("does not start live research when the user disables web search and blocks unverified current-answer fallback", async () => {

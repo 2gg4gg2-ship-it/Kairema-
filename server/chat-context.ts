@@ -1,6 +1,6 @@
 import { claimMemoryExtractionJob, completeMemoryExtractionJob, deleteMemoryEntryByKey, deleteMemoryEntryByValue, getMemoryExtractionJobTurn, getMemoryProfile, getMemorySettings, getOwnedChatAttachments, getUserSettings, listMemoryEntries, refreshAutoMemoryProfileSummary, retryMemoryExtractionJob, upsertMemoryEntry } from "./db";
 import { invokeLLM } from "./_core/llm";
-import type { ChatSettings } from "./providers";
+import type { ChatSettings, WebGrounding, WebGroundingIntent } from "./providers";
 import { searchWeb } from "./web-search";
 import { beginCapacitySearch, CapacityAdmissionError, settleCapacityReservation, type CapacityActor } from "./capacity-controller";
 import { retrieveRagContext, type RagRole } from "./knowledge";
@@ -12,19 +12,42 @@ export const FLASH_WEB_RESEARCH_BUDGET_MS = 1_500;
 const MEMORY_CONTEXT_FACT_LIMIT = 30;
 const MEMORY_CONTEXT_TOPIC_LIMIT = 15;
 const FRESHNESS_QUERY_PATTERN = /(?:сегодня|сейчас|нынешн|текущ|последн|новост|свеж|актуальн|обновлен|нов(?:ый|ая|ые|ое)|верси[яиюе]|релиз|курс|цен[аы]|погод|врем[яени]|дата|событи|\bnow\b|\btoday\b|\bcurrent\b|\blatest\b|\brecent\b|\bnew\b|\bnews\b|\bupdate\b|\bversion\b|\brelease\b|\bprice\b|\bweather\b)/i;
+const EXTERNAL_DISCOVERY_PATTERN = /(?:найд[иите]|проверь|поищ|источник|ссылк|официальн|компан|организац|министерств|правительств|президент|рын(?:ок|ка)|акци[яи]|тариф|закон|исследован|статистик|выбор|спорт|матч|фильм|серия|продукт|сервис|сайт|\bsource\b|\bsearch\b|\bofficial\b|\bcompany\b|\bmarket\b|\bstock\b|\blaw\b|\belection\b)/i;
+const DIRECT_CURRENT_PATTERN = /(?:сегодня|сейчас|текущ|последн|свеж|актуальн|новост|курс|цен[аы]|погод|дата|врем[яени]|релиз|обновлен|\bnow\b|\btoday\b|\bcurrent\b|\blatest\b|\brecent\b|\bnews\b|\bprice\b|\bweather\b)/i;
+const QUESTION_PATTERN = /(?:\?|^(?:кто|что|где|когда|какой|какая|какие|сколько|почему|зачем|как|можно\s+ли|есть\s+ли|who|what|where|when|which|how|is|are)\b)/i;
+const PRIVATE_SEARCH_CONTEXT_PATTERN = /(?:^|[^A-Za-zА-Яа-яЁё0-9_])(?:я|мне|меня|мо(?:й|я|ё|его|ем|ём|и)|наш(?:а|е|и|его|ем|ей|ими|их)?|личн[А-Яа-яЁё]*|аккаунт[А-Яа-яЁё]*|учётн[А-Яа-яЁё]*|парол[А-Яа-яЁё]*|почт[А-Яа-яЁё]*|телефон[А-Яа-яЁё]*|адрес[А-Яа-яЁё]*|документ[А-Яа-яЁё]*|файл[А-Яа-яЁё]*|вложен[А-Яа-яЁё]*|профил[А-Яа-яЁё]*|памят[А-Яа-яЁё]*)(?=$|[^A-Za-zА-Яа-яЁё0-9_])|\b(?:i|me|my|mine|account|password|email|phone|address|attachment|profile|memory)\b|@/i;
 const TODAY_QUERY_PATTERN = /(?:сегодня|сейчас|\bnow\b|\btoday\b)/i;
 const RECENT_QUERY_PATTERN = /(?:последн|новост|свеж|актуальн|текущ|обновлен|нов(?:ый|ая|ые|ое)|релиз|\bcurrent\b|\blatest\b|\brecent\b|\bnew\b|\bnews\b|\bupdate\b|\brelease\b)/i;
 const STALE_RAG_AGE_MS = 90 * 24 * 60 * 60_000;
 const IDENTITY_QUERY_PATTERN = /^\s*(?:кто\s+ты|что\s+ты\s+(?:такое|за\s+ассистент)|как\s+тебя\s+зовут|ты\s+(?:kairema|кайрема)|who\s+are\s+you|what\s+are\s+you|what(?:'s|\s+is)\s+your\s+name)\s*[?!。.]?\s*$/i;
 export const FRESHNESS_UNAVAILABLE_PROMPT = "Свежие источники сейчас недоступны, поэтому я не могу надёжно подтвердить актуальные сведения.";
 export const FRESHNESS_EMPTY_PROMPT = "По проверенным свежим источникам не найдено достаточных данных для надёжного ответа.";
+export const WEB_RESEARCH_PREFERRED_PROMPT = "Свежие источники для этого вопроса не подтверждены; не выдавай сведения за актуальные и явно отделяй общий справочный ответ от проверенных фактов.";
 
 export function isKairemaIdentityQuery(query: string) {
   return IDENTITY_QUERY_PATTERN.test(query.trim());
 }
 
+export function classifyWebGroundingIntent(query: string): WebGroundingIntent {
+  const normalized = query.replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim().slice(0, 8_000);
+  if (!normalized || isKairemaIdentityQuery(normalized)) return "NONE";
+  const isQuestion = QUESTION_PATTERN.test(normalized);
+  const hasTemporalSignal = DIRECT_CURRENT_PATTERN.test(normalized);
+  const hasExternalSignal = EXTERNAL_DISCOVERY_PATTERN.test(normalized);
+  // Required combines current framing with question structure or a verifiable topic;
+  // preferred supports source-seeking research without silently claiming freshness.
+  if (hasTemporalSignal && (isQuestion || hasExternalSignal)) return "REQUIRED";
+  if (hasExternalSignal && isQuestion) return "PREFERRED";
+  return "NONE";
+}
+
 export function needsWebResearch(query: string) {
-  return !isKairemaIdentityQuery(query) && FRESHNESS_QUERY_PATTERN.test(query);
+  return classifyWebGroundingIntent(query) !== "NONE";
+}
+
+/** Cache/dedup is an optional public optimization, never a way to share user-scoped context. */
+export function canUsePublicSearchCache(query: string, input: { hasAttachments: boolean; hasMemoryContext: boolean }) {
+  return classifyWebGroundingIntent(query) !== "NONE" && !input.hasAttachments && !input.hasMemoryContext && !PRIVATE_SEARCH_CONTEXT_PATTERN.test(query);
 }
 
 /** Fresh web questions may use only dated evidence recent enough for the wording of the request. */
@@ -88,32 +111,43 @@ export async function buildChatContext(userId: number, sessionId: string, input:
     ...(imageUrls.length ? { imageUrls } : {}),
   };
 
-  const queryNeedsFreshSources = needsWebResearch(input.query ?? "");
+  const webGroundingIntent = classifyWebGroundingIntent(input.query ?? "");
+  const queryNeedsFreshSources = webGroundingIntent !== "NONE";
   const canUseLiveSearch = Boolean(preferences.webSearch) && WEB_RESEARCH_ROLE_POLICY.has(input.role ?? "flagship");
   if (queryNeedsFreshSources && !canUseLiveSearch) {
-    // Never let an up-to-date request silently fall back to model training or RAG.
-    // The provider prompt treats this warning as an instruction to refuse unverified
-    // volatile claims while still allowing clearly-labelled general background.
-    context.freshnessWarning = FRESHNESS_UNAVAILABLE_PROMPT;
+    context.webGrounding = { intent: webGroundingIntent as Exclude<WebGroundingIntent, "NONE">, state: "disabled", sourcesCount: 0, citations: [], ...(webGroundingIntent === "REQUIRED" ? { freshnessBlocked: true } : {}) };
+    if (webGroundingIntent === "REQUIRED") context.freshnessWarning = FRESHNESS_UNAVAILABLE_PROMPT;
   }
 
   if (queryNeedsFreshSources && canUseLiveSearch) {
     const role = input.role ?? "flagship";
     let searchLease: Awaited<ReturnType<typeof beginCapacitySearch>> | null = null;
-    let searchTicket: Parameters<typeof settleCapacityReservation>[0] | null = null;
-    let searchSucceeded = false;
     try {
       searchLease = input.capacityActor ? await beginCapacitySearch(input.capacityActor, role) : null;
-      searchTicket = searchLease ? await searchLease.reserve() : null;
       const search = await searchWeb(
         "Собери только релевантные актуальные факты и источники для запроса пользователя:\n" + (input.query?.slice(0, 8_000) ?? ""),
-        { ...(role === "fast" ? { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS } : {}), ...freshnessSearchPolicy(input.query ?? "") },
+        {
+          ...(role === "fast" ? { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS } : {}),
+          ...freshnessSearchPolicy(input.query ?? ""),
+          publicCache: canUsePublicSearchCache(input.query ?? "", { hasAttachments: attachments.length > 0, hasMemoryContext: Boolean(context.memoryContext) }),
+          beforeAttempt: async () => {
+            const ticket = searchLease ? await searchLease.reserve() : null;
+            return ticket ? async (outcome) => {
+              await settleCapacityReservation(ticket, outcome === "success" ? "settled" : "released");
+            } : undefined;
+          },
+        },
       );
-      searchSucceeded = true;
       if (search.state === "found" && search.sources.length) {
         context.webResearch = search.summary;
         context.webSources = search.sources;
         context.webEvidence = search.evidence;
+        context.webGrounding = {
+          intent: webGroundingIntent as Exclude<WebGroundingIntent, "NONE">,
+          state: "verified",
+          sourcesCount: search.sources.length,
+          citations: search.sources.map(({ title, url, domain, publishedAt, retrievedAt }) => ({ title, url, ...(domain ? { domain } : {}), ...(publishedAt ? { publishedAt } : {}), ...(retrievedAt ? { retrievedAt } : {}) })),
+        } satisfies WebGrounding;
         context.searchStatus = {
           cascadeUsed: search.cascadeUsed,
           sourcesCount: search.sources.length,
@@ -121,20 +155,22 @@ export async function buildChatContext(userId: number, sessionId: string, input:
           verificationStatus: "verified",
         };
       } else {
-        context.freshnessWarning = search.state === "empty" ? FRESHNESS_EMPTY_PROMPT : FRESHNESS_UNAVAILABLE_PROMPT;
+        context.webGrounding = { intent: webGroundingIntent as Exclude<WebGroundingIntent, "NONE">, state: search.state === "empty" ? "empty" : search.state === "degraded" ? "degraded" : "unavailable", sourcesCount: 0, citations: [], ...(webGroundingIntent === "REQUIRED" ? { freshnessBlocked: true } : {}) };
+        context.freshnessWarning = search.state === "empty" ? FRESHNESS_EMPTY_PROMPT : webGroundingIntent === "REQUIRED" ? FRESHNESS_UNAVAILABLE_PROMPT : WEB_RESEARCH_PREFERRED_PROMPT;
         context.searchStatus = {
           cascadeUsed: null,
           sourcesCount: 0,
           state: search.state,
           verificationStatus: search.verificationStatus,
-          freshnessBlocked: true,
+          ...(webGroundingIntent === "REQUIRED" ? { freshnessBlocked: true } : {}),
         };
       }
-    } catch {
-      context.freshnessWarning = FRESHNESS_UNAVAILABLE_PROMPT;
-      context.searchStatus = { cascadeUsed: null, sourcesCount: 0, state: "error", verificationStatus: "unavailable", freshnessBlocked: true };
+    } catch (error) {
+      const admissionDenied = error instanceof CapacityAdmissionError;
+      context.webGrounding = { intent: webGroundingIntent as Exclude<WebGroundingIntent, "NONE">, state: admissionDenied ? "admission_denied" : "unavailable", sourcesCount: 0, citations: [], ...(webGroundingIntent === "REQUIRED" ? { freshnessBlocked: true } : {}) };
+      context.freshnessWarning = webGroundingIntent === "REQUIRED" ? FRESHNESS_UNAVAILABLE_PROMPT : WEB_RESEARCH_PREFERRED_PROMPT;
+      context.searchStatus = { cascadeUsed: null, sourcesCount: 0, state: "error", verificationStatus: "unavailable", ...(webGroundingIntent === "REQUIRED" ? { freshnessBlocked: true } : {}) };
     } finally {
-      if (searchTicket) await settleCapacityReservation(searchTicket, searchSucceeded ? "settled" : "released").catch(() => undefined);
       searchLease?.release();
     }
   }

@@ -12,7 +12,7 @@ import { MODEL_IDS, OWNER_CONTROL_TARGETS, PUBLIC_DASHBOARD_PROVIDERS, chatWithR
 import { getOwnedAttachmentDownload, uploadOwnedChatAttachment } from "./attachments";
 import { createPersistentChatExport, getOwnedChatExportDownload } from "./chat-exports";
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
-import { getWebSearchStatus, probeWebSearchStatus } from "./web-search";
+import { getWebGroundedRuntimeGaugeSnapshot, getWebSearchStatus, probeWebSearchStatus } from "./web-search";
 import { getKnowledgeAudit, getKnowledgeStatus, refreshKnowledgeBase } from "./knowledge";
 import { ownerClaimFingerprint } from "./owner-claim";
 import { getChatStreamRuntimeGaugeSnapshot } from "./chat-stream";
@@ -283,7 +283,11 @@ export const appRouter = router({
     }),
     observability: protectedProcedure.query(async ({ ctx }) => {
       requireOwner(ctx);
-      return { ...(await getOwnerObservabilitySnapshot()), runtime: getChatStreamRuntimeGaugeSnapshot() };
+      return {
+        ...(await getOwnerObservabilitySnapshot()),
+        runtime: getChatStreamRuntimeGaugeSnapshot(),
+        webGroundingRuntime: getWebGroundedRuntimeGaugeSnapshot(),
+      };
     }),
     providerControls: protectedProcedure.query(async ({ ctx }) => {
       requireOwner(ctx);
@@ -598,12 +602,13 @@ export const appRouter = router({
             { ...storedSettings, ...input.settings },
             { userId: ctx.user.id, requestKey: `message:${ctx.user.id}:${savedUser.id}` },
           );
-          const sourceMetadata = result.sources?.length || result.evidence?.length || result.ragSources?.length || result.searchStatus
+          const sourceMetadata = result.sources?.length || result.evidence?.length || result.ragSources?.length || result.searchStatus || result.webGrounding
             ? JSON.stringify({
               ...(result.sources?.length ? { sources: result.sources } : {}),
               ...(result.evidence?.length ? { evidence: result.evidence } : {}),
               ...(result.ragSources?.length ? { ragSources: result.ragSources } : {}),
               ...(result.searchStatus ? { searchStatus: result.searchStatus } : {}),
+              ...(result.webGrounding ? { webGrounding: result.webGrounding } : {}),
             })
             : undefined;
           const savedAssistant = await appendChatMessage(ctx.user.id, input.sessionId, "assistant", result.content, result.modelUsed, sourceMetadata);

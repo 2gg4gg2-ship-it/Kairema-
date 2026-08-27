@@ -5,6 +5,7 @@ export type StreamDonePayload = {
   label?: string;
   searchStatus?: { state?: "found" | "empty" | "degraded" | "error"; verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable"; sourcesCount?: number; freshnessBlocked?: boolean; staleRagOnly?: boolean; sourceDateMin?: string; sourceDateMax?: string };
   sources?: StreamSource[];
+  webGrounding?: { intent?: "PREFERRED" | "REQUIRED"; state?: "verified" | "disabled" | "empty" | "degraded" | "unavailable" | "admission_denied"; sourcesCount?: number; citations?: StreamSource[]; freshnessBlocked?: boolean };
 };
 
 export function sseEventFromBlock(block: string) {
