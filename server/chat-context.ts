@@ -2,6 +2,7 @@ import { claimMemoryExtractionJob, completeMemoryExtractionJob, deleteMemoryEntr
 import { invokeLLM } from "./_core/llm";
 import type { ChatSettings } from "./providers";
 import { searchWeb } from "./web-search";
+import { beginCapacitySearch, CapacityAdmissionError, settleCapacityReservation, type CapacityActor } from "./capacity-controller";
 import { retrieveRagContext, type RagRole } from "./knowledge";
 import { getAttachmentPromptText, getOwnedAttachmentVisionDataUrl } from "./attachments";
 
@@ -56,7 +57,7 @@ const DEFAULT_CONTEXT_PREFERENCES = {
   webSearch: 0,
 };
 
-export async function buildChatContext(userId: number, sessionId: string, input: { attachmentIds?: string[]; query?: string; role?: RagRole }): Promise<ChatSettings> {
+export async function buildChatContext(userId: number, sessionId: string, input: { attachmentIds?: string[]; query?: string; role?: RagRole; capacityActor?: CapacityActor }): Promise<ChatSettings> {
   const [preferences, memorySettings, profile, facts, topics] = await Promise.all([
     getUserSettings(userId).catch(() => DEFAULT_CONTEXT_PREFERENCES),
     getMemorySettings(userId).catch(() => null),
@@ -98,11 +99,17 @@ export async function buildChatContext(userId: number, sessionId: string, input:
 
   if (queryNeedsFreshSources && canUseLiveSearch) {
     const role = input.role ?? "flagship";
+    let searchLease: Awaited<ReturnType<typeof beginCapacitySearch>> | null = null;
+    let searchTicket: Parameters<typeof settleCapacityReservation>[0] | null = null;
+    let searchSucceeded = false;
     try {
+      searchLease = input.capacityActor ? await beginCapacitySearch(input.capacityActor, role) : null;
+      searchTicket = searchLease ? await searchLease.reserve() : null;
       const search = await searchWeb(
         "Собери только релевантные актуальные факты и источники для запроса пользователя:\n" + (input.query?.slice(0, 8_000) ?? ""),
         { ...(role === "fast" ? { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS } : {}), ...freshnessSearchPolicy(input.query ?? "") },
       );
+      searchSucceeded = true;
       if (search.state === "found" && search.sources.length) {
         context.webResearch = search.summary;
         context.webSources = search.sources;
@@ -126,6 +133,9 @@ export async function buildChatContext(userId: number, sessionId: string, input:
     } catch {
       context.freshnessWarning = FRESHNESS_UNAVAILABLE_PROMPT;
       context.searchStatus = { cascadeUsed: null, sourcesCount: 0, state: "error", verificationStatus: "unavailable", freshnessBlocked: true };
+    } finally {
+      if (searchTicket) await settleCapacityReservation(searchTicket, searchSucceeded ? "settled" : "released").catch(() => undefined);
+      searchLease?.release();
     }
   }
   try {

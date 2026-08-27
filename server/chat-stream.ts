@@ -382,7 +382,12 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
         transcript = await dependencies.listSessionTranscriptWindow(user.id, input.sessionId, input.modelId, { throughMessageId: append.id });
       }
 
-      const storedSettings = await dependencies.buildChatContext(user.id, input.sessionId, { attachmentIds: input.attachmentIds, query: input.content, role: input.modelId });
+      const storedSettings = await dependencies.buildChatContext(user.id, input.sessionId, {
+        attachmentIds: input.attachmentIds,
+        query: input.content,
+        role: input.modelId,
+        capacityActor: { userId: user.id, requestKey: `stream:${user.id}:${input.clientMessageId ?? savedUserMessageId ?? input.regenerateMessageId ?? "generation"}` },
+      });
       const effectiveSettings = { ...storedSettings, ...input.settings };
 
       res.status(200);
@@ -416,6 +421,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
             if (!closed) writeEvent(res, "delta", { content: delta });
           },
           controller.signal,
+          { userId: user.id, requestKey: `stream:${user.id}:${input.clientMessageId ?? savedUserMessageId ?? input.regenerateMessageId ?? "generation"}` },
         );
         if (!closed) {
           const allSources = [...(result.sources ?? []), ...(result.ragSources ?? [])];

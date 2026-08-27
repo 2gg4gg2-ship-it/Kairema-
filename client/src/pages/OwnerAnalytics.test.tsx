@@ -16,13 +16,19 @@ const fixtures = vi.hoisted(() => ({
   providerControls: vi.fn(),
   providerControlTargets: vi.fn(),
   updateProviderControl: vi.fn(),
+  capacitySnapshot: vi.fn(),
+  capacityPolicy: vi.fn(),
+  updateCapacityPolicy: vi.fn(),
+  capacityProviderBudgets: vi.fn(),
+  updateCapacityProviderBudget: vi.fn(),
+  invalidateCapacity: vi.fn(),
 }));
 
 vi.mock("wouter", () => ({ useLocation: () => ["/owner-analytics", fixtures.navigate] }));
 vi.mock("@/lib/chat-export", () => ({ downloadPreparedChatExport: fixtures.download }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
-    useUtils: () => ({ owner: { providerControls: { invalidate: fixtures.invalidateControls }, observability: { invalidate: fixtures.invalidateObservability } } }),
+    useUtils: () => ({ owner: { providerControls: { invalidate: fixtures.invalidateControls }, observability: { invalidate: fixtures.invalidateObservability }, capacitySnapshot: { invalidate: fixtures.invalidateCapacity }, capacityPolicy: { invalidate: fixtures.invalidateCapacity }, capacityProviderBudgets: { invalidate: fixtures.invalidateCapacity } } }),
     owner: {
       isOwner: { useQuery: () => ({ data: fixtures.isOwner, isLoading: false, isSuccess: true }) },
       claimDiagnostic: { useQuery: (input: unknown, options: unknown) => { fixtures.claimDiagnostic(options); return { data: fixtures.isOwner ? null : { comparedClaim: "openId", configured: true, expectedFingerprint: "sha256:expected", sessionFingerprint: "sha256:session", matches: false } }; } },
@@ -30,6 +36,11 @@ vi.mock("@/lib/trpc", () => ({
       providerControls: { useQuery: (input: unknown, options: unknown) => { fixtures.providerControls(options); return { data: fixtures.isOwner ? [{ targetType: "provider", targetKey: "deepseek", disabled: false, preference: "avoid" }] : null }; } },
       providerControlTargets: { useQuery: (input: unknown, options: unknown) => { fixtures.providerControlTargets(options); return { data: fixtures.isOwner ? { providers: ["deepseek"], models: ["deepseek-chat"] } : null }; } },
       updateProviderControl: { useMutation: () => ({ mutateAsync: fixtures.updateProviderControl, isPending: false, error: null }) },
+      capacitySnapshot: { useQuery: (input: unknown, options: unknown) => { fixtures.capacitySnapshot(options); return { data: fixtures.isOwner ? { policy: { enabled: true, globalCapacity: "UNKNOWN / unconfigured", searchCapacity: "UNKNOWN / unconfigured", queueScope: "disabled (safe default)" }, local: { scope: "single process only; not a global production concurrency claim", generation: { active: 0, instanceLimit: 12 }, search: { active: 0, instanceLimit: 6 }, counters: {} }, adapters: [{ id: "cloudflare-workers-ai", status: "feasibility-only" }] } : null }; } },
+      capacityPolicy: { useQuery: (input: unknown, options: unknown) => { fixtures.capacityPolicy(options); return { data: fixtures.isOwner ? { enabled: true, globalGenerationWcuLimit: null, globalSearchWcuLimit: null, perUserGenerationWcuLimit: 12, perUserSearchWcuLimit: 6, perUserGenerationConcurrency: 2, perUserSearchConcurrency: 1, apexPressureReservePercent: 20, queueMaxWaitMs: 0, queueMaxDepth: 0, updatedAt: "2026-08-27T00:00:00.000Z" } : null }; } },
+      updateCapacityPolicy: { useMutation: () => ({ mutateAsync: fixtures.updateCapacityPolicy, isPending: false, error: null }) },
+      capacityProviderBudgets: { useQuery: (input: unknown, options: unknown) => { fixtures.capacityProviderBudgets(options); return { data: fixtures.isOwner ? [] : null }; } },
+      updateCapacityProviderBudget: { useMutation: () => ({ mutateAsync: fixtures.updateCapacityProviderBudget, isPending: false, error: null }) },
     },
     search: {
       qualityPanel: { useQuery: (input: unknown, options: unknown) => { fixtures.qualityPanel(options); return { data: null }; } },
@@ -40,7 +51,7 @@ vi.mock("@/lib/trpc", () => ({
 
 import OwnerAnalytics from "./OwnerAnalytics";
 
-beforeEach(() => { fixtures.isOwner = false; fixtures.download.mockReset(); fixtures.navigate.mockReset(); fixtures.invalidateControls.mockReset(); fixtures.invalidateObservability.mockReset(); fixtures.qualityPanel.mockReset(); fixtures.qualityChart.mockReset(); fixtures.claimDiagnostic.mockReset(); fixtures.observability.mockReset(); fixtures.providerControls.mockReset(); fixtures.providerControlTargets.mockReset(); fixtures.updateProviderControl.mockReset(); });
+beforeEach(() => { fixtures.isOwner = false; fixtures.download.mockReset(); fixtures.navigate.mockReset(); fixtures.invalidateControls.mockReset(); fixtures.invalidateObservability.mockReset(); fixtures.invalidateCapacity.mockReset(); fixtures.qualityPanel.mockReset(); fixtures.qualityChart.mockReset(); fixtures.claimDiagnostic.mockReset(); fixtures.observability.mockReset(); fixtures.providerControls.mockReset(); fixtures.providerControlTargets.mockReset(); fixtures.updateProviderControl.mockReset(); fixtures.capacitySnapshot.mockReset(); fixtures.capacityPolicy.mockReset(); fixtures.updateCapacityPolicy.mockReset(); fixtures.capacityProviderBudgets.mockReset(); fixtures.updateCapacityProviderBudget.mockReset(); });
 afterEach(() => cleanup());
 
 describe("owner analytics", () => {
@@ -51,6 +62,9 @@ describe("owner analytics", () => {
     expect(fixtures.qualityChart).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(fixtures.observability).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(fixtures.providerControls).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+    expect(fixtures.capacitySnapshot).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+    expect(fixtures.capacityPolicy).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+    expect(fixtures.capacityProviderBudgets).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(fixtures.claimDiagnostic).toHaveBeenCalledWith(expect.objectContaining({ enabled: true }));
   });
 
@@ -59,10 +73,16 @@ describe("owner analytics", () => {
     render(<OwnerAnalytics />);
     expect(screen.getByText("Наблюдаемость Kairema")).toBeTruthy();
     expect(screen.getByText("Fail-safe routing controls")).toBeTruthy();
+    expect(screen.getByLabelText("AI Capacity & Fairness Controller")).toBeTruthy();
+    expect(screen.getAllByText("UNKNOWN / unconfigured")).toHaveLength(2);
+    expect(screen.getByText("Provider / model budget metadata")).toBeTruthy();
+    expect(screen.getByLabelText("Allowlisted target")).toBeTruthy();
+    expect(screen.getByText(/Configured provider\/model budgets пока отсутствуют/)).toBeTruthy();
     expect(screen.getByLabelText("Успешные результаты за семь дней")).toBeTruthy();
     expect(screen.getByLabelText("Отказы анонимных слоёв поиска за двадцать четыре часа")).toBeTruthy();
     expect(screen.queryByText(/https?:\/\//)).toBeNull();
     expect(fixtures.qualityChart).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, refetchInterval: 60_000 }));
+    expect(fixtures.capacityProviderBudgets).toHaveBeenCalledWith(expect.objectContaining({ enabled: true }));
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "CSV" }));
     await user.click(screen.getByRole("button", { name: "JSON" }));
@@ -74,5 +94,28 @@ describe("owner analytics", () => {
     expect(csv).toContain("date,requests,success,failures_by_layer,p50,p95");
     expect(json.daily[0]).toEqual({ date: "2026-08-20", requests: 3, success: 2, failures_by_layer: { layer_1: 1, layer_2: 1, layer_3: 0 }, p50: 120, p95: 240 });
     expect(`${csv}\n${JSON.stringify(json)}`).not.toMatch(/userId|message|memory|chatId|attachment|https?:\/\/|provider|model/i);
+  });
+
+  it("submits provider budget metadata through the owner-only mutation without client identity fields", async () => {
+    fixtures.isOwner = true;
+    render(<OwnerAnalytics />);
+    const user = userEvent.setup();
+    await user.click(screen.getByText("Provider / model budget metadata"));
+    await user.selectOptions(screen.getByLabelText("Allowlisted target"), '{"provider":"deepseek"}');
+    await user.clear(screen.getByLabelText("Generation WCU cap"));
+    await user.type(screen.getByLabelText("Generation WCU cap"), "4");
+    await user.click(screen.getByLabelText("fast"));
+    await user.click(screen.getByRole("button", { name: "Сохранить metadata" }));
+    expect(fixtures.updateCapacityProviderBudget).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "deepseek",
+      modelId: null,
+      enabled: true,
+      generationWcuLimit: 4,
+      roleEligibility: ["fast"],
+      billingSafe: false,
+      quotaState: "unknown",
+    }));
+    expect(fixtures.updateCapacityProviderBudget.mock.calls[0]?.[0]).not.toHaveProperty("userId");
+    expect(fixtures.updateCapacityProviderBudget.mock.calls[0]?.[0]).not.toHaveProperty("reservationKey");
   });
 });

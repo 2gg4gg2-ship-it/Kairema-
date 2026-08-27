@@ -384,6 +384,92 @@ export const chatAttachments = mysqlTable("chat_attachments", {
   index("chat_attachments_expires_idx").on(table.expiresAt),
 ]);
 
+/** One server-controlled policy row; null WCU limits explicitly mean UNKNOWN/unconfigured, never unlimited provider capacity. */
+export const capacityControllerSettings = mysqlTable("capacity_controller_settings", {
+  id: int("id").primaryKey(),
+  enabled: int("enabled").notNull().default(1),
+  globalGenerationWcuLimit: int("globalGenerationWcuLimit"),
+  globalSearchWcuLimit: int("globalSearchWcuLimit"),
+  globalGenerationConcurrency: int("globalGenerationConcurrency"),
+  globalSearchConcurrency: int("globalSearchConcurrency"),
+  globalGenerationInflightWcuLimit: int("globalGenerationInflightWcuLimit"),
+  degradationMode: mysqlEnum("degradationMode", ["normal", "elevated", "high", "critical", "exhausted"]).notNull().default("normal"),
+  perUserGenerationWcuLimit: int("perUserGenerationWcuLimit").notNull().default(12),
+  perUserSearchWcuLimit: int("perUserSearchWcuLimit").notNull().default(6),
+  perUserGenerationConcurrency: int("perUserGenerationConcurrency").notNull().default(2),
+  perUserSearchConcurrency: int("perUserSearchConcurrency").notNull().default(1),
+  apexPressureReservePercent: int("apexPressureReservePercent").notNull().default(20),
+  roleWeightsJson: text("roleWeightsJson").notNull(),
+  modifierWeightsJson: text("modifierWeightsJson").notNull(),
+  queueMaxWaitMs: int("queueMaxWaitMs").notNull().default(0),
+  queueMaxDepth: int("queueMaxDepth").notNull().default(0),
+  queueEligibleRolesJson: varchar("queueEligibleRolesJson", { length: 64 }).notNull().default('["fast"]'),
+  reservationTtlSeconds: int("reservationTtlSeconds").notNull().default(180),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+/** Provider/model policy is owner-configurable but starts UNKNOWN: it contains no inferred provider quota. */
+export const capacityProviderBudgets = mysqlTable("capacity_provider_budgets", {
+  scopeKey: varchar("scopeKey", { length: 220 }).primaryKey(),
+  provider: varchar("provider", { length: 48 }).notNull(),
+  modelId: varchar("modelId", { length: 160 }),
+  enabled: int("enabled").notNull().default(1),
+  generationWcuLimit: int("generationWcuLimit"),
+  maxConcurrent: int("maxConcurrent"),
+  rpmLimit: int("rpmLimit"),
+  tpmLimit: int("tpmLimit"),
+  dailyUnitsLimit: int("dailyUnitsLimit"),
+  dailyRequestLimit: int("dailyRequestLimit"),
+  dailyTokenLimit: int("dailyTokenLimit"),
+  resetWindow: varchar("resetWindow", { length: 96 }),
+  cooldownState: mysqlEnum("cooldownState", ["unknown", "inherit_provider_health", "cooldown"]).notNull().default("inherit_provider_health"),
+  roleEligibilityJson: text("roleEligibilityJson"),
+  searchEligibility: mysqlEnum("searchEligibility", ["unknown", "eligible", "not_eligible"]).notNull().default("unknown"),
+  eligibilityState: mysqlEnum("eligibilityState", ["unknown", "eligible", "not_eligible", "paid_required"]).notNull().default("unknown"),
+  billingState: mysqlEnum("billingState", ["unknown", "free", "paid", "not_configured"]).notNull().default("unknown"),
+  billingSafe: int("billingSafe"),
+  quotaState: mysqlEnum("quotaState", ["unknown", "operator_configured"]).notNull().default("unknown"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("capacity_provider_budgets_provider_idx").on(table.provider)]);
+
+/** Scoped rolling fixed windows keep only aggregate WCU: no prompts, responses, tokens, user content or secrets. */
+export const capacityBudgetWindows = mysqlTable("capacity_budget_windows", {
+  scopeKey: varchar("scopeKey", { length: 220 }).primaryKey(),
+  windowStarted: timestamp("windowStarted").defaultNow().notNull(),
+  usedWcu: int("usedWcu").notNull().default(0),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+/** Atomic durable aggregate inflight counters. They coordinate best-effort guards across instances without holding private content. */
+export const capacityInflightCounters = mysqlTable("capacity_inflight_counters", {
+  scopeKey: varchar("scopeKey", { length: 220 }).primaryKey(),
+  activeCount: int("activeCount").notNull().default(0),
+  activeWcu: int("activeWcu").notNull().default(0),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+/** Reservation records make fallback accounting idempotent; scope keys are operational metadata only. */
+export const capacityReservations = mysqlTable("capacity_reservations", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  requestKey: varchar("requestKey", { length: 180 }).notNull().unique(),
+  userId: int("userId").references(() => users.id, { onDelete: "set null" }),
+  kind: mysqlEnum("kind", ["generation", "search"]).notNull(),
+  roleId: mysqlEnum("roleId", ["fast", "smart", "context", "flagship"]),
+  provider: varchar("provider", { length: 48 }),
+  modelId: varchar("modelId", { length: 160 }),
+  wcu: int("wcu").notNull(),
+  scopeKeysJson: text("scopeKeysJson").notNull(),
+  inflightScopeKeysJson: text("inflightScopeKeysJson").notNull(),
+  state: mysqlEnum("state", ["reserved", "settled", "released"]).notNull().default("reserved"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  finalizedAt: timestamp("finalizedAt"),
+}, (table) => [
+  index("capacity_reservations_created_idx").on(table.createdAt),
+  index("capacity_reservations_user_created_idx").on(table.userId, table.createdAt),
+]);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type ProviderIdentity = typeof providerIdentities.$inferSelect;
@@ -407,3 +493,7 @@ export type MemoryEntry = typeof memoryEntries.$inferSelect;
 export type MemoryExtractionJob = typeof memoryExtractionJobs.$inferSelect;
 export type MemoryFact = typeof memoryFacts.$inferSelect;
 export type ChatAttachment = typeof chatAttachments.$inferSelect;
+export type CapacityControllerSettings = typeof capacityControllerSettings.$inferSelect;
+export type CapacityProviderBudget = typeof capacityProviderBudgets.$inferSelect;
+export type CapacityBudgetWindow = typeof capacityBudgetWindows.$inferSelect;
+export type CapacityReservation = typeof capacityReservations.$inferSelect;

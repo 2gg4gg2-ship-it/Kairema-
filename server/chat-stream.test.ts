@@ -219,7 +219,12 @@ describe("chat stream happy-path", () => {
 
     await handler({ body: validRequestBody } as Request, streamResponse, vi.fn());
 
-    expect(buildChatContext).toHaveBeenCalledWith(42, validRequestBody.sessionId, { attachmentIds: undefined, query: "Привет", role: "fast" });
+    expect(buildChatContext).toHaveBeenCalledWith(42, validRequestBody.sessionId, expect.objectContaining({
+      attachmentIds: undefined,
+      query: "Привет",
+      role: "fast",
+      capacityActor: { userId: 42, requestKey: "stream:42:1" },
+    }));
     expect(streamResponse.status).toHaveBeenCalledWith(200);
     expect(chatWithRoleStream).toHaveBeenCalledOnce();
     expect(appendChatMessage).toHaveBeenCalledTimes(2);

@@ -1,4 +1,5 @@
 import { getProviderAvailability, getProviderDailySuccess, getPublicProviderAvailabilityHistory, incrementProviderDailySuccess, listProviderControlFlags, listProviderHealth, listRoleRuntimeStatus, recordFlashTtftMetric, recordTechnicalEvent, upsertProviderHealth, upsertRoleRuntimeStatus } from "./db";
+import { beginCapacityGeneration, CapacityAdmissionError, settleCapacityReservation, type CapacityActor, type CapacityGenerationLease } from "./capacity-controller";
 
 export const ROLE_IDS = ["fast", "smart", "context", "flagship"] as const;
 /** Compatibility alias: clients select a role, never a raw upstream model. */
@@ -145,9 +146,9 @@ const PROVIDERS: readonly Provider[] = ["openrouter", "orcarouter", "zenmux", "d
 /** Hard cap on real upstream requests. Health or capability skips never consume this budget. */
 export const MAX_ATTEMPTS = 4;
 /** One allowance is created for each chat generation and is spent only on a real upstream LLM call. */
-export type RequestBudget = { remaining: number; used: number; requestId: string };
-export function createRequestBudget(): RequestBudget {
-  return { remaining: MAX_ATTEMPTS, used: 0, requestId: crypto.randomUUID() };
+export type RequestBudget = { remaining: number; used: number; requestId: string; capacityLease?: CapacityGenerationLease };
+export function createRequestBudget(capacityLease?: CapacityGenerationLease): RequestBudget {
+  return { remaining: MAX_ATTEMPTS, used: 0, requestId: crypto.randomUUID(), ...(capacityLease ? { capacityLease } : {}) };
 }
 /** The dashboard deliberately excludes server-only fallback and diagnostic providers. */
 export const PUBLIC_DASHBOARD_PROVIDERS = ["openrouter", "orcarouter", "google", "groq"] as const satisfies readonly Provider[];
@@ -421,9 +422,14 @@ async function invoke(candidate: Candidate, role: ModelConfig, history: ChatMess
   if (stream) headers.Accept = "text/event-stream";
   if (candidate.provider === "openrouter") { headers["HTTP-Referer"] = "https://kairema.manus.space"; headers["X-Title"] = "Kairema"; }
   let response: Response;
+  let reservation: Awaited<ReturnType<CapacityGenerationLease["reserveAttempt"]>> | null = null;
   try {
     if (budget) {
-      const attemptIndex = consumeRequestBudget(budget);
+      const attemptIndex = budget.used + 1;
+      // The durable controller reservation is immediately before the real fetch.
+      // A rejected reservation never consumes the four-attempt upstream budget.
+      reservation = budget.capacityLease ? await budget.capacityLease.reserveAttempt({ provider: candidate.provider, modelId: candidate.modelId }, attemptIndex) : null;
+      consumeRequestBudget(budget);
       console.info("[Kairema LLM]", JSON.stringify({
         event: "llm.attempt",
         requestId: budget.requestId,
@@ -441,19 +447,27 @@ async function invoke(candidate: Candidate, role: ModelConfig, history: ChatMess
       signal: timeoutSignal(signal, ATTEMPT_TIMEOUT_MS),
     });
   } catch (error) {
+    if (error instanceof CapacityAdmissionError) throw error;
+    if (reservation) await settleCapacityReservation(reservation, "settled").catch(() => undefined);
     if (signal?.aborted) throw error;
     const status = network(error);
     await recordProviderIssue(candidate.provider, status);
     throw new OpenRouterError(status);
   }
-  if (!response.ok) {
-    let body: unknown = null;
-    try { body = await response.json(); } catch { body = { message: await response.text().catch(() => "") }; }
-    const status = failure(response.status, body);
-    await recordProviderIssue(candidate.provider, status, status.category === "RATE_LIMIT" ? retryAfterMs(response, body) : undefined);
-    throw new OpenRouterError(status);
+  try {
+    if (!response.ok) {
+      let body: unknown = null;
+      try { body = await response.json(); } catch { body = { message: await response.text().catch(() => "") }; }
+      const status = failure(response.status, body);
+      await recordProviderIssue(candidate.provider, status, status.category === "RATE_LIMIT" ? retryAfterMs(response, body) : undefined);
+      throw new OpenRouterError(status);
+    }
+    return response;
+  } finally {
+    // After fetch starts an upstream can charge even an errored response, so WCU is
+    // conservatively settled. Only pre-fetch denial creates no reservation.
+    if (reservation) await settleCapacityReservation(reservation, "settled").catch(() => undefined);
   }
-  return response;
 }
 
 function retryable(status: ModelStatus) { return ["RATE_LIMIT", "QUOTA", "PROVIDER_UNAVAILABLE", "NETWORK", "TIMEOUT", "AUTH", "MODEL", "ENDPOINT"].includes(status.category ?? ""); }
@@ -656,17 +670,19 @@ export function createReasoningStreamFilter() {
 }
 export function statusFromChatPayload(payload: unknown): ModelStatus { const raw = (payload as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content; return sanitizeAssistantContent(typeof raw === "string" ? raw : "") ? ready() : failure(200, { message: "empty response" }); }
 
-export async function chatWithRole(roleId: string, history: ChatMessage[], settings?: ChatSettings): Promise<ChatResult> {
+export async function chatWithRole(roleId: string, history: ChatMessage[], settings?: ChatSettings, actor?: CapacityActor): Promise<ChatResult> {
   assertAllowedModelId(roleId);
   await hydrateProviderHealth();
   const role = roleById(roleId)!;
   const attempts: ChainAttempt[] = [];
   let last: OpenRouterError | null = null;
   const candidates = await controlledCandidates(role.chain);
-  const budget = createRequestBudget();
   if (settings?.imageUrls?.length && !candidates.some(({ candidate, control }) => !control.disabled && candidate.vision && providerAvailable(candidate.provider))) {
     throw new OpenRouterError({ state: "unavailable", badge: "Недоступно", category: "PROVIDER_UNAVAILABLE", http: null, checkedAt: now(), confirmed: "Анализ изображений временно недоступен: нет готового vision-кандидата." });
   }
+  const capacityLease = actor ? await beginCapacityGeneration(actor, role.key, settings ?? {}) : null;
+  const budget = createRequestBudget(capacityLease ?? undefined);
+  try {
   for (let index = 0; index < candidates.length; index += 1) {
     const { candidate, originalIndex, control } = candidates[index]!;
     if (control.disabled) { attempts.push(attempt(candidate, "skipped")); continue; }
@@ -683,6 +699,10 @@ export async function chatWithRole(roleId: string, history: ChatMessage[], setti
       if (fallbackUsed) void recordTechnicalEvent({ kind: "fallback", title: "Резервный кандидат использован", code: candidate.provider, roleId: role.key }).catch(() => undefined);
       return { content, modelUsed: candidate.displayName, provider: candidate.provider, fallbackUsed, label: role.label, status: fallbackUsed ? backup(`Ответил резерв ${candidate.displayName}.`) : ready(), ...(settings?.webSources?.length ? { sources: settings.webSources } : {}), ...(settings?.webEvidence?.length ? { evidence: settings.webEvidence } : {}), ...(settings?.ragSources?.length ? { ragSources: settings.ragSources } : {}), ...(settings?.searchStatus ? { searchStatus: settings.searchStatus } : {}) };
     } catch (error) {
+      if (error instanceof CapacityAdmissionError) {
+        if (error.scope === "provider") { attempts.push(attempt(candidate, "skipped")); continue; }
+        throw error;
+      }
       const status = error instanceof OpenRouterError ? error.status : network(error);
       last = error instanceof OpenRouterError ? error : new OpenRouterError(status);
       attempts.push(attempt(candidate, "failed", status));
@@ -693,21 +713,26 @@ export async function chatWithRole(roleId: string, history: ChatMessage[], setti
   const finalError = last ?? new OpenRouterError(unconfigured());
   await saveRoleRuntime(role.key, "unavailable", null, null);
   throw finalError;
+  } finally {
+    capacityLease?.release();
+  }
 }
 
-export async function chatWithRoleStream(roleId: string, history: ChatMessage[], settings: ChatSettings | undefined, onDelta: (delta: string) => void, signal?: AbortSignal): Promise<ChatResult> {
+export async function chatWithRoleStream(roleId: string, history: ChatMessage[], settings: ChatSettings | undefined, onDelta: (delta: string) => void, signal?: AbortSignal, actor?: CapacityActor): Promise<ChatResult> {
   assertAllowedModelId(roleId);
   await hydrateProviderHealth();
   const role = roleById(roleId)!;
   const attempts: ChainAttempt[] = [];
   let last: OpenRouterError | null = null;
   const candidates = await controlledCandidates(role.chain);
-  const budget = createRequestBudget();
   /** Every visible fragment is retained only for this request, so a reserve can continue in one answer bubble. */
   const emittedParts: string[] = [];
   if (settings?.imageUrls?.length && !candidates.some(({ candidate, control }) => !control.disabled && candidate.vision && providerAvailable(candidate.provider))) {
     throw new OpenRouterError({ state: "unavailable", badge: "Недоступно", category: "PROVIDER_UNAVAILABLE", http: null, checkedAt: now(), confirmed: "Анализ изображений временно недоступен: нет готового vision-кандидата." });
   }
+  const capacityLease = actor ? await beginCapacityGeneration(actor, role.key, settings ?? {}) : null;
+  const budget = createRequestBudget(capacityLease ?? undefined);
+  try {
   for (let index = 0; index < candidates.length; index += 1) {
     const { candidate, originalIndex, control } = candidates[index]!;
     if (control.disabled) { attempts.push(attempt(candidate, "skipped")); continue; }
@@ -752,6 +777,10 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
       if (fallbackUsed) void recordTechnicalEvent({ kind: "fallback", title: "Резервный кандидат использован", code: candidate.provider, roleId: role.key }).catch(() => undefined);
       return { content, modelUsed: candidate.displayName, provider: candidate.provider, fallbackUsed, label: role.label, status: fallbackUsed ? backup(`Ответил резерв ${candidate.displayName}.`) : ready(), ...(settings?.webSources?.length ? { sources: settings.webSources } : {}), ...(settings?.webEvidence?.length ? { evidence: settings.webEvidence } : {}), ...(settings?.ragSources?.length ? { ragSources: settings.ragSources } : {}), ...(settings?.searchStatus ? { searchStatus: settings.searchStatus } : {}) };
     } catch (error) {
+      if (error instanceof CapacityAdmissionError) {
+        if (error.scope === "provider") { attempts.push(attempt(candidate, "skipped")); continue; }
+        throw error;
+      }
       if (signal?.aborted) throw error;
       const status = flashDeadlineExpired
         ? { state: "error" as const, badge: "Недоступно", category: "TIMEOUT" as const, http: null, checkedAt: now(), confirmed: "Flash не получил видимый фрагмент за 1,5 секунды; включён резерв." }
@@ -769,6 +798,9 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
   const finalError = last ?? new OpenRouterError(unconfigured());
   await saveRoleRuntime(role.key, "unavailable", null, null);
   throw finalError;
+  } finally {
+    capacityLease?.release();
+  }
 }
 
 export const chatWithOpenRouter = chatWithRole;
@@ -804,6 +836,10 @@ export async function chatWithDev(history: ChatMessage[]) {
 }
 
 export function publicChatError(_roleId: string, error: unknown) {
+  if (error instanceof CapacityAdmissionError) {
+    const why = error.reason === "concurrency" || error.reason === "queue_full" ? "временная локальная перегрузка" : "лимит мощности для этой минуты";
+    return `Что произошло: Генерация временно ограничена | Почему: ${why}. | Что делать: повторите запрос через ${error.retryAfterSeconds} с.`;
+  }
   const status = error instanceof OpenRouterError ? error.status : error instanceof InvalidModelSelectionError ? { ...unavailable(), category: "MODEL" as const, confirmed: error.message } : network(error);
   const action = status.category === "RATE_LIMIT" || status.category === "QUOTA" ? "Роль перейдёт к резерву; повторите запрос позже." : "Повторите попытку позже.";
   return `Что произошло: ${status.badge} | Почему: ${status.confirmed} | Что делать: ${action}`;

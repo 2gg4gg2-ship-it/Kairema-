@@ -8,7 +8,7 @@ import { resolveOrCreateProviderUser } from "./db";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { ENV } from "./_core/env";
-import { MODEL_IDS, OWNER_CONTROL_TARGETS, chatWithRole, getModelViews, getPublicProviderDashboard, isOwnerControlTarget, publicChatError } from "./providers";
+import { MODEL_IDS, OWNER_CONTROL_TARGETS, PUBLIC_DASHBOARD_PROVIDERS, chatWithRole, getModelViews, getPublicProviderDashboard, isOwnerControlTarget, publicChatError } from "./providers";
 import { getOwnedAttachmentDownload, uploadOwnedChatAttachment } from "./attachments";
 import { createPersistentChatExport, getOwnedChatExportDownload } from "./chat-exports";
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
@@ -16,6 +16,7 @@ import { getWebSearchStatus, probeWebSearchStatus } from "./web-search";
 import { getKnowledgeAudit, getKnowledgeStatus, refreshKnowledgeBase } from "./knowledge";
 import { ownerClaimFingerprint } from "./owner-claim";
 import { getChatStreamRuntimeGaugeSnapshot } from "./chat-stream";
+import { getCapacityControllerSnapshot, getCapacityPolicy, listCapacityProviderBudgets, updateCapacityPolicy, updateCapacityProviderBudget } from "./capacity-controller";
 
 const settingsSchema = z.object({
   style: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional(),
@@ -33,6 +34,48 @@ const providerControlSchema = z.object({
   disabled: z.boolean(),
   preference: z.enum(["normal", "prefer", "avoid"]),
 });
+
+const positiveCapacityValue = z.number().int().min(1).max(100_000);
+const capacityPolicySchema = z.object({
+  enabled: z.boolean().optional(),
+  globalGenerationWcuLimit: positiveCapacityValue.nullable().optional(),
+  globalSearchWcuLimit: positiveCapacityValue.nullable().optional(),
+  globalGenerationConcurrency: z.number().int().min(1).max(128).nullable().optional(),
+  globalSearchConcurrency: z.number().int().min(1).max(64).nullable().optional(),
+  globalGenerationInflightWcuLimit: positiveCapacityValue.nullable().optional(),
+  perUserGenerationWcuLimit: positiveCapacityValue.optional(),
+  perUserSearchWcuLimit: positiveCapacityValue.optional(),
+  perUserGenerationConcurrency: z.number().int().min(1).max(12).optional(),
+  perUserSearchConcurrency: z.number().int().min(1).max(6).optional(),
+  apexPressureReservePercent: z.number().int().min(0).max(80).optional(),
+  roleWeights: z.object({ fast: z.number().int().min(1).max(32), smart: z.number().int().min(1).max(32), context: z.number().int().min(1).max(32), flagship: z.number().int().min(1).max(32) }).optional(),
+  modifierWeights: z.object({ thinking: z.number().int().min(1).max(32), vision: z.number().int().min(1).max(32), detailed: z.number().int().min(1).max(32), highEffort: z.number().int().min(1).max(32), webResearch: z.number().int().min(1).max(32) }).optional(),
+  queueMaxWaitMs: z.number().int().min(0).max(1_500).optional(),
+  queueMaxDepth: z.number().int().min(0).max(64).optional(),
+  queueEligibleRoles: z.array(z.literal("fast")).max(1).optional(),
+  reservationTtlSeconds: z.number().int().min(30).max(900).optional(),
+  degradationMode: z.enum(["normal", "elevated", "high", "critical", "exhausted"]).optional(),
+}).strict();
+const capacityProviderBudgetSchema = z.object({
+  provider: z.enum(PUBLIC_DASHBOARD_PROVIDERS),
+  modelId: z.string().trim().min(1).max(160).nullable().optional(),
+  enabled: z.boolean().optional(),
+  generationWcuLimit: positiveCapacityValue.nullable().optional(),
+  maxConcurrent: positiveCapacityValue.nullable().optional(),
+  rpmLimit: positiveCapacityValue.nullable().optional(),
+  tpmLimit: positiveCapacityValue.nullable().optional(),
+  dailyUnitsLimit: positiveCapacityValue.nullable().optional(),
+  dailyRequestLimit: positiveCapacityValue.nullable().optional(),
+  dailyTokenLimit: positiveCapacityValue.nullable().optional(),
+  resetWindow: z.string().trim().min(1).max(96).nullable().optional(),
+  cooldownState: z.enum(["unknown", "inherit_provider_health", "cooldown"]).optional(),
+  roleEligibility: z.array(z.enum(["fast", "smart", "context", "flagship"])).max(4).nullable().optional(),
+  searchEligibility: z.enum(["unknown", "eligible", "not_eligible"]).optional(),
+  eligibilityState: z.enum(["unknown", "eligible", "not_eligible", "paid_required"]).optional(),
+  billingState: z.enum(["unknown", "free", "paid", "not_configured"]).optional(),
+  billingSafe: z.boolean().nullable().optional(),
+  quotaState: z.enum(["unknown", "operator_configured"]).optional(),
+}).strict();
 
 function requireOwner(ctx: { user: { id: number; openId: string } }) {
   if (!ENV.ownerOpenId || ctx.user.openId !== ENV.ownerOpenId) {
@@ -258,6 +301,51 @@ export const appRouter = router({
       const control = await upsertProviderControlFlag({ ...input, actorUserId: owner.id });
       await recordTechnicalEvent({ kind: "owner_flag", title: input.disabled ? "Кандидат отключён владельцем" : "Настройка кандидата обновлена", code: `${input.targetType}:${input.targetKey}`, actorUserId: owner.id });
       return control;
+    }),
+    capacitySnapshot: protectedProcedure.query(async ({ ctx }) => {
+      requireOwner(ctx);
+      return getCapacityControllerSnapshot();
+    }),
+    capacityPolicy: protectedProcedure.query(async ({ ctx }) => {
+      requireOwner(ctx);
+      return getCapacityPolicy();
+    }),
+    updateCapacityPolicy: protectedProcedure.input(capacityPolicySchema).mutation(async ({ ctx, input }) => {
+      const owner = requireOwner(ctx);
+      const policy = await updateCapacityPolicy(input);
+      await recordTechnicalEvent({ kind: "owner_flag", title: "Политика controller мощности обновлена", code: "capacity-policy", actorUserId: owner.id });
+      return policy;
+    }),
+    capacityProviderBudgets: protectedProcedure.query(async ({ ctx }) => {
+      requireOwner(ctx);
+      return listCapacityProviderBudgets();
+    }),
+    updateCapacityProviderBudget: protectedProcedure.input(capacityProviderBudgetSchema).mutation(async ({ ctx, input }) => {
+      const owner = requireOwner(ctx);
+      if (input.modelId && !OWNER_CONTROL_TARGETS.models.includes(`${input.provider}:${input.modelId}`)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Недопустимая цель provider/model budget." });
+      }
+      const budget = await updateCapacityProviderBudget({
+        target: { provider: input.provider, modelId: input.modelId ?? null },
+        enabled: input.enabled,
+        generationWcuLimit: input.generationWcuLimit,
+        maxConcurrent: input.maxConcurrent,
+        rpmLimit: input.rpmLimit,
+        tpmLimit: input.tpmLimit,
+        dailyUnitsLimit: input.dailyUnitsLimit,
+        dailyRequestLimit: input.dailyRequestLimit,
+        dailyTokenLimit: input.dailyTokenLimit,
+        resetWindow: input.resetWindow,
+        cooldownState: input.cooldownState,
+        roleEligibility: input.roleEligibility,
+        searchEligibility: input.searchEligibility,
+        eligibilityState: input.eligibilityState,
+        billingState: input.billingState,
+        billingSafe: input.billingSafe,
+        quotaState: input.quotaState,
+      });
+      await recordTechnicalEvent({ kind: "owner_flag", title: "Provider budget controller обновлён", code: input.modelId ? `model:${input.provider}:${input.modelId}` : `provider:${input.provider}`, actorUserId: owner.id });
+      return budget;
     }),
   }),
   settings: router({
@@ -498,8 +586,18 @@ export const appRouter = router({
           const savedUser = await appendChatMessage(ctx.user.id, input.sessionId, "user", input.content, input.modelId, attachmentMetadata);
           if (session.title === "Новый разговор") await updateChatTitle(ctx.user.id, input.sessionId, input.content.slice(0, 72));
           const transcript = await listSessionTranscriptWindow(ctx.user.id, input.sessionId, input.modelId, { throughMessageId: savedUser.id });
-          const storedSettings = await buildChatContext(ctx.user.id, input.sessionId, { attachmentIds: input.attachmentIds, query: input.content, role: input.modelId });
-          const result = await chatWithRole(input.modelId, transcript.messages.map((message) => ({ role: message.role, content: message.content })), { ...storedSettings, ...input.settings });
+          const storedSettings = await buildChatContext(ctx.user.id, input.sessionId, {
+            attachmentIds: input.attachmentIds,
+            query: input.content,
+            role: input.modelId,
+            capacityActor: { userId: ctx.user.id, requestKey: `message:${ctx.user.id}:${savedUser.id}` },
+          });
+          const result = await chatWithRole(
+            input.modelId,
+            transcript.messages.map((message) => ({ role: message.role, content: message.content })),
+            { ...storedSettings, ...input.settings },
+            { userId: ctx.user.id, requestKey: `message:${ctx.user.id}:${savedUser.id}` },
+          );
           const sourceMetadata = result.sources?.length || result.evidence?.length || result.ragSources?.length || result.searchStatus
             ? JSON.stringify({
               ...(result.sources?.length ? { sources: result.sources } : {}),

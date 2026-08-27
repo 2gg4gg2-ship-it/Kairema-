@@ -1,0 +1,1 @@
+ALTER TABLE `capacity_controller_settings` ADD `reservationTtlSeconds` int DEFAULT 180 NOT NULL;
