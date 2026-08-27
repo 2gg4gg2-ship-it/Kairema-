@@ -708,3 +708,10 @@
 - [x] provider-capacity-followup/ACCOUNT-METADATA: completed metadata-only review of safely visible Manus account/project information; unavailable Kairema usage, billing, provider remaining quotas and reset timestamps are explicitly UNKNOWN without requests, billing or secret inspection.
 - [x] provider-capacity-followup/CLOUDFLARE-FEASIBILITY: collected current official Cloudflare Workers AI evidence for independent free-first capacity, usage/billing/auth/commercial boundaries and future routing compatibility; no Cloudflare account, token, API, inference or integration action occurred.
 - [x] provider-capacity-followup/CROSSCHECK-REPORT: created the Russian evidence report with VERIFIED / ACCOUNT-LEVEL VERIFIED / DOCUMENTED / SIMULATED / ILLUSTRATIVE / UNKNOWN separation and narrow decision matrix; deterministic validation and evidence-only checkpoint are next, then stop.
+
+## Account-level Manus/WebDev usage and quota review — 2026-08
+
+- [x] account-usage-review/SCOPE: preserved all Kairema, provider, auth, search and external-blocker invariants; metadata-only review proceeds with no deployment, billing, account, provider or application mutation.
+- [x] account-usage-review/OWNER-METRICS: inspected safely visible owner-level Manus/WebDev metadata. Only the general free-plan label was visible; Kairema-specific usage, applicable limits, reset period, hosting/runtime, database/storage, bandwidth/API, autoscale/replica and throttling fields were not available and are recorded exactly as UNKNOWN/NOT AVAILABLE without probing.
+- [x] account-usage-review/CAPACITY-CROSSCHECK: compared only observed metadata with existing local SSE/per-user/durable protections, pagination, transcript bounds, graceful degradation and provider/search findings; no global capacity claim was made.
+- [x] account-usage-review/DECISION-REPORT: created the Russian concise decision matrix; deterministic evidence/tracker validation and checkpoint are next, then stop without Cloudflare, WCU/controller/cache/scheduler/infrastructure work.
