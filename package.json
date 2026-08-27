@@ -15,6 +15,7 @@
     "benchmark:db-storage": "tsx scripts/db-storage-benchmark.ts",
     "benchmark:history-pagination": "tsx scripts/history-pagination-benchmark.ts",
     "benchmark:transcript-window": "tsx scripts/transcript-window-benchmark.ts",
+    "benchmark:capacity-calibration": "tsx scripts/capacity-calibration.ts",
     "db:push": "drizzle-kit generate && drizzle-kit migrate"
   },
   "dependencies": {

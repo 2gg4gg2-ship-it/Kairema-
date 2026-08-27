@@ -61,6 +61,7 @@ import {
   CapacityAdmissionError,
   beginCapacityGeneration,
   beginCapacitySearch,
+  getCapacityPolicy,
   resetCapacityControllerRuntimeForTests,
   settleCapacityReservation,
   updateCapacityPolicy,
@@ -201,5 +202,48 @@ describe("capacity controller V1", () => {
     const afterRestart = await beginCapacityGeneration({ userId: 301, requestKey: "after-restart" }, "fast", normal);
     beforeRestart.release();
     afterRestart.release();
+  });
+
+  it("normalizes malformed persisted policy values to bounded safe defaults without inventing global quota", async () => {
+    state.settings = {
+      id: 1,
+      enabled: 1,
+      globalGenerationWcuLimit: -1,
+      globalSearchWcuLimit: 0,
+      globalGenerationConcurrency: -2,
+      globalSearchConcurrency: null,
+      globalGenerationInflightWcuLimit: "invalid",
+      perUserGenerationWcuLimit: 0,
+      perUserSearchWcuLimit: -1,
+      perUserGenerationConcurrency: 999,
+      perUserSearchConcurrency: 999,
+      apexPressureReservePercent: 999,
+      roleWeightsJson: "not-json",
+      modifierWeightsJson: "not-json",
+      queueMaxWaitMs: 9_999,
+      queueMaxDepth: 9_999,
+      queueEligibleRolesJson: '["not-a-role"]',
+      reservationTtlSeconds: 9_999,
+      degradationMode: "not-a-mode",
+    };
+    const policy = await getCapacityPolicy();
+    expect(policy).toMatchObject({
+      globalGenerationWcuLimit: null,
+      globalSearchWcuLimit: null,
+      globalGenerationConcurrency: null,
+      globalSearchConcurrency: null,
+      globalGenerationInflightWcuLimit: null,
+      perUserGenerationWcuLimit: 12,
+      perUserSearchWcuLimit: 6,
+      perUserGenerationConcurrency: 2,
+      perUserSearchConcurrency: 1,
+      apexPressureReservePercent: 80,
+      roleWeights: { fast: 1, smart: 2, context: 3, flagship: 4 },
+      queueMaxWaitMs: 1_500,
+      queueMaxDepth: 64,
+      queueEligibleRoles: ["fast"],
+      reservationTtlSeconds: 180,
+      degradationMode: "normal",
+    });
   });
 });

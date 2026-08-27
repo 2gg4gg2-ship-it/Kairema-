@@ -1,0 +1,249 @@
+{
+  "version": "capacity-calibration-v1",
+  "deterministic": true,
+  "network": {
+    "allowed": false,
+    "attempted": 0
+  },
+  "scope": "synthetic only; no user data, database, provider, search, billing, account quota or production runtime calls",
+  "constants": {
+    "windowSeconds": 60,
+    "fairnessGlobalWcuWindow": 120,
+    "perUserGenerationWcu": 12,
+    "perUserGenerationConcurrency": 2,
+    "queueMaxWaitMs": 1500,
+    "queueMaxDepth": 64,
+    "reservationTtlSeconds": 180,
+    "providerSharedDomainWcu": 6,
+    "searchWcuWindow": 1,
+    "localGenerationPerInstance": 12,
+    "localGenerationPerUser": 2
+  },
+  "fairness": {
+    "classification": "synthetic-controller-calibration-not-a-quota",
+    "offered": {
+      "noisyUserRequests": 100,
+      "quietUsersWithOneRequest": 100,
+      "totalLowCostWcu": 200
+    },
+    "configuredCalibrationOnly": {
+      "globalWcu": 120,
+      "perUserWcu": 12
+    },
+    "guardedControllerModel": {
+      "noisyAdmitted": 12,
+      "noisyRejectedByUser": 88,
+      "quietAdmitted": 100,
+      "quietRejected": 0,
+      "usedWcu": 112,
+      "quietCohortProtected": true
+    },
+    "counterfactualWithoutPerUserGuard": {
+      "noisyAdmitted": 100,
+      "quietAdmitted": 20,
+      "quietUsersDeniedByGlobal": 80,
+      "usedWcu": 120
+    }
+  },
+  "lifecycle": {
+    "classification": "synthetic-lifecycle-trace",
+    "firstReservation": {
+      "key": "synthetic-message-1:attempt:1:provider:openrouter",
+      "deduplicated": false,
+      "state": "reserved"
+    },
+    "replay": {
+      "key": "synthetic-message-1:attempt:1:provider:openrouter",
+      "deduplicated": true,
+      "state": "reserved"
+    },
+    "firstFailureReleased": true,
+    "duplicateReleaseChangedState": false,
+    "fallbackReservation": {
+      "key": "synthetic-message-1:attempt:2:provider:groq",
+      "deduplicated": false,
+      "state": "reserved"
+    },
+    "fallbackSettled": true,
+    "distinctAttemptKeys": true,
+    "attemptHistogram": {
+      "1": 1,
+      "2": 1,
+      "3": 0,
+      "4": 0,
+      "overHardMaximum": 0
+    },
+    "finalInflightWcu": 0,
+    "staleReservation": {
+      "ttlSeconds": 180,
+      "releasedExactlyOnce": true,
+      "restartMeaning": "local counters reset on restart; durable reserved rows require TTL cleanup"
+    }
+  },
+  "providerAndSearch": {
+    "classification": "synthetic-scope-isolation-not-provider-quota",
+    "sharedProviderDomain": {
+      "syntheticProviderWindowWcu": 6,
+      "modelA": {
+        "requestedWcu": 4,
+        "admitted": true
+      },
+      "modelB": {
+        "requestedWcu": 4,
+        "admitted": false,
+        "deniedBy": "provider"
+      },
+      "conclusion": "provider-level scope prevents two model identifiers from independently consuming one configured provider budget"
+    },
+    "separateSearchBudget": {
+      "generation": {
+        "admittedWcu": 2,
+        "affectedBySearchExhaustion": false
+      },
+      "search": {
+        "capacityWcu": 1,
+        "firstAdmission": true,
+        "secondAdmission": false
+      },
+      "truthfulFreshnessAction": "search-denied => existing freshness-unavailable/degraded context; generation policy is not used as evidence of fresh data"
+    }
+  },
+  "degradationAndQueue": {
+    "classification": "synthetic-policy-matrix",
+    "degradation": {
+      "normal": {
+        "fast": true,
+        "smart": true,
+        "context": true,
+        "flagship": true
+      },
+      "elevated": {
+        "fast": true,
+        "smart": true,
+        "context": true,
+        "flagship": true
+      },
+      "high": {
+        "fast": true,
+        "smart": true,
+        "context": true,
+        "flagship": false
+      },
+      "critical": {
+        "fast": true,
+        "smart": false,
+        "context": false,
+        "flagship": false
+      },
+      "exhausted": {
+        "fast": false,
+        "smart": false,
+        "context": false,
+        "flagship": false
+      }
+    },
+    "queue": {
+      "disabledDefault": {
+        "waitMs": 0,
+        "depth": 0,
+        "overflowAction": "controlled immediate rejection before upstream"
+      },
+      "configuredFlashOnly": {
+        "eligibleRole": "fast",
+        "maxWaitMs": 1500,
+        "maxDepth": 64,
+        "queuedAtDepth": 64,
+        "nextRequest": "queue_full",
+        "timedOutRequest": "no reservation/no upstream attempt"
+      }
+    }
+  },
+  "multiInstance": {
+    "classification": "synthetic-topology-boundary",
+    "twoIndependentProcesses": {
+      "localPerInstance": 12,
+      "oneActorCanHold": 4,
+      "interpretation": "process-local per-user state alone is not global fairness across replicas"
+    },
+    "durableCounterIllustration": {
+      "configuredGlobalConcurrentLimit": 3,
+      "admittedAcrossTwoProcesses": 3,
+      "fourthAdmission": "durably denied",
+      "interpretation": "durable counters coordinate configured aggregate limits but do not form a distributed queue or a global scheduling guarantee"
+    }
+  },
+  "populationProjections": [
+    {
+      "registeredActors": 10000,
+      "dauRatio": 0.01,
+      "dailyActiveActors": 100,
+      "syntheticBurstActors": 5,
+      "workload": "one logical low-cost admission offer per burst actor",
+      "outcome": "not admitted/rejected because real global provider/account capacity is unknown and no quota is assumed"
+    },
+    {
+      "registeredActors": 10000,
+      "dauRatio": 0.05,
+      "dailyActiveActors": 500,
+      "syntheticBurstActors": 25,
+      "workload": "one logical low-cost admission offer per burst actor",
+      "outcome": "not admitted/rejected because real global provider/account capacity is unknown and no quota is assumed"
+    },
+    {
+      "registeredActors": 10000,
+      "dauRatio": 0.1,
+      "dailyActiveActors": 1000,
+      "syntheticBurstActors": 50,
+      "workload": "one logical low-cost admission offer per burst actor",
+      "outcome": "not admitted/rejected because real global provider/account capacity is unknown and no quota is assumed"
+    },
+    {
+      "registeredActors": 25000,
+      "dauRatio": 0.01,
+      "dailyActiveActors": 250,
+      "syntheticBurstActors": 13,
+      "workload": "one logical low-cost admission offer per burst actor",
+      "outcome": "not admitted/rejected because real global provider/account capacity is unknown and no quota is assumed"
+    },
+    {
+      "registeredActors": 25000,
+      "dauRatio": 0.05,
+      "dailyActiveActors": 1250,
+      "syntheticBurstActors": 63,
+      "workload": "one logical low-cost admission offer per burst actor",
+      "outcome": "not admitted/rejected because real global provider/account capacity is unknown and no quota is assumed"
+    },
+    {
+      "registeredActors": 25000,
+      "dauRatio": 0.1,
+      "dailyActiveActors": 2500,
+      "syntheticBurstActors": 125,
+      "workload": "one logical low-cost admission offer per burst actor",
+      "outcome": "not admitted/rejected because real global provider/account capacity is unknown and no quota is assumed"
+    },
+    {
+      "registeredActors": 50000,
+      "dauRatio": 0.01,
+      "dailyActiveActors": 500,
+      "syntheticBurstActors": 25,
+      "workload": "one logical low-cost admission offer per burst actor",
+      "outcome": "not admitted/rejected because real global provider/account capacity is unknown and no quota is assumed"
+    },
+    {
+      "registeredActors": 50000,
+      "dauRatio": 0.05,
+      "dailyActiveActors": 2500,
+      "syntheticBurstActors": 125,
+      "workload": "one logical low-cost admission offer per burst actor",
+      "outcome": "not admitted/rejected because real global provider/account capacity is unknown and no quota is assumed"
+    },
+    {
+      "registeredActors": 50000,
+      "dauRatio": 0.1,
+      "dailyActiveActors": 5000,
+      "syntheticBurstActors": 250,
+      "workload": "one logical low-cost admission offer per burst actor",
+      "outcome": "not admitted/rejected because real global provider/account capacity is unknown and no quota is assumed"
+    }
+  ]
+}

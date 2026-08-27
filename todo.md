@@ -744,3 +744,12 @@
 - [x] capacity-v1/PROVIDER-ADAPTER-CLOUDFLARE: introduced non-integrating provider adapter/registry hooks and completed a lightweight official Cloudflare non-paid text-model feasibility classification without account, billing, token or inference action.
 - [x] capacity-v1/OWNER-PROVIDER-BUDGET-UI: added a compact owner-only configuration surface for provider/model budget eligibility and documented metadata, with no client-side quota identity or secret exposure; deterministic submission regression passes.
 - [x] capacity-v1/TESTS-VALIDATION-REPORT: added deterministic no-network tests, passed the focused 9-file/107-test suite, `pnpm check` and `git diff --check`, and documented multi-instance limitations and outcomes; checkpoint and delivery remain without production build diagnosis or Stytch delivery work.
+
+## AI Capacity & Fairness Controller V1 — calibration — 2026-08
+
+- [x] capacity-calibration/SCOPE: preserved all V1 architecture, four-role/MAX_ATTEMPTS invariants, provider and search chains, auth, privacy, Magic Link and build blockers while limiting work to metadata and synthetic/no-network controller calibration.
+- [x] capacity-calibration/QUOTA-AND-POLICY-INVENTORY: classified existing runtime budgets and provider metadata as VERIFIED, DOCUMENTED, UNKNOWN or NOT AVAILABLE, including reset behavior and no inventable WCU conversions.
+- [x] capacity-calibration/SYNTHETIC-FAIRNESS: added deterministic multi-user and noisy-user calibration scenarios covering reserved Flash capacity, Think/Context/Apex priority, concurrency, queue, fallback and restart boundaries without users, prompts or upstream calls.
+- [x] capacity-calibration/SAFE-POLICY-LAYERS: retained evidence-backed conservative default policy calibration and transparent owner metadata; unknown quota values remain unset and no hidden paid/external fallback is enabled.
+- [x] capacity-calibration/VALIDATION-REPORT: ran targeted no-network tests, type/diff checks and wrote an evidence report separating measured synthetic behavior from unknown production capacity and multi-instance limits.
+- [x] capacity-calibration/CHECKPOINT-DELIVERY: reviewed tracker, prepared one checkpoint and final report covering validated calibration plus next measurement prerequisites; production build, provider/search probes, billing/account work and Cloudflare integration remain excluded.
