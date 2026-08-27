@@ -168,6 +168,13 @@
 - [x] failure-audit/VALIDATION: complete focused failure/degradation suite, `pnpm check`, `git diff --check`, report heading and closed-tracker checks; do not run production build or real external calls.
 - [x] failure-audit/REPORT: write Russian evidence with COMPONENT, FAILURE SIMULATION, EXPECTED BEHAVIOR, ACTUAL RESULT, FIXED ISSUES, REGRESSION TESTS and UNMEASURED LIMITATIONS, then stop before index work or new features.
 
+- [x] scale-priority/RESOLUTION: user selected the sole next mandatory read-only scope: AI provider/model capacity audit. Production-build SIGTERM diagnosis remains a separate deferred blocker and was not started.
+- [x] provider-capacity/AUDIT-BASELINE: source-level inventory of current production providers, public roles, model mapping, fallback chains, search cascade, SSE local boundary and immutable Kairema invariants.
+- [x] provider-capacity/OFFICIAL-RESEARCH: gathered only official public-source evidence for free-tier quota dimensions, scope, resets, shared quota pools, regional/production limits and billing semantics; no provider/search measurement requests.
+- [x] provider-capacity/POOL-ANALYSIS: distinguished independent providers from model IDs sharing a quota domain; documented CURRENT_POOL, EXPANDED_POOL_A/B and 10K/25K/50K cases with VERIFIED/ILLUSTRATIVE/UNKNOWN labels.
+- [x] provider-capacity/RECOMMENDATION: identified the minimal evidence-based candidate set for a future separate review, without integration, routing change, secret request or new infrastructure.
+- [x] provider-capacity/REPORT: wrote and validated the Russian evidence report, preserving Stytch Magic Link and production-build SIGTERM as separate blockers; evidence-only checkpoint is next.
+
 ## Multi-user foundation — 2026-08
 
 - [x] multiuser/PLATFORM-BLOCKER-REGISTRY: все 24 исторических browser/OAuth/owner/provider/build пункта перенесены в `reports/evidence/platform-blocker-registry-2026-08.md` с причиной, статусом и условием разблокировки. Приёмки не возобновлялись; OAuth/owner mapping не менялись.
