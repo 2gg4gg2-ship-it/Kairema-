@@ -723,3 +723,11 @@
 - [x] provider-account-quota/OFFICIAL-LEDGER: recorded official current quota, scope, reset, billing, 401/403/429, commercial/region and shared-domain evidence separately from account-level observations; absent facts, including Dots Studio quota/billing evidence, remain UNKNOWN/NOT AVAILABLE.
 - [x] provider-account-quota/DOMAIN-CAPACITY: mapped independent quota domains to Flash, Think, Context and Apex fallbacks and documented verified constraints plus explicitly illustrative 10K/25K/50K demand, bottlenecks, cost risks and fairness implications; no global current-capacity claim was made.
 - [x] provider-account-quota/REPORT: created the Russian 16-section evidence report and completed safe focused no-network test, typecheck, diff and heading validation; evidence-only checkpoint is next, then stop without Cloudflare integration, controller/cache/scheduler work, build diagnosis or Magic Link work.
+
+## Final read-only capacity decision audit — 2026-08
+
+- [x] capacity-decision/SCOPE: preserved all completed audit facts, invariants and external blockers; this final assessment uses previously saved evidence only, without provider/network/load/billing/account actions or production changes.
+- [x] capacity-decision/CURRENT-STATE: compiled the requested current-state matrix for runtime, Manus WebDev, SSE, DB/storage, provider/search pools, fallbacks, quotas/counters, build, billing and replica topology with explicit evidence classifications.
+- [x] capacity-decision/OPTIONS: compared A/B/C/A+B architecture paths, selected at most five provider-expansion candidates, and assessed Cloudflare Workers AI separately from Workers hosting using existing official evidence only.
+- [x] capacity-decision/FAIRNESS-ECONOMICS: documented symbolic sustainable-demand equations, controller/search readiness, fairness gaps, build-impact limits and architecture-critical unknowns without implementing a controller or cache.
+- [x] capacity-decision/REPORT: produced the final Russian decision report and completed deterministic focused no-network test, typecheck, diff, exact-heading and tracker validation; evidence-only checkpoint is next, then stop without Cloudflare account/integration, provider expansion, controller/cache/scheduler, build diagnosis, Magic Link or infrastructure work.
