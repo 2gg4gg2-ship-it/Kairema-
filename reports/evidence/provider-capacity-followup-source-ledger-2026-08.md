@@ -1,0 +1,46 @@
+# Follow-up source ledger: Manus topology, resource model and Cloudflare feasibility
+
+**Статус:** рабочая evidence-база для read-only follow-up аудита от 27 августа 2026 года. Ни один источник не является доказательством account-level использования, остатка quota или цены Kairema, пока соответствующие данные не видны через безопасный owner-канал.
+
+## Official Manus sources — extracted findings
+
+| Тема | Официальный URL | Extracted factual finding | Evidence classification |
+|---|---|---|---|
+| Autoscale topology | <https://manus.im/docs/website-builder/publishing> | Autoscale runs on Google Cloud Run; 1 vCPU and 512 MB per instance; documented auto-scaling is 0–5 instances; US is the documented default region; cold starts may occur. | DOCUMENTED platform default; Kairema’s actual active replica count and selected region remain UNKNOWN. |
+| Reserved topology | <https://manus.im/docs/website-builder/publishing> | Reserved is a single persistent process with the same documented 1 vCPU/512 MB spec; it is positioned for persistent connections/background work. | DOCUMENTED platform option; Kairema’s mode is account/project metadata rather than an inference from code. |
+| Persistent components | <https://manus.im/docs/website-builder/cloud-infrastructure> | Manus documents managed backend, integrated persistent database and secure/scalable file storage. | DOCUMENTED platform capability; exact Kairema tier/limits, connection pool and throughput remain UNKNOWN. |
+| Cost semantics | <https://manus.im/docs/website-builder/getting-started/usage-and-pricing> | Official documentation divides WebDev costs into cloud, AI and API consumption and shows free monthly allowances. It says usage can be monitored in the Website usage & billing dashboard. | DOCUMENTED public policy; account-level balance, real-time spend, limits, billing-cycle date and forecasts are deliberately not recorded in evidence. |
+| Account-wide shared credit | <https://manus.im/blog/manus-hosting-web-builder> | The official blog says the complimentary monthly $10 applies to hosting/database cloud usage. | DOCUMENTED public policy; this is not evidence of remaining Kairema credit or a cost estimate. |
+
+## Методологическая граница
+
+Любые account-level выводы в финальном отчёте должны опираться на безопасно видимые read-only owner metadata; при отсутствии такой видимости они остаются **UNKNOWN**. В ходе follow-up аудита не выполняются deployment mutation, billing action, provider/search/LLM API request, inference, quota-consuming измерение или раскрытие секретов. В соответствии с ограничением поддержки Manus evidence не вычисляет расход credits, прогноз стоимости или «цену 1 000 сессий»; такие account/billing вопросы направляются в [Manus Help Center](https://help.manus.im).
+
+## Owner-interface metadata check — 2026-08-27
+
+| Проверка | Наблюдение | Classification | Ограничение |
+|---|---|---|---|
+| Доступ owner web app | В read-only Manus web app отображается authenticated shell и статус account plan **Free plan**. | ACCOUNT-LEVEL VERIFIED | Никакие payment settings, limits, top-up или hosting controls не открывались и не изменялись. |
+| Project/usage dashboard | В доступном owner shell не показаны Kairema-specific cloud/AI/API balance, actual usage, database/storage consumption, active pod count или per-provider usage. | UNKNOWN | Поэтому итог не предполагает нулевой расход, остаток свободной allowance, доступный budget или цену сессии. |
+| Browser access route | Read-only browser connector is enabled, поэтому отсутствие Kairema usage values не объясняется отключённым browser connector. | VERIFIED configuration availability | Это не подтверждает доступ к billing/usage dashboard и не даёт права обходить owner UI. |
+| User-visible plan notice | Shell сообщает, что free usage может иметь daily limit, меняемый в зависимости от demand/system capacity. | ACCOUNT-LEVEL UI NOTICE | Формулировка не указывает численное значение, reset window или влияние на Kairema WebDev hosting. |
+
+## Official Cloudflare Workers AI sources — extracted findings
+
+| Тема | Официальный URL | Extracted factual finding | Evidence classification |
+|---|---|---|---|
+| Независимая free allocation | <https://developers.cloudflare.com/workers-ai/platform/pricing/> | Workers AI documents **10,000 Neurons/day** at no charge for Workers Free and Workers Paid. Limits reset at **00:00 UTC**; operations after a relevant limit is exceeded fail. | DOCUMENTED provider policy; no Cloudflare account, balance or remaining daily allocation was inspected. |
+| Consumption unit | <https://developers.cloudflare.com/workers-ai/platform/pricing/> | Neurons are model/compute-derived; pricing lists distinct input/output neuron coefficients by model. Therefore one chat turn cannot be converted to a stable request count without a bounded model, input/output token budget and measurement. | VERIFIED semantic limitation. |
+| Generation rate limit | <https://developers.cloudflare.com/workers-ai/platform/limits/> | Default text generation limit is documented as **300 RPM**; docs state rate limits are default by task type, with certain model exceptions. | DOCUMENTED default; whether the limit is per account/model/other scope for ordinary text generation is not stated on this page, so quota-domain aggregation is UNKNOWN. |
+| Frontier model eligibility | <https://developers.cloudflare.com/workers-ai/platform/pricing/> | Several named frontier models require a paid billing method; pricing page enumerates them, including DeepSeek V4 Flash/Pro and specified Kimi/GLM models. | VERIFIED exclusion for a zero-unexpected-cost free-first candidate set. |
+| Payment-method condition | <https://developers.cloudflare.com/workers-ai/platform/pricing/> | Official pricing states that **some models require a paid billing method**, while Workers AI is available on Free and Paid Workers plans. | DOCUMENTED condition for the enumerated paid-gated models. The reviewed sources do not establish that a payment method is compulsory merely to use the Workers Free plan or its daily allocation, so that broader assertion remains UNKNOWN. |
+| REST authentication and integration | <https://developers.cloudflare.com/workers-ai/get-started/rest-api/> | REST use requires a Cloudflare account, Account ID and an API token. The quickstart instructs creation/copying of a Workers AI token; manually scoped token needs Workers AI Read and Edit. | DOCUMENTED integration prerequisite; disallowed in this read-only audit. |
+| Cloudflare execution-plane free limits | <https://developers.cloudflare.com/workers/platform/pricing/> | The Workers Free plan documents 100,000 Worker requests/day and 10 ms CPU time per invocation. Workers Paid has a minimum monthly charge. | DOCUMENTED separate execution-plane constraint. Adding a Worker/proxy would be a new external runtime and is out of scope. |
+| Model catalog | <https://developers.cloudflare.com/workers-ai/models/> | The current catalog page lists 85 models across task types and marks model capabilities/statuses individually. The catalog includes text-generation models such as Gemma 4 26B and GPT-OSS 20B, but catalog presence alone is not a quota, plan-eligibility or production-compatibility guarantee. | DOCUMENTED catalog snapshot; exact selected model remains undecided. |
+| Regional availability and latency | <https://developers.cloudflare.com/workers-ai/> | Overview describes inference on Cloudflare's global network; the audited pricing/limits/catalog pages provide no Kairema-specific regional placement, p50/p95 latency or availability/SLA commitment. | Global-network statement DOCUMENTED; region, latency and SLA are UNKNOWN. |
+| Data handling and model licenses | <https://developers.cloudflare.com/workers-ai/platform/data-usage/> | Workers AI inputs/outputs/embeddings are Customer Content; Cloudflare says it does not train models or improve its/third-party services with that content absent explicit consent. Models are Third-Party Services and may carry separate open-source or other license terms. | DOCUMENTED service behavior; model-by-model licence, DPA and Kairema privacy compatibility require a later review. |
+| General applicable terms | <https://www.cloudflare.com/service-specific-terms-application-services/> | Service-specific terms supplement the applicable agreement; the publicly extracted material did not identify an Workers-AI-specific end-user or internal-use prohibition. | INCONCLUSIVE legal evidence: this is not a legal approval for Kairema production use. |
+
+### Cloudflare feasibility boundary
+
+Cloudflare Workers AI is an **independent vendor/quota domain candidate**, not an addition to OpenRouter, Groq, Google or OrcaRouter capacity. However, it cannot be treated as immediate Kairema capacity because Kairema has no reviewed Cloudflare account metadata, no allowed token, no selected free-eligible model, no model-specific per-turn neuron budget, no end-to-end compatibility assessment, no security/DPA/retention review and no approved server-side integration. Public documentation confirms paid-billing requirements for named frontier models; it does not establish that any presently selected Kairema route can operate forever at zero cost. Commercial/end-user legality and individual model license compatibility require a separate terms review.

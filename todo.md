@@ -700,3 +700,11 @@
 - [x] v3/CLIENT-SECURITY-AUDIT: verified that server-side credentials and upstream endpoints do not ship to the browser; the isolated raw-HTML style template has no confirmed user-content exposure.
 - [x] v3/PUBLIC-DELIVERY-RECHECK: completed unauthenticated public delivery verification after the v3 evidence checkpoint; canonical `lkn.manus.space` is recorded as BLOCKED BY PLATFORM DELIVERY and project-domain authenticated acceptance remains NOT VERIFIED BY PLATFORM SESSION.
 - [x] v3/LIVE-SEARCH-RETEST-AFTER-MAINTENANCE: canonical runtime retest completed. `lkn.manus.space` still did not deliver Kairema runtime, so the three requested search queries were deliberately not run; evidence records BLOCKED BY PLATFORM DELIVERY and no code/provider change was made.
+
+## Provider capacity follow-up — topology, account metadata and Cloudflare feasibility — 2026-08
+
+- [x] provider-capacity-followup/SCOPE-BASELINE: preserved the prior evidence-only provider-capacity findings and immutable Kairema invariants; production-build SIGTERM and Stytch Magic Link remain separate untouched blockers.
+- [x] provider-capacity-followup/TOPOLOGY-RESOURCE: inspected only available official/project metadata for published WebDev Autoscale topology, managed runtime/resource semantics, database/storage persistence and the local 12-SSE-stream boundary; no replica count was assumed and no load ran.
+- [x] provider-capacity-followup/ACCOUNT-METADATA: completed metadata-only review of safely visible Manus account/project information; unavailable Kairema usage, billing, provider remaining quotas and reset timestamps are explicitly UNKNOWN without requests, billing or secret inspection.
+- [x] provider-capacity-followup/CLOUDFLARE-FEASIBILITY: collected current official Cloudflare Workers AI evidence for independent free-first capacity, usage/billing/auth/commercial boundaries and future routing compatibility; no Cloudflare account, token, API, inference or integration action occurred.
+- [x] provider-capacity-followup/CROSSCHECK-REPORT: created the Russian evidence report with VERIFIED / ACCOUNT-LEVEL VERIFIED / DOCUMENTED / SIMULATED / ILLUSTRATIVE / UNKNOWN separation and narrow decision matrix; deterministic validation and evidence-only checkpoint are next, then stop.
