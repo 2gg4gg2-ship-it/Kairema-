@@ -804,3 +804,10 @@
 - [x] live-source-success-recheck/SESSION: published Kairema показал application UI без guest login screen; authenticated controlled session была доступна. OAuth/login mutation и user-scoped resources не открывались.
 - [x] live-source-success-recheck/REQUEST: выполнен ровно один нейтральный current-web request. Frontend показал truthful degraded state `Свежие источники сейчас недоступны...`, статус `3/4`; source cards/links не появились. `LIVE SOURCE-SUCCESS = BLOCKED — LIVE SEARCH RETURNED NO VERIFIABLE SOURCES`. Повторных requests не было.
 - [x] live-source-success-recheck/CLOSEOUT: существующий V1 closeout обновлён фактическим live outcome и sanitised evidence; новый audit, runtime change и provider experiment не выполнялись. Final status remains `WEB-GROUNDED V1 READY WITH DOCUMENTED LIMITATIONS`.
+
+## SUPPORT PLATFORM CHECKS — 2026-08
+- [x] support-check/1-CANONICAL-RUNTIME: `https://lkn.manus.space` проверен; maintenance condition reproduced (HTTP 503), Kairema runtime absent, current-vs-old frontend comparison UNVERIFIED.
+- [x] support-check/2-OWNER-OPEN-ID: boolean-only server environment check returned `OWNER_OPEN_ID_PRESENT=YES`; value/identity/claims not disclosed. Published binding remains UNVERIFIED; existing owner-gated probe returned HTTP 403.
+- [x] support-check/3-OAUTH-SESSION: canonical Kairema root loaded and existing authenticated session persisted across root navigation/refresh (`auth.me` HTTP 200, boolean true). New login→callback execution was not initiated and remains UNVERIFIED; Stytch untouched.
+- [x] support-check/4-PROVIDER-HEALTH: existing owner-gated `webSearch.probe` invoked exactly once; returned HTTP 403 authorization error before provider sub-statuses. No provider outage/quota conclusion inferred; no retries.
+- [x] support-check/DELIVERY: unified sanitized support-ready table with `REPRODUCED`, `EXACT ACTION`, `SAFE OBSERVED RESULT`, `HTTP STATUS/ERROR CLASS`, and `CHECK TIME` saved in `reports/evidence/data/support-platform-checks-2026-08-28.md`; no new audit cycle started.
