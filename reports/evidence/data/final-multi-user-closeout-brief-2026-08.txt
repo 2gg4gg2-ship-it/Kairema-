@@ -1,20 +1,20 @@
 KAIREMA — ПРОВЕДИ ОДИН ЗАВЕРШАЮЩИЙ ПРАКТИЧЕСКИЙ ЭТАП ДЛЯ "WEB-GROUNDED MODEL RESPONSES V1", КОТОРЫЙ ДОЛЖЕ
-Н МАКСИМАЛЬНО ЗАКРЫТЬ LIVE END-TO-END ПРОВЕРКУ И НЕ СОЗДАВАТЬ НОВЫЙ ЦИКЛ АУДИТОВ. НЕ ПОВТОРЯЙ �
-�РЕДЫДУЩИЕ READ-ONLY AUDITS. ТЕКУЩИЙ BASELINE СЧИТАТЬ ПОДТВЕРЖДЁННЫМ: WEB-GROUNDED V1 уже опубликован; server
--side freshness intent реализован; search admission проходит через существующий AI Capacity & Fairness Controller V1 на р�
-�альных cascade attempts; privacy-safe bounded cache/dedup реализованы; provenance-only "WEB SOURCES" реализован; structured citation
+Н МАКСИМАЛЬНО ЗАКРЫТЬ LIVE END-TO-END ПРОВЕРКУ И НЕ СОЗДАВАТЬ НОВЫЙ ЦИКЛ АУДИТОВ. НЕ ПОВТОРЯЙ �
+�РЕДЫДУЩИЕ READ-ONLY AUDITS. ТЕКУЩИЙ BASELINE СЧИТАТЬ ПОДТВЕРЖДЁННЫМ: WEB-GROUNDED V1 уже опубликован; server
+-side freshness intent реализован; search admission проходит через существующий AI Capacity & Fairness Controller V1 на р�
+�альных cascade attempts; privacy-safe bounded cache/dedup реализованы; provenance-only "WEB SOURCES" реализован; structured citation
 s/statuses работают для stream, replay и non-stream; aggregate owner telemetry добавлена; 11 focused no-network файлов / 141 тест
  PASS; typecheck и diff-check PASS; один live smoke подтвердил честный degraded state; live source-success остаётся UNVERIFIED. З
-АДАЧА ЭТОГО ЭТАПА — ПОЛУЧИТЬ ПРЯМОЕ END-TO-END ДОКАЗАТЕЛЬСТВО УСПЕШНОГО WEB-GROUNDING НА РЕАЛЬНО�
-� ПУБЛИЧНОМ ЗАПРОСЕ, НЕ РАСХОДУЯ БЕЗ НЕОБХОДИМОСТИ QUOTA И НЕ МЕНЯЯ АРХИТЕКТУРУ. 1. ПЕРЕД LIVE
- TEST: кратко прочитай только существующий V1 implementation и существующий evidence report, чтобы опред�
-�лить конкретный production search path, выбранный search provider для текущего запроса, существующую fresh
+АДАЧА ЭТОГО ЭТАПА — ПОЛУЧИТЬ ПРЯМОЕ END-TO-END ДОКАЗАТЕЛЬСТВО УСПЕШНОГО WEB-GROUNDING НА РЕАЛЬНО�
+� ПУБЛИЧНОМ ЗАПРОСЕ, НЕ РАСХОДУЯ БЕЗ НЕОБХОДИМОСТИ QUOTA И НЕ МЕНЯЯ АРХИТЕКТУРУ. 1. ПЕРЕД LIVE
+ TEST: кратко прочитай только существующий V1 implementation и существующий evidence report, чтобы опред�
+�лить конкретный production search path, выбранный search provider для текущего запроса, существующую fresh
 ness classification, search admission, "WEB SOURCES" assembly, citation DTO, stream/replay/non-stream response path и существующий owner telemetry.
  НЕ ДЕЛАЙ НОВЫЙ ОБЩИЙ АУДИТ. 2. CONTROLLED PUBLIC QUERY: выполни ОДИН максимально безопасный live public q
 uery, который действительно требует свежей информации и при этом не содержит персональны
 х/чувствительных данных. Предпочтительно использовать простой публичный вопрос с одно
-значным актуальным ответом, например запрос о текущей версии публичного ПО или другом �
-�убличном факте, который изменяется со временем. НЕ ИСПОЛЬЗОВАТЬ реальный пользователь
+значным актуальным ответом, например запрос о текущей версии публичного ПО или другом �
+�убличном факте, который изменяется со временем. НЕ ИСПОЛЬЗОВАТЬ реальный пользователь
 ский вопрос, личные данные, приватные документы, private search context или confidential information. НЕ ДЕЛАТ
 Ь массовую серию запросов. 3. END-TO-END TRACE: для этого одного live query проверить всю цепочку: "USER 
 REQUEST → FRESHNESS INTENT → SEARCH ADMISSION → EXISTING SEARCH CASCADE → REAL SEARCH RESULT → SOURCE NORMALIZATION → PROVENANCE-LABELED WEB SOURCES
@@ -24,83 +24,83 @@ ce body. 4. SEARCH REQUIRED CHECK: убедиться, что запрос бы�
 квивалентный строгий режим актуальности. Если система выбрала "SEARCH_PREFERRED", определить, п
 очему, и проверить, соответствует ли это существующей policy. Если классификация ошибочна,
  исправить только классификатор/правило минимальным low-risk способом и добавить regression test.
- 5. SEARCH ADMISSION CHECK: убедиться, что реальный search request прошёл через существующий Capacity Controller и �
-�то никакой search call не обходит user/global/provider budget, concurrency или provider health/cooldown. Проверить, что search
+ 5. SEARCH ADMISSION CHECK: убедиться, что реальный search request прошёл через существующий Capacity Controller и �
+�то никакой search call не обходит user/global/provider budget, concurrency или provider health/cooldown. Проверить, что search
  attempts ограничены текущей policy и не происходят бесконечно. Если есть fallback search attempt, он долж
 ен проходить новую admission check. 6. REAL SOURCE SUCCESS: убедиться, что хотя бы один разрешённый search prov
-ider реально вернул результаты и backend сохранил безопасный source metadata record. Для успеха достат�
-�чно metadata evidence: source count > 0, source URL exists, title/domain available if returned, retrieval timestamp exists if available. НЕ выклады
+ider реально вернул результаты и backend сохранил безопасный source metadata record. Для успеха достат�
+�чно metadata evidence: source count > 0, source URL exists, title/domain available if returned, retrieval timestamp exists if available. НЕ выклады
 вать в отчёт raw URL/token/query, если это не нужно. В user-visible UI разрешено показать реальную source link
 , полученную backend, но не внутренние secrets. 7. MODEL SEES WEB SOURCES: это главный тест. Доказать, что вы
-бранная LLM получает "WEB SOURCES" как отдельный labeled context block, а не просто скрытую ссылку или вн�
-�тренний server state. В системе должно быть чёткое provenance distinction между "WEB", "MEMORY", "CHAT_HISTORY", "SYSTEM". 
+бранная LLM получает "WEB SOURCES" как отдельный labeled context block, а не просто скрытую ссылку или вн�
+�тренний server state. В системе должно быть чёткое provenance distinction между "WEB", "MEMORY", "CHAT_HISTORY", "SYSTEM". 
 Web source content является untrusted DATA, а не инструкциями. Проверить, что модель не воспринимает web 
 page instructions как system/developer instruction. 8. RESPONSE GROUNDING: проверить, что итоговый ответ действительно 
-использует найденную live information. Не достаточно, чтобы search был вызван. Необходимо установ�
-�ть, что user-visible answer соответствует source evidence. Для этого использовать простой факт, который
- можно однозначно сопоставить с live search result. Если ответ модели игнорирует source evidence, не вы�
-�умывать успех: либо исправить context assembly/instruction минимально, либо отметить failure и сделать t
+использует найденную live information. Не достаточно, чтобы search был вызван. Необходимо установ�
+�ть, что user-visible answer соответствует source evidence. Для этого использовать простой факт, который
+ можно однозначно сопоставить с live search result. Если ответ модели игнорирует source evidence, не вы�
+�умывать успех: либо исправить context assembly/instruction минимально, либо отметить failure и сделать t
 argeted fix в рамках этого же этапа. 9. CITATION INTEGRITY: каждая user-visible citation должна соответствовать ba
 ckend source record. Не разрешать модели самостоятельно придумывать URL. Citation metadata должна приходи
 ть из фактического search result. Проверить отсутствие duplicate/broken citation records, invalid URLs, empty source objects 
-и source/model mismatch. 10. FRESHNESS/DATES: если source provider возвращает published/updated timestamp, показать его только �
-�сли реально доступен; не придумывать дату. Проверить, что current data не смешивается с memory/his
-tory как будто memory является актуальным web evidence. 11. CONFLICT CHECK: при наличии нескольких источни�
-�ов с конфликтующими данными проверить, что система не выбирает первый результат слепо.
+и source/model mismatch. 10. FRESHNESS/DATES: если source provider возвращает published/updated timestamp, показать его только �
+�сли реально доступен; не придумывать дату. Проверить, что current data не смешивается с memory/his
+tory как будто memory является актуальным web evidence. 11. CONFLICT CHECK: при наличии нескольких источни�
+�ов с конфликтующими данными проверить, что система не выбирает первый результат слепо.
  Для controlled test можно использовать запрос, где источники согласны, а отдельно deterministic fixtures
  проверяют conflict behavior. Не тратить реальные search quota на конфликтный live test без необходимости
 . 12. SEARCH FAILURE PATH: использовать уже существующий deterministic no-network harness для проверки failure modes: all 
-providers unavailable, 401/403, 429, 5xx, timeout, malformed result, empty result. Не делать дополнительные live provider requests рад�
-� этого. Убедиться, что "SEARCH_REQUIRED + no source" не создаёт fabricated current answer; "SEARCH_PREFERRED + no source" может 
+providers unavailable, 401/403, 429, 5xx, timeout, malformed result, empty result. Не делать дополнительные live provider requests рад�
+� этого. Убедиться, что "SEARCH_REQUIRED + no source" не создаёт fabricated current answer; "SEARCH_PREFERRED + no source" может 
 деградировать честно; "NO_SEARCH" не делает лишний search call. 13. PROMPT INJECTION: deterministic fixture должен сод
 ержать malicious web text с fake system instructions, “ignore previous instructions”, fake URLs and HTML/Markdown injection. Убедиться, чт
 о model context treats it as untrusted source data. Не отправлять malicious content в реальный provider, если этого можно и
-збежать; использовать local fixtures. 14. CACHE/DEDUP LIVE CHECK: если уже реализованный bounded public cache/dedup по�
-�воляет безопасно проверить без существенного quota use, выполнить один дополнительный contro
+збежать; использовать local fixtures. 14. CACHE/DEDUP LIVE CHECK: если уже реализованный bounded public cache/dedup по�
+�воляет безопасно проверить без существенного quota use, выполнить один дополнительный contro
 lled repeated public query только если это действительно нужно для доказательства cache hit/dedup. Не дела
 ть массовые requests. Проверить metadata: first call miss, second identical call hit/dedup, no cross-user/private data. Если такой c
 heck невозможно сделать без лишней provider quota, оставить deterministic evidence и не запускать повторны
 й live call. 15. SEARCH BUDGET: проверить, что search usage отражается отдельно от LLM usage в owner telemetry и что exhau
 sted search budget produces correct safe state. Использовать no-network fixtures для exhaustion. 16. FOUR ROLE MATRIX: не делать четы
-ре отдельных live provider calls без необходимости. Использовать один live controlled source-success для осно�
-�ной end-to-end proof, а для остальных Flash/Think/Context/Apex — deterministic/no-network validation того же "WEB SOURCES" contract. Е
+ре отдельных live provider calls без необходимости. Использовать один live controlled source-success для осно�
+�ной end-to-end proof, а для остальных Flash/Think/Context/Apex — deterministic/no-network validation того же "WEB SOURCES" contract. Е
 сли одна дополнительная live role validation может быть выполнена безопасно и незначительно рас
-ходует quota, допустим максимум один дополнительный smoke, но только если он реально нужен д�
-�я доказательства role compatibility. Не расходовать quota ради галочки. 17. STREAM/REPLAY/NON-STREAM: убедиться
+ходует quota, допустим максимум один дополнительный smoke, но только если он реально нужен д�
+�я доказательства role compatibility. Не расходовать quota ради галочки. 17. STREAM/REPLAY/NON-STREAM: убедиться
 , что source metadata/status не теряется в stream path, replay path или non-stream path. Использовать existing fixtures/replay harn
 ess. Если live stream уже подтверждает source metadata, остальные paths можно подтверждать deterministic evidence. 
 18. FRONTEND ACCEPTANCE: на опубликованном Kairema проверить, что user-visible response явно показывает, что web gr
 ounding был выполнен, и показывает реальные source cards/links/status. Не раскрывать provider secrets, internal reques
 t IDs, hidden prompts или private telemetry. При no-search ответе web source UI не должен появляться ложно. При degraded s
-earch UI должен честно показывать unavailable/skipped status. 19. USER CONTROL: НЕ добавлять user-facing switch автомат�
-�чески только потому, что он был предложен ранее. Сначала проверить, нужен ли он с точки �
-�рения текущей V1 behavior. Если без switch текущая UX достаточно однозначна и capacity policy работает, 
-оставить UI без лишней настройки. Если отсутствие switch является реальным UX ambiguity, реализо�
-�ать минимальный "Web Search: Auto / On request / Off" только если это низкорисковое изменение и не лома
-ет role/router semantics. В этом случае добавить tests и сохранить server-side policy. 20. CAPACITY CONTROLLER INTEGRATION: по�
-�твердить, что search calls не могут обойти capacity controller. Проверить reservation/admission semantics для search and fa
+earch UI должен честно показывать unavailable/skipped status. 19. USER CONTROL: НЕ добавлять user-facing switch автомат�
+�чески только потому, что он был предложен ранее. Сначала проверить, нужен ли он с точки �
+�рения текущей V1 behavior. Если без switch текущая UX достаточно однозначна и capacity policy работает, 
+оставить UI без лишней настройки. Если отсутствие switch является реальным UX ambiguity, реализо�
+�ать минимальный "Web Search: Auto / On request / Off" только если это низкорисковое изменение и не лома
+ет role/router semantics. В этом случае добавить tests и сохранить server-side policy. 20. CAPACITY CONTROLLER INTEGRATION: по�
+�твердить, что search calls не могут обойти capacity controller. Проверить reservation/admission semantics для search and fa
 llback. Не изменять WCU values только ради test result. 21. PRIVACY: public cache must never receive user-specific memory/chat context; cach
 e key must be safe; no private query or source body written to owner telemetry. If a query cannot be confidently classified as public, bypass shared cache. 22. 
 COST SAFETY: никакого автоматического paid search/LLM, никакого billing activation, quota bypass, новых provider accounts/ke
-ys, массового live testing. Если current provider quota is unknown, keep live proof minimal. 23. SMALL TARGETED FIXES: если live test обна�
-�ужит реальную bug, исправить её в рамках этого же этапа только минимальным additive change, доба
-вить focused regression test и повторить ТОЛЬКО тот controlled check, который нужен для подтверждения фик�
-�а. Не начинать новый audit. 24. DO NOT LOOP: запрещается после обнаруженной проблемы создавать н�
-�вый “audit of audit”. Если проблема не может быть исправлена без новой внешней зависимости, �
-�тметить "BLOCKED/EXTERNAL LIMITATION" и продолжить остальные проверки. 25. BUILD: production build SIGTERM/resource blocker 
-остаётся отдельным external/platform item. Не менять application architecture ради build. 26. STYTCH: Magic Link external blocker �
-�е трогать. 27. SEARCH PROVIDERS: не добавлять новых providers и не менять cascade в рамках V1 closeout, если тол
+ys, массового live testing. Если current provider quota is unknown, keep live proof minimal. 23. SMALL TARGETED FIXES: если live test обна�
+�ужит реальную bug, исправить её в рамках этого же этапа только минимальным additive change, доба
+вить focused regression test и повторить ТОЛЬКО тот controlled check, который нужен для подтверждения фик�
+�а. Не начинать новый audit. 24. DO NOT LOOP: запрещается после обнаруженной проблемы создавать н�
+�вый “audit of audit”. Если проблема не может быть исправлена без новой внешней зависимости, �
+�тметить "BLOCKED/EXTERNAL LIMITATION" и продолжить остальные проверки. 25. BUILD: production build SIGTERM/resource blocker 
+остаётся отдельным external/platform item. Не менять application architecture ради build. 26. STYTCH: Magic Link external blocker �
+�е трогать. 27. SEARCH PROVIDERS: не добавлять новых providers и не менять cascade в рамках V1 closeout, если тол
 ько live evidence не докажет конкретный blocking defect. 28. VALIDATION: после любых fixes выполнить focused web-ground
 ing/citation/provenance/security tests, existing capacity integration tests, "pnpm check" и "git diff --check". Не запускать broad provider-heavy su
-ite. 29. FINAL CLOSEOUT CRITERIA: WEB-GROUNDED V1 считается функционально закрытым, если есть хотя бы один ре�
-�льный controlled source-success end-to-end proof и deterministic evidence для failure, provenance, citation, injection, cache/dedup, budget, all four 
-role compatibility и frontend states. Не требуется десятки live requests. 30. FINAL REPORT: опубликовать ОДИН финальн�
-�й report без нового research cycle с разделами: "LIVE SOURCE-SUCCESS", "END-TO-END TRACE", "SEARCH INTENT", "SEARCH ADMISSION", "REAL SOURC
+ite. 29. FINAL CLOSEOUT CRITERIA: WEB-GROUNDED V1 считается функционально закрытым, если есть хотя бы один ре�
+�льный controlled source-success end-to-end proof и deterministic evidence для failure, provenance, citation, injection, cache/dedup, budget, all four 
+role compatibility и frontend states. Не требуется десятки live requests. 30. FINAL REPORT: опубликовать ОДИН финальн�
+�й report без нового research cycle с разделами: "LIVE SOURCE-SUCCESS", "END-TO-END TRACE", "SEARCH INTENT", "SEARCH ADMISSION", "REAL SOURC
 ES", "MODEL WEB CONTEXT", "GROUNDING CORRECTNESS", "CITATION INTEGRITY", "FRESHNESS", "PROMPT INJECTION", "CACHE/DEDUP", "SEARCH BUDGET", "FOUR ROLES", "STREAM/
 REPLAY/NON-STREAM", "FRONTEND", "CAPACITY CONTROLLER", "PRIVACY", "COST SAFETY", "FIXES MADE", "TEST RESULTS", "BLOCKED/UNVERIFIED", "FINAL WEB-GROUNDED V1 STAT
-US". Для каждого использовать только "PASS", "FAIL", "FIXED", "BLOCKED", "UNVERIFIED". В конце выбрать один ста�
-�ус: "WEB-GROUNDED V1 READY", "WEB-GROUNDED V1 READY WITH DOCUMENTED LIMITATIONS", или "WEB-GROUNDED V1 NOT READY — SPECIFIC FIX REQUIRED". Если вы
+US". Для каждого использовать только "PASS", "FAIL", "FIXED", "BLOCKED", "UNVERIFIED". В конце выбрать один ста�
+�ус: "WEB-GROUNDED V1 READY", "WEB-GROUNDED V1 READY WITH DOCUMENTED LIMITATIONS", или "WEB-GROUNDED V1 NOT READY — SPECIFIC FIX REQUIRED". Если вы
 бран "READY" или "READY WITH DOCUMENTED LIMITATIONS", НЕ создавать новый Web Search audit автоматически. Следующий 
-этап должен быть уже targeted quality improvement или отдельная продуктовая функция, а не повторный �
-�рхитектурный audit. КЛЮЧЕВОЕ ПРАВИЛО: ЭТОТ ЭТАП ДОЛЖЕН ЗАКОНЧИТЬСЯ ФАКТИЧЕСКИМ РЕЗУЛЬТА�
-�ОМ LIVE SOURCE-SUCCESS И ФИНАЛЬНЫМ VERDICT, А НЕ НОВЫМ СПИСКОМ ВОЗМОЖНЫХ АУДИТОВ.
+этап должен быть уже targeted quality improvement или отдельная продуктовая функция, а не повторный �
+�рхитектурный audit. КЛЮЧЕВОЕ ПРАВИЛО: ЭТОТ ЭТАП ДОЛЖЕН ЗАКОНЧИТЬСЯ ФАКТИЧЕСКИМ РЕЗУЛЬТА�
+�ОМ LIVE SOURCE-SUCCESS И ФИНАЛЬНЫМ VERDICT, А НЕ НОВЫМ СПИСКОМ ВОЗМОЖНЫХ АУДИТОВ.
