@@ -813,13 +813,13 @@
 - [x] support-check/DELIVERY: unified sanitized support-ready table with `REPRODUCED`, `EXACT ACTION`, `SAFE OBSERVED RESULT`, `HTTP STATUS/ERROR CLASS`, and `CHECK TIME` saved in `reports/evidence/data/support-platform-checks-2026-08-28.md`; no new audit cycle started.
 
 ## WEB-GROUNDED V1 APPLICATION CONTRACT CLOSEOUT — 2026-08
-- [ ] web-grounded-app-closeout/BASELINE: подтвердить текущий request → freshness intent → search admission → result → provenance → bounded model context → response → structured status/citations pipeline только по existing code/evidence.
-- [ ] web-grounded-app-closeout/DETERMINISTIC: сверить existing 141 focused no-network tests для search states, admission, fallback/error classes, provenance, timestamps/conflicts, prompt injection, cache/dedup privacy, stream/replay/non-stream, four roles, controller, isolation и safe errors.
-- [ ] web-grounded-app-closeout/FRONTEND: сверить existing UI contract для grounded/unavailable/skipped/no-search states; не добавлять Auto/On/Off switch без доказанной ambiguity и не исправлять недоказанные defects.
-- [ ] web-grounded-app-closeout/LIVE: не выполнять real search request при подтверждённых lkn HTTP 503 и owner-gated health HTTP 403; статус `BLOCKED BY CURRENT PLATFORM INCIDENT`.
-- [ ] web-grounded-app-closeout/REPORT: подготовить один report с exact 15 headings и final status `WEB-GROUNDED V1 READY WITH DOCUMENTED PLATFORM LIMITATIONS`, отделив platform blockers от application PASS.
-- [ ] web-grounded-app-closeout/VALIDATION: после report выполнить только focused web-grounding/security/provenance/citation tests, `pnpm check`, `git diff --check`, tracker/report gates; broad suites и production build исключить.
-- [ ] web-grounded-app-closeout/CHECKPOINT: сохранить ровно один checkpoint после закрытия всех текущих tracker items.
+- [x] web-grounded-app-closeout/BASELINE: already covered by published V1 contract/evidence and checkpoint `72b9ca53`; no new application audit performed in this sync task.
+- [x] web-grounded-app-closeout/DETERMINISTIC: existing published evidence records 11 focused files/141 tests PASS for the listed no-network coverage; no broad rerun or provider traffic performed.
+- [x] web-grounded-app-closeout/FRONTEND: existing V1 UI contract/evidence covers grounded/unavailable states; no switch, UI behavior or unproven defect was changed.
+- [x] web-grounded-app-closeout/LIVE: retained `BLOCKED BY CURRENT PLATFORM INCIDENT`; no additional real search request was sent after lkn HTTP 503 and owner-gated health HTTP 403 evidence.
+- [x] web-grounded-app-closeout/REPORT: prior published V1/source-success closeout reports and sanitized live recheck separate application evidence from platform limitations; no new audit report was created for this GitHub sync task.
+- [x] web-grounded-app-closeout/VALIDATION: prior published V1 validation records focused no-network PASS, `pnpm check`, `git diff --check` and report/tracker gates; this sync task made no runtime code change and ran no broad suite or production build.
+- [x] web-grounded-app-closeout/CHECKPOINT: existing source-success checkpoint `1282d329` and subsequent support snapshot `3b3db657` preserve the bounded closeout; no new application checkpoint was needed before this separate pre-push analysis.
 
 ## SAFE GITHUB SYNC PRE-PUSH ANALYSIS — 2026-08
 - [x] github-sync/BOUNDARY: текущий `/home/ubuntu/kairema` используется как source of truth; production, database/user data, architecture, runtime и existing features не менялись.
