@@ -79,7 +79,7 @@ type ChainAttempt = { provider: Provider; modelId: string; status: "ready" | "sk
 /** Exactly four public roles. All upstream model IDs remain server-only. */
 export const MODEL_ROLES: readonly ModelConfig[] = [
   { key: "fast", modelId: "fast", label: "Kairema Flash", role: "Мгновенные ответы на повседневные вопросы.", chain: [
-    { provider: "openrouter", modelId: "openai/gpt-oss-20b:free", displayName: "GPT-OSS 20B" },
+    { provider: "openrouter", modelId: "minimax/minimax-m3:free", displayName: "MiniMax M3" },
     { provider: "orcarouter", modelId: "deepseek/deepseek-v4-flash-free", displayName: "DeepSeek V4 Flash" },
     { provider: "groq", modelId: "openai/gpt-oss-20b", displayName: "GPT-OSS 20B" },
     { provider: "google", modelId: "gemini-flash-lite-latest", displayName: "Gemini Flash Lite", vision: true, requiresWebResearch: true },
@@ -99,7 +99,7 @@ export const MODEL_ROLES: readonly ModelConfig[] = [
   ] },
   { key: "flagship", modelId: "flagship", label: "Kairema Apex", role: "Сложнейшие задачи, переводы и максимальная мощность.", chain: [
     { provider: "openrouter", modelId: "google/gemma-4-31b-it:free", displayName: "Gemma 4 31B" },
-    { provider: "orcarouter", modelId: "deepseek/deepseek-v4-pro-free", displayName: "DeepSeek V4 Pro" },
+    { provider: "orcarouter", modelId: "orcarouter/free", displayName: "OrcaRouter Free" },
     { provider: "google", modelId: "gemini-flash-lite-latest", displayName: "Gemini Flash Lite", vision: true, requiresWebResearch: true },
     { provider: "groq", modelId: "openai/gpt-oss-120b", displayName: "GPT-OSS 120B" },
   ] },
