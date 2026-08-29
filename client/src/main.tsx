@@ -6,7 +6,6 @@ import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
 import { startLogin } from "./const";
-import { runtimeAuthHeaders } from "./lib/runtime-auth";
 import "./index.css";
 
 const queryClient = new QueryClient();
@@ -44,11 +43,7 @@ const trpcClient = trpc.createClient({
       url: "/api/trpc",
       transformer: superjson,
       headers() {
-        // Preview auto-login fallback: when the browser blocks iframe cookies
-        // (Safari ITP / private browsing / WebView), the runtime mirrors the
-        // session into sessionStorage so we can forward it as a Bearer token.
-        // The regular OAuth cookie flow keeps working and takes priority server-side.
-        return runtimeAuthHeaders();
+        return {};
       },
       fetch(input, init) {
         return globalThis.fetch(input, {

@@ -8,7 +8,6 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { useTheme } from "@/contexts/ThemeContext";
 import { startLogin } from "@/const";
 import { memorySearchMatches } from "@/lib/memory-search";
-import { runtimeAuthHeaders } from "@/lib/runtime-auth";
 import { consumeChatStream } from "@/lib/chat-stream";
 import { trpc } from "@/lib/trpc";
 import { Archive, Bot, CircleCheck, CircleDot, Clock3, Copy, FileImage, Gauge, Globe2, Languages, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Moon, PanelLeftClose, PanelLeftOpen, Search, Settings2, SlidersHorizontal, Sparkles, Sun, Trash2, TriangleAlert, X } from "lucide-react";
@@ -147,7 +146,6 @@ async function uploadFileBytes(sessionId: string, file: File, mimeType: string):
       "X-Attachment-Session-Id": sessionId,
       "X-Attachment-File-Name": encodeURIComponent(file.name),
       "X-Attachment-Content-Type": mimeType,
-      ...runtimeAuthHeaders(),
     },
     body: file,
   });
@@ -320,7 +318,7 @@ export default function Home() {
     const controller = new AbortController();
     streamAbortRef.current = controller;
     try {
-      const response = await fetch("/api/chat/stream", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...runtimeAuthHeaders() }, signal: controller.signal, body: JSON.stringify({ sessionId, modelId: selectedId, content, settings: { style: settings.responseStyle, responseLength: settings.responseLength, effort: settings.effort, thinking: Boolean(settings.thinking), toolAccess: toolAccessEnabled }, attachmentIds: options?.attachmentIds, clientMessageId: options?.clientMessageId }) });
+      const response = await fetch("/api/chat/stream", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "text/event-stream" }, signal: controller.signal, body: JSON.stringify({ sessionId, modelId: selectedId, content, settings: { style: settings.responseStyle, responseLength: settings.responseLength, effort: settings.effort, thinking: Boolean(settings.thinking), toolAccess: toolAccessEnabled }, attachmentIds: options?.attachmentIds, clientMessageId: options?.clientMessageId }) });
       if (!response.ok || !response.body) throw new Error(await streamStartErrorMessage(response, language === "ru" ? "Не удалось начать потоковый ответ." : "Could not start the stream."));
       await consumeChatStream(response, { onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)), onDone: (data) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: typeof data.content === "string" ? data.content : message.content, model: typeof data.modelUsed === "string" ? data.modelUsed : message.model, providerLabel: typeof data.label === "string" ? data.label : message.providerLabel, status: language === "ru" ? "полный ответ" : "complete", searchStatus: safeSearchStatus(data.searchStatus), sources: safeSourceEvidence(data.sources), webGrounding: safeWebGrounding(data.webGrounding) } : message)) });
       await Promise.all([utils.chats.historyPage.invalidate({ sessionId, limit: 60 }), utils.chats.list.invalidate(), utils.attachments.list.invalidate({ sessionId }), utils.models.list.invalidate(), utils.knowledge.status.invalidate()]);
