@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import pdf from "pdf-parse/lib/pdf-parse.js";
 import { createChatAttachment, getOwnedChatAttachment } from "./db";
-import { storageGetSignedUrl, storagePut } from "./storage";
+import { storageGetSignedUrl, storagePut } from "./storage-s3";
 
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_EXTRACTED_TEXT = 30_000;

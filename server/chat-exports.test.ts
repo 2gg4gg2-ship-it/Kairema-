@@ -13,7 +13,7 @@ const storage = vi.hoisted(() => ({
 }));
 
 vi.mock("./db", () => exportDb);
-vi.mock("./storage", () => storage);
+vi.mock("./storage-s3", () => storage);
 
 import { createPersistentChatExport, getOwnedChatExportDownload } from "./chat-exports";
 

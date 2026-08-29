@@ -2,7 +2,7 @@ import { exportFileStem, type ChatExportInput } from "@shared/chat-export";
 import { jsPDF } from "jspdf";
 import type { PreparedChatExport } from "./chat-export";
 
-const PDF_FONT_URL = "/manus-storage/kairema-export-dejavu_a34427d0.ttf";
+const PDF_FONT_URL = "/api/storage/kairema-export-dejavu_a34427d0.ttf";
 
 function binaryFromArrayBuffer(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer);

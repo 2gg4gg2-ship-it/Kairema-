@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { jsPDF } from "jspdf";
 import { buildChatMarkdown, exportFileStem, type ChatExportInput } from "@shared/chat-export";
 import { createChatExport, getOwnedChatExport, getOwnedChatSession, listSessionMessages, type ChatExportFormat } from "./db";
-import { storageGetSignedUrl, storagePut } from "./storage";
+import { storageGetSignedUrl, storagePut } from "./storage-s3";
 
 const PDF_FONT_KEY = "kairema-export-dejavu_a34427d0.ttf";
 const EXPORTABLE_ROLES = new Set(["user", "assistant"]);
