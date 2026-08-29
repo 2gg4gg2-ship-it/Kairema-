@@ -828,3 +828,11 @@
 - [x] github-sync/SECRETS: `.gitignore`, sensitive filenames and likely literal patterns scanned without printing values. No likely secret literal pattern was found in scanned tracked application files; provider secret test files and historical diagnostics/reports remain review exclusions before any push.
 - [x] github-sync/PUSH-PLAN: conditional plan prepared with local `main` proposal, target-default-branch verification gate, preservation of target history, non-force push, reviewed file list and sensitive exclusions. Push remains blocked until access/repository identity is resolved and user explicitly confirms.
 - [x] github-sync/REPORT: detailed sanitized report saved at `reports/evidence/github-sync-pre-push-plan-2026-08-29.md`; it covers Manus findings, GitHub 404/access blocker, proposed branch policy, exclusions and conditional Bolt-import readiness. No push performed.
+
+## GITHUB SYNC FINAL PASS — 2026-08
+- [ ] github-final/ACCESS: через уже подключённую GitHub integration/CLI подтвердить account owner и exact target repository; не угадывать URL и не создавать новый repo.
+- [ ] github-final/TARGET: read-only проверить visibility, default branch, refs, commits, tree и safe-empty/template-only state; неизвестное содержимое блокирует overwrite.
+- [ ] github-final/MANIFEST: повторить secret-safety scan и зафиксировать exact included/excluded manifest; исключить secrets, env values, user data, dumps, caches, node_modules, build artifacts и temporary files.
+- [ ] github-final/PUSH: при однозначном target выполнить ровно один обычный non-force push из verified Manus checkout HEAD 3b3db657; иначе документировать blocker без push.
+- [ ] github-final/POSTCHECK: если push выполнен, read-only проверить owner/repo/default branch/commit/tree/no-secret state и Bolt-import readiness; если нет, сохранить точную причину отказа.
+- [ ] github-final/REPORT: выдать финальный отчёт по 12 обязательным пунктам и остановиться; не менять Manus production/runtime и не запускать Bolt.
