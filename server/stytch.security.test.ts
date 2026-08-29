@@ -45,13 +45,14 @@ describe("Stytch server-auth security boundaries", () => {
     expect(clears).toEqual([expect.objectContaining({ name: STYTCH_LINK_INTENT_COOKIE, options: expect.objectContaining({ maxAge: -1 }) })]);
   });
 
-  it("preserves Manus OAuth precedence and uses only remote-verified Stytch fallback", async () => {
+  it("preserves Stytch primary auth with Manus OAuth fallback", async () => {
     const source = await readFile(resolve(process.cwd(), "server/_core/context.ts"), "utf8");
-    const manusCall = source.indexOf("sdk.authenticateRequest(opts.req)");
     const stytchCall = source.indexOf("authenticateStytchRequest(opts.req)");
+    const manusCall = source.indexOf("sdk.authenticateRequest(opts.req)");
 
+    expect(stytchCall).toBeGreaterThan(-1);
     expect(manusCall).toBeGreaterThan(-1);
-    expect(stytchCall).toBeGreaterThan(manusCall);
+    expect(stytchCall).toBeLessThan(manusCall);
     expect(source).toContain("providerSubject: stytch.user.user_id");
     expect(source).not.toContain("req.body.userId");
     expect(source).not.toContain("req.headers['x-user-id']");

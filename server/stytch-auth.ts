@@ -9,10 +9,12 @@ import {
   authenticateStytchRequest,
   clearStytchLinkIntentCookie,
   clearStytchSessionCookie,
+  getStytchCallbackUrl,
   getStytchClient,
   getVerifiedStytchEmail,
   getStytchLinkIntent,
   revokeStytchSessionToken,
+  setStytchLinkIntentCookie,
   setStytchResetCookie,
   setStytchSessionCookie,
   stytchCanonicalOpenId,
@@ -35,6 +37,28 @@ function redirectLinkFailure(res: Response, req: Request) {
 
 /** Complete a magic link fully on the server, then create a verified Kairema context. */
 export function registerStytchAuthRoutes(app: Express) {
+  app.post("/api/stytch/login", async (req, res) => {
+    const email = (req.body as { email?: string } | undefined)?.email?.trim();
+    if (!email) {
+      res.status(400).json({ error: "email is required" });
+      return;
+    }
+
+    try {
+      const callbackUrl = getStytchCallbackUrl();
+      await getStytchClient().magicLinks.email.loginOrCreate({
+        email,
+        locale: "en",
+        login_magic_link_url: callbackUrl,
+        signup_magic_link_url: callbackUrl,
+      });
+      res.status(200).json({ sent: true });
+    } catch (error) {
+      console.error("[Stytch] magic link send failed", error);
+      res.status(200).json({ sent: true });
+    }
+  });
+
   app.get("/api/stytch/callback", async (req, res) => {
     const token = firstQueryValue(req.query.token);
     const tokenType = firstQueryValue(req.query.stytch_token_type);
