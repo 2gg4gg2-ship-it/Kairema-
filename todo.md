@@ -811,3 +811,20 @@
 - [x] support-check/3-OAUTH-SESSION: canonical Kairema root loaded and existing authenticated session persisted across root navigation/refresh (`auth.me` HTTP 200, boolean true). New login→callback execution was not initiated and remains UNVERIFIED; Stytch untouched.
 - [x] support-check/4-PROVIDER-HEALTH: existing owner-gated `webSearch.probe` invoked exactly once; returned HTTP 403 authorization error before provider sub-statuses. No provider outage/quota conclusion inferred; no retries.
 - [x] support-check/DELIVERY: unified sanitized support-ready table with `REPRODUCED`, `EXACT ACTION`, `SAFE OBSERVED RESULT`, `HTTP STATUS/ERROR CLASS`, and `CHECK TIME` saved in `reports/evidence/data/support-platform-checks-2026-08-28.md`; no new audit cycle started.
+
+## WEB-GROUNDED V1 APPLICATION CONTRACT CLOSEOUT — 2026-08
+- [ ] web-grounded-app-closeout/BASELINE: подтвердить текущий request → freshness intent → search admission → result → provenance → bounded model context → response → structured status/citations pipeline только по existing code/evidence.
+- [ ] web-grounded-app-closeout/DETERMINISTIC: сверить existing 141 focused no-network tests для search states, admission, fallback/error classes, provenance, timestamps/conflicts, prompt injection, cache/dedup privacy, stream/replay/non-stream, four roles, controller, isolation и safe errors.
+- [ ] web-grounded-app-closeout/FRONTEND: сверить existing UI contract для grounded/unavailable/skipped/no-search states; не добавлять Auto/On/Off switch без доказанной ambiguity и не исправлять недоказанные defects.
+- [ ] web-grounded-app-closeout/LIVE: не выполнять real search request при подтверждённых lkn HTTP 503 и owner-gated health HTTP 403; статус `BLOCKED BY CURRENT PLATFORM INCIDENT`.
+- [ ] web-grounded-app-closeout/REPORT: подготовить один report с exact 15 headings и final status `WEB-GROUNDED V1 READY WITH DOCUMENTED PLATFORM LIMITATIONS`, отделив platform blockers от application PASS.
+- [ ] web-grounded-app-closeout/VALIDATION: после report выполнить только focused web-grounding/security/provenance/citation tests, `pnpm check`, `git diff --check`, tracker/report gates; broad suites и production build исключить.
+- [ ] web-grounded-app-closeout/CHECKPOINT: сохранить ровно один checkpoint после закрытия всех текущих tracker items.
+
+## SAFE GITHUB SYNC PRE-PUSH ANALYSIS — 2026-08
+- [x] github-sync/BOUNDARY: текущий `/home/ubuntu/kairema` используется как source of truth; production, database/user data, architecture, runtime и existing features не менялись.
+- [x] github-sync/GITHUB-STATE: read-only UI/API/transport checks completed. Target returned GitHub 404 and unauthenticated git transport; existence, visibility, default branch, tree, commits and empty/non-empty state remain UNVERIFIED. No push/clone/login/mutation.
+- [x] github-sync/MANUS-STATE: read-only inventory completed: local branch `main`, HEAD `3b3db657`, 431 tracked files; client/server/reports/drizzle/scripts/shared and requested feature/test areas are present; only current-task `todo.md` was initially modified.
+- [x] github-sync/SECRETS: `.gitignore`, sensitive filenames and likely literal patterns scanned without printing values. No likely secret literal pattern was found in scanned tracked application files; provider secret test files and historical diagnostics/reports remain review exclusions before any push.
+- [x] github-sync/PUSH-PLAN: conditional plan prepared with local `main` proposal, target-default-branch verification gate, preservation of target history, non-force push, reviewed file list and sensitive exclusions. Push remains blocked until access/repository identity is resolved and user explicitly confirms.
+- [x] github-sync/REPORT: detailed sanitized report saved at `reports/evidence/github-sync-pre-push-plan-2026-08-29.md`; it covers Manus findings, GitHub 404/access blocker, proposed branch policy, exclusions and conditional Bolt-import readiness. No push performed.
