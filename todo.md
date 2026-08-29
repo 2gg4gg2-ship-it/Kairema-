@@ -830,9 +830,9 @@
 - [x] github-sync/REPORT: detailed sanitized report saved at `reports/evidence/github-sync-pre-push-plan-2026-08-29.md`; it covers Manus findings, GitHub 404/access blocker, proposed branch policy, exclusions and conditional Bolt-import readiness. No push performed.
 
 ## GITHUB SYNC FINAL PASS — 2026-08
-- [ ] github-final/ACCESS: через уже подключённую GitHub integration/CLI подтвердить account owner и exact target repository; не угадывать URL и не создавать новый repo.
-- [ ] github-final/TARGET: read-only проверить visibility, default branch, refs, commits, tree и safe-empty/template-only state; неизвестное содержимое блокирует overwrite.
-- [ ] github-final/MANIFEST: повторить secret-safety scan и зафиксировать exact included/excluded manifest; исключить secrets, env values, user data, dumps, caches, node_modules, build artifacts и temporary files.
-- [ ] github-final/PUSH: при однозначном target выполнить ровно один обычный non-force push из verified Manus checkout HEAD 3b3db657; иначе документировать blocker без push.
-- [ ] github-final/POSTCHECK: если push выполнен, read-only проверить owner/repo/default branch/commit/tree/no-secret state и Bolt-import readiness; если нет, сохранить точную причину отказа.
-- [ ] github-final/REPORT: выдать финальный отчёт по 12 обязательным пунктам и остановиться; не менять Manus production/runtime и не запускать Bolt.
+- [x] github-final/ACCESS: через уже подключённую GitHub integration/CLI подтвердить account owner и exact target repository; не угадывать URL и не создавать новый repo.
+- [x] github-final/TARGET: read-only проверить visibility, default branch, refs, commits, tree и safe-empty/template-only state; неизвестное содержимое блокирует overwrite.
+- [x] github-final/MANIFEST: повторить secret-safety scan и зафиксировать exact included/excluded manifest; исключить secrets, env values, user data, dumps, caches, node_modules, build artifacts и temporary files.
+- [x] github-final/PUSH: при однозначном target выполнить ровно один обычный non-force push из verified Manus checkout HEAD 3b3db657; иначе документировать blocker без push.
+- [x] github-final/POSTCHECK: если push выполнен, read-only проверить owner/repo/default branch/commit/tree/no-secret state и Bolt-import readiness; если нет, сохранить точную причину отказа.
+- [x] github-final/REPORT: выдать финальный отчёт по 12 обязательным пунктам и остановиться; не менять Manus production/runtime и не запускать Bolt.
