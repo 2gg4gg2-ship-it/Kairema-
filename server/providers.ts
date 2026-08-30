@@ -7,7 +7,7 @@ export const MODEL_IDS = ROLE_IDS;
 export type RoleId = (typeof ROLE_IDS)[number];
 export type ModelId = RoleId;
 export type ModelKey = RoleId;
-export type Provider = "openrouter" | "orcarouter" | "zenmux" | "dots" | "google" | "groq" | "sambanova" | "mistral" | "cerebras" | "deepseek";
+export type Provider = "openrouter" | "orcarouter" | "zenmux" | "dots" | "google" | "groq" | "sambanova" | "mistral" | "cerebras" | "deepseek" | "tokenharbor";
 export type StatusCategory = "AUTH" | "QUOTA" | "RATE_LIMIT" | "PROVIDER_UNAVAILABLE" | "ENDPOINT" | "MODEL" | "NETWORK" | "TIMEOUT" | "PARSE" | "CONFIG" | "UNKNOWN";
 export type ModelStatus = { state: "ready" | "fallback" | "loading" | "error" | "unavailable" | "not_configured"; badge: string; category: StatusCategory | null; http: number | null; checkedAt: string; confirmed: string };
 export type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -79,10 +79,10 @@ type ChainAttempt = { provider: Provider; modelId: string; status: "ready" | "sk
 /** Exactly four public roles. All upstream model IDs remain server-only. */
 export const MODEL_ROLES: readonly ModelConfig[] = [
   { key: "fast", modelId: "fast", label: "Kairema Flash", role: "Мгновенные ответы на повседневные вопросы.", chain: [
-    { provider: "openrouter", modelId: "minimax/minimax-m3:free", displayName: "MiniMax M3" },
-    { provider: "orcarouter", modelId: "deepseek/deepseek-v4-flash-free", displayName: "DeepSeek V4 Flash" },
-    { provider: "groq", modelId: "openai/gpt-oss-20b", displayName: "GPT-OSS 20B" },
     { provider: "google", modelId: "gemini-flash-lite-latest", displayName: "Gemini Flash Lite", vision: true, requiresWebResearch: true },
+    { provider: "groq", modelId: "openai/gpt-oss-20b", displayName: "GPT-OSS 20B" },
+    { provider: "tokenharbor", modelId: "deepseek-v4-flash:free", displayName: "DeepSeek V4 Flash" },
+    { provider: "openrouter", modelId: "minimax/minimax-m3:free", displayName: "MiniMax M3" },
   ] },
   { key: "smart", modelId: "smart", label: "Kairema Think", role: "Математика, логика и последовательные рассуждения.", chain: [
     { provider: "openrouter", modelId: "google/gemma-4-26b-a4b-it:free", displayName: "Gemma 4 26B" },
@@ -148,8 +148,9 @@ const ENDPOINTS: Record<Provider, string> = {
   mistral: "https://api.mistral.ai/v1/chat/completions",
   cerebras: "https://api.cerebras.ai/v1/chat/completions",
   deepseek: "https://api.deepseek.com/chat/completions",
+  tokenharbor: "https://tokenharbor.ai/v1/chat/completions",
 };
-const PROVIDERS: readonly Provider[] = ["openrouter", "orcarouter", "zenmux", "dots", "google", "groq", "sambanova", "mistral", "cerebras", "deepseek"];
+const PROVIDERS: readonly Provider[] = ["openrouter", "orcarouter", "zenmux", "dots", "google", "groq", "sambanova", "mistral", "cerebras", "deepseek", "tokenharbor"];
 /** Hard cap on real upstream requests. Health or capability skips never consume this budget. */
 export const MAX_ATTEMPTS = 4;
 /** One allowance is created for each chat generation and is spent only on a real upstream LLM call. */
@@ -229,6 +230,8 @@ function secretFor(provider: Provider) {
             ? "MISTRAL_API_KEY"
             : provider === "cerebras"
               ? "CEREBRAS_API_KEY"
+              : provider === "tokenharbor"
+                ? "TOKENHARBOR_API_KEY"
               : "DEEPSEEK_API_KEY";
   return process.env[envName]?.trim();
 }
@@ -412,6 +415,7 @@ function probeCandidate(provider: Provider): Candidate {
   if (provider === "sambanova") return { provider, modelId: "Meta-Llama-3.3-70B-Instruct", displayName: "health probe" };
   if (provider === "mistral") return { provider, modelId: "codestral-2508", displayName: "health probe" };
   if (provider === "deepseek") return { provider, modelId: "deepseek-chat", displayName: "health probe" };
+  if (provider === "tokenharbor") return { provider, modelId: "deepseek-v4-flash:free", displayName: "health probe" };
   return { provider, modelId: "gpt-oss-120b", displayName: "health probe" };
 }
 
@@ -577,7 +581,7 @@ function statusForRole(role: ModelConfig) {
 }
 
 function providerLabel(provider: Provider | null) {
-  return provider === "openrouter" ? "OpenRouter" : provider === "orcarouter" ? "OrcaRouter" : provider === "zenmux" ? "ZenMux" : provider === "dots" ? "Dots Studio" : provider === "google" ? "Google AI Studio" : provider === "groq" ? "Groq" : provider === "sambanova" ? "SambaNova" : provider === "mistral" ? "Mistral" : provider === "cerebras" ? "Cerebras" : provider === "deepseek" ? "DeepSeek" : null;
+  return provider === "openrouter" ? "OpenRouter" : provider === "orcarouter" ? "OrcaRouter" : provider === "zenmux" ? "ZenMux" : provider === "dots" ? "Dots Studio" : provider === "google" ? "Google AI Studio" : provider === "groq" ? "Groq" : provider === "sambanova" ? "SambaNova" : provider === "mistral" ? "Mistral" : provider === "cerebras" ? "Cerebras" : provider === "deepseek" ? "DeepSeek" : provider === "tokenharbor" ? "Token Harbor" : null;
 }
 
 export function toRoleRuntimeView(state: RoleRuntimeView["state"], provider: string | null, modelUsed: string | null, checkedAt: Date): RoleRuntimeView {

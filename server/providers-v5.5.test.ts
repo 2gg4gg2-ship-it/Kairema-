@@ -9,13 +9,15 @@ describe("v5.5 server-side role safety", () => {
     expect(MODEL_ROLES.find((role) => role.key === "context")?.chain[4]?.provider).toBe("dots");
   });
 
-  it("uses Google candidates only behind web-research policy and keeps OrcaRouter in server-side chains", () => {
+  it("uses Google candidates only behind web-research policy and keeps OrcaRouter in non-Flash server-side chains", () => {
     for (const role of MODEL_ROLES) {
       const googleCandidate = role.chain.find((candidate) => candidate.provider === "google");
       expect(googleCandidate?.requiresWebResearch).toBe(true);
       expect(googleCandidate?.vision).toBe(true);
       expect(googleCandidate?.modelId).toBe("gemini-flash-lite-latest");
-      expect(role.chain.some((candidate) => candidate.provider === "orcarouter")).toBe(true);
+      if (role.key !== "fast") {
+        expect(role.chain.some((candidate) => candidate.provider === "orcarouter")).toBe(true);
+      }
       expect(role.chain.some((candidate) => candidate.provider === "sambanova" || candidate.provider === "cerebras")).toBe(false);
     }
   });
