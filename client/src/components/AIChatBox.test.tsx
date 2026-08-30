@@ -390,4 +390,18 @@ describe("AIChatBox user flows", () => {
     expect(screen.getByText(/полный ответ/)).toBeTruthy();
     expect(screen.queryByText("печатает")).toBeNull();
   });
+
+  it("clears the composer once after send even if the stream later fails", async () => {
+    const user = userEvent.setup();
+    const onSendMessage = vi.fn().mockResolvedValue(false);
+    const { container } = render(<AIChatBox messages={[]} onSendMessage={onSendMessage} emptyStateMessage="Kairema" />);
+    const textarea = container.querySelector("textarea");
+    if (!textarea) throw new Error("Composer is missing");
+
+    await user.type(textarea, "Ошибка стрима");
+    await user.keyboard("{Enter}");
+
+    expect((textarea as HTMLTextAreaElement).value).toBe("");
+    expect(onSendMessage).toHaveBeenCalledWith("Ошибка стрима", expect.any(Object));
+  });
 });

@@ -236,11 +236,13 @@ export function AIChatBox({
     event?.preventDefault();
     const value = currentInput.trim();
     if (!value || isLoading || isUploading || pendingLocalAttachments.length > 0) return;
-    const sent = await onSendMessage(value, { attachmentIds: attachments.map((attachment) => attachment.id), attachments, clientMessageId: crypto.randomUUID() });
-    if (sent === false) return;
-    setComposerInput("");
-    setAttachments([]);
-    textareaRef.current?.focus();
+    try {
+      await onSendMessage(value, { attachmentIds: attachments.map((attachment) => attachment.id), attachments, clientMessageId: crypto.randomUUID() });
+    } finally {
+      setComposerInput("");
+      setAttachments([]);
+      textareaRef.current?.focus();
+    }
   };
 
   const uploadPendingLocalAttachments = async (localItems: PendingLocalAttachment[]) => {

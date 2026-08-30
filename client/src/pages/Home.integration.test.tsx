@@ -493,8 +493,8 @@ describe("Home integration flows", () => {
     await waitFor(() => expect(screen.getByText(/Не удалось начать потоковый ответ|Service Unavailable/)).toBeTruthy());
     expect(screen.getAllByRole("button", { name: "Открыть предпросмотр: vision.png" }).length).toBeGreaterThanOrEqual(1);
     await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 }));
-    expect((screen.getByPlaceholderText("Напишите сообщение…") as HTMLTextAreaElement).value).toBe("Проверь вложение");
-    expect(fixtures.clearDraft).not.toHaveBeenCalled();
+    expect((screen.getByPlaceholderText("Напишите сообщение…") as HTMLTextAreaElement).value).toBe("");
+    await waitFor(() => expect(fixtures.clearDraft).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
   });
 
   it("keeps a sent-image preview while persisted message hydration leads the attachment query", async () => {
@@ -555,8 +555,8 @@ describe("Home integration flows", () => {
 
     await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Отменить генерацию" })).toBeNull());
-    expect((composer as HTMLTextAreaElement).value).toBe("Отменяемый запрос");
-    expect(fixtures.clearDraft).not.toHaveBeenCalled();
+    expect((composer as HTMLTextAreaElement).value).toBe("");
+    await waitFor(() => expect(fixtures.clearDraft).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
   });
 
   it("updates a setting's active state immediately while its server save is still pending", async () => {

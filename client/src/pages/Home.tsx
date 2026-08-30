@@ -314,6 +314,8 @@ export default function Home() {
     const selectedId = modelId;
     const assistantId = `stream-${Date.now()}`;
     const label = selectedModel.label[language];
+    persistedDraftRef.current = `${sessionId}\u0000`;
+    void draftClearMutation.mutateAsync({ sessionId }).catch(() => undefined);
     if (options?.attachments?.length) setSentAttachmentFallbacks((current) => [...current.filter((attachment) => !options.attachments!.some((item) => item.id === attachment.id)), ...options.attachments!]);
     setOptimisticMessages([{ id: `user-${Date.now()}`, role: "user", content, attachments: options?.attachments }, { id: assistantId, role: "assistant", content: "", providerLabel: label, model: selectedId, status: language === "ru" ? "печатает" : "typing" }]);
     setIsStreaming(true);
@@ -331,7 +333,7 @@ export default function Home() {
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") { setOptimisticMessages([]); await Promise.all([utils.chats.historyPage.invalidate({ sessionId, limit: 60 }), utils.attachments.list.invalidate({ sessionId })]); return false; }
       const errorMessage = error instanceof Error ? error.message : "Stream error";
-      setOptimisticMessages((items) => [...items.filter((item) => item.id !== assistantId), { id: `stream-error-${Date.now()}`, role: "assistant", content: errorMessage, providerLabel: "Kairema", model: selectedId, status: language === "ru" ? "ошибка" : "error", isError: true }]);
+      setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content ? `${message.content}\n\n[${language === "ru" ? "Ошибка" : "Error"}: ${errorMessage}]` : errorMessage, status: language === "ru" ? "ошибка" : "error", isError: true } : message));
       await Promise.all([utils.chats.historyPage.invalidate({ sessionId, limit: 60 }), utils.attachments.list.invalidate({ sessionId })]);
       return false;
     } finally { streamAbortRef.current = null; setIsStreaming(false); }
