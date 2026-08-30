@@ -1,1 +1,2 @@
-ALTER TABLE `user_settings` ADD `exportSortBy` enum('createdAt','byteSize') DEFAULT 'createdAt' NOT NULL;
+-- Historical no-op: `exportSortBy` is already added in `0016_clumsy_freak.sql`.
+-- Kept to preserve Drizzle migration journal continuity.
