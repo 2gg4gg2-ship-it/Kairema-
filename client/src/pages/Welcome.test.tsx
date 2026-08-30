@@ -90,6 +90,50 @@ describe("Welcome", () => {
     await user.click(screen.getByRole("button", { name: "Закрыть" }));
     expect(screen.queryByLabelText("Условия использования")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Политику конфиденциальности" }));
-    expect(screen.getByLabelText("Политика конфиденциальности")).not.toBeNull();
+    expect(screen.getByLabelText("Политику конфиденциальности")).not.toBeNull();
+  });
+
+  it("shows login diagnostic state starting with LOGIN_NOT_STARTED", async () => {
+    const user = userEvent.setup();
+    render(<Welcome />);
+    await user.click(screen.getByRole("button", { name: "Войти по email и паролю" }));
+    expect(screen.getByText(/Staging diagnostic: LOGIN_NOT_STARTED/i)).not.toBeNull();
+  });
+
+  it("shows LOGIN_STARTED and then LOGIN_ERROR_HTTP_401 on failed login", async () => {
+    const user = userEvent.setup();
+    fixtures.login.mockReset().mockRejectedValueOnce({ data: { httpStatus: 401 } });
+    render(<Welcome />);
+    await user.click(screen.getByRole("button", { name: "Войти по email и паролю" }));
+    await user.type(screen.getByLabelText("Email"), "member@example.test");
+    await user.type(screen.getByLabelText("Пароль"), "secure passphrase");
+    await user.click(screen.getByRole("button", { name: "Войти" }));
+    await waitFor(() => expect(screen.getByText(/Staging diagnostic: LOGIN_ERROR_HTTP_401/i)).not.toBeNull());
+  });
+
+  it("shows LOGIN_SUCCESS on successful login", async () => {
+    const user = userEvent.setup();
+    fixtures.login.mockReset().mockResolvedValueOnce({ state: "SIGNED_IN" });
+    render(<Welcome />);
+    await user.click(screen.getByRole("button", { name: "Войти по email и паролю" }));
+    await user.type(screen.getByLabelText("Email"), "member@example.test");
+    await user.type(screen.getByLabelText("Пароль"), "secure passphrase");
+    await user.click(screen.getByRole("button", { name: "Войти" }));
+    await waitFor(() => expect(screen.getByText(/Staging diagnostic: LOGIN_SUCCESS/i)).not.toBeNull());
+  });
+
+  it("disables the submit button while login is pending", async () => {
+    const user = userEvent.setup();
+    let resolveLogin: (value: { state: string }) => void;
+    fixtures.login.mockReset().mockReturnValue(new Promise((resolve) => { resolveLogin = resolve; }));
+    render(<Welcome />);
+    await user.click(screen.getByRole("button", { name: "Войти по email и паролю" }));
+    await user.type(screen.getByLabelText("Email"), "member@example.test");
+    await user.type(screen.getByLabelText("Пароль"), "secure passphrase");
+    await user.click(screen.getByRole("button", { name: "Войти" }));
+    const loginButton = screen.getByRole("button", { name: "Войти" });
+    expect(loginButton.hasAttribute("disabled")).toBe(true);
+    resolveLogin({ state: "VERIFICATION_REQUIRED" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Войти" }).hasAttribute("disabled")).toBe(false));
   });
 });
