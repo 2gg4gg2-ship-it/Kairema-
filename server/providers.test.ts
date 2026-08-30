@@ -104,10 +104,12 @@ describe("Kairema v4 role registry", () => {
     vi.stubEnv("ORCAROUTER_API_KEY", "");
     vi.stubEnv("GROQ_API_KEY", "test-groq-key");
     vi.stubEnv("GEMINI_API_KEY", "test-google-key");
+    vi.stubEnv("TOKENHARBOR_API_KEY", "");
     const fetchSpy = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "quota exhausted" } }), { status: 429 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "controlled error" } }), { status: 400 }))
       .mockResolvedValueOnce(success("Резерв fast"))
-      .mockResolvedValueOnce(success("Резерв context"));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "quota exhausted" } }), { status: 429 }))
+      .mockResolvedValueOnce(success("Ответ context"));
 
     const fast = await chatWithRole("fast", [{ role: "user", content: "Первый" }]);
     const context = await chatWithRole("context", [{ role: "user", content: "Второй" }]);
@@ -115,8 +117,11 @@ describe("Kairema v4 role registry", () => {
 
     expect(fast).toMatchObject({ provider: "groq", fallbackUsed: true });
     expect(context).toMatchObject({ provider: "google", fallbackUsed: true });
-    expect(fetchSpy).toHaveBeenCalledTimes(3);
-    expect(String(fetchSpy.mock.calls[2]?.[0])).toContain("generativelanguage.googleapis.com");
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("generativelanguage.googleapis.com");
+    expect(String(fetchSpy.mock.calls[1]?.[0])).toContain("api.groq.com");
+    expect(String(fetchSpy.mock.calls[2]?.[0])).toContain("openrouter.ai");
+    expect(String(fetchSpy.mock.calls[3]?.[0])).toContain("generativelanguage.googleapis.com");
     expect(health.find((item) => item.provider === "openrouter")).toMatchObject({ state: "unavailable", category: "QUOTA" });
   });
 
@@ -129,7 +134,8 @@ describe("Kairema v4 role registry", () => {
     vi.stubEnv("OPENROUTER_API_KEY", "");
     vi.stubEnv("ORCAROUTER_API_KEY", "");
     vi.stubEnv("GROQ_API_KEY", "");
-    vi.stubEnv("GEMINI_API_KEY", "test-google-key");
+    vi.stubEnv("GEMINI_API_KEY", "");
+    vi.stubEnv("TOKENHARBOR_API_KEY", "");
     const fetchSpy = vi.spyOn(globalThis, "fetch");
 
     await expect(chatWithRole("fast", [{ role: "user", content: "Проверка fail-safe control" }])).rejects.toMatchObject({
@@ -140,27 +146,30 @@ describe("Kairema v4 role registry", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("globally skips OrcaRouter after its 429 and continues each later role with another provider", async () => {
+  it("globally skips OpenRouter after its 429 and continues each later role with another provider", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
-    vi.stubEnv("ORCAROUTER_API_KEY", "test-orcarouter-key");
+    vi.stubEnv("ORCAROUTER_API_KEY", "");
     vi.stubEnv("GROQ_API_KEY", "test-groq-key");
     vi.stubEnv("GEMINI_API_KEY", "test-google-key");
+    vi.stubEnv("TOKENHARBOR_API_KEY", "");
     const fetchSpy = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "unsupported model" } }), { status: 400 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429, headers: { "retry-after": "60" } }))
       .mockResolvedValueOnce(success("Резерв fast"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "quota exhausted" } }), { status: 429 }))
       .mockResolvedValueOnce(success("Ответ context"));
 
     const fast = await chatWithRole("fast", [{ role: "user", content: "Первый" }]);
     const context = await chatWithRole("context", [{ role: "user", content: "Второй" }]);
-    const orcaCalls = fetchSpy.mock.calls.filter(([url]) => String(url).includes("api.orcarouter.ai"));
     const health = await getProviderHealthForTesting();
 
     expect(fast).toMatchObject({ provider: "groq", fallbackUsed: true });
-    expect(context).toMatchObject({ provider: "openrouter", fallbackUsed: false });
-    expect(orcaCalls).toHaveLength(1);
+    expect(context).toMatchObject({ provider: "google", fallbackUsed: true });
     expect(fetchSpy).toHaveBeenCalledTimes(4);
-    expect(health.find((item) => item.provider === "orcarouter")).toMatchObject({ state: "cooldown", category: "RATE_LIMIT" });
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("generativelanguage.googleapis.com");
+    expect(String(fetchSpy.mock.calls[1]?.[0])).toContain("api.groq.com");
+    expect(String(fetchSpy.mock.calls[2]?.[0])).toContain("openrouter.ai");
+    expect(String(fetchSpy.mock.calls[3]?.[0])).toContain("generativelanguage.googleapis.com");
+    expect(health.find((item) => item.provider === "openrouter")).toMatchObject({ state: "unavailable", category: "QUOTA" });
   });
 
   it("keeps inaccessible ZenMux in server-only health checks while Dots uses a separate key", async () => {
@@ -334,7 +343,7 @@ describe("Kairema v4 role registry", () => {
     const view = toPublicModelView(MODEL_CONFIG[0]!, { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" });
     expect(Object.keys(view).sort()).toEqual(["key", "label", "limits", "modelId", "role", "runtime", "status"]);
     expect(view.runtime).toBeNull();
-    expect(view.limits).toMatchObject({ candidate: "primary", quota: "ready", provider: "OpenRouter" });
+    expect(view.limits).toMatchObject({ candidate: "primary", quota: "ready", provider: "Google AI Studio" });
     expect(JSON.stringify(view)).not.toMatch(/chain|modelId.*openai|OPENROUTER_API_KEY|Authorization|Bearer/i);
   });
 
@@ -392,7 +401,7 @@ describe("Kairema v4 role registry", () => {
 
     const result = await chatWithRoleStream("fast", [{ role: "user", content: "Тест" }], undefined, (delta) => deltas.push(delta));
 
-    expect(result).toMatchObject({ provider: "orcarouter", fallbackUsed: true, content: "Начало и продолжение" });
+    expect(result).toMatchObject({ provider: "groq", fallbackUsed: true, content: "Начало и продолжение" });
     expect(deltas.join("")).toBe("Начало и продолжение");
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(fetchSpy.mock.calls[1]?.[1]?.body)).toContain("Начало");
@@ -439,9 +448,9 @@ describe("Kairema v4 role registry", () => {
     const result = await pending;
     const health = await getProviderHealthForTesting();
 
-    expect(result).toMatchObject({ provider: "orcarouter", fallbackUsed: true, content: "Резервный ответ" });
+    expect(result).toMatchObject({ provider: "groq", fallbackUsed: true, content: "Резервный ответ" });
     expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(health.find((item) => item.provider === "openrouter")).toMatchObject({ state: "cooldown", category: "TIMEOUT" });
+    expect(health.find((item) => item.provider === "google")).toMatchObject({ state: "cooldown", category: "TIMEOUT" });
     vi.useRealTimers();
   });
 
@@ -470,7 +479,7 @@ describe("Kairema v4 role registry", () => {
     await vi.advanceTimersByTimeAsync(FLASH_VISIBLE_TTFT_DEADLINE_MS + 100);
     const result = await pending;
 
-    expect(result).toMatchObject({ provider: "google", fallbackUsed: true, content: "Изображение получено" });
+    expect(result).toMatchObject({ provider: "google", fallbackUsed: false, content: "Изображение получено" });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
