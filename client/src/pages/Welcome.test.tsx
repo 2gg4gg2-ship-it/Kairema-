@@ -86,21 +86,28 @@ describe("Welcome", () => {
     const user = userEvent.setup();
     render(<Welcome />);
     await user.click(screen.getByRole("button", { name: "Условия использования" }));
-    expect(screen.getByLabelText("Условия использования")).not.toBeNull();
+    expect(screen.getByRole("region", { name: "Условия использования" })).not.toBeNull();
     await user.click(screen.getByRole("button", { name: "Закрыть" }));
-    expect(screen.queryByLabelText("Условия использования")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Условия использования" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Политику конфиденциальности" }));
-    expect(screen.getByLabelText("Политику конфиденциальности")).not.toBeNull();
+    expect(screen.getByRole("region", { name: "Политика конфиденциальности" })).not.toBeNull();
   });
 
-  it("shows login diagnostic state starting with LOGIN_NOT_STARTED", async () => {
+  it("shows login button loading state while login is in flight", async () => {
     const user = userEvent.setup();
+    let resolveLogin: (value: { state: string }) => void = () => {};
+    fixtures.login.mockReset().mockReturnValue(new Promise((resolve) => { resolveLogin = resolve; }));
     render(<Welcome />);
     await user.click(screen.getByRole("button", { name: "Войти по email и паролю" }));
-    expect(screen.getByText(/Staging diagnostic: LOGIN_NOT_STARTED/i)).not.toBeNull();
+    await user.type(screen.getByLabelText("Email"), "member@example.test");
+    await user.type(screen.getByLabelText("Пароль"), "secure passphrase");
+    await user.click(screen.getByRole("button", { name: "Войти" }));
+    expect(screen.getByRole("button", { name: "Вход..." })).not.toBeNull();
+    resolveLogin({ state: "VERIFICATION_REQUIRED" });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Подтвердите email" })).not.toBeNull());
   });
 
-  it("shows LOGIN_STARTED and then LOGIN_ERROR_HTTP_401 on failed login", async () => {
+  it("shows 401 notice when login fails with unauthorized", async () => {
     const user = userEvent.setup();
     fixtures.login.mockReset().mockRejectedValueOnce({ data: { httpStatus: 401 } });
     render(<Welcome />);
@@ -108,10 +115,32 @@ describe("Welcome", () => {
     await user.type(screen.getByLabelText("Email"), "member@example.test");
     await user.type(screen.getByLabelText("Пароль"), "secure passphrase");
     await user.click(screen.getByRole("button", { name: "Войти" }));
-    await waitFor(() => expect(screen.getByText(/Staging diagnostic: LOGIN_ERROR_HTTP_401/i)).not.toBeNull());
+    await waitFor(() => expect(screen.getByText(/Неверный email или пароль \(staging diagnostic: HTTP 401\)/i)).not.toBeNull());
   });
 
-  it("shows LOGIN_SUCCESS on successful login", async () => {
+  it("shows 500 notice when login fails with server error", async () => {
+    const user = userEvent.setup();
+    fixtures.login.mockReset().mockRejectedValueOnce({ data: { httpStatus: 500 } });
+    render(<Welcome />);
+    await user.click(screen.getByRole("button", { name: "Войти по email и паролю" }));
+    await user.type(screen.getByLabelText("Email"), "member@example.test");
+    await user.type(screen.getByLabelText("Пароль"), "secure passphrase");
+    await user.click(screen.getByRole("button", { name: "Войти" }));
+    await waitFor(() => expect(screen.getByText(/Ошибка сервера \(staging diagnostic: HTTP 500\)/i)).not.toBeNull());
+  });
+
+  it("shows client error notice when login fails without httpStatus", async () => {
+    const user = userEvent.setup();
+    fixtures.login.mockReset().mockRejectedValueOnce({});
+    render(<Welcome />);
+    await user.click(screen.getByRole("button", { name: "Войти по email и паролю" }));
+    await user.type(screen.getByLabelText("Email"), "member@example.test");
+    await user.type(screen.getByLabelText("Пароль"), "secure passphrase");
+    await user.click(screen.getByRole("button", { name: "Войти" }));
+    await waitFor(() => expect(screen.getByText(/Сеть или клиент временно недоступны/i)).not.toBeNull());
+  });
+
+  it("clears loading state on successful SIGNED_IN login without showing an error", async () => {
     const user = userEvent.setup();
     fixtures.login.mockReset().mockResolvedValueOnce({ state: "SIGNED_IN" });
     render(<Welcome />);
@@ -119,21 +148,20 @@ describe("Welcome", () => {
     await user.type(screen.getByLabelText("Email"), "member@example.test");
     await user.type(screen.getByLabelText("Пароль"), "secure passphrase");
     await user.click(screen.getByRole("button", { name: "Войти" }));
-    await waitFor(() => expect(screen.getByText(/Staging diagnostic: LOGIN_SUCCESS/i)).not.toBeNull());
+    await waitFor(() => expect(fixtures.login).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/Неверный email или пароль/i)).toBeNull();
+    expect(screen.queryByText(/Ошибка сервера/i)).toBeNull();
   });
 
-  it("disables the submit button while login is pending", async () => {
+  it("never leaves the UI silent after a failed login mutation", async () => {
     const user = userEvent.setup();
-    let resolveLogin: (value: { state: string }) => void;
-    fixtures.login.mockReset().mockReturnValue(new Promise((resolve) => { resolveLogin = resolve; }));
+    fixtures.login.mockReset().mockRejectedValueOnce(new Error("network"));
     render(<Welcome />);
     await user.click(screen.getByRole("button", { name: "Войти по email и паролю" }));
     await user.type(screen.getByLabelText("Email"), "member@example.test");
     await user.type(screen.getByLabelText("Пароль"), "secure passphrase");
     await user.click(screen.getByRole("button", { name: "Войти" }));
-    const loginButton = screen.getByRole("button", { name: "Войти" });
-    expect(loginButton.hasAttribute("disabled")).toBe(true);
-    resolveLogin({ state: "VERIFICATION_REQUIRED" });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Войти" }).hasAttribute("disabled")).toBe(false));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Войти" })).not.toBeNull());
+    expect(screen.getByText(/Сеть или клиент временно недоступны/i)).not.toBeNull();
   });
 });

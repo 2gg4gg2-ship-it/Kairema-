@@ -29,7 +29,7 @@ export default function Welcome() {
   const resetStartMutation = trpc.auth.stytch.requestPasswordReset.useMutation();
   const resetCompleteMutation = trpc.auth.stytch.completePasswordReset.useMutation();
   const pending = registerMutation.isPending || loginMutation.isPending || resendMutation.isPending || resetStartMutation.isPending || resetCompleteMutation.isPending;
-  const [loginDiagnostic, setLoginDiagnostic] = useState<string>("LOGIN_NOT_STARTED");
+  const [loginLoading, setLoginLoading] = useState(false);
 
   const showStart = () => {
     setEmailView("start");
@@ -57,22 +57,29 @@ export default function Welcome() {
 
   const submitLogin = async (event: React.FormEvent) => {
     event.preventDefault();
-    setLoginDiagnostic("LOGIN_STARTED");
+    setLoginLoading(true);
     try {
       const result = await loginMutation.mutateAsync({ email, password });
       setPassword("");
       if (result.state === "SIGNED_IN") {
-        setLoginDiagnostic("LOGIN_SUCCESS");
         window.location.assign("/");
         return;
       }
-      setLoginDiagnostic("LOGIN_VERIFICATION_REQUIRED");
       setEmailView("verify");
       setNotice("Сначала подтвердите email по ссылке из письма. При необходимости запросите новую ссылку.");
     } catch (error) {
       const status = (error as any)?.data?.httpStatus ?? (error as any)?.status ?? "CLIENT";
-      setLoginDiagnostic(`LOGIN_ERROR_HTTP_${status}`);
-      setNotice(`Не удалось подтвердить email или пароль. Попробуйте снова либо восстановите пароль.`);
+      if (status === 401) {
+        setNotice("Неверный email или пароль (staging diagnostic: HTTP 401)");
+      } else if (status === 500) {
+        setNotice("Ошибка сервера (staging diagnostic: HTTP 500)");
+      } else if (status === "CLIENT") {
+        setNotice("Сеть или клиент временно недоступны. Проверьте соединение и попробуйте снова.");
+      } else {
+        setNotice(`Ошибка входа (staging diagnostic: HTTP ${status}). Попробуйте позже.`);
+      }
+    } finally {
+      setLoginLoading(false);
     }
   };
 
@@ -145,8 +152,7 @@ export default function Welcome() {
       <label>Email<input aria-label="Email" type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} required /></label>
       <label>Пароль<input aria-label="Пароль" type="password" autoComplete={isRegister ? "new-password" : "current-password"} value={password} onChange={event => setPassword(event.target.value)} minLength={8} required /></label>
       {isRegister && <label>Повторите пароль<input aria-label="Повторите пароль" type="password" autoComplete="new-password" value={passwordConfirm} onChange={event => setPasswordConfirm(event.target.value)} minLength={8} required /></label>}
-      <button type="submit" className="kairema-auth-gate__google" disabled={pending}>{isRegister ? "Создать и подтвердить email" : "Войти"}</button>
-      {emailView === "login" && <p className="kairema-auth-gate__notice" role="status" aria-live="polite">Staging diagnostic: {loginDiagnostic}</p>}
+      <button type="submit" className="kairema-auth-gate__google" disabled={pending || loginLoading}>{loginLoading ? "Вход..." : (isRegister ? "Создать и подтвердить email" : "Войти")}</button>
       {isRegister ? <button type="button" className="kairema-auth-gate__text-button" onClick={() => setEmailView("login")}>Уже есть аккаунт? Войти</button> : <><button type="button" className="kairema-auth-gate__text-button" onClick={() => setEmailView("recovery")}>Забыли пароль?</button><button type="button" className="kairema-auth-gate__text-button" onClick={() => setEmailView("register")}>Создать аккаунт</button></>}
       <button type="button" className="kairema-auth-gate__text-button" onClick={showStart}><ArrowLeft className="size-3" aria-hidden="true" /> Другой способ входа</button>
     </form>;
