@@ -17,6 +17,7 @@ import { getKnowledgeAudit, getKnowledgeStatus, refreshKnowledgeBase } from "./k
 import { ownerClaimFingerprint } from "./owner-claim";
 import { getChatStreamRuntimeGaugeSnapshot } from "./chat-stream";
 import { getCapacityControllerSnapshot, getCapacityPolicy, listCapacityProviderBudgets, updateCapacityPolicy, updateCapacityProviderBudget } from "./capacity-controller";
+import { assertTestEmailAllowed, sendTransactionalEmail } from "./email";
 
 const settingsSchema = z.object({
   style: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional(),
@@ -350,6 +351,12 @@ export const appRouter = router({
       });
       await recordTechnicalEvent({ kind: "owner_flag", title: "Provider budget controller обновлён", code: input.modelId ? `model:${input.provider}:${input.modelId}` : `provider:${input.provider}`, actorUserId: owner.id });
       return budget;
+    }),
+    sendTestEmail: protectedProcedure.input(z.object({ to: z.string().email(), subject: z.string().max(255), html: z.string().max(1024 * 1024) })).mutation(async ({ ctx, input }) => {
+      requireOwner(ctx);
+      assertTestEmailAllowed(input.to);
+      const delivered = await sendTransactionalEmail({ to: input.to, subject: input.subject, html: input.html });
+      return { success: delivered } as const;
     }),
   }),
   settings: router({
