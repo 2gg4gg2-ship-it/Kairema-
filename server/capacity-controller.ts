@@ -601,6 +601,9 @@ export async function beginCapacitySearch(actor: CapacityActor, roleId: RoleId):
 export const CAPACITY_PROVIDER_ADAPTERS = Object.freeze([
   { id: "openrouter", routing: "existing", budgetScope: "provider/model", status: "active-chain" },
   { id: "orcarouter", routing: "existing", budgetScope: "provider/model", status: "active-chain" },
+  { id: "teamorouter", routing: "existing", budgetScope: "provider/model", status: "active-chain" },
+  { id: "tokenharbor", routing: "existing", budgetScope: "provider/model", status: "active-chain" },
+  { id: "bazaarlink", routing: "existing", budgetScope: "provider/model", status: "active-chain" },
   { id: "google", routing: "existing", budgetScope: "provider/model", status: "active-chain" },
   { id: "groq", routing: "existing", budgetScope: "provider/model", status: "active-chain" },
   { id: "dots", routing: "existing-reserve", budgetScope: "provider/model", status: "reserve-not-guaranteed" },

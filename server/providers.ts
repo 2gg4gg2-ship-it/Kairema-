@@ -7,7 +7,7 @@ export const MODEL_IDS = ROLE_IDS;
 export type RoleId = (typeof ROLE_IDS)[number];
 export type ModelId = RoleId;
 export type ModelKey = RoleId;
-export type Provider = "openrouter" | "orcarouter" | "zenmux" | "dots" | "google" | "groq" | "sambanova" | "mistral" | "cerebras" | "deepseek";
+export type Provider = "openrouter" | "orcarouter" | "teamorouter" | "tokenharbor" | "bazaarlink" | "zenmux" | "dots" | "google" | "groq" | "sambanova" | "mistral" | "cerebras" | "deepseek";
 export type StatusCategory = "AUTH" | "QUOTA" | "RATE_LIMIT" | "PROVIDER_UNAVAILABLE" | "ENDPOINT" | "MODEL" | "NETWORK" | "TIMEOUT" | "PARSE" | "CONFIG" | "UNKNOWN";
 export type ModelStatus = { state: "ready" | "fallback" | "loading" | "error" | "unavailable" | "not_configured"; badge: string; category: StatusCategory | null; http: number | null; checkedAt: string; confirmed: string };
 export type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -87,21 +87,20 @@ export const MODEL_ROLES: readonly ModelConfig[] = [
   { key: "smart", modelId: "smart", label: "Kairema Think", role: "Математика, логика и последовательные рассуждения.", chain: [
     { provider: "openrouter", modelId: "google/gemma-4-26b-a4b-it:free", displayName: "Gemma 4 26B" },
     { provider: "orcarouter", modelId: "tencent/hy3-free", displayName: "Tencent HY 3" },
-    { provider: "google", modelId: "gemini-flash-lite-latest", displayName: "Gemini Flash Lite", vision: true, requiresWebResearch: true },
+    { provider: "tokenharbor", modelId: "deepseek/deepseek-v4-pro", displayName: "DeepSeek V4 Pro" },
     { provider: "groq", modelId: "openai/gpt-oss-120b", displayName: "GPT-OSS 120B" },
   ] },
   { key: "context", modelId: "context", label: "Kairema Context", role: "Большие тексты, история диалога и глубокий анализ.", chain: [
     { provider: "openrouter", modelId: "nvidia/nemotron-3-ultra-550b-a55b:free", displayName: "Nemotron 3 Ultra" },
-    { provider: "orcarouter", modelId: "deepseek/deepseek-v4-flash-free", displayName: "DeepSeek V4 Flash" },
-    { provider: "google", modelId: "gemini-flash-lite-latest", displayName: "Gemini Flash Lite", vision: true, requiresWebResearch: true },
-    { provider: "groq", modelId: "openai/gpt-oss-120b", displayName: "GPT-OSS 120B" },
-    { provider: "dots", modelId: "dots-studio/dots3-note-prev", displayName: "Dots Studio" },
+    { provider: "openrouter", modelId: "minimax/minimax-m3:free", displayName: "MiniMax M3" },
+    { provider: "bazaarlink", modelId: "qwen/qwen3.7-flash", displayName: "Qwen3.7 Flash" },
+    { provider: "zenmux", modelId: "dots-studio/dots3-note-prev", displayName: "Dots3 Note" },
   ] },
   { key: "flagship", modelId: "flagship", label: "Kairema Apex", role: "Сложнейшие задачи, переводы и максимальная мощность.", chain: [
+    { provider: "teamorouter", modelId: "deepseek-v4-pro-free", displayName: "DeepSeek V4 Pro Free" },
     { provider: "openrouter", modelId: "google/gemma-4-31b-it:free", displayName: "Gemma 4 31B" },
-    { provider: "orcarouter", modelId: "orcarouter/free", displayName: "OrcaRouter Free" },
-    { provider: "google", modelId: "gemini-flash-lite-latest", displayName: "Gemini Flash Lite", vision: true, requiresWebResearch: true },
     { provider: "groq", modelId: "openai/gpt-oss-120b", displayName: "GPT-OSS 120B" },
+    { provider: "openrouter", modelId: "nvidia/nemotron-3-ultra-550b-a55b:free", displayName: "Nemotron 3 Ultra" },
   ] },
 ] as const;
 
@@ -140,6 +139,9 @@ const DOTS_MODEL_ALLOWLIST = ["dots-studio/dots3-note-prev"] as const;
 const ENDPOINTS: Record<Provider, string> = {
   openrouter: "https://openrouter.ai/api/v1/chat/completions",
   orcarouter: "https://api.orcarouter.ai/v1/chat/completions",
+  teamorouter: "https://api.teamorouter.com/v1/chat/completions",
+  tokenharbor: "https://tokenharbor.ai/v1/chat/completions",
+  bazaarlink: "https://api.bazaarlink.ai/v1/chat/completions",
   zenmux: "https://zenmux.ai/api/v1/chat/completions",
   dots: "https://zenmux.ai/api/v1/chat/completions",
   google: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
@@ -149,7 +151,7 @@ const ENDPOINTS: Record<Provider, string> = {
   cerebras: "https://api.cerebras.ai/v1/chat/completions",
   deepseek: "https://api.deepseek.com/chat/completions",
 };
-const PROVIDERS: readonly Provider[] = ["openrouter", "orcarouter", "zenmux", "dots", "google", "groq", "sambanova", "mistral", "cerebras", "deepseek"];
+const PROVIDERS: readonly Provider[] = ["openrouter", "orcarouter", "teamorouter", "tokenharbor", "bazaarlink", "zenmux", "dots", "google", "groq", "sambanova", "mistral", "cerebras", "deepseek"];
 /** Hard cap on real upstream requests. Health or capability skips never consume this budget. */
 export const MAX_ATTEMPTS = 4;
 /** One allowance is created for each chat generation and is spent only on a real upstream LLM call. */
@@ -215,21 +217,27 @@ function secretFor(provider: Provider) {
     ? "OPENROUTER_API_KEY"
     : provider === "orcarouter"
       ? "ORCAROUTER_API_KEY"
-      : provider === "zenmux"
-        ? "ZENMUX_API_KEY"
-      : provider === "dots"
-        ? "API_KEY_DOTS3"
-      : provider === "google"
-      ? "GEMINI_API_KEY"
-      : provider === "groq"
-        ? "GROQ_API_KEY"
-        : provider === "sambanova"
-          ? "SAMBANOVA_API_KEY"
-          : provider === "mistral"
-            ? "MISTRAL_API_KEY"
-            : provider === "cerebras"
-              ? "CEREBRAS_API_KEY"
-              : "DEEPSEEK_API_KEY";
+      : provider === "teamorouter"
+        ? "TEAMOROUTER_API_KEY"
+        : provider === "tokenharbor"
+          ? "TOKENHARBOR_API_KEY"
+          : provider === "bazaarlink"
+            ? "BAZAARLINK_API_KEY"
+            : provider === "zenmux"
+              ? "ZENMUX_API_KEY"
+            : provider === "dots"
+              ? "API_KEY_DOTS3"
+            : provider === "google"
+              ? "GEMINI_API_KEY"
+            : provider === "groq"
+              ? "GROQ_API_KEY"
+              : provider === "sambanova"
+                ? "SAMBANOVA_API_KEY"
+                : provider === "mistral"
+                  ? "MISTRAL_API_KEY"
+                  : provider === "cerebras"
+                    ? "CEREBRAS_API_KEY"
+                    : "DEEPSEEK_API_KEY";
   return process.env[envName]?.trim();
 }
 function configured(provider: Provider) { return Boolean(secretFor(provider)); }
@@ -405,6 +413,9 @@ function providerNeedsPing(provider: Provider, force: boolean) {
 function probeCandidate(provider: Provider): Candidate {
   if (provider === "openrouter") return { provider, modelId: "openai/gpt-oss-20b:free", displayName: "health probe" };
   if (provider === "orcarouter") return { provider, modelId: "orcarouter/free", displayName: "diagnostic health probe" };
+  if (provider === "teamorouter") return { provider, modelId: "deepseek-v4-pro-free", displayName: "diagnostic health probe" };
+  if (provider === "tokenharbor") return { provider, modelId: "deepseek/deepseek-v4-pro", displayName: "diagnostic health probe" };
+  if (provider === "bazaarlink") return { provider, modelId: "qwen/qwen3.7-flash", displayName: "diagnostic health probe" };
   if (provider === "zenmux") return { provider, modelId: ZENMUX_FREE_MODEL_ALLOWLIST[1], displayName: "diagnostic health probe" };
   if (provider === "dots") return { provider, modelId: DOTS_MODEL_ALLOWLIST[0], displayName: "diagnostic health probe" };
   if (provider === "google") return { provider, modelId: "gemini-flash-lite-latest", displayName: "health probe" };
@@ -577,7 +588,7 @@ function statusForRole(role: ModelConfig) {
 }
 
 function providerLabel(provider: Provider | null) {
-  return provider === "openrouter" ? "OpenRouter" : provider === "orcarouter" ? "OrcaRouter" : provider === "zenmux" ? "ZenMux" : provider === "dots" ? "Dots Studio" : provider === "google" ? "Google AI Studio" : provider === "groq" ? "Groq" : provider === "sambanova" ? "SambaNova" : provider === "mistral" ? "Mistral" : provider === "cerebras" ? "Cerebras" : provider === "deepseek" ? "DeepSeek" : null;
+  return provider === "openrouter" ? "OpenRouter" : provider === "orcarouter" ? "OrcaRouter" : provider === "teamorouter" ? "TeamoRouter" : provider === "tokenharbor" ? "Token Harbor" : provider === "bazaarlink" ? "BazaarLink" : provider === "zenmux" ? "ZenMux" : provider === "dots" ? "Dots Studio" : provider === "google" ? "Google AI Studio" : provider === "groq" ? "Groq" : provider === "sambanova" ? "SambaNova" : provider === "mistral" ? "Mistral" : provider === "cerebras" ? "Cerebras" : provider === "deepseek" ? "DeepSeek" : null;
 }
 
 export function toRoleRuntimeView(state: RoleRuntimeView["state"], provider: string | null, modelUsed: string | null, checkedAt: Date): RoleRuntimeView {
