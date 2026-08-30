@@ -30,6 +30,12 @@ export default function OwnerAnalytics() {
   const [targetKey, setTargetKey] = useState("");
   const [disabled, setDisabled] = useState(false);
   const [preference, setPreference] = useState<ControlInput["preference"]>("normal");
+  const [stagingEmailTo, setStagingEmailTo] = useState("");
+  const [stagingEmailSubject, setStagingEmailSubject] = useState("Kairema Staging — Resend email delivery test");
+  const [stagingEmailHtml, setStagingEmailHtml] = useState("<p>Kairema Staging — Resend email delivery test</p>");
+  const [stagingEmailResult, setStagingEmailResult] = useState<{ success: boolean; id?: string } | null>(null);
+  const [stagingEmailError, setStagingEmailError] = useState<string | null>(null);
+  const sendTestEmailMutation = trpc.owner.sendTestEmail.useMutation();
   const ownerQuery = trpc.owner.isOwner.useQuery(undefined, { staleTime: 300_000 });
   const enabled = ownerQuery.data === true;
   const claimDiagnostic = trpc.owner.claimDiagnostic.useQuery(undefined, { enabled: ownerQuery.isSuccess && !enabled, staleTime: 300_000 });
@@ -152,6 +158,39 @@ export default function OwnerAnalytics() {
       <article className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4"><h2 className="font-medium">Health providers</h2><p className="mt-1 text-xs text-slate-400">Read-only status snapshots без ключей, endpoint details и raw errors.</p><div className="mt-3 space-y-2">{observabilityQuery.data?.providers.map((provider) => <div key={provider.provider} className="flex items-center justify-between gap-3 rounded-xl bg-slate-950/70 px-3 py-2 text-xs"><span className="min-w-0 truncate font-medium text-slate-200">{provider.provider}</span><span className="text-right text-slate-400">{provider.state} · {provider.category ?? "—"}<br />{formatWhen(provider.checkedAt)}</span></div>)}{!observabilityQuery.data?.providers.length && <p className="rounded-xl bg-slate-950/70 p-3 text-sm text-slate-400">Нет сохранённых health snapshots.</p>}</div></article></section>
 
     <section className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/80 p-4"><div className="flex items-start gap-3"><SlidersHorizontal className="mt-0.5 size-5 text-amber-300" /><div><h2 className="font-medium">Fail-safe routing controls</h2><p className="mt-1 text-xs text-slate-400">Owner-only. Controls могут пропустить известный candidate до network call или изменить его порядок. Они не меняют ключи, allowlist, rate limits и maximum-attempt contract.</p></div></div><div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><label className="text-xs text-slate-400">Тип<select className="mt-1 h-10 w-full rounded-lg border border-slate-700 bg-slate-950 px-2 text-sm text-slate-100" value={targetType} onChange={(event) => { setTargetType(event.target.value as ControlInput["targetType"]); setTargetKey(""); }}><option value="provider">Provider</option><option value="model">Model candidate</option></select></label><label className="text-xs text-slate-400">Разрешённая цель<select className="mt-1 h-10 w-full rounded-lg border border-slate-700 bg-slate-950 px-2 text-sm text-slate-100" value={targetKey} onChange={(event) => setTargetKey(event.target.value)}><option value="">Выберите…</option>{selectedTargets.map((target) => <option key={target} value={target}>{target}</option>)}</select></label><label className="text-xs text-slate-400">Порядок<select className="mt-1 h-10 w-full rounded-lg border border-slate-700 bg-slate-950 px-2 text-sm text-slate-100" value={preference} onChange={(event) => setPreference(event.target.value as ControlInput["preference"])}><option value="normal">Обычный</option><option value="prefer">Предпочесть</option><option value="avoid">Избегать</option></select></label><label className="flex items-end gap-3 pb-1 text-sm text-slate-300"><input type="checkbox" checked={disabled} onChange={(event) => setDisabled(event.target.checked)} />Отключить candidate</label></div><button disabled={!targetKey || updateControl.isPending} className="mt-4 rounded-lg bg-amber-300 px-3 py-2 text-sm font-medium text-slate-950 disabled:cursor-not-allowed disabled:opacity-50" onClick={() => void applyControl({ targetKey, targetType, disabled, preference })}>{updateControl.isPending ? "Сохранение…" : "Подтвердить control"}</button>{updateControl.error && <p role="alert" className="mt-2 text-sm text-rose-300">Не удалось сохранить control. Повторите позже.</p>}<div className="mt-4 grid gap-2 sm:grid-cols-2">{controlsQuery.data?.map((control) => <div key={`${control.targetType}:${control.targetKey}`} className="rounded-xl bg-slate-950/70 p-3 text-xs"><p className="break-all font-medium text-slate-200">{control.targetType}: {control.targetKey}</p><p className="mt-1 text-slate-400">{control.disabled ? "disabled" : "enabled"} · {control.preference} · {formatWhen(control.updatedAt)}</p><button className="mt-2 rounded border border-slate-700 px-2 py-1 text-slate-200 hover:bg-slate-800" onClick={() => void applyControl({ targetKey: control.targetKey, targetType: control.targetType, disabled: false, preference: "normal" })}>Сбросить</button></div>)}{!controlsQuery.data?.length && <p className="text-sm text-slate-400">Manual controls пока не заданы.</p>}</div></section>
+    <section className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/80 p-4" aria-label="Staging Resend email diagnostic">
+      <div className="flex items-start gap-3">
+        <ShieldAlert className="mt-0.5 size-5 text-amber-300" />
+        <div>
+          <h2 className="font-medium">Resend email diagnostic (staging only)</h2>
+          <p className="mt-1 text-xs text-slate-400">
+            Temporary owner-only test control for staging Resend integration. Uses existing owner.sendTestEmail endpoint with 60s cooldown per recipient. Do not expose this in production documentation.
+          </p>
+        </div>
+      </div>
+      <form className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" onSubmit={async (event) => {
+        event.preventDefault();
+        setStagingEmailResult(null);
+        setStagingEmailError(null);
+        try {
+          const result = await sendTestEmailMutation.mutateAsync({ to: stagingEmailTo, subject: stagingEmailSubject, html: stagingEmailHtml });
+          setStagingEmailResult(result);
+        } catch (error) {
+          setStagingEmailError(error instanceof Error ? error.message : "Unknown error");
+        }
+      }}>
+        <label className="text-xs text-slate-400">Recipient email<input value={stagingEmailTo} onChange={(event) => setStagingEmailTo(event.target.value)} type="email" required className="mt-1 h-10 w-full rounded-lg border border-slate-700 bg-slate-950 px-2 text-sm text-slate-100" /></label>
+        <label className="text-xs text-slate-400">Subject<input value={stagingEmailSubject} onChange={(event) => setStagingEmailSubject(event.target.value)} required className="mt-1 h-10 w-full rounded-lg border border-slate-700 bg-slate-950 px-2 text-sm text-slate-100" /></label>
+        <label className="text-xs text-slate-400">HTML body<textarea value={stagingEmailHtml} onChange={(event) => setStagingEmailHtml(event.target.value)} required rows={3} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-slate-100" /></label>
+        <div className="sm:col-span-2 lg:col-span-3">
+          <button disabled={sendTestEmailMutation.isPending} className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm hover:bg-slate-800 disabled:opacity-50">{sendTestEmailMutation.isPending ? "Sending…" : "Send test email"}</button>
+        </div>
+      </form>
+      {stagingEmailResult && <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-300">Resend response: success = <b>{String(stagingEmailResult.success)}</b>{stagingEmailResult.id ? `, id = ${stagingEmailResult.id}` : ""}</div>}
+      {stagingEmailError && <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs text-red-300">Error: {stagingEmailError}</div>}
+      <p className="mt-2 text-xs text-slate-500">Endpoint: owner.sendTestEmail · Protected by requireOwner · 60s cooldown per recipient · No secrets exposed</p>
+    </section>
+
   </div></main>;
 }
 
