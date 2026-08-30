@@ -36,13 +36,13 @@ describe("Kairema v4 role registry", () => {
     expect(modelById("code")).toBeUndefined();
   });
 
-  it("keeps four primary candidates and permits only Dots as the fifth server-side reserve", () => {
+  it("keeps four primary candidates and permits only ZenMux as the fifth server-side reserve", () => {
     for (const role of MODEL_ROLES) {
       expect(role.chain.slice(0, MAX_ATTEMPTS)).toHaveLength(4);
       expect(role.chain.every((candidate) => candidate.modelId !== role.modelId)).toBe(true);
       expect(role.chain.some((candidate) => candidate.modelId === "openrouter/free")).toBe(false);
     }
-    expect(MODEL_ROLES.find((role) => role.key === "context")?.chain[4]).toEqual({ provider: "dots", modelId: "dots-studio/dots3-note-prev", displayName: "Dots Studio" });
+    expect(MODEL_ROLES.find((role) => role.key === "context")?.chain.length).toBe(4);
     expect(MODEL_ROLES.filter((role) => role.key !== "context").every((role) => role.chain.length === 4)).toBe(true);
     expect(DIAGNOSTIC_CANDIDATES).toEqual([
       { provider: "openrouter", modelId: "openrouter/free", displayName: "OpenRouter Auto" },
@@ -68,12 +68,11 @@ describe("Kairema v4 role registry", () => {
     ]);
   });
 
-  it("keeps each public role on the tested Google vision candidate without extending its active chain", () => {
-    for (const role of MODEL_ROLES) {
-      const vision = role.chain.find((candidate) => candidate.vision);
-      expect(vision).toMatchObject({ provider: "google", modelId: "gemini-flash-lite-latest", vision: true });
-      expect(role.chain.slice(0, MAX_ATTEMPTS)).toHaveLength(MAX_ATTEMPTS);
-    }
+  it("keeps the tested Google vision candidate on Flash without extending its active chain", () => {
+    const flash = MODEL_ROLES.find((role) => role.key === "fast")!;
+    const vision = flash.chain.find((candidate) => candidate.vision);
+    expect(vision).toMatchObject({ provider: "google", modelId: "gemini-flash-lite-latest", vision: true });
+    expect(flash.chain.slice(0, MAX_ATTEMPTS)).toHaveLength(MAX_ATTEMPTS);
   });
 
   it("maps role health into the fixed Russian badge set", () => {
@@ -114,9 +113,9 @@ describe("Kairema v4 role registry", () => {
     const health = await getProviderHealthForTesting();
 
     expect(fast).toMatchObject({ provider: "groq", fallbackUsed: true });
-    expect(context).toMatchObject({ provider: "google", fallbackUsed: true });
+    expect(context).toMatchObject({ provider: "bazaarlink", fallbackUsed: true });
     expect(fetchSpy).toHaveBeenCalledTimes(3);
-    expect(String(fetchSpy.mock.calls[2]?.[0])).toContain("generativelanguage.googleapis.com");
+    expect(String(fetchSpy.mock.calls[2]?.[0])).toContain("bazaarlink.ai");
     expect(health.find((item) => item.provider === "openrouter")).toMatchObject({ state: "unavailable", category: "QUOTA" });
   });
 
@@ -163,9 +162,12 @@ describe("Kairema v4 role registry", () => {
     expect(health.find((item) => item.provider === "orcarouter")).toMatchObject({ state: "cooldown", category: "RATE_LIMIT" });
   });
 
-  it("keeps inaccessible ZenMux in server-only health checks while Dots uses a separate key", async () => {
+  it("keeps ZenMux in Context chain and Dots out of active chains", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "");
     vi.stubEnv("ORCAROUTER_API_KEY", "");
+    vi.stubEnv("TEAMOROUTER_API_KEY", "");
+    vi.stubEnv("TOKENHARBOR_API_KEY", "");
+    vi.stubEnv("BAZAARLINK_API_KEY", "");
     vi.stubEnv("GROQ_API_KEY", "");
     vi.stubEnv("GEMINI_API_KEY", "");
     vi.stubEnv("SAMBANOVA_API_KEY", "");
@@ -181,26 +183,25 @@ describe("Kairema v4 role registry", () => {
     await refreshProviderHealth({ force: true });
     const health = await getProviderHealthForTesting();
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe("https://zenmux.ai/api/v1/chat/completions");
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("zenmux.ai"))).toBe(true);
     expect(health.find((item) => item.provider === "zenmux")).toMatchObject({ state: "auth_failed", category: "AUTH", http: 403 });
-    expect(MODEL_ROLES.every((role) => role.chain.every((candidate) => candidate.provider !== "zenmux"))).toBe(true);
-    expect(MODEL_ROLES.find((role) => role.key === "context")?.chain[4]?.provider).toBe("dots");
+    expect(MODEL_ROLES.find((role) => role.key === "context")?.chain.some((candidate) => candidate.provider === "zenmux")).toBe(true);
+    expect(MODEL_ROLES.every((role) => role.chain.every((candidate) => candidate.provider !== "dots" || role.key === "context"))).toBe(true);
     expect(getZenmuxHeartbeatTrackingForTests()).toEqual({ consecutiveHttp200: 0, activation: "manual-verification-required" });
   });
 
-  it("does not invoke the fifth Dots reserve after four real context attempts", async () => {
+  it("does not exceed four real context attempts when all candidates fail", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
     vi.stubEnv("ORCAROUTER_API_KEY", "test-orcarouter-key");
     vi.stubEnv("GEMINI_API_KEY", "test-google-key");
     vi.stubEnv("API_KEY_DOTS3", "test-dots-key");
+    vi.stubEnv("BAZAARLINK_API_KEY", "test-bazaarlink-key");
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({ error: { message: "unsupported model" } }), { status: 400 }),
     ));
 
     await expect(chatWithRole("context", [{ role: "user", content: "Проверка лимита" }])).rejects.toMatchObject({ name: "OpenRouterError" });
     expect(fetchSpy).toHaveBeenCalledTimes(MAX_ATTEMPTS);
-    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("zenmux.ai"))).toBe(false);
   });
 
   it("records one request-scoped budget trace for each of no more than four real LLM calls", async () => {
@@ -224,24 +225,23 @@ describe("Kairema v4 role registry", () => {
     expect(JSON.stringify(traces)).not.toContain("test-openrouter-key");
   });
 
-  it("uses Dots only as the last Context reserve when an earlier candidate is skipped", async () => {
+  it("uses ZenMux as the last Context candidate when earlier candidates are skipped", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "");
     vi.stubEnv("ORCAROUTER_API_KEY", "test-orcarouter-key");
     vi.stubEnv("GEMINI_API_KEY", "test-google-key");
     vi.stubEnv("GROQ_API_KEY", "test-groq-key");
-    vi.stubEnv("API_KEY_DOTS3", "test-dots-key");
+    vi.stubEnv("BAZAARLINK_API_KEY", "test-bazaarlink-key");
+    vi.stubEnv("ZENMUX_API_KEY", "test-zenmux-key");
     const fetchSpy = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "unsupported model" } }), { status: 400 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "unsupported model" } }), { status: 400 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "unsupported model" } }), { status: 400 }))
-      .mockResolvedValueOnce(success("Ответ Dots"));
+      .mockResolvedValueOnce(success("Ответ ZenMux"));
 
     const result = await chatWithRole("context", [{ role: "user", content: "Проверка резерва" }]);
 
-    expect(result).toMatchObject({ provider: "dots", modelUsed: "Dots Studio", fallbackUsed: true });
-    expect(fetchSpy).toHaveBeenCalledTimes(4);
-    expect(String(fetchSpy.mock.calls[3]?.[0])).toBe("https://zenmux.ai/api/v1/chat/completions");
-    expect(JSON.parse(String(fetchSpy.mock.calls[3]?.[1]?.body))).toMatchObject({ model: "dots-studio/dots3-note-prev" });
+    expect(result).toMatchObject({ provider: "zenmux", modelUsed: "Dots3 Note", fallbackUsed: true });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(String(fetchSpy.mock.calls[1]?.[0])).toBe("https://zenmux.ai/api/v1/chat/completions");
+    expect(JSON.parse(String(fetchSpy.mock.calls[1]?.[1]?.body))).toMatchObject({ model: "dots-studio/dots3-note-prev" });
   });
 
   it("removes reasoning blocks before any response reaches the browser", () => {

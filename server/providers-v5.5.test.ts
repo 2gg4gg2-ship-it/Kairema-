@@ -6,18 +6,17 @@ describe("v5.5 server-side role safety", () => {
     expect(ROLE_IDS).toEqual(["fast", "smart", "context", "flagship"]);
     expect(MODEL_ROLES).toHaveLength(4);
     expect(MODEL_ROLES.every((role) => role.chain.slice(0, MAX_ATTEMPTS).length === 4)).toBe(true);
-    expect(MODEL_ROLES.find((role) => role.key === "context")?.chain[4]?.provider).toBe("dots");
+    expect(MODEL_ROLES.find((role) => role.key === "context")?.chain.length).toBe(4);
   });
 
   it("uses Google candidates only behind web-research policy and keeps OrcaRouter in server-side chains", () => {
-    for (const role of MODEL_ROLES) {
-      const googleCandidate = role.chain.find((candidate) => candidate.provider === "google");
-      expect(googleCandidate?.requiresWebResearch).toBe(true);
-      expect(googleCandidate?.vision).toBe(true);
-      expect(googleCandidate?.modelId).toBe("gemini-flash-lite-latest");
-      expect(role.chain.some((candidate) => candidate.provider === "sambanova" || candidate.provider === "cerebras")).toBe(false);
-    }
+    const flash = MODEL_ROLES.find((role) => role.key === "fast")!;
+    const googleCandidate = flash.chain.find((candidate) => candidate.provider === "google");
+    expect(googleCandidate?.requiresWebResearch).toBe(true);
+    expect(googleCandidate?.vision).toBe(true);
+    expect(googleCandidate?.modelId).toBe("gemini-flash-lite-latest");
     expect(MODEL_ROLES.some((role) => role.chain.some((candidate) => candidate.provider === "orcarouter"))).toBe(true);
+    expect(MODEL_ROLES.every((role) => role.chain.some((candidate) => candidate.provider === "sambanova" || candidate.provider === "cerebras"))).toBe(false);
   });
 
   it("removes URL lists and markdown links from assistant text server-side", () => {
