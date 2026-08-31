@@ -3,7 +3,7 @@ import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
 import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
-import { clearStytchLinkIntentCookie, clearStytchResetCookie, clearStytchSessionCookie, getSafeStytchDeliveryFailure, getStytchCallbackUrl, getStytchClient, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
+import { clearStytchLinkIntentCookie, clearStytchOtpEmailIdCookie, clearStytchResetCookie, clearStytchSessionCookie, getSafeStytchDeliveryFailure, getStytchCallbackUrl, getStytchClient, getStytchOtpEmailId, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchOtpEmailIdCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
 import { resolveOrCreateProviderUser } from "./db";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -154,15 +154,31 @@ export const appRouter = router({
       return { success: true } as const;
     }),
     stytch: router({
-      register: publicProcedure.input(stytchCredentialsSchema).mutation(async ({ input }) => {
+      register: publicProcedure.input(stytchCredentialsSchema).mutation(async ({ ctx, input }) => {
         try {
           await getStytchClient().passwords.create({ email: input.email, password: input.password });
-          const callbackUrl = getStytchCallbackUrl();
-          await getStytchClient().magicLinks.email.loginOrCreate({ email: input.email, locale: "en", login_magic_link_url: callbackUrl, signup_magic_link_url: callbackUrl });
+          const result = await getStytchClient().otps.email.send({ email: input.email });
+          setStytchOtpEmailIdCookie(ctx.res, ctx.req, result.email_id);
           return { state: "VERIFICATION_REQUIRED" as const };
         } catch (error) {
           throw stytchErrorToTrpc(error);
         }
+      }),
+      sendOtp: publicProcedure.input(stytchEmailSchema).mutation(async ({ ctx, input }) => {
+        try {
+          const result = await getStytchClient().otps.email.send({ email: input.email });
+          setStytchOtpEmailIdCookie(ctx.res, ctx.req, result.email_id);
+          return { state: "DELIVERY_REQUESTED" as const };
+        } catch (error) {
+          const deliveryFailure = getSafeStytchDeliveryFailure(error);
+          try {
+            await recordTechnicalEvent({ kind: "provider", title: "Stytch OTP delivery request rejected", code: deliveryFailure });
+          } catch {
+            // Observability must not affect an anti-enumeration auth flow.
+          }
+          if (toSafeStytchError(error).safeCode === "UNAVAILABLE") throw stytchErrorToTrpc(error);
+        }
+        return { state: "DELIVERY_REQUESTED" as const };
       }),
       resendVerification: publicProcedure.input(stytchEmailSchema).mutation(async ({ input }) => {
         try {
@@ -171,18 +187,47 @@ export const appRouter = router({
         } catch (error) {
           const deliveryFailure = getSafeStytchDeliveryFailure(error);
           try {
-            // Best-effort operational telemetry. It never receives request data
-            // or provider identifiers, and cannot alter the public response.
             await recordTechnicalEvent({ kind: "provider", title: "Stytch verification delivery request rejected", code: deliveryFailure });
           } catch {
             // Observability must not affect an anti-enumeration auth flow.
           }
-          // Keep the pre-observability availability decision exactly aligned
-          // with the established provider error normalizer.
           if (toSafeStytchError(error).safeCode === "UNAVAILABLE") throw stytchErrorToTrpc(error);
         }
-        // Deliberately generic to avoid account enumeration.
         return { state: "DELIVERY_REQUESTED" as const };
+      }),
+      verifyOtp: publicProcedure.input(z.object({ code: z.string().min(6).max(6) })).mutation(async ({ ctx, input }) => {
+        const emailId = getStytchOtpEmailId(ctx.req);
+        if (!emailId) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Запросите новый код подтверждения." });
+        }
+        try {
+          const result = await getStytchClient().otps.authenticate({
+            method_id: emailId,
+            code: input.code,
+            session_duration_minutes: STYTCH_SESSION_DURATION_MINUTES,
+          });
+          const verifiedEmail = getVerifiedStytchEmail(result.user);
+          if (!verifiedEmail) {
+            await revokeStytchSessionToken(result.session_token);
+            throw new TRPCError({ code: "FORBIDDEN", message: "Подтвердите email, затем войдите снова." });
+          }
+          const canonicalUser = await resolveOrCreateProviderUser({
+            provider: STYTCH_PROVIDER,
+            providerSubject: result.user.user_id,
+            canonicalOpenId: stytchCanonicalOpenId(result.user.user_id),
+            verifiedEmail,
+            displayName: result.user.name?.first_name ?? null,
+            loginMethod: "stytch-password",
+          });
+          setStytchSessionCookie(ctx.res, ctx.req, result.session_token);
+          clearStytchOtpEmailIdCookie(ctx.res, ctx.req);
+          ctx.res.clearCookie(COOKIE_NAME, { ...getSessionCookieOptions(ctx.req), maxAge: -1 });
+          return { state: "SIGNED_IN" as const };
+        } catch (error) {
+          clearStytchOtpEmailIdCookie(ctx.res, ctx.req);
+          if (error instanceof TRPCError) throw error;
+          throw stytchErrorToTrpc(error);
+        }
       }),
       login: publicProcedure.input(stytchCredentialsSchema).mutation(async ({ ctx, input }) => {
         try {
@@ -194,8 +239,8 @@ export const appRouter = router({
           const canonicalUser = await resolveVerifiedStytchUser(result.user);
           if (!canonicalUser) {
             await revokeStytchSessionToken(result.session_token);
-            const callbackUrl = getStytchCallbackUrl();
-            await getStytchClient().magicLinks.email.loginOrCreate({ email: input.email, locale: "en", login_magic_link_url: callbackUrl, signup_magic_link_url: callbackUrl });
+            const otpResult = await getStytchClient().otps.email.send({ email: input.email, user_id: result.user.user_id });
+            setStytchOtpEmailIdCookie(ctx.res, ctx.req, otpResult.email_id);
             return { state: "VERIFICATION_REQUIRED" as const };
           }
           setStytchSessionCookie(ctx.res, ctx.req, result.session_token);
