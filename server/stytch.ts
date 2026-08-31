@@ -221,3 +221,18 @@ export function toSafeStytchError(error: unknown): StytchProviderError {
   }
   return error instanceof StytchProviderError ? error : new StytchProviderError("UNAVAILABLE");
 }
+
+export function logSafeStytchDiagnostic(error: unknown, context: string) {
+  if (error instanceof StytchError) {
+    const category = error.status_code === 401 || error.status_code === 404
+      ? "INVALID"
+      : error.status_code === 408 || error.status_code >= 500
+        ? "UNAVAILABLE"
+        : "INVALID";
+    console.error(`[stytch-diagnostic] ${context}: class=StytchError error_type=${error.error_type} status_code=${error.status_code} category=${category}`);
+  } else if (error instanceof StytchProviderError) {
+    console.error(`[stytch-diagnostic] ${context}: class=StytchProviderError safeCode=${error.safeCode}`);
+  } else {
+    console.error(`[stytch-diagnostic] ${context}: class=${error instanceof Error ? error.constructor.name : typeof error}`);
+  }
+}
