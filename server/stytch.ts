@@ -8,10 +8,12 @@ export const STYTCH_PROVIDER = "stytch";
 export const STYTCH_SESSION_COOKIE = "__Host-kairema-stytch-session";
 export const STYTCH_RESET_COOKIE = "__Host-kairema-stytch-reset";
 export const STYTCH_LINK_INTENT_COOKIE = "__Host-kairema-stytch-link-intent";
+export const STYTCH_OTP_EMAIL_ID_COOKIE = "__Host-kairema-stytch-otp-email-id";
 export const STYTCH_SESSION_DURATION_MINUTES = 10_080; // provider-managed seven-day maximum
 const STYTCH_SESSION_MAX_AGE_MS = STYTCH_SESSION_DURATION_MINUTES * 60_000;
 const STYTCH_RESET_MAX_AGE_MS = 30 * 60_000;
 const STYTCH_LINK_INTENT_MAX_AGE_MS = 10 * 60_000;
+const STYTCH_OTP_EMAIL_ID_MAX_AGE_MS = 10 * 60_000;
 
 export class StytchProviderError extends Error {
   constructor(public readonly safeCode: "UNAVAILABLE" | "INVALID" | "EXPIRED") {
@@ -162,6 +164,25 @@ export function getStytchResetToken(req: Request) {
 export function getStytchLinkIntent(req: Request) {
   const reference = parseCookieHeader(req.headers.cookie ?? "")[STYTCH_LINK_INTENT_COOKIE];
   return reference && reference.length <= 128 ? reference : null;
+}
+
+export function setStytchOtpEmailIdCookie(res: Response, req: Request, emailId: string) {
+  res.cookie(STYTCH_OTP_EMAIL_ID_COOKIE, emailId, {
+    ...getSessionCookieOptions(req),
+    maxAge: STYTCH_OTP_EMAIL_ID_MAX_AGE_MS,
+  });
+}
+
+export function clearStytchOtpEmailIdCookie(res: Response, req: Request) {
+  res.clearCookie(STYTCH_OTP_EMAIL_ID_COOKIE, {
+    ...getSessionCookieOptions(req),
+    maxAge: -1,
+  });
+}
+
+export function getStytchOtpEmailId(req: Request) {
+  const value = parseCookieHeader(req.headers.cookie ?? "")[STYTCH_OTP_EMAIL_ID_COOKIE];
+  return value && value.length <= 128 ? value : null;
 }
 
 export async function authenticateStytchRequest(req: Request) {
