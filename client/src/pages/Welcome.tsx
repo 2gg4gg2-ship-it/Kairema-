@@ -3,11 +3,21 @@ import { useState } from "react";
 import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
 
-type EmailAuthView = "start" | "login" | "register" | "verify" | "recovery" | "reset";
+type EmailAuthView = "start" | "login" | "register" | "verify" | "recovery" | "reset" | "otp";
 
 function initialAuthView(): EmailAuthView {
   if (typeof window === "undefined") return "start";
-  return new URLSearchParams(window.location.search).get("reset") === "1" ? "reset" : "start";
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("reset") === "1") return "reset";
+  if (params.get("auth") === "verification-required") return "otp";
+  return "start";
+}
+
+function maskEmail(email: string) {
+  const [local, domain] = email.split("@");
+  if (!domain) return email;
+  const maskedLocal = local.length <= 2 ? "*".repeat(local.length) : local[0] + "*".repeat(Math.max(local.length - 2, 1)) + local[local.length - 1];
+  return `${maskedLocal}@${domain}`;
 }
 
 export default function Welcome() {
@@ -17,24 +27,31 @@ export default function Welcome() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpCooldown, setOtpCooldown] = useState(0);
   const [notice, setNotice] = useState(() => {
     if (typeof window === "undefined") return "";
     const auth = new URLSearchParams(window.location.search).get("auth");
-    return auth === "failed" ? "Не удалось завершить ссылку входа. Запросите новую и попробуйте снова." : "";
+    if (auth === "failed") return "Не удалось завершить ссылку входа. Запросите новую и попробуйте снова.";
+    if (auth === "verification-required") return "Подтвердите email кодом из письма.";
+    return "";
   });
 
   const registerMutation = trpc.auth.stytch.register.useMutation();
   const loginMutation = trpc.auth.stytch.login.useMutation();
+  const sendOtpMutation = trpc.auth.stytch.sendOtp.useMutation();
+  const verifyOtpMutation = trpc.auth.stytch.verifyOtp.useMutation();
   const resendMutation = trpc.auth.stytch.resendVerification.useMutation();
   const resetStartMutation = trpc.auth.stytch.requestPasswordReset.useMutation();
   const resetCompleteMutation = trpc.auth.stytch.completePasswordReset.useMutation();
-  const pending = registerMutation.isPending || loginMutation.isPending || resendMutation.isPending || resetStartMutation.isPending || resetCompleteMutation.isPending;
+  const pending = registerMutation.isPending || loginMutation.isPending || sendOtpMutation.isPending || verifyOtpMutation.isPending || resendMutation.isPending || resetStartMutation.isPending || resetCompleteMutation.isPending;
   const [loginLoading, setLoginLoading] = useState(false);
 
   const showStart = () => {
     setEmailView("start");
     setPassword("");
     setPasswordConfirm("");
+    setOtpCode("");
     setNotice("");
   };
 
@@ -48,8 +65,9 @@ export default function Welcome() {
       await registerMutation.mutateAsync({ email, password });
       setPassword("");
       setPasswordConfirm("");
-      setEmailView("verify");
-      setNotice("Мы отправили ссылку для подтверждения email. Откройте её в этом же браузере.");
+      setOtpCode("");
+      setEmailView("otp");
+      setNotice("Мы отправили код подтверждения на ваш email. Введите 6-значный код ниже.");
     } catch {
       setNotice("Не удалось создать защищённый аккаунт. Проверьте данные или повторите позже.");
     }
@@ -65,8 +83,9 @@ export default function Welcome() {
         window.location.assign("/");
         return;
       }
-      setEmailView("verify");
-      setNotice("Сначала подтвердите email по ссылке из письма. При необходимости запросите новую ссылку.");
+      setOtpCode("");
+      setEmailView("otp");
+      setNotice("Подтвердите email кодом из письма. Если письма нет, запросите новый код.");
     } catch (error) {
       const status = (error as any)?.data?.httpStatus ?? (error as any)?.status ?? "CLIENT";
       if (status === 401) {
@@ -81,6 +100,44 @@ export default function Welcome() {
     } finally {
       setLoginLoading(false);
     }
+  };
+
+  const sendOtp = async () => {
+    try {
+      await sendOtpMutation.mutateAsync({ email });
+      setOtpCode("");
+      setNotice("Если этот адрес доступен для подтверждения, новый код отправлен.");
+      startOtpCooldown();
+    } catch {
+      setNotice("Отправка кода временно недоступна. Повторите попытку позже.");
+    }
+  };
+
+  const verifyOtp = async (event: React.FormEvent) => {
+    event.preventDefault();
+    try {
+      const result = await verifyOtpMutation.mutateAsync({ code: otpCode });
+      if (result.state === "SIGNED_IN") {
+        window.location.assign("/");
+        return;
+      }
+      setNotice("Код принят. Сессия создана.");
+    } catch {
+      setNotice("Неверный или истёкший код. Запросите новый и попробуйте снова.");
+    }
+  };
+
+  const startOtpCooldown = () => {
+    setOtpCooldown(30);
+    const timer = setInterval(() => {
+      setOtpCooldown((current) => {
+        if (current <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return current - 1;
+      });
+    }, 1000);
   };
 
   const resendVerification = async () => {
@@ -120,6 +177,18 @@ export default function Welcome() {
 
   const emailForm = (() => {
     if (emailView === "start") return null;
+    if (emailView === "otp") {
+      return <section className="kairema-auth-gate__email" aria-labelledby="email-otp-title">
+        <div className="kairema-auth-gate__email-heading"><Mail className="size-4" aria-hidden="true" /><h2 id="email-otp-title">Проверьте почту</h2></div>
+        <p>Мы отправили 6-значный код на <strong>{maskEmail(email)}</strong>. Введите его ниже, чтобы подтвердить email.</p>
+        <form className="kairema-auth-gate__email" onSubmit={verifyOtp} aria-labelledby="email-otp-title">
+          <label>Код подтверждения<input aria-label="Код подтверждения" type="text" inputMode="numeric" autoComplete="one-time-code" value={otpCode} onChange={event => setOtpCode(event.target.value.replace(/\D/g, "").slice(0, 6))} minLength={6} maxLength={6} required /></label>
+          <button type="submit" className="kairema-auth-gate__google" disabled={pending || otpCode.length !== 6}>Проверить код</button>
+        </form>
+        <button type="button" className="kairema-auth-gate__text-button" disabled={pending || otpCooldown > 0} onClick={() => { if (otpCooldown <= 0) { void sendOtp(); } }}>{otpCooldown > 0 ? `Отправить повторно через ${otpCooldown}с` : "Отправить код повторно"}</button>
+        <button type="button" className="kairema-auth-gate__text-button" onClick={() => { setEmailView("login"); setOtpCode(""); setNotice(""); }}><ArrowLeft className="size-3" aria-hidden="true" /> Назад ко входу</button>
+      </section>;
+    }
     if (emailView === "verify") {
       return <section className="kairema-auth-gate__email" aria-labelledby="email-verify-title">
         <div className="kairema-auth-gate__email-heading"><Mail className="size-4" aria-hidden="true" /><h2 id="email-verify-title">Подтвердите email</h2></div>
