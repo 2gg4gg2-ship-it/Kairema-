@@ -49,8 +49,13 @@ export default function Welcome() {
       setPasswordConfirm("");
       setEmailView("verify");
       setNotice("Мы отправили ссылку для подтверждения email. Откройте её в этом же браузере.");
-    } catch {
-      setNotice("Не удалось создать защищённый аккаунт. Проверьте данные или повторите позже.");
+    } catch (error) {
+      const trpcError = error as { data?: { code?: string }; message?: string };
+      if (trpcError?.data?.code === "CONFLICT") {
+        setNotice("Этот email уже зарегистрирован. Войдите в аккаунт или воспользуйтесь восстановлением пароля.");
+      } else {
+        setNotice("Не удалось создать защищённый аккаунт. Проверьте данные или повторите позже.");
+      }
     }
   };
 

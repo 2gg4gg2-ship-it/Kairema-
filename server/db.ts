@@ -159,37 +159,69 @@ export async function resolveOrCreateProviderUser(input: {
   displayName?: string | null;
   loginMethod: string;
 }) {
-  const existing = await getUserByProviderIdentity(input.provider, input.providerSubject);
-  if (existing) {
-    const db = requireDatabase(await getDb());
-    await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, existing.id));
-    return existing;
+  let candidate: Awaited<ReturnType<typeof getUserByOpenId>> | null = null;
+  try {
+    const existing = await getUserByProviderIdentity(input.provider, input.providerSubject);
+    if (existing) {
+      const db = requireDatabase(await getDb());
+      await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, existing.id));
+      console.error("[RESOLVE_EXISTING_OK]");
+      return existing;
+    }
+    console.error("[RESOLVE_EXISTING_OK]");
+  } catch (error) {
+    console.error(`[RESOLVE_EXISTING_ERROR] error_name=${error?.constructor?.name ?? "Error"}`);
+    throw error;
   }
 
-  await upsertUser({
-    openId: input.canonicalOpenId,
-    email: input.verifiedEmail,
-    name: input.displayName ?? null,
-    loginMethod: input.loginMethod,
-    lastSignedIn: new Date(),
-  });
-
-  const candidate = await getUserByOpenId(input.canonicalOpenId);
-  if (!candidate) {
-    throw new Error("Canonical user could not be resolved");
+  try {
+    await upsertUser({
+      openId: input.canonicalOpenId,
+      email: input.verifiedEmail,
+      name: input.displayName ?? null,
+      loginMethod: input.loginMethod,
+      lastSignedIn: new Date(),
+    });
+    console.error("[RESOLVE_UPSERT_OK]");
+  } catch (error) {
+    console.error(`[RESOLVE_UPSERT_ERROR] error_name=${error?.constructor?.name ?? "Error"}`);
+    throw error;
   }
 
-  await linkProviderIdentityToUser({
-    provider: input.provider,
-    providerSubject: input.providerSubject,
-    userId: candidate.id,
-  });
-
-  const mapped = await getUserByProviderIdentity(input.provider, input.providerSubject);
-  if (!mapped) {
-    throw new Error("Provider identity mapping could not be resolved");
+  try {
+    candidate = await getUserByOpenId(input.canonicalOpenId);
+    if (!candidate) {
+      throw new Error("Canonical user could not be resolved");
+    }
+    console.error("[RESOLVE_OPENID_OK]");
+  } catch (error) {
+    console.error(`[RESOLVE_OPENID_ERROR] error_name=${error?.constructor?.name ?? "Error"}`);
+    throw error;
   }
-  return mapped;
+
+  try {
+    await linkProviderIdentityToUser({
+      provider: input.provider,
+      providerSubject: input.providerSubject,
+      userId: candidate!.id,
+    });
+    console.error("[RESOLVE_LINK_OK]");
+  } catch (error) {
+    console.error(`[RESOLVE_LINK_ERROR] error_name=${error?.constructor?.name ?? "Error"}`);
+    throw error;
+  }
+
+  try {
+    const mapped = await getUserByProviderIdentity(input.provider, input.providerSubject);
+    if (!mapped) {
+      throw new Error("Provider identity mapping could not be resolved");
+    }
+    console.error("[RESOLVE_FINAL_LOOKUP_OK]");
+    return mapped;
+  } catch (error) {
+    console.error(`[RESOLVE_FINAL_LOOKUP_ERROR] error_name=${error?.constructor?.name ?? "Error"}`);
+    throw error;
+  }
 }
 
 function requireDatabase(db: Awaited<ReturnType<typeof getDb>>) {
