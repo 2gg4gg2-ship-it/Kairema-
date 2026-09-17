@@ -121,6 +121,28 @@ function stytchErrorToTrpc(error: unknown) {
   return new TRPCError({ code: "UNAUTHORIZED", message: "Не удалось подтвердить email или пароль. Проверьте данные либо используйте восстановление пароля." });
 }
 
+function stytchResetErrorToTrpc(error: unknown) {
+  if (error instanceof StytchError) {
+    if (error.error_type === "invalid_email" || error.status_code === 400) {
+      return new TRPCError({ code: "BAD_REQUEST", message: "Некорректный или неизвестный email." });
+    }
+    if (error.error_type === "rate_limited" || error.status_code === 429) {
+      return new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Слишком много запросов на восстановление пароля. Подождите перед повторной попыткой." });
+    }
+    if (error.error_type === "invalid_redirect_url" || error.error_type === "callback_url_rejected") {
+      return new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Ошибка конфигурации ссылки восстановления. Обратитесь к администратору." });
+    }
+    if (error.status_code === 408 || error.status_code >= 500) {
+      return new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Сервис восстановления пароля временно недоступен. Повторите попытку позже." });
+    }
+  }
+  const safe = toSafeStytchError(error);
+  if (safe.safeCode === "UNAVAILABLE") {
+    return new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Сервис восстановления пароля временно недоступен. Повторите попытку позже." });
+  }
+  return new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Ошибка восстановления пароля. Повторите попытку позже." });
+}
+
 async function resolveVerifiedStytchUser(user: { user_id: string; emails: { email: string; verified: boolean }[]; name?: { first_name?: string | null } | null }) {
   const verifiedEmail = getVerifiedStytchEmail(user);
   if (!verifiedEmail) return null;
@@ -256,7 +278,7 @@ export const appRouter = router({
           await getStytchClient().passwords.email.resetStart({ email: input.email, locale: "en", reset_password_redirect_url: callbackUrl, login_redirect_url: callbackUrl });
           return { state: "DELIVERY_REQUESTED" as const };
         } catch (error) {
-          throw stytchErrorToTrpc(error);
+          throw stytchResetErrorToTrpc(error);
         }
       }),
       completePasswordReset: publicProcedure.input(z.object({ password: z.string().min(8).max(256) })).mutation(async ({ ctx, input }) => {
