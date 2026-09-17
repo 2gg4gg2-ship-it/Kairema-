@@ -217,14 +217,21 @@ export const appRouter = router({
             clearStytchOtpEmailIdCookie(ctx.res, ctx.req);
             throw new TRPCError({ code: "FORBIDDEN", message: "Email не подтверждён." });
           }
-          const canonicalUser = await resolveOrCreateProviderUser({
-            provider: STYTCH_PROVIDER,
-            providerSubject: result.user.user_id,
-            canonicalOpenId: stytchCanonicalOpenId(result.user.user_id),
-            verifiedEmail,
-            displayName: result.user.name?.first_name ?? null,
-            loginMethod: "stytch-password",
-          });
+          let canonicalUser;
+          try {
+            canonicalUser = await resolveOrCreateProviderUser({
+              provider: STYTCH_PROVIDER,
+              providerSubject: result.user.user_id,
+              canonicalOpenId: stytchCanonicalOpenId(result.user.user_id),
+              verifiedEmail,
+              displayName: result.user.name?.first_name ?? null,
+              loginMethod: "stytch-password",
+            });
+            console.error("[CANONICAL_USER_OK] stage=canonical_user");
+          } catch (error) {
+            console.error(`[CANONICAL_USER_ERROR] stage=resolve_provider error_name=${error?.constructor?.name ?? "Error"}`);
+            throw error;
+          }
           if (!canonicalUser) {
             await revokeStytchSessionToken(result.session_token);
             clearStytchOtpEmailIdCookie(ctx.res, ctx.req);
