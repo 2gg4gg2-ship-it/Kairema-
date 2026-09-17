@@ -191,16 +191,10 @@ export const appRouter = router({
             password: input.password,
             session_duration_minutes: STYTCH_SESSION_DURATION_MINUTES,
           });
-          const canonicalUser = await resolveVerifiedStytchUser(result.user);
-          if (!canonicalUser) {
-            await revokeStytchSessionToken(result.session_token);
-            const otpResult = await getStytchClient().otps.email.send({ email: input.email, expiration_minutes: 10 });
-            setStytchOtpEmailIdCookie(ctx.res, ctx.req, otpResult.email_id);
-            return { state: "OTP_REQUIRED" as const };
-          }
-          setStytchSessionCookie(ctx.res, ctx.req, result.session_token);
-          ctx.res.clearCookie(COOKIE_NAME, { ...getSessionCookieOptions(ctx.req), maxAge: -1 });
-          return { state: "SIGNED_IN" as const };
+          await revokeStytchSessionToken(result.session_token);
+          const otpResult = await getStytchClient().otps.email.send({ email: input.email, expiration_minutes: 10 });
+          setStytchOtpEmailIdCookie(ctx.res, ctx.req, otpResult.email_id);
+          return { state: "OTP_REQUIRED" as const };
         } catch (error) {
           logSafeStytchDiagnostic(error, "login");
           throw stytchErrorToTrpc(error);

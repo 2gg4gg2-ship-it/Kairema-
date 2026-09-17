@@ -64,12 +64,12 @@ export default function Welcome() {
     try {
       const result = await loginMutation.mutateAsync({ email, password });
       setPassword("");
-      if (result.state === "SIGNED_IN") {
-        window.location.assign("/");
+      if (result.state === "OTP_REQUIRED") {
+        setEmailView("verify");
+        setNotice("Мы отправили 6-значный код на email. Введите его для входа.");
         return;
       }
-      setEmailView("verify");
-      setNotice("Сначала подтвердите email по ссылке из письма. При необходимости запросите новую ссылку.");
+      setNotice("Не удалось подтвердить email или пароль. Попробуйте снова либо восстановите пароль.");
     } catch {
       setNotice("Не удалось подтвердить email или пароль. Попробуйте снова либо восстановите пароль.");
     }
