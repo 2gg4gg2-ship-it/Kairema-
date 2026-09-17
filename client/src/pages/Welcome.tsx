@@ -105,8 +105,9 @@ export default function Welcome() {
     try {
       await resetStartMutation.mutateAsync({ email });
       setNotice("Если этот адрес доступен для восстановления, ссылка отправлена. Откройте её в этом же браузере.");
-    } catch {
-      setNotice("Восстановление пароля временно недоступно. Повторите попытку позже.");
+    } catch (error) {
+      const trpcError = error as { data?: { code?: string }; message?: string };
+      setNotice(trpcError?.message ?? "Восстановление пароля временно недоступно. Повторите попытку позже.");
     }
   };
 

@@ -254,10 +254,10 @@ export const appRouter = router({
         try {
           const callbackUrl = getStytchCallbackUrl();
           await getStytchClient().passwords.email.resetStart({ email: input.email, locale: "en", reset_password_redirect_url: callbackUrl, login_redirect_url: callbackUrl });
+          return { state: "DELIVERY_REQUESTED" as const };
         } catch (error) {
-          if (toSafeStytchError(error).safeCode === "UNAVAILABLE") throw stytchErrorToTrpc(error);
+          throw stytchErrorToTrpc(error);
         }
-        return { state: "DELIVERY_REQUESTED" as const };
       }),
       completePasswordReset: publicProcedure.input(z.object({ password: z.string().min(8).max(256) })).mutation(async ({ ctx, input }) => {
         const providerResetToken = getStytchResetToken(ctx.req);
