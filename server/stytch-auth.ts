@@ -88,14 +88,20 @@ export function registerStytchAuthRoutes(app: Express) {
         return;
       }
 
-      await resolveOrCreateProviderUser({
-        provider: STYTCH_PROVIDER,
-        providerSubject: result.user.user_id,
-        canonicalOpenId: stytchCanonicalOpenId(result.user.user_id),
-        verifiedEmail,
-        displayName: result.user.name?.first_name ?? null,
-        loginMethod: "stytch-password",
-      });
+      try {
+        await resolveOrCreateProviderUser({
+          provider: STYTCH_PROVIDER,
+          providerSubject: result.user.user_id,
+          canonicalOpenId: stytchCanonicalOpenId(result.user.user_id),
+          verifiedEmail,
+          displayName: result.user.name?.first_name ?? null,
+          loginMethod: "stytch-password",
+        });
+        console.log("[CANONICAL_USER_OK]");
+      } catch (error) {
+        console.log(`[CANONICAL_USER_ERROR] stage=resolve_provider error_name=${error?.constructor?.name ?? "Error"}`);
+        throw error;
+      }
       setStytchSessionCookie(res, req, result.session_token);
       // Choosing a verified provider session is an explicit account switch.
       // Existing Manus OAuth remains supported but is not left ambiguous.
