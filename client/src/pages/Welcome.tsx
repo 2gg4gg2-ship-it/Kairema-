@@ -2,6 +2,7 @@ import { ArrowLeft, ArrowRight, Check, KeyRound, LockKeyhole, Mail, ShieldCheck,
 import { useState } from "react";
 import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
+import { InputOTP, InputOTPSlot } from "@/components/ui/input-otp";
 
 type EmailAuthView = "start" | "login" | "register" | "verify" | "recovery" | "reset";
 
@@ -25,10 +26,12 @@ export default function Welcome() {
 
   const registerMutation = trpc.auth.stytch.register.useMutation();
   const loginMutation = trpc.auth.stytch.login.useMutation();
+  const verifyOtpMutation = trpc.auth.stytch.verifyOtp.useMutation();
   const resendMutation = trpc.auth.stytch.resendVerification.useMutation();
   const resetStartMutation = trpc.auth.stytch.requestPasswordReset.useMutation();
   const resetCompleteMutation = trpc.auth.stytch.completePasswordReset.useMutation();
-  const pending = registerMutation.isPending || loginMutation.isPending || resendMutation.isPending || resetStartMutation.isPending || resetCompleteMutation.isPending;
+  const [otpCode, setOtpCode] = useState("");
+  const pending = registerMutation.isPending || loginMutation.isPending || verifyOtpMutation.isPending || resendMutation.isPending || resetStartMutation.isPending || resetCompleteMutation.isPending;
 
   const showStart = () => {
     setEmailView("start");
@@ -64,6 +67,7 @@ export default function Welcome() {
     try {
       const result = await loginMutation.mutateAsync({ email, password });
       setPassword("");
+      setOtpCode("");
       if (result.state === "OTP_REQUIRED") {
         setEmailView("verify");
         setNotice("Мы отправили 6-значный код на email. Введите его для входа.");
@@ -77,10 +81,22 @@ export default function Welcome() {
 
   const resendVerification = async () => {
     try {
-      await resendMutation.mutateAsync({ email });
-      setNotice("Если этот адрес доступен для подтверждения, новая ссылка отправлена.");
+      await loginMutation.mutateAsync({ email, password });
+      setNotice("Новый код отправлен. Проверьте почту.");
     } catch {
-      setNotice("Отправка ссылки временно недоступна. Повторите попытку позже.");
+      setNotice("Отправка кода временно недоступна. Повторите попытку позже.");
+    }
+  };
+
+  const submitOtp = async () => {
+    try {
+      const result = await verifyOtpMutation.mutateAsync({ code: otpCode });
+      if (result.state === "SIGNED_IN") {
+        setOtpCode("");
+        window.location.assign("/");
+      }
+    } catch {
+      setNotice("Неверный код. Попробуйте снова.");
     }
   };
 
@@ -115,8 +131,12 @@ export default function Welcome() {
     if (emailView === "verify") {
       return <section className="kairema-auth-gate__email" aria-labelledby="email-verify-title">
         <div className="kairema-auth-gate__email-heading"><Mail className="size-4" aria-hidden="true" /><h2 id="email-verify-title">Подтвердите email</h2></div>
-        <p>Ссылка подтверждается защищённым провайдером. Kairema не создаёт и не хранит токены подтверждения.</p>
-        <button type="button" className="kairema-auth-gate__google" disabled={pending || !email} onClick={() => void resendVerification()}>Отправить ссылку повторно</button>
+        <p>Введите 6-значный код из письма. Kairema не создаёт и не хранит токены подтверждения.</p>
+        <InputOTP maxLength={6} value={otpCode} onChange={setOtpCode} disabled={verifyOtpMutation.isPending}>
+          <InputOTPSlot index={0} /><InputOTPSlot index={1} /><InputOTPSlot index={2} /><InputOTPSlot index={3} /><InputOTPSlot index={4} /><InputOTPSlot index={5} />
+        </InputOTP>
+        <button type="button" className="kairema-auth-gate__google" disabled={pending || !email || otpCode.length < 6} onClick={() => void submitOtp()}>Подтвердить код</button>
+        <button type="button" className="kairema-auth-gate__google" disabled={pending || !email || !password} onClick={() => void resendVerification()}>Запросить новый код</button>
         <button type="button" className="kairema-auth-gate__text-button" onClick={showStart}>Вернуться к выбору входа</button>
       </section>;
     }
