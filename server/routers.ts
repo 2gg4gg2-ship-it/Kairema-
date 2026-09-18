@@ -243,7 +243,7 @@ export const appRouter = router({
           });
           setStytchOtpEmailIdCookie(ctx.res, ctx.req, otpResult.email_id);
           setStytchPasswordSessionCookie(ctx.res, ctx.req, result.session_token);
-          console.error("[OTP_SESSION_LINKED] stage=password_to_otp");
+          console.error(`[login] otp_sent emailIdPrefix=${otpResult.email_id?.slice(0,8) ?? "none"} sessionPrefix=${result.session_token?.slice(0,8) ?? "none"}`);
           return { state: "OTP_REQUIRED" as const };
         } catch (error) {
           logSafeStytchDiagnostic(error, "login");
@@ -253,6 +253,7 @@ export const appRouter = router({
       verifyOtp: publicProcedure.input(z.object({ code: z.string().min(6).max(6) })).mutation(async ({ ctx, input }) => {
         const emailId = getStytchOtpEmailId(ctx.req);
         const passwordSessionToken = getStytchPasswordSessionToken(ctx.req);
+        console.error(`[verifyOtp] entry hasEmailId=${!!emailId} hasPasswordSession=${!!passwordSessionToken} emailIdPrefix=${emailId?.slice(0,8) ?? "none"} sessionPrefix=${passwordSessionToken?.slice(0,8) ?? "none"}`);
         if (!emailId) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Запросите код подтверждения." });
         }
@@ -266,6 +267,7 @@ export const appRouter = router({
             session_token: passwordSessionToken,
             session_duration_minutes: STYTCH_SESSION_DURATION_MINUTES,
           });
+          console.error(`[verifyOtp] stytch_ok user_id=${result.user.user_id}`);
           const verifiedEmail = getVerifiedStytchEmail(result.user);
           if (!verifiedEmail) {
             await revokeStytchSessionToken(result.session_token);
