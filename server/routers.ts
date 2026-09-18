@@ -278,6 +278,9 @@ export const appRouter = router({
           await getStytchClient().passwords.email.resetStart({ email: input.email, locale: "en", reset_password_redirect_url: callbackUrl, login_redirect_url: callbackUrl });
           return { state: "DELIVERY_REQUESTED" as const };
         } catch (error) {
+          if (error instanceof StytchError) {
+            console.error(`[PASSWORD_RESET_ERROR] status_code=${error.status_code} error_type=${error.error_type} request_id=${error.request_id}`);
+          }
           throw stytchResetErrorToTrpc(error);
         }
       }),
