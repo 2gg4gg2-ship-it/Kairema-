@@ -10,12 +10,14 @@ export const STYTCH_RESET_COOKIE = "__Host-kairema-stytch-reset";
 export const STYTCH_LINK_INTENT_COOKIE = "__Host-kairema-stytch-link-intent";
 export const STYTCH_OTP_EMAIL_ID_COOKIE = "__Host-kairema-stytch-otp-email-id";
 export const STYTCH_PASSWORD_SESSION_COOKIE = "__Host-kairema-stytch-password-session";
+export const STYTCH_PASSWORD_RECOVERY_EMAIL_COOKIE = "__Host-kairema-stytch-password-recovery-email";
 export const STYTCH_SESSION_DURATION_MINUTES = 10_080; // provider-managed seven-day maximum
 const STYTCH_SESSION_MAX_AGE_MS = STYTCH_SESSION_DURATION_MINUTES * 60_000;
 const STYTCH_RESET_MAX_AGE_MS = 30 * 60_000;
 const STYTCH_LINK_INTENT_MAX_AGE_MS = 10 * 60_000;
 const STYTCH_OTP_EMAIL_ID_MAX_AGE_MS = 10 * 60_000;
 const STYTCH_PASSWORD_SESSION_MAX_AGE_MS = 10 * 60_000;
+const STYTCH_PASSWORD_RECOVERY_EMAIL_MAX_AGE_MS = 10 * 60_000;
 
 export class StytchProviderError extends Error {
   constructor(public readonly safeCode: "UNAVAILABLE" | "INVALID" | "EXPIRED") {
@@ -186,6 +188,25 @@ export function clearStytchPasswordSessionCookie(res: Response, req: Request) {
 export function getStytchPasswordSessionToken(req: Request) {
   const value = parseCookieHeader(req.headers.cookie ?? "")[STYTCH_PASSWORD_SESSION_COOKIE];
   return value && value.length <= 512 ? value : null;
+}
+
+export function setStytchPasswordRecoveryEmailCookie(res: Response, req: Request, email: string) {
+  res.cookie(STYTCH_PASSWORD_RECOVERY_EMAIL_COOKIE, email, {
+    ...getSessionCookieOptions(req),
+    maxAge: STYTCH_PASSWORD_RECOVERY_EMAIL_MAX_AGE_MS,
+  });
+}
+
+export function clearStytchPasswordRecoveryEmailCookie(res: Response, req: Request) {
+  res.clearCookie(STYTCH_PASSWORD_RECOVERY_EMAIL_COOKIE, {
+    ...getSessionCookieOptions(req),
+    maxAge: -1,
+  });
+}
+
+export function getStytchPasswordRecoveryEmail(req: Request) {
+  const value = parseCookieHeader(req.headers.cookie ?? "")[STYTCH_PASSWORD_RECOVERY_EMAIL_COOKIE];
+  return value && value.length <= 320 ? value : null;
 }
 
 export function getStytchOtpEmailId(req: Request) {

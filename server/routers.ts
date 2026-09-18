@@ -3,7 +3,7 @@ import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
 import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
-import { clearStytchLinkIntentCookie, clearStytchOtpEmailIdCookie, clearStytchPasswordSessionCookie, clearStytchResetCookie, clearStytchSessionCookie, getSafeStytchDeliveryFailure, getStytchCallbackUrl, getStytchClient, getStytchOtpEmailId, getStytchPasswordSessionToken, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, logSafeStytchDiagnostic, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchOtpEmailIdCookie, setStytchPasswordSessionCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
+import { clearStytchLinkIntentCookie, clearStytchOtpEmailIdCookie, clearStytchPasswordRecoveryEmailCookie, clearStytchPasswordSessionCookie, clearStytchResetCookie, clearStytchSessionCookie, getSafeStytchDeliveryFailure, getStytchCallbackUrl, getStytchClient, getStytchOtpEmailId, getStytchPasswordRecoveryEmail, getStytchPasswordSessionToken, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, logSafeStytchDiagnostic, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchOtpEmailIdCookie, setStytchPasswordRecoveryEmailCookie, setStytchPasswordSessionCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
 import Stytch, { StytchError } from "stytch";
 import { resolveOrCreateProviderUser } from "./db";
 import { systemRouter } from "./_core/systemRouter";
@@ -208,8 +208,26 @@ export const appRouter = router({
           // with the established provider error normalizer.
           if (toSafeStytchError(error).safeCode === "UNAVAILABLE") throw stytchErrorToTrpc(error);
         }
-        // Deliberately generic to avoid account enumeration.
+// Deliberately generic to avoid account enumeration.
         return { state: "DELIVERY_REQUESTED" as const };
+      }),
+      startPasswordRecovery: publicProcedure.input(stytchEmailSchema).mutation(async ({ ctx, input }) => {
+        try {
+          const otpResult = await getStytchClient().otps.email.send({
+            email: input.email,
+            expiration_minutes: 10,
+          });
+          setStytchOtpEmailIdCookie(ctx.res, ctx.req, otpResult.email_id);
+          setStytchPasswordRecoveryEmailCookie(ctx.res, ctx.req, input.email);
+          console.error("[PASSWORD_RECOVERY_OTP_SENT] status=200");
+          return { state: "OTP_REQUIRED" as const };
+        } catch (error) {
+          if (error instanceof StytchError) {
+            console.error(`[PASSWORD_RECOVERY_OTP_ERROR] status_code=${error.status_code} error_type=${error.error_type} request_id=${error.request_id}`);
+          }
+          logSafeStytchDiagnostic(error, "start_password_recovery");
+          throw stytchErrorToTrpc(error);
+        }
       }),
       login: publicProcedure.input(stytchCredentialsSchema).mutation(async ({ ctx, input }) => {
         try {
