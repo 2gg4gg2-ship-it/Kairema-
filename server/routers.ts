@@ -3,7 +3,7 @@ import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
 import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
-import { clearStytchLinkIntentCookie, clearStytchOtpEmailIdCookie, clearStytchResetCookie, clearStytchSessionCookie, getSafeStytchDeliveryFailure, getStytchCallbackUrl, getStytchClient, getStytchOtpEmailId, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, logSafeStytchDiagnostic, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchOtpEmailIdCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
+import { clearStytchLinkIntentCookie, clearStytchOtpEmailIdCookie, clearStytchPasswordSessionCookie, clearStytchResetCookie, clearStytchSessionCookie, getSafeStytchDeliveryFailure, getStytchCallbackUrl, getStytchClient, getStytchOtpEmailId, getStytchPasswordSessionToken, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, logSafeStytchDiagnostic, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchOtpEmailIdCookie, setStytchPasswordSessionCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
 import Stytch, { StytchError } from "stytch";
 import { resolveOrCreateProviderUser } from "./db";
 import { systemRouter } from "./_core/systemRouter";
@@ -176,12 +176,17 @@ export const appRouter = router({
       return { success: true } as const;
     }),
     stytch: router({
-      register: publicProcedure.input(stytchCredentialsSchema).mutation(async ({ input }) => {
+      register: publicProcedure.input(stytchCredentialsSchema).mutation(async ({ ctx, input }) => {
         try {
-          await getStytchClient().passwords.create({ email: input.email, password: input.password });
-          const callbackUrl = getStytchCallbackUrl();
-          await getStytchClient().magicLinks.email.loginOrCreate({ email: input.email, locale: "en", login_magic_link_url: callbackUrl, signup_magic_link_url: callbackUrl });
-          return { state: "VERIFICATION_REQUIRED" as const };
+          const createResult = await getStytchClient().passwords.create({ email: input.email, password: input.password });
+          const otpResult = await getStytchClient().otps.email.send({
+            email: input.email,
+            expiration_minutes: 10,
+            session_token: createResult.session_token,
+          });
+          setStytchOtpEmailIdCookie(ctx.res, ctx.req, otpResult.email_id);
+          setStytchPasswordSessionCookie(ctx.res, ctx.req, createResult.session_token);
+          return { state: "OTP_REQUIRED" as const };
         } catch (error) {
           throw stytchErrorToTrpc(error);
         }
@@ -213,9 +218,14 @@ export const appRouter = router({
             password: input.password,
             session_duration_minutes: STYTCH_SESSION_DURATION_MINUTES,
           });
-          await revokeStytchSessionToken(result.session_token);
-          const otpResult = await getStytchClient().otps.email.send({ email: input.email, expiration_minutes: 10 });
+          const otpResult = await getStytchClient().otps.email.send({
+            email: input.email,
+            expiration_minutes: 10,
+            session_token: result.session_token,
+          });
           setStytchOtpEmailIdCookie(ctx.res, ctx.req, otpResult.email_id);
+          setStytchPasswordSessionCookie(ctx.res, ctx.req, result.session_token);
+          console.error("[OTP_SESSION_LINKED] stage=password_to_otp");
           return { state: "OTP_REQUIRED" as const };
         } catch (error) {
           logSafeStytchDiagnostic(error, "login");
@@ -224,19 +234,25 @@ export const appRouter = router({
       }),
       verifyOtp: publicProcedure.input(z.object({ code: z.string().min(6).max(6) })).mutation(async ({ ctx, input }) => {
         const emailId = getStytchOtpEmailId(ctx.req);
+        const passwordSessionToken = getStytchPasswordSessionToken(ctx.req);
         if (!emailId) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Запросите код подтверждения." });
+        }
+        if (!passwordSessionToken) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Сессия пароля истекла. Войдите снова." });
         }
         try {
           const result = await getStytchClient().otps.authenticate({
             method_id: emailId,
             code: input.code,
+            session_token: passwordSessionToken,
             session_duration_minutes: STYTCH_SESSION_DURATION_MINUTES,
           });
           const verifiedEmail = getVerifiedStytchEmail(result.user);
           if (!verifiedEmail) {
             await revokeStytchSessionToken(result.session_token);
             clearStytchOtpEmailIdCookie(ctx.res, ctx.req);
+            clearStytchPasswordSessionCookie(ctx.res, ctx.req);
             throw new TRPCError({ code: "FORBIDDEN", message: "Email не подтверждён." });
           }
           let canonicalUser;
@@ -257,14 +273,17 @@ export const appRouter = router({
           if (!canonicalUser) {
             await revokeStytchSessionToken(result.session_token);
             clearStytchOtpEmailIdCookie(ctx.res, ctx.req);
+            clearStytchPasswordSessionCookie(ctx.res, ctx.req);
             throw new TRPCError({ code: "FORBIDDEN", message: "Пользователь не найден." });
           }
           setStytchSessionCookie(ctx.res, ctx.req, result.session_token);
           clearStytchOtpEmailIdCookie(ctx.res, ctx.req);
+          clearStytchPasswordSessionCookie(ctx.res, ctx.req);
           ctx.res.clearCookie(COOKIE_NAME, { ...getSessionCookieOptions(ctx.req), maxAge: -1 });
           return { state: "SIGNED_IN" as const };
         } catch (error) {
           clearStytchOtpEmailIdCookie(ctx.res, ctx.req);
+          clearStytchPasswordSessionCookie(ctx.res, ctx.req);
           if (error instanceof StytchError) {
             console.error(`[OTP Verify StytchError] status_code=${error.status_code} error_type=${error.error_type} request_id=${error.request_id} safe_message="Stytch authentication failed"`);
           }
