@@ -95,3 +95,81 @@ export async function storageGetSignedUrl(relKey: string): Promise<string> {
   const { url } = (await resp.json()) as { url: string };
   return url;
 }
+
+export async function storageDelete(relKey: string): Promise<boolean> {
+  const { forgeUrl, forgeKey } = getForgeConfig();
+  const key = normalizeKey(relKey);
+
+  const deleteUrl = new URL("v1/storage/delete", forgeUrl + "/");
+  deleteUrl.searchParams.set("path", key);
+
+  const resp = await fetch(deleteUrl, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${forgeKey}` },
+  });
+
+  if (!resp.ok) {
+    const msg = await resp.text().catch(() => resp.statusText);
+    throw new Error(`Storage delete failed (${resp.status}): ${msg}`);
+  }
+
+  return true;
+}
+
+export async function storageCopy(srcKey: string, destKey: string): Promise<{ key: string; url: string }> {
+  const { forgeUrl, forgeKey } = getForgeConfig();
+  const src = normalizeKey(srcKey);
+  const dest = normalizeKey(destKey);
+
+  // 1. Get presigned GET URL for source
+  const getUrl = new URL("v1/storage/presign/get", forgeUrl + "/");
+  getUrl.searchParams.set("path", src);
+
+  const getResp = await fetch(getUrl, {
+    headers: { Authorization: `Bearer ${forgeKey}` },
+  });
+
+  if (!getResp.ok) {
+    const msg = await getResp.text().catch(() => getResp.statusText);
+    throw new Error(`Storage get presign failed (${getResp.status}): ${msg}`);
+  }
+
+  const { url: s3GetUrl } = (await getResp.json()) as { url: string };
+  if (!s3GetUrl) throw new Error("Forge returned empty presign GET URL");
+
+  // 2. Download from source
+  const downloadResp = await fetch(s3GetUrl);
+  if (!downloadResp.ok) {
+    throw new Error(`Storage download failed (${downloadResp.status})`);
+  }
+  const blob = await downloadResp.blob();
+
+  // 3. Get presigned PUT URL for destination
+  const putUrl = new URL("v1/storage/presign/put", forgeUrl + "/");
+  putUrl.searchParams.set("path", dest);
+
+  const putResp = await fetch(putUrl, {
+    headers: { Authorization: `Bearer ${forgeKey}` },
+  });
+
+  if (!putResp.ok) {
+    const msg = await putResp.text().catch(() => putResp.statusText);
+    throw new Error(`Storage put presign failed (${putResp.status}): ${msg}`);
+  }
+
+  const { url: s3PutUrl } = (await putResp.json()) as { url: string };
+  if (!s3PutUrl) throw new Error("Forge returned empty presign PUT URL");
+
+  // 4. Upload to destination
+  const uploadResp = await fetch(s3PutUrl, {
+    method: "PUT",
+    headers: { "Content-Type": blob.type || "application/octet-stream" },
+    body: blob,
+  });
+
+  if (!uploadResp.ok) {
+    throw new Error(`Storage upload to destination failed (${uploadResp.status})`);
+  }
+
+  return { key: dest, url: `/manus-storage/${dest}` };
+}

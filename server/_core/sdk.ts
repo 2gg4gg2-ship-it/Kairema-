@@ -317,8 +317,8 @@ class SDKServer {
       return user;
     }
 
-    // 3. Guest session fallback (for chat-stream, attachment-upload raw routes)
-    // Only used when no valid regular session exists
+    // 3. Guest session validation ONLY (no auto-creation)
+    // Raw routes (chat-stream, attachment-upload) should call getOrCreateGuestUser explicitly when needed
     const guestToken = getGuestTokenFromCookie(req);
     if (guestToken) {
       const guest = await validateGuestToken(guestToken);

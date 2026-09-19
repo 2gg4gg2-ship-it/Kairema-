@@ -61,6 +61,39 @@ const requireGuest = t.middleware(async opts => {
 
 export const guestProcedure = t.procedure.use(requireGuest);
 
+const requireUserOrGuest = t.middleware(async opts => {
+  const { ctx, next } = opts;
+
+  if (ctx.user) {
+    return next({
+      ctx: {
+        ...ctx,
+        user: ctx.user,
+      },
+    });
+  }
+
+  const guest = await validateGuestSession(ctx.req, ctx.res);
+  if (!guest) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+  }
+
+  const user = await (await import("../db")).getUserById(guest.userId);
+  if (!user || user.isGuest !== 1) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+  }
+
+  return next({
+    ctx: {
+      ...ctx,
+      user,
+      isGuest: true,
+    },
+  });
+});
+
+export const userOrGuestProcedure = t.procedure.use(requireUserOrGuest);
+
 export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;

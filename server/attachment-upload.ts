@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import express from "express";
 import { AttachmentPublicError, uploadOwnedChatAttachmentBytes } from "./attachments";
 import { sdk } from "./_core/sdk";
+import { getOrCreateGuestUser } from "./_core/guest-session";
 
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const uploadParser = express.raw({ type: "application/octet-stream", limit: MAX_ATTACHMENT_BYTES });
@@ -10,11 +11,20 @@ class UploadRequestError extends Error {}
 
 type UploadDependencies = {
   authenticateRequest: (request: Request) => Promise<{ id: number } | null>;
+  getOrCreateGuestUser: (request: Request, response: Response) => Promise<{ id: number; isGuest: boolean } | null>;
   upload: typeof uploadOwnedChatAttachmentBytes;
 };
 
 const productionUploadDependencies: UploadDependencies = {
   authenticateRequest: request => sdk.authenticateRequest(request),
+  getOrCreateGuestUser: async (request, response) => {
+    try {
+      const guest = await getOrCreateGuestUser(request, response);
+      return { id: guest.userId, isGuest: guest.isNew || true };
+    } catch {
+      return null;
+    }
+  },
   upload: uploadOwnedChatAttachmentBytes,
 };
 
@@ -39,10 +49,18 @@ function decodedFileName(req: Request) {
 export async function handleAttachmentUpload(req: Request, res: Response, dependencies: UploadDependencies = productionUploadDependencies) {
   try {
     let user;
+    let isGuest = false;
     try {
       user = await dependencies.authenticateRequest(req);
     } catch {
-      return reject(res, 401, "Войдите, чтобы загрузить вложение.");
+      // Fall through to guest creation
+    }
+    if (!user) {
+      const guest = await dependencies.getOrCreateGuestUser(req, res).catch(() => null);
+      if (guest) {
+        user = { id: guest.id } as { id: number };
+        isGuest = true;
+      }
     }
     if (!user) return reject(res, 401, "Войдите, чтобы загрузить вложение.");
     const sessionId = requiredHeader(req, "X-Attachment-Session-Id");

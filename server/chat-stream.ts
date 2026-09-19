@@ -4,6 +4,7 @@ import { appendChatMessage, consumeChatStreamRequestQuota, enqueueMemoryExtracti
 import { sdk } from "./_core/sdk";
 import { MODEL_IDS, chatWithRoleStream, publicChatError, type Provider, type RoleId } from "./providers";
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
+import { getOrCreateGuestUser } from "./_core/guest-session";
 
 export const CHAT_STREAM_RATE_LIMIT = 60;
 export const CHAT_STREAM_MAX_ACTIVE_PER_INSTANCE = 12;
@@ -254,6 +255,7 @@ function publicStreamResult(result: Pick<StreamResult, "content" | "modelUsed" |
 
 type StreamDependencies = {
   authenticateRequest: (request: Request) => Promise<{ id: number } | null>;
+  getOrCreateGuestUser: (request: Request, response: Response) => Promise<{ id: number; isGuest: boolean } | null>;
   getOwnedChatSession: typeof getOwnedChatSession;
   getStoredAssistantForClientMessage: typeof getStoredAssistantForClientMessage;
   consumeChatStreamRequestQuota: typeof consumeChatStreamRequestQuota;
@@ -270,6 +272,14 @@ type StreamDependencies = {
 
 const defaultDependencies: StreamDependencies = {
   authenticateRequest: async (request) => sdk.authenticateRequest(request) as Promise<{ id: number }>,
+  getOrCreateGuestUser: async (request, response) => {
+    try {
+      const guest = await getOrCreateGuestUser(request, response);
+      return { id: guest.userId, isGuest: guest.isNew || true };
+    } catch {
+      return null;
+    }
+  },
   getOwnedChatSession,
   getStoredAssistantForClientMessage,
   consumeChatStreamRequestQuota,
@@ -287,7 +297,18 @@ const defaultDependencies: StreamDependencies = {
 export function createChatStreamHandler(overrides: Partial<StreamDependencies> = {}): RequestHandler {
   const dependencies = { ...defaultDependencies, ...overrides };
   return async (req: Request, res: Response) => {
-    const user = await dependencies.authenticateRequest(req).catch(() => null);
+    let user = await dependencies.authenticateRequest(req).catch(() => null);
+    let isGuest = false;
+
+    // If no regular auth, try to get or create guest session
+    if (!user) {
+      const guest = await dependencies.getOrCreateGuestUser(req, res).catch(() => null);
+      if (guest) {
+        user = { id: guest.id } as { id: number };
+        isGuest = true;
+      }
+    }
+
     if (!user) {
       res.status(401).json({ error: "Войдите, чтобы продолжить разговор." });
       return;

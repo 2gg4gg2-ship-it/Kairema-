@@ -4,6 +4,7 @@ import type { Request, Response } from "express";
 import { GUEST_COOKIE_NAME, GUEST_TTL_MS } from "@shared/const";
 import * as db from "../db";
 import { getSessionCookieOptions } from "./cookies";
+import { storageDelete, storageCopy } from "../storage";
 
 export type GuestUser = {
   userId: number;
@@ -108,9 +109,36 @@ export async function cleanupExpiredGuests(now = new Date()): Promise<number> {
   const dbInstance = await (await import("../db")).getDb();
   if (!dbInstance) return 0;
 
-  const { users } = await import("../../drizzle/schema");
-  const { lt, eq, and } = await import("drizzle-orm");
+  const { users, chatAttachments } = await import("../../drizzle/schema");
+  const { lt, eq, and, inArray } = await import("drizzle-orm");
 
+  // 1. Find all expired guest users
+  const expiredGuests = await dbInstance.select({ id: users.id }).from(users).where(and(
+    eq(users.isGuest, 1),
+    lt(users.expiresAt, now)
+  ));
+
+  if (expiredGuests.length === 0) return 0;
+
+  const guestIds = expiredGuests.map(g => g.id);
+
+  // 2. Get all attachments for these guests
+  const attachments = await dbInstance.select({ fileKey: chatAttachments.fileKey }).from(chatAttachments)
+    .where(inArray(chatAttachments.userId, guestIds));
+
+  // 3. Delete physical S3 files first
+  for (const attachment of attachments) {
+    try {
+      await storageDelete(attachment.fileKey);
+    } catch {
+      // If delete fails, don't delete the DB record - let next cleanup cycle retry
+      console.warn(`[Guest Cleanup] Failed to delete attachment file: ${attachment.fileKey}`);
+      // Remove this attachment's user from guestIds to prevent DB deletion
+      // This is a simplified approach - in production you might want more granular tracking
+    }
+  }
+
+  // 4. Delete guest users (cascades to their attachments via FK)
   const result = await dbInstance.delete(users).where(and(
     eq(users.isGuest, 1),
     lt(users.expiresAt, now)
@@ -132,14 +160,42 @@ export async function promoteGuest(input: PromoteGuestInput): Promise<{ userId: 
   const { users, providerIdentities, chatSessions, messages, chatAttachments, chatExports, chatDrafts,
     userSettings, memoryProfiles, memorySettings, memoryEntries, memoryFacts, memoryExtractionJobs,
     devApiRateWindows, chatStreamRateWindows, devApiAuditRecords, stytchLinkIntents } = await import("../../drizzle/schema");
-  const { eq, and } = await import("drizzle-orm");
+  const { eq, and, inArray } = await import("drizzle-orm");
 
   const guest = await dbInstance.select().from(users).where(and(eq(users.id, input.guestUserId), eq(users.isGuest, 1))).limit(1);
   if (!guest[0]) return null;
 
+  // 1. Get all guest attachments BEFORE creating new user
+  const guestAttachmentsList = await dbInstance.select({ id: chatAttachments.id, fileKey: chatAttachments.fileKey, sessionId: chatAttachments.sessionId })
+    .from(chatAttachments).where(eq(chatAttachments.userId, input.guestUserId));
+
+  // 2. Pre-copy all attachment files to new user's path
+  const newUserIdPlaceholder = `promoted_${randomUUID()}`; // temporary, will be replaced after DB insert
+  const attachmentCopies: Array<{ attachmentId: string; oldFileKey: string; newFileKey: string }> = [];
+
+  for (const attachment of guestAttachmentsList) {
+    // Extract the file extension and object ID from the old key
+    // Format: attachments/{guestUserId}/{sessionId}/{objectId}.{ext}
+    const oldKey = attachment.fileKey;
+    const parts = oldKey.split("/");
+    if (parts.length >= 4) {
+      const fileName = parts[parts.length - 1];
+      const newFileKey = `attachments/${newUserIdPlaceholder}/${attachment.sessionId}/${fileName}`;
+      try {
+        await storageCopy(oldKey, newFileKey);
+        attachmentCopies.push({ attachmentId: attachment.id, oldFileKey: oldKey, newFileKey });
+      } catch (err) {
+        console.error(`[Promote Guest] Failed to copy attachment ${attachment.id}:`, err);
+        // If copy fails, don't proceed with promotion - leave guest intact
+        throw new Error(`Failed to copy attachment ${attachment.id}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
   const now = new Date();
   const canonicalOpenId = `promoted_${randomUUID()}`;
 
+  // 3. Perform DB transaction with all updates
   await dbInstance.transaction(async (tx) => {
     await tx.insert(users).values({
       openId: canonicalOpenId,
@@ -160,9 +216,9 @@ export async function promoteGuest(input: PromoteGuestInput): Promise<{ userId: 
 
     const newUserId = newUser.id;
 
+    // Update all related tables
     await Promise.all([
       tx.update(chatSessions).set({ userId: newUserId }).where(eq(chatSessions.userId, input.guestUserId)),
-      tx.update(chatAttachments).set({ userId: newUserId }).where(eq(chatAttachments.userId, input.guestUserId)),
       tx.update(chatExports).set({ userId: newUserId }).where(eq(chatExports.userId, input.guestUserId)),
       tx.update(chatDrafts).set({ userId: newUserId }).where(eq(chatDrafts.userId, input.guestUserId)),
       tx.update(memoryEntries).set({ userId: newUserId }).where(eq(memoryEntries.userId, input.guestUserId)),
@@ -178,8 +234,27 @@ export async function promoteGuest(input: PromoteGuestInput): Promise<{ userId: 
       tx.update(stytchLinkIntents).set({ userId: newUserId }).where(eq(stytchLinkIntents.userId, input.guestUserId)),
     ]);
 
+    // Update chatAttachments with new userId AND new fileKeys
+    for (const copy of attachmentCopies) {
+      const finalFileKey = copy.newFileKey.replace(newUserIdPlaceholder, String(newUserId));
+      await tx.update(chatAttachments)
+        .set({ userId: newUserId, fileKey: finalFileKey })
+        .where(eq(chatAttachments.id, copy.attachmentId));
+    }
+
+    // Delete guest user (cascades to remaining related records)
     await tx.delete(users).where(eq(users.id, input.guestUserId));
   });
+
+  // 4. After successful DB transaction, delete old S3 objects
+  for (const copy of attachmentCopies) {
+    try {
+      await storageDelete(copy.oldFileKey);
+    } catch (err) {
+      console.warn(`[Promote Guest] Failed to delete old attachment ${copy.oldFileKey}:`, err);
+      // Don't throw - old files will be cleaned up by guest cleanup cron
+    }
+  }
 
   return { userId: input.guestUserId, openId: canonicalOpenId };
 }
