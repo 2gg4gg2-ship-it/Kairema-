@@ -738,6 +738,15 @@ export async function chatWithRole(roleId: string, history: ChatMessage[], setti
     try {
       const response = await invoke(candidate, role, history, settings, false, undefined, budget);
       const content = contentFrom(await response.json());
+      console.info("[Kairema LLM]", JSON.stringify({
+        event: "chat.role_succeeded",
+        role: role.key,
+        requestId: budget.requestId,
+        provider: candidate.provider,
+        model: candidate.modelId,
+        displayName: candidate.displayName,
+        fallbackUsed: originalIndex > 0,
+      }));
       attempts.push(attempt(candidate, "ready"));
       const fallbackUsed = originalIndex > 0;
       if (candidate.provider === "orcarouter") await incrementProviderDailySuccess("orcarouter");
@@ -757,6 +766,14 @@ export async function chatWithRole(roleId: string, history: ChatMessage[], setti
     }
   }
   const finalError = last ?? new OpenRouterError(unconfigured());
+  console.info("[Kairema LLM]", JSON.stringify({
+    event: "chat.role_exhausted",
+    role: role.key,
+    requestId: budget.requestId,
+    attempts: attempts.map(a => ({ provider: a.provider, model: a.modelId, status: a.status, category: a.category, http: a.http })),
+    finalErrorCategory: finalError.status.category,
+    finalErrorMessage: finalError.status.confirmed,
+  }));
   await saveRoleRuntime(role.key, "unavailable", null, null);
   throw finalError;
   } finally {
@@ -838,6 +855,16 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
       } finally { emit("", true); reader.releaseLock(); }
       const content = sanitizeAssistantContent(emittedParts.join(""));
       if (!content) throw new OpenRouterError({ state: "error", badge: "Недоступно", category: "PARSE", http: 200, checkedAt: now(), confirmed: "После удаления reasoning-блоков не осталось финального ответа." });
+      console.info("[Kairema LLM]", JSON.stringify({
+        event: "chat.role_stream_succeeded",
+        role: role.key,
+        requestId: budget.requestId,
+        provider: candidate.provider,
+        model: candidate.modelId,
+        displayName: candidate.displayName,
+        fallbackUsed: originalIndex > 0,
+        latencyMs: Date.now() - attemptStartedAt,
+      }));
       attempts.push(attempt(candidate, "ready"));
       const fallbackUsed = originalIndex > 0;
       if (candidate.provider === "orcarouter") await incrementProviderDailySuccess("orcarouter");
