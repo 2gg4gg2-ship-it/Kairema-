@@ -430,6 +430,7 @@ async function invoke(candidate: Candidate, role: ModelConfig, history: ChatMess
   if (candidate.provider === "openrouter") { headers["HTTP-Referer"] = "https://kairema.manus.space"; headers["X-Title"] = "Kairema"; }
   let response: Response;
   let reservation: Awaited<ReturnType<CapacityGenerationLease["reserveAttempt"]>> | null = null;
+  const invokeStartedAt = Date.now();
   try {
     if (budget) {
       const attemptIndex = budget.used + 1;
@@ -447,18 +448,45 @@ async function invoke(candidate: Candidate, role: ModelConfig, history: ChatMess
         remainingBudget: budget.remaining,
       }));
     }
+    console.info("[Kairema LLM]", JSON.stringify({
+      event: "llm.invoke_start",
+      requestId: budget?.requestId ?? "no-budget",
+      provider: candidate.provider,
+      model: candidate.modelId,
+      role: role.key,
+      stream,
+    }));
     response = await fetch(ENDPOINTS[candidate.provider], {
       method: "POST",
       headers,
       body: JSON.stringify({ model: candidate.modelId, messages: buildOpenRouterMessages(role, history, settings), stream }),
       signal: timeoutSignal(signal, ATTEMPT_TIMEOUT_MS),
     });
+    console.info("[Kairema LLM]", JSON.stringify({
+      event: "llm.invoke_response",
+      requestId: budget?.requestId ?? "no-budget",
+      provider: candidate.provider,
+      model: candidate.modelId,
+      role: role.key,
+      httpStatus: response.status,
+      latencyMs: Date.now() - invokeStartedAt,
+    }));
   } catch (error) {
     if (error instanceof CapacityAdmissionError) throw error;
     if (reservation) await settleCapacityReservation(reservation, "settled").catch(() => undefined);
     if (signal?.aborted) throw error;
     const status = network(error);
     await recordProviderIssue(candidate.provider, status);
+    console.info("[Kairema LLM]", JSON.stringify({
+      event: "llm.invoke_error",
+      requestId: budget?.requestId ?? "no-budget",
+      provider: candidate.provider,
+      model: candidate.modelId,
+      role: role.key,
+      errorCategory: status.category,
+      errorMessage: status.confirmed,
+      latencyMs: Date.now() - invokeStartedAt,
+    }));
     throw new OpenRouterError(status);
   }
   try {
@@ -467,6 +495,17 @@ async function invoke(candidate: Candidate, role: ModelConfig, history: ChatMess
       try { body = await response.json(); } catch { body = { message: await response.text().catch(() => "") }; }
       const status = failure(response.status, body);
       await recordProviderIssue(candidate.provider, status, status.category === "RATE_LIMIT" ? retryAfterMs(response, body) : undefined);
+      console.info("[Kairema LLM]", JSON.stringify({
+        event: "llm.invoke_http_error",
+        requestId: budget?.requestId ?? "no-budget",
+        provider: candidate.provider,
+        model: candidate.modelId,
+        role: role.key,
+        httpStatus: response.status,
+        errorCategory: status.category,
+        errorMessage: status.confirmed,
+        latencyMs: Date.now() - invokeStartedAt,
+      }));
       throw new OpenRouterError(status);
     }
     return response;
@@ -732,6 +771,17 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
   const attempts: ChainAttempt[] = [];
   let last: OpenRouterError | null = null;
   const candidates = await controlledCandidates(role.chain);
+  console.info("[Kairema LLM]", JSON.stringify({
+    event: "chat.role_stream_start",
+    role: role.key,
+    candidates: candidates.map(({ candidate, control }) => ({
+      provider: candidate.provider,
+      model: candidate.modelId,
+      displayName: candidate.displayName,
+      disabled: control.disabled,
+      available: providerAvailable(candidate.provider),
+    })),
+  }));
   /** Every visible fragment is retained only for this request, so a reserve can continue in one answer bubble. */
   const emittedParts: string[] = [];
   if (settings?.imageUrls?.length && !candidates.some(({ candidate, control }) => !control.disabled && candidate.vision && providerAvailable(candidate.provider))) {
@@ -750,6 +800,17 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
     let visibleDeltaDelivered = false;
     let providerDeltaReceived = false;
     let flashDeadlineExpired = false;
+    console.info("[Kairema LLM]", JSON.stringify({
+      event: "chat.candidate_attempt",
+      requestId: budget.requestId,
+      role: role.key,
+      attemptIndex: index,
+      provider: candidate.provider,
+      model: candidate.modelId,
+      displayName: candidate.displayName,
+      originalIndex,
+      fallbackUsed: originalIndex > 0,
+    }));
     // A vision request can use only the dedicated vision candidate. Applying Flash's
     // text TTFT fallback deadline here would abort that sole candidate before a
     // normal image decode can yield its first token; the 25-second attempt limit
@@ -795,6 +856,20 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
       if (flashDeadlineExpired) await recordProviderIssue(candidate.provider, status);
       last = new OpenRouterError(status);
       attempts.push(attempt(candidate, "failed", status));
+      console.info("[Kairema LLM]", JSON.stringify({
+        event: "chat.candidate_failed",
+        requestId: budget.requestId,
+        role: role.key,
+        provider: candidate.provider,
+        model: candidate.modelId,
+        displayName: candidate.displayName,
+        errorCategory: status.category,
+        errorMessage: status.confirmed,
+        httpStatus: status.http,
+        latencyMs: Date.now() - attemptStartedAt,
+        fallbackUsed: originalIndex > 0,
+        willRetry: retryable(status),
+      }));
       if (visibleDeltaDelivered || providerDeltaReceived) await recordProviderIssue(candidate.provider, status);
       if (status.category === "RATE_LIMIT") await pause(300);
       if (!retryable(status)) break;
