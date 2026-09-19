@@ -7,10 +7,15 @@ export const users = mysqlTable("users", {
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  isGuest: int("isGuest").notNull().default(0),
+  expiresAt: timestamp("expiresAt"),
+  lastActivityAt: timestamp("lastActivityAt").defaultNow().notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
-});
+}, (table) => [
+  index("users_guest_expires_idx").on(table.isGuest, table.expiresAt),
+]);
 
 /**
  * Provider subject → canonical Kairema user mapping.

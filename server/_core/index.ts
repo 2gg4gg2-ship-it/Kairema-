@@ -11,6 +11,7 @@ import { registerAttachmentUploadRoute } from "../attachment-upload";
 import { registerProviderHealthScheduleRoute } from "../provider-health-schedule";
 import { registerKnowledgeScheduleRoute } from "../knowledge-schedule";
 import { registerMemoryExtractionScheduleRoute } from "../memory-extraction-schedule";
+import { registerGuestCleanupScheduleRoute } from "../guest-cleanup-schedule";
 import { registerDevRoute } from "../dev-api";
 import { registerStytchAuthRoutes } from "../stytch-auth";
 import { refreshProviderHealth } from "../providers";
@@ -50,6 +51,7 @@ async function startServer() {
   registerProviderHealthScheduleRoute(app);
   registerKnowledgeScheduleRoute(app);
   registerMemoryExtractionScheduleRoute(app);
+  registerGuestCleanupScheduleRoute(app);
   registerDevRoute(app);
   // tRPC API
   app.use(

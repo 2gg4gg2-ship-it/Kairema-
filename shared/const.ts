@@ -4,6 +4,10 @@ export const AXIOS_TIMEOUT_MS = 30_000;
 export const UNAUTHED_ERR_MSG = 'Please login (10001)';
 export const NOT_ADMIN_ERR_MSG = 'You do not have required permission (10002)';
 
+// Guest session cookie: __Host- prefix for host-only, HttpOnly, Secure, SameSite=None
+export const GUEST_COOKIE_NAME = "__Host-kairema-guest";
+export const GUEST_TTL_MS = 60 * 60 * 1000; // 1 hour sliding TTL
+
 // One-time nonce cookie that binds an OAuth login to the browser that started
 // it. The `__Host-` prefix forces the cookie host-only (Secure, Path=/, no
 // Domain), so a sibling *.manus.space site cannot plant a matching value in a

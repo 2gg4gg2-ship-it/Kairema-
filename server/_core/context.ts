@@ -8,6 +8,7 @@ export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
   res: CreateExpressContextOptions["res"];
   user: User | null;
+  isGuest: boolean;
 };
 
 export async function createContext(
@@ -40,9 +41,12 @@ export async function createContext(
     }
   }
 
+  const isGuest = user?.isGuest === 1;
+
   return {
     req: opts.req,
     res: opts.res,
     user,
+    isGuest,
   };
 }

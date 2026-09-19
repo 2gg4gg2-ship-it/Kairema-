@@ -34,6 +34,18 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       updateSet[field] = values[field];
     }
   }
+  if (user.isGuest !== undefined) {
+    values.isGuest = user.isGuest;
+    updateSet.isGuest = user.isGuest;
+  }
+  if (user.expiresAt !== undefined) {
+    values.expiresAt = user.expiresAt;
+    updateSet.expiresAt = user.expiresAt;
+  }
+  if (user.lastActivityAt !== undefined) {
+    values.lastActivityAt = user.lastActivityAt;
+    updateSet.lastActivityAt = user.lastActivityAt;
+  }
   if (user.role !== undefined) {
     values.role = user.role;
     updateSet.role = user.role;
@@ -56,6 +68,14 @@ export async function getUserById(userId: number) {
   if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   return result[0];
+}
+
+export async function updateUserActivity(userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(users)
+    .set({ lastActivityAt: new Date(), expiresAt: new Date(Date.now() + 60 * 60 * 1000) })
+    .where(eq(users.id, userId));
 }
 
 export async function getUserByProviderIdentity(provider: string, providerSubject: string) {

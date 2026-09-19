@@ -2,6 +2,7 @@ import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
+import { validateGuestSession } from "./guest-session";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -35,6 +36,30 @@ const requireUser = t.middleware(async opts => {
 });
 
 export const protectedProcedure = t.procedure.use(requireUser);
+
+const requireGuest = t.middleware(async opts => {
+  const { ctx, next } = opts;
+
+  const guest = await validateGuestSession(ctx.req, ctx.res);
+  if (!guest) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "Guest session required" });
+  }
+
+  const user = await (await import("../db")).getUserById(guest.userId);
+  if (!user || user.isGuest !== 1) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "Guest session required" });
+  }
+
+  return next({
+    ctx: {
+      ...ctx,
+      user,
+      isGuest: true,
+    },
+  });
+});
+
+export const guestProcedure = t.procedure.use(requireGuest);
 
 export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {

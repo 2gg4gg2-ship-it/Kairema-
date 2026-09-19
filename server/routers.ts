@@ -7,7 +7,7 @@ import { clearStytchLinkIntentCookie, clearStytchOtpEmailIdCookie, clearStytchPa
 import Stytch, { StytchError } from "stytch";
 import { resolveOrCreateProviderUser } from "./db";
 import { systemRouter } from "./_core/systemRouter";
-import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { protectedProcedure, publicProcedure, router, guestProcedure } from "./_core/trpc";
 import { ENV } from "./_core/env";
 import { MODEL_IDS, OWNER_CONTROL_TARGETS, PUBLIC_DASHBOARD_PROVIDERS, chatWithRole, getModelViews, getPublicProviderDashboard, isOwnerControlTarget, publicChatError } from "./providers";
 import { getOwnedAttachmentDownload, uploadOwnedChatAttachment } from "./attachments";
@@ -18,6 +18,8 @@ import { getKnowledgeAudit, getKnowledgeStatus, refreshKnowledgeBase } from "./k
 import { ownerClaimFingerprint } from "./owner-claim";
 import { getChatStreamRuntimeGaugeSnapshot } from "./chat-stream";
 import { getCapacityControllerSnapshot, getCapacityPolicy, listCapacityProviderBudgets, updateCapacityPolicy, updateCapacityProviderBudget } from "./capacity-controller";
+import { promoteGuest, clearGuestCookie } from "./_core/guest-session";
+import { GUEST_COOKIE_NAME } from "@shared/const";
 
 const settingsSchema = z.object({
   style: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional(),
@@ -175,6 +177,15 @@ export const appRouter = router({
       clearStytchLinkIntentCookie(ctx.res, ctx.req);
       return { success: true } as const;
     }),
+    promoteGuest: guestProcedure
+      .input(z.object({ email: z.string().trim().email().max(320), name: z.string().max(120).optional(), loginMethod: z.string().min(1).max(64) }))
+      .mutation(async ({ ctx, input }) => {
+        const result = await promoteGuest({ guestUserId: ctx.user.id, email: input.email, name: input.name ?? null, loginMethod: input.loginMethod });
+        if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Guest session not found or already promoted." });
+        // Clear guest cookie after promotion
+        clearGuestCookie(ctx.res, ctx.req);
+        return { success: true, openId: result.openId };
+      }),
     stytch: router({
       register: publicProcedure.input(stytchCredentialsSchema).mutation(async ({ ctx, input }) => {
         try {
@@ -480,13 +491,13 @@ export const appRouter = router({
     }),
   }),
   memory: router({
-    get: protectedProcedure.query(async ({ ctx }) => {
+    get: guestProcedure.query(async ({ ctx }) => {
       const [settings, profile, facts, topics] = await Promise.all([
         getMemorySettings(ctx.user.id), getMemoryProfile(ctx.user.id), listMemoryEntries(ctx.user.id, "fact"), listMemoryEntries(ctx.user.id, "dialog_topic"),
       ]);
       return { settings, profile, facts, topics };
     }),
-    update: protectedProcedure.input(z.object({ enabled: z.boolean().optional(), autoExtract: z.boolean().optional(), profile: z.string().max(5_000).optional() })).mutation(async ({ ctx, input }) => {
+    update: guestProcedure.input(z.object({ enabled: z.boolean().optional(), autoExtract: z.boolean().optional(), profile: z.string().max(5_000).optional() })).mutation(async ({ ctx, input }) => {
       const { enabled, autoExtract, ...rest } = input;
       const [settings, profile] = await Promise.all([
         updateMemorySettings(ctx.user.id, { ...(enabled === undefined ? {} : { enabled: enabled ? 1 : 0 }), ...(autoExtract === undefined ? {} : { autoExtract: autoExtract ? 1 : 0 }) }),
@@ -494,27 +505,27 @@ export const appRouter = router({
       ]);
       return { settings, profile };
     }),
-    addFact: protectedProcedure.input(z.object({ fact: z.string().trim().min(3).max(280) })).mutation(async ({ ctx, input }) => {
+    addFact: guestProcedure.input(z.object({ fact: z.string().trim().min(3).max(280) })).mutation(async ({ ctx, input }) => {
       const fact = await upsertMemoryEntry(ctx.user.id, "fact", input.fact, { source: "manual" });
       if (!fact) throw new TRPCError({ code: "CONFLICT", message: "Такой факт уже есть в памяти." });
       return fact;
     }),
-    listEntries: protectedProcedure.input(z.object({ category: z.enum(["profile", "fact", "dialog_topic"]) })).query(({ ctx, input }) => listMemoryEntries(ctx.user.id, input.category)),
-    addEntry: protectedProcedure.input(z.object({ category: z.enum(["profile", "fact", "dialog_topic"]), value: z.string().trim().min(3).max(500) })).mutation(async ({ ctx, input }) => {
+    listEntries: guestProcedure.input(z.object({ category: z.enum(["profile", "fact", "dialog_topic"]) })).query(({ ctx, input }) => listMemoryEntries(ctx.user.id, input.category)),
+    addEntry: guestProcedure.input(z.object({ category: z.enum(["profile", "fact", "dialog_topic"]), value: z.string().trim().min(3).max(500) })).mutation(async ({ ctx, input }) => {
       if (input.category === "dialog_topic") throw new TRPCError({ code: "BAD_REQUEST", message: "Темы диалога формируются только после завершённого ответа." });
       const entry = await upsertMemoryEntry(ctx.user.id, input.category, input.value, { source: "manual" });
       if (!entry) throw new TRPCError({ code: "CONFLICT", message: "Такая запись уже есть в памяти." });
       return entry;
     }),
-    deleteEntry: protectedProcedure.input(z.object({ entryId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    deleteEntry: guestProcedure.input(z.object({ entryId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
       if (!await deleteMemoryEntry(ctx.user.id, input.entryId)) throw new TRPCError({ code: "NOT_FOUND", message: "Запись памяти не найдена или недоступна." });
       return { success: true } as const;
     }),
-    clearCategory: protectedProcedure.input(z.object({ category: z.enum(["profile", "fact", "dialog_topic"]) })).mutation(async ({ ctx, input }) => {
+    clearCategory: guestProcedure.input(z.object({ category: z.enum(["profile", "fact", "dialog_topic"]) })).mutation(async ({ ctx, input }) => {
       await clearMemoryByCategory(ctx.user.id, input.category);
       return { success: true } as const;
     }),
-    clear: protectedProcedure.mutation(async ({ ctx }) => {
+    clear: guestProcedure.mutation(async ({ ctx }) => {
       await clearAllMemory(ctx.user.id);
       return { success: true } as const;
     }),
@@ -551,7 +562,7 @@ export const appRouter = router({
     }),
   }),
   attachments: router({
-    list: protectedProcedure.input(z.object({ sessionId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    list: guestProcedure.input(z.object({ sessionId: z.string().uuid() })).query(async ({ ctx, input }) => {
       try {
         const attachments = await listSessionAttachments(ctx.user.id, input.sessionId);
         return Promise.all(attachments.map(async (attachment) => ({
@@ -562,7 +573,7 @@ export const appRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: storageError(error) });
       }
     }),
-    upload: protectedProcedure.input(attachmentInputSchema).mutation(async ({ ctx, input }) => {
+    upload: guestProcedure.input(attachmentInputSchema).mutation(async ({ ctx, input }) => {
       try {
         const attachment = await uploadOwnedChatAttachment(ctx.user.id, input);
         return { ...attachment, previewUrl: (await getOwnedAttachmentDownload(ctx.user.id, attachment.id)).url };
@@ -570,14 +581,14 @@ export const appRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Не удалось загрузить вложение." });
       }
     }),
-    download: protectedProcedure.input(z.object({ attachmentId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    download: guestProcedure.input(z.object({ attachmentId: z.string().uuid() })).query(async ({ ctx, input }) => {
       try {
         return await getOwnedAttachmentDownload(ctx.user.id, input.attachmentId);
       } catch (error) {
         throw new TRPCError({ code: "NOT_FOUND", message: error instanceof Error ? error.message : "Вложение не найдено или недоступно." });
       }
     }),
-    delete: protectedProcedure.input(z.object({ attachmentId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    delete: guestProcedure.input(z.object({ attachmentId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
       if (!await deleteOwnedChatAttachment(ctx.user.id, input.attachmentId)) throw new TRPCError({ code: "NOT_FOUND", message: "Вложение не найдено или недоступно." });
       return { success: true } as const;
     }),
@@ -611,8 +622,8 @@ export const appRouter = router({
     }),
   }),
   chats: router({
-    list: protectedProcedure.query(({ ctx }) => listChatSessions(ctx.user.id)),
-    create: protectedProcedure
+    list: guestProcedure.query(({ ctx }) => listChatSessions(ctx.user.id)),
+    create: guestProcedure
       .input(z.object({ modelId: modelIdSchema }))
       .mutation(async ({ ctx, input }) => {
         try {
@@ -621,7 +632,7 @@ export const appRouter = router({
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: storageError(error) });
         }
       }),
-    messages: protectedProcedure
+    messages: guestProcedure
       .input(z.object({ sessionId: z.string().uuid() }))
       .query(async ({ ctx, input }) => {
         try {
@@ -630,7 +641,7 @@ export const appRouter = router({
           throw new TRPCError({ code: "NOT_FOUND", message: storageError(error) });
         }
       }),
-    historyPage: protectedProcedure
+    historyPage: guestProcedure
       .input(z.object({ sessionId: z.string().uuid(), before: z.string().min(1).max(512).optional(), limit: z.number().int().min(1).max(100).default(60) }))
       .query(async ({ ctx, input }) => {
         try {
@@ -642,28 +653,28 @@ export const appRouter = router({
           throw new TRPCError({ code: "NOT_FOUND", message: storageError(error) });
         }
       }),
-    draft: protectedProcedure.input(z.object({ sessionId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    draft: guestProcedure.input(z.object({ sessionId: z.string().uuid() })).query(async ({ ctx, input }) => {
       try {
         return await getOwnedChatDraft(ctx.user.id, input.sessionId);
       } catch {
         throw new TRPCError({ code: "NOT_FOUND", message: "Чат не найден или недоступен." });
       }
     }),
-    saveDraft: protectedProcedure.input(z.object({ sessionId: z.string().uuid(), content: z.string().max(16_000) })).mutation(async ({ ctx, input }) => {
+    saveDraft: guestProcedure.input(z.object({ sessionId: z.string().uuid(), content: z.string().max(16_000) })).mutation(async ({ ctx, input }) => {
       try {
         return await saveOwnedChatDraft(ctx.user.id, input.sessionId, input.content);
       } catch {
         throw new TRPCError({ code: "NOT_FOUND", message: "Чат не найден или недоступен." });
       }
     }),
-    clearDraft: protectedProcedure.input(z.object({ sessionId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    clearDraft: guestProcedure.input(z.object({ sessionId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
       try {
         return await clearOwnedChatDraft(ctx.user.id, input.sessionId);
       } catch {
         throw new TRPCError({ code: "NOT_FOUND", message: "Чат не найден или недоступен." });
       }
     }),
-    rename: protectedProcedure
+    rename: guestProcedure
       .input(z.object({ sessionId: z.string().uuid(), title: z.string().trim().min(1).max(255) }))
       .mutation(async ({ ctx, input }) => {
         try {
@@ -673,18 +684,18 @@ export const appRouter = router({
           throw new TRPCError({ code: "NOT_FOUND", message: storageError(error) });
         }
       }),
-    delete: protectedProcedure
+    delete: guestProcedure
       .input(z.object({ sessionId: z.string().uuid() }))
       .mutation(async ({ ctx, input }) => {
         const deleted = await deleteOwnedChatSession(ctx.user.id, input.sessionId);
         return { success: true, alreadyDeleted: !deleted } as const;
       }),
-    clearAll: protectedProcedure
+    clearAll: guestProcedure
       .mutation(async ({ ctx }) => {
         const deletedCount = await deleteAllOwnedChatSessions(ctx.user.id);
         return { success: true, deletedCount } as const;
       }),
-    send: protectedProcedure
+    send: guestProcedure
       .input(z.object({
         sessionId: z.string().uuid(),
         modelId: modelIdSchema,
