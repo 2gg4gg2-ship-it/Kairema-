@@ -7,4 +7,10 @@ export const ENV = {
   isProduction: process.env.NODE_ENV === "production",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  b2Endpoint: process.env.B2_ENDPOINT ?? "",
+  b2Region: process.env.B2_REGION ?? "",
+  b2Bucket: process.env.B2_BUCKET ?? "",
+  b2KeyId: process.env.B2_KEY_ID ?? "",
+  b2ApplicationKey: process.env.B2_APPLICATION_KEY ?? "",
+  storageBackend: (process.env.STORAGE_BACKEND as "forge" | "b2") ?? "forge",
 };
