@@ -11,8 +11,9 @@ export function registerB2SmokeTestRoute(app: Express) {
     }
 
     const results: Record<string, unknown> = {};
-    const originalKey = `smoke-test/original-${crypto.randomUUID()}`;
-    const copyKey = `smoke-test/copy-${crypto.randomUUID()}`;
+    const testId = crypto.randomUUID();
+    const originalKey = `__kairema_smoke__/${testId}/original`;
+    const copyKey = `__kairema_smoke__/${testId}/copy`;
     let originalUrl = "";
     let copyUrl = "";
 
