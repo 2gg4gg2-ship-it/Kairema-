@@ -13,6 +13,7 @@ import { registerKnowledgeScheduleRoute } from "../knowledge-schedule";
 import { registerMemoryExtractionScheduleRoute } from "../memory-extraction-schedule";
 import { registerGuestCleanupScheduleRoute } from "../guest-cleanup-schedule";
 import { registerDevRoute } from "../dev-api";
+import { registerB2SmokeTestRoute } from "../b2-smoke-test-route";
 import { registerStytchAuthRoutes } from "../stytch-auth";
 import { refreshProviderHealth } from "../providers";
 import { createContext } from "./context";
@@ -53,6 +54,7 @@ async function startServer() {
   registerMemoryExtractionScheduleRoute(app);
   registerGuestCleanupScheduleRoute(app);
   registerDevRoute(app);
+  registerB2SmokeTestRoute(app);
   // tRPC API
   app.use(
     "/api/trpc",
