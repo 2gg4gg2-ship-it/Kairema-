@@ -13,5 +13,4 @@ export const ENV = {
   b2KeyId: process.env.B2_KEY_ID ?? "",
   b2ApplicationKey: process.env.B2_APPLICATION_KEY ?? "",
   storageBackend: (process.env.STORAGE_BACKEND as "forge" | "b2") ?? "forge",
-  b2SmokeTestToken: process.env.B2_SMOKE_TEST_TOKEN ?? "",
 };
