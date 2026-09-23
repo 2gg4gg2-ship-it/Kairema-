@@ -16,34 +16,38 @@ export function registerB2SmokeTestRoute(app: Express) {
     const copyKey = `__kairema_smoke__/${testId}/copy`;
     let originalUrl = "";
     let copyUrl = "";
+    let actualOriginalKey = "";
+    let actualCopyKey = "";
 
     try {
       const putResult = await storagePut(originalKey, "b2-smoke-test-data", "text/plain");
+      actualOriginalKey = putResult.key;
       originalUrl = putResult.url;
-      results.put = { key: putResult.key, url: putResult.url };
+      results.put = { key: actualOriginalKey, url: putResult.url };
 
-      const signedUrl = await storageGetSignedUrl(originalKey);
+      const signedUrl = await storageGetSignedUrl(actualOriginalKey);
       results.getSignedUrl = { url: signedUrl };
 
-      const copyResult = await storageCopy(originalKey, copyKey);
+      const copyResult = await storageCopy(actualOriginalKey, copyKey);
+      actualCopyKey = copyResult.key;
       copyUrl = copyResult.url;
-      results.copy = { key: copyResult.key, url: copyResult.url };
+      results.copy = { key: actualCopyKey, url: copyResult.url };
 
-      const copySignedUrl = await storageGetSignedUrl(copyKey);
+      const copySignedUrl = await storageGetSignedUrl(actualCopyKey);
       results.copySignedUrl = { url: copySignedUrl };
 
-      const deleteOriginal = await storageDelete(originalKey);
+      const deleteOriginal = await storageDelete(actualOriginalKey);
       results.deleteOriginal = { success: deleteOriginal };
 
-      const deleteCopy = await storageDelete(copyKey);
+      const deleteCopy = await storageDelete(actualCopyKey);
       results.deleteCopy = { success: deleteCopy };
 
       res.json({ ok: true, results });
     } catch (error) {
       console.error("[B2SmokeTest] failed:", error);
       try {
-        if (originalUrl) await storageDelete(originalKey);
-        if (copyUrl) await storageDelete(copyKey);
+        if (originalUrl) await storageDelete(actualOriginalKey);
+        if (copyUrl) await storageDelete(actualCopyKey);
       } catch (cleanupError) {
         console.error("[B2SmokeTest] cleanup failed:", cleanupError);
       }
