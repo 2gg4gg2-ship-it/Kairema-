@@ -4,7 +4,7 @@ import type { Request, Response } from "express";
 import { GUEST_COOKIE_NAME, GUEST_TTL_MS } from "@shared/const";
 import * as db from "../db";
 import { getSessionCookieOptions } from "./cookies";
-import { storageDelete, storageCopy } from "../storage";
+import { storageDelete } from "../storage";
 
 export type GuestUser = {
   userId: number;
@@ -157,104 +157,41 @@ export async function promoteGuest(input: PromoteGuestInput): Promise<{ userId: 
   const dbInstance = await (await import("../db")).getDb();
   if (!dbInstance) return null;
 
-  const { users, providerIdentities, chatSessions, messages, chatAttachments, chatExports, chatDrafts,
-    userSettings, memoryProfiles, memorySettings, memoryEntries, memoryFacts, memoryExtractionJobs,
-    devApiRateWindows, chatStreamRateWindows, devApiAuditRecords, stytchLinkIntents } = await import("../../drizzle/schema");
-  const { eq, and, inArray } = await import("drizzle-orm");
-
-  const guest = await dbInstance.select().from(users).where(and(eq(users.id, input.guestUserId), eq(users.isGuest, 1))).limit(1);
-  if (!guest[0]) return null;
-
-  // 1. Get all guest attachments BEFORE creating new user
-  const guestAttachmentsList = await dbInstance.select({ id: chatAttachments.id, fileKey: chatAttachments.fileKey, sessionId: chatAttachments.sessionId })
-    .from(chatAttachments).where(eq(chatAttachments.userId, input.guestUserId));
-
-  // 2. Pre-copy all attachment files to new user's path
-  const newUserIdPlaceholder = `promoted_${randomUUID()}`; // temporary, will be replaced after DB insert
-  const attachmentCopies: Array<{ attachmentId: string; oldFileKey: string; newFileKey: string }> = [];
-
-  for (const attachment of guestAttachmentsList) {
-    // Extract the file extension and object ID from the old key
-    // Format: attachments/{guestUserId}/{sessionId}/{objectId}.{ext}
-    const oldKey = attachment.fileKey;
-    const parts = oldKey.split("/");
-    if (parts.length >= 4) {
-      const fileName = parts[parts.length - 1];
-      const newFileKey = `attachments/${newUserIdPlaceholder}/${attachment.sessionId}/${fileName}`;
-      try {
-        await storageCopy(oldKey, newFileKey);
-        attachmentCopies.push({ attachmentId: attachment.id, oldFileKey: oldKey, newFileKey });
-      } catch (err) {
-        console.error(`[Promote Guest] Failed to copy attachment ${attachment.id}:`, err);
-        // If copy fails, don't proceed with promotion - leave guest intact
-        throw new Error(`Failed to copy attachment ${attachment.id}: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-  }
+  const { users } = await import("../../drizzle/schema");
+  const { eq, and } = await import("drizzle-orm");
 
   const now = new Date();
   const canonicalOpenId = `promoted_${randomUUID()}`;
 
-  // 3. Perform DB transaction with all updates
-  await dbInstance.transaction(async (tx) => {
-    await tx.insert(users).values({
-      openId: canonicalOpenId,
-      email: input.email,
-      name: input.name ?? null,
-      loginMethod: input.loginMethod,
-      isGuest: 0,
-      expiresAt: null,
-      lastActivityAt: now,
-      lastSignedIn: now,
-      createdAt: now,
-      updatedAt: now,
-      role: "user",
-    });
+  // In-place conversion: UPDATE the existing guest row to a permanent user.
+  // The WHERE clause (isGuest = 1) makes this idempotent — a concurrent or
+  // repeat call affects 0 rows and returns null.
+  // No new user row is created, no attachments are copied in B2,
+  // and no other table ownership needs updating because FK references
+  // still point to the same user.id.
+  const result = await dbInstance.transaction(async (tx) => {
+    const updateResult = await tx.update(users)
+      .set({
+        isGuest: 0,
+        openId: canonicalOpenId,
+        email: input.email,
+        name: input.name ?? null,
+        loginMethod: input.loginMethod,
+        expiresAt: null,
+        lastSignedIn: now,
+        lastActivityAt: now,
+        updatedAt: now,
+      })
+      .where(and(
+        eq(users.id, input.guestUserId),
+        eq(users.isGuest, 1),
+      ));
 
-    const [newUser] = await tx.select().from(users).where(eq(users.openId, canonicalOpenId)).limit(1);
-    if (!newUser) throw new Error("Failed to create promoted user");
+    const affectedRows = Number(updateResult[0]?.affectedRows ?? 0);
+    if (affectedRows === 0) return null;
 
-    const newUserId = newUser.id;
-
-    // Update all related tables
-    await Promise.all([
-      tx.update(chatSessions).set({ userId: newUserId }).where(eq(chatSessions.userId, input.guestUserId)),
-      tx.update(chatExports).set({ userId: newUserId }).where(eq(chatExports.userId, input.guestUserId)),
-      tx.update(chatDrafts).set({ userId: newUserId }).where(eq(chatDrafts.userId, input.guestUserId)),
-      tx.update(memoryEntries).set({ userId: newUserId }).where(eq(memoryEntries.userId, input.guestUserId)),
-      tx.update(memoryFacts).set({ userId: newUserId }).where(eq(memoryFacts.userId, input.guestUserId)),
-      tx.update(memoryProfiles).set({ userId: newUserId }).where(eq(memoryProfiles.userId, input.guestUserId)),
-      tx.update(memorySettings).set({ userId: newUserId }).where(eq(memorySettings.userId, input.guestUserId)),
-      tx.update(userSettings).set({ userId: newUserId }).where(eq(userSettings.userId, input.guestUserId)),
-      tx.update(memoryExtractionJobs).set({ userId: newUserId }).where(eq(memoryExtractionJobs.userId, input.guestUserId)),
-      tx.update(devApiRateWindows).set({ userId: newUserId }).where(eq(devApiRateWindows.userId, input.guestUserId)),
-      tx.update(chatStreamRateWindows).set({ userId: newUserId }).where(eq(chatStreamRateWindows.userId, input.guestUserId)),
-      tx.update(devApiAuditRecords).set({ userId: newUserId }).where(eq(devApiAuditRecords.userId, input.guestUserId)),
-      tx.update(providerIdentities).set({ userId: newUserId }).where(eq(providerIdentities.userId, input.guestUserId)),
-      tx.update(stytchLinkIntents).set({ userId: newUserId }).where(eq(stytchLinkIntents.userId, input.guestUserId)),
-    ]);
-
-    // Update chatAttachments with new userId AND new fileKeys
-    for (const copy of attachmentCopies) {
-      const finalFileKey = copy.newFileKey.replace(newUserIdPlaceholder, String(newUserId));
-      await tx.update(chatAttachments)
-        .set({ userId: newUserId, fileKey: finalFileKey })
-        .where(eq(chatAttachments.id, copy.attachmentId));
-    }
-
-    // Delete guest user (cascades to remaining related records)
-    await tx.delete(users).where(eq(users.id, input.guestUserId));
+    return { userId: input.guestUserId, openId: canonicalOpenId };
   });
 
-  // 4. After successful DB transaction, delete old S3 objects
-  for (const copy of attachmentCopies) {
-    try {
-      await storageDelete(copy.oldFileKey);
-    } catch (err) {
-      console.warn(`[Promote Guest] Failed to delete old attachment ${copy.oldFileKey}:`, err);
-      // Don't throw - old files will be cleaned up by guest cleanup cron
-    }
-  }
-
-  return { userId: input.guestUserId, openId: canonicalOpenId };
+  return result ?? null;
 }
