@@ -7,6 +7,7 @@ export const NOT_ADMIN_ERR_MSG = 'You do not have required permission (10002)';
 // Guest session cookie: __Host- prefix for host-only, HttpOnly, Secure, SameSite=None
 export const GUEST_COOKIE_NAME = "__Host-kairema-guest";
 export const GUEST_TTL_MS = 60 * 60 * 1000; // 1 hour sliding TTL
+export const GUEST_MAX_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000; // 7-day absolute ceiling
 
 // One-time nonce cookie that binds an OAuth login to the browser that started
 // it. The `__Host-` prefix forces the cookie host-only (Secure, Path=/, no

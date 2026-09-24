@@ -20,10 +20,10 @@ const t = initTRPC.context<TrpcContext>().create({
 export const router = t.router;
 export const publicProcedure = t.procedure;
 
-const requireUser = t.middleware(async opts => {
+export const requireUser = t.middleware(async opts => {
   const { ctx, next } = opts;
 
-  if (!ctx.user) {
+  if (!ctx.user || ctx.user.isGuest === 1) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
   }
 
@@ -61,7 +61,7 @@ const requireGuest = t.middleware(async opts => {
 
 export const guestProcedure = t.procedure.use(requireGuest);
 
-const requireUserOrGuest = t.middleware(async opts => {
+export const requireUserOrGuest = t.middleware(async opts => {
   const { ctx, next } = opts;
 
   if (ctx.user) {

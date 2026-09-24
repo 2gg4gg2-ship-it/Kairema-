@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request, Response } from "express";
-import { GUEST_COOKIE_NAME, GUEST_TTL_MS } from "@shared/const";
+import { GUEST_COOKIE_NAME, GUEST_TTL_MS, GUEST_MAX_LIFETIME_MS } from "@shared/const";
 import * as db from "../db";
 import { getSessionCookieOptions } from "./cookies";
 import { storageDelete } from "../storage";
@@ -25,6 +25,20 @@ function getGuestCookieOptions(req: Request) {
   };
 }
 
+/** H2: Compute expiresAt as min(now + sliding TTL, createdAt + absolute max lifetime) */
+function computeGuestExpiresAt(createdAt: Date): Date {
+  const now = Date.now();
+  const sliding = now + GUEST_TTL_MS;
+  const absolute = new Date(createdAt).getTime() + GUEST_MAX_LIFETIME_MS;
+  return new Date(Math.min(sliding, absolute));
+}
+
+/** H2: Check if a guest has exceeded its absolute lifetime (7 days from creation) */
+function isGuestBeyondAbsoluteLifetime(createdAt: Date, now: Date = new Date()): boolean {
+  const absoluteExpiry = new Date(new Date(createdAt).getTime() + GUEST_MAX_LIFETIME_MS);
+  return now >= absoluteExpiry;
+}
+
 export function getGuestTokenFromCookie(req: Request): string | null {
   const cookies = parseCookieHeader(req.headers.cookie ?? "");
   const raw = cookies[GUEST_COOKIE_NAME];
@@ -39,19 +53,26 @@ export async function getOrCreateGuestUser(req: Request, res: Response): Promise
   if (existingToken) {
     const existingUser = await db.getUserByOpenId(existingToken);
     if (existingUser && existingUser.isGuest === 1) {
-      // EXG1: Do not resurrect an expired guest. If expiresAt is in the past,
-      // skip updateUserActivity and fall through to create a new guest.
+      // EXG1 + H2: Do not resurrect an expired guest. If expiresAt is in the
+      // past OR the guest has exceeded its absolute lifetime (7 days),
+      // skip updateUserActivity, trigger best-effort lazy cleanup (C4), and
+      // fall through to create a new guest.
       if (!existingUser.expiresAt || existingUser.expiresAt >= new Date()) {
-        await db.updateUserActivity(existingUser.id);
-        res.cookie(GUEST_COOKIE_NAME, existingToken, getGuestCookieOptions(req));
-        return { userId: existingUser.id, openId: existingToken, isNew: false };
+        if (!isGuestBeyondAbsoluteLifetime(existingUser.createdAt)) {
+          await db.updateUserActivity(existingUser.id);
+          res.cookie(GUEST_COOKIE_NAME, existingToken, getGuestCookieOptions(req));
+          return { userId: existingUser.id, openId: existingToken, isNew: false };
+        }
       }
+      // C4: Lazy cleanup triggered only when we detect an expired guest.
+      void maybeLazyCleanupExpiredGuests();
     }
   }
 
   const openId = generateGuestOpenId();
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + GUEST_TTL_MS);
+  // H2: Use absolute lifetime capped expiresAt, not pure sliding TTL
+  const expiresAt = computeGuestExpiresAt(now);
 
   await db.upsertUser({
     openId,
@@ -78,20 +99,8 @@ export async function validateGuestSession(req: Request, res: Response): Promise
   if (user.expiresAt && user.expiresAt < new Date()) {
     return null;
   }
-
-  await db.updateUserActivity(user.id);
-  res.cookie(GUEST_COOKIE_NAME, token, getGuestCookieOptions(req));
-  return { userId: user.id, openId: token };
-}
-
-// Lightweight validation without cookie update (for SDK)
-export async function validateGuestToken(token: string): Promise<{ userId: number; openId: string } | null> {
-  if (!token || !token.startsWith(GUEST_OPENID_PREFIX)) return null;
-
-  const user = await db.getUserByOpenId(token);
-  if (!user || user.isGuest !== 1) return null;
-
-  if (user.expiresAt && user.expiresAt < new Date()) {
+  // H2: Also reject guests beyond absolute lifetime
+  if (user.createdAt && isGuestBeyondAbsoluteLifetime(user.createdAt)) {
     return null;
   }
 
@@ -185,7 +194,6 @@ export async function cleanupExpiredGuests(now = new Date()): Promise<number> {
  * Best-effort — never throws, never blocks the caller.
  */
 export async function maybeLazyCleanupExpiredGuests(): Promise<void> {
-  if (process.env.NODE_ENV === "test") return;
   try {
     await cleanupExpiredGuests();
   } catch {

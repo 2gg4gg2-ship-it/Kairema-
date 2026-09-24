@@ -5,6 +5,7 @@ import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAudit
 import { providerHealthHistory } from "../drizzle/schema";
 import { stytchLinkIntents } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { GUEST_MAX_LIFETIME_MS, GUEST_TTL_MS } from "@shared/const";
 import { decodeHistoryPageCursor, encodeHistoryPageCursor, normalizeHistoryPageLimit } from "./history-pagination";
 import { selectTranscriptWindow, TRANSCRIPT_WINDOW_BUDGETS, type TranscriptRole } from "./transcript-window";
 
@@ -73,8 +74,16 @@ export async function getUserById(userId: number) {
 export async function updateUserActivity(userId: number): Promise<void> {
   const db = await getDb();
   if (!db) return;
+  // H2: Enforce absolute lifetime on guest activity updates.
+  // expiresAt = min(now + GUEST_TTL_MS, createdAt + GUEST_MAX_LIFETIME_MS)
+  const user = await db.select({ createdAt: users.createdAt }).from(users).where(eq(users.id, userId)).limit(1);
+  if (!user[0]) return;
+  const now = Date.now();
+  const sliding = now + GUEST_TTL_MS;
+  const absolute = new Date(user[0].createdAt).getTime() + GUEST_MAX_LIFETIME_MS;
+  const expiresAt = new Date(Math.min(sliding, absolute));
   await db.update(users)
-    .set({ lastActivityAt: new Date(), expiresAt: new Date(Date.now() + 60 * 60 * 1000) })
+    .set({ lastActivityAt: new Date(), expiresAt })
     .where(eq(users.id, userId));
 }
 
