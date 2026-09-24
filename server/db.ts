@@ -159,31 +159,92 @@ export async function resolveOrCreateProviderUser(input: {
   displayName?: string | null;
   loginMethod: string;
 }) {
-  const existing = await getUserByProviderIdentity(input.provider, input.providerSubject);
-  if (existing) {
-    const db = requireDatabase(await getDb());
-    await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, existing.id));
-    return existing;
+  try {
+    const existing = await getUserByProviderIdentity(input.provider, input.providerSubject);
+    if (existing) {
+      const db = requireDatabase(await getDb());
+      await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, existing.id));
+      return existing;
+    }
+  } catch (error) {
+    const cause = (error as { cause?: unknown })?.cause;
+    const source = cause ?? error;
+    const e = source as { code?: unknown; errno?: unknown; syscall?: unknown };
+    console.error(
+      `[RESOLVE_EXISTING_ERROR] ` +
+      `error_name=${error?.constructor?.name ?? "Error"} ` +
+      `errno=${e.errno?.toString() ?? "none"} ` +
+      `code=${e.code?.toString() ?? "none"} ` +
+      `syscall=${e.syscall?.toString() ?? "none"} ` +
+      `stage=getUserByProviderIdentity`
+    );
+    throw error;
   }
 
-  await upsertUser({
-    openId: input.canonicalOpenId,
-    email: input.verifiedEmail,
-    name: input.displayName ?? null,
-    loginMethod: input.loginMethod,
-    lastSignedIn: new Date(),
-  });
-
-  const candidate = await getUserByOpenId(input.canonicalOpenId);
-  if (!candidate) {
-    throw new Error("Canonical user could not be resolved");
+  try {
+    await upsertUser({
+      openId: input.canonicalOpenId,
+      email: input.verifiedEmail,
+      name: input.displayName ?? null,
+      loginMethod: input.loginMethod,
+      lastSignedIn: new Date(),
+    });
+  } catch (error) {
+    const cause = (error as { cause?: unknown })?.cause;
+    const source = cause ?? error;
+    const e = source as { code?: unknown; errno?: unknown; syscall?: unknown };
+    console.error(
+      `[RESOLVE_UPSERT_ERROR] ` +
+      `error_name=${error?.constructor?.name ?? "Error"} ` +
+      `errno=${e.errno?.toString() ?? "none"} ` +
+      `code=${e.code?.toString() ?? "none"} ` +
+      `syscall=${e.syscall?.toString() ?? "none"} ` +
+      `stage=upsertUser`
+    );
+    throw error;
   }
 
-  await linkProviderIdentityToUser({
-    provider: input.provider,
-    providerSubject: input.providerSubject,
-    userId: candidate.id,
-  });
+  let candidate: Awaited<ReturnType<typeof getUserByOpenId>> | null = null;
+  try {
+    candidate = await getUserByOpenId(input.canonicalOpenId);
+    if (!candidate) {
+      throw new Error("Canonical user could not be resolved");
+    }
+  } catch (error) {
+    const cause = (error as { cause?: unknown })?.cause;
+    const source = cause ?? error;
+    const e = source as { code?: unknown; errno?: unknown; syscall?: unknown };
+    console.error(
+      `[RESOLVE_OPENID_ERROR] ` +
+      `error_name=${error?.constructor?.name ?? "Error"} ` +
+      `errno=${e.errno?.toString() ?? "none"} ` +
+      `code=${e.code?.toString() ?? "none"} ` +
+      `syscall=${e.syscall?.toString() ?? "none"} ` +
+      `stage=getUserByOpenId`
+    );
+    throw error;
+  }
+
+  try {
+    await linkProviderIdentityToUser({
+      provider: input.provider,
+      providerSubject: input.providerSubject,
+      userId: candidate!.id,
+    });
+  } catch (error) {
+    const cause = (error as { cause?: unknown })?.cause;
+    const source = cause ?? error;
+    const e = source as { code?: unknown; errno?: unknown; syscall?: unknown };
+    console.error(
+      `[RESOLVE_LINK_ERROR] ` +
+      `error_name=${error?.constructor?.name ?? "Error"} ` +
+      `errno=${e.errno?.toString() ?? "none"} ` +
+      `code=${e.code?.toString() ?? "none"} ` +
+      `syscall=${e.syscall?.toString() ?? "none"} ` +
+      `stage=linkProviderIdentityToUser`
+    );
+    throw error;
+  }
 
   const mapped = await getUserByProviderIdentity(input.provider, input.providerSubject);
   if (!mapped) {
