@@ -89,8 +89,7 @@ export async function getOrCreateGuestUser(req: Request, res: Response): Promise
   return { userId: user.id, openId, isNew: true };
 }
 
-export async function validateGuestSession(req: Request, res: Response): Promise<{ userId: number; openId: string } | null> {
-  const token = getGuestTokenFromCookie(req);
+export async function validateGuestToken(token: string): Promise<{ userId: number; openId: string } | null> {
   if (!token) return null;
 
   const user = await db.getUserByOpenId(token);
@@ -105,6 +104,13 @@ export async function validateGuestSession(req: Request, res: Response): Promise
   }
 
   return { userId: user.id, openId: token };
+}
+
+export async function validateGuestSession(req: Request, res: Response): Promise<{ userId: number; openId: string } | null> {
+  const token = getGuestTokenFromCookie(req);
+  if (!token) return null;
+
+  return validateGuestToken(token);
 }
 
 export async function clearGuestCookie(res: Response, req: Request): Promise<void> {

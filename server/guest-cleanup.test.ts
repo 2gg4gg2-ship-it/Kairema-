@@ -283,9 +283,9 @@ describe("getOrCreateGuestUser — EXG1 + H2 + C4", () => {
       { cookie: vi.fn() } as unknown as Response,
     );
 
-    await flushPromises(3);
-
-    expect(mockDbInstance.select).toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(mockDbInstance.select).toHaveBeenCalled();
+    }, { timeout: 2000, interval: 10 });
   });
 
   it("active guest is reused — updateUserActivity called, lazy cleanup NOT triggered", async () => {
