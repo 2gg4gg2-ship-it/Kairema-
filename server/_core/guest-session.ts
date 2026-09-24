@@ -40,12 +40,17 @@ export async function getOrCreateGuestUser(req: Request, res: Response): Promise
     const existingUser = await db.getUserByOpenId(existingToken);
     if (existingUser && existingUser.isGuest === 1) {
       // EXG1: Do not resurrect an expired guest. If expiresAt is in the past,
-      // skip updateUserActivity and fall through to create a new guest.
+      // skip updateUserActivity, trigger best-effort lazy cleanup (C4), and
+      // fall through to create a new guest.
       if (!existingUser.expiresAt || existingUser.expiresAt >= new Date()) {
         await db.updateUserActivity(existingUser.id);
         res.cookie(GUEST_COOKIE_NAME, existingToken, getGuestCookieOptions(req));
         return { userId: existingUser.id, openId: existingToken, isNew: false };
       }
+      // C4: Lazy cleanup triggered only when we detect an expired guest.
+      // Best-effort — never throws, never blocks new guest creation.
+      // cleanupExpiredGuests does NOT call getOrCreateGuestUser, so no recursion.
+      void maybeLazyCleanupExpiredGuests();
     }
   }
 
@@ -181,11 +186,10 @@ export async function cleanupExpiredGuests(now = new Date()): Promise<number> {
 
 /**
  * Lazy cleanup pass: triggers cleanup of expired guests on-demand.
- * Called after Render sleep when the scheduled cron route may be idle.
+ * Called when an expired guest session is encountered during getOrCreateGuestUser.
  * Best-effort — never throws, never blocks the caller.
  */
 export async function maybeLazyCleanupExpiredGuests(): Promise<void> {
-  if (process.env.NODE_ENV === "test") return;
   try {
     await cleanupExpiredGuests();
   } catch {
