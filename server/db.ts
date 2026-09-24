@@ -170,9 +170,11 @@ export async function resolveOrCreateProviderUser(input: {
     const cause = (error as { cause?: unknown })?.cause;
     const source = cause ?? error;
     const e = source as { code?: unknown; errno?: unknown; syscall?: unknown };
+    const message = (source as { message?: unknown })?.message?.toString() ?? "none";
     console.error(
       `[RESOLVE_EXISTING_ERROR] ` +
       `error_name=${error?.constructor?.name ?? "Error"} ` +
+      `message=${message} ` +
       `errno=${e.errno?.toString() ?? "none"} ` +
       `code=${e.code?.toString() ?? "none"} ` +
       `syscall=${e.syscall?.toString() ?? "none"} ` +
@@ -193,9 +195,11 @@ export async function resolveOrCreateProviderUser(input: {
     const cause = (error as { cause?: unknown })?.cause;
     const source = cause ?? error;
     const e = source as { code?: unknown; errno?: unknown; syscall?: unknown };
+    const message = (source as { message?: unknown })?.message?.toString() ?? "none";
     console.error(
       `[RESOLVE_UPSERT_ERROR] ` +
       `error_name=${error?.constructor?.name ?? "Error"} ` +
+      `message=${message} ` +
       `errno=${e.errno?.toString() ?? "none"} ` +
       `code=${e.code?.toString() ?? "none"} ` +
       `syscall=${e.syscall?.toString() ?? "none"} ` +
@@ -214,9 +218,11 @@ export async function resolveOrCreateProviderUser(input: {
     const cause = (error as { cause?: unknown })?.cause;
     const source = cause ?? error;
     const e = source as { code?: unknown; errno?: unknown; syscall?: unknown };
+    const message = (source as { message?: unknown })?.message?.toString() ?? "none";
     console.error(
       `[RESOLVE_OPENID_ERROR] ` +
       `error_name=${error?.constructor?.name ?? "Error"} ` +
+      `message=${message} ` +
       `errno=${e.errno?.toString() ?? "none"} ` +
       `code=${e.code?.toString() ?? "none"} ` +
       `syscall=${e.syscall?.toString() ?? "none"} ` +
@@ -235,9 +241,11 @@ export async function resolveOrCreateProviderUser(input: {
     const cause = (error as { cause?: unknown })?.cause;
     const source = cause ?? error;
     const e = source as { code?: unknown; errno?: unknown; syscall?: unknown };
+    const message = (source as { message?: unknown })?.message?.toString() ?? "none";
     console.error(
       `[RESOLVE_LINK_ERROR] ` +
       `error_name=${error?.constructor?.name ?? "Error"} ` +
+      `message=${message} ` +
       `errno=${e.errno?.toString() ?? "none"} ` +
       `code=${e.code?.toString() ?? "none"} ` +
       `syscall=${e.syscall?.toString() ?? "none"} ` +
