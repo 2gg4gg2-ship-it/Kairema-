@@ -199,7 +199,15 @@ export async function resolveOrCreateProviderUser(input: {
     }
     console.error("[RESOLVE_EXISTING_OK]");
   } catch (error) {
-    console.error(`[RESOLVE_EXISTING_ERROR] error_name=${error?.constructor?.name ?? "Error"}`);
+    const e = error as { code?: unknown; errno?: unknown; syscall?: unknown };
+    console.error(
+      `[RESOLVE_EXISTING_ERROR] ` +
+      `error_name=${error?.constructor?.name ?? "Error"} ` +
+      `errno=${e.errno?.toString() ?? "none"} ` +
+      `code=${e.code?.toString() ?? "none"} ` +
+      `syscall=${e.syscall?.toString() ?? "none"} ` +
+      `stage=getUserByProviderIdentity`
+    );
     throw error;
   }
 
@@ -213,7 +221,14 @@ export async function resolveOrCreateProviderUser(input: {
     });
     console.error("[RESOLVE_UPSERT_OK]");
   } catch (error) {
-    console.error(`[RESOLVE_UPSERT_ERROR] error_name=${error?.constructor?.name ?? "Error"}`);
+    const e = error as { code?: unknown; errno?: unknown; syscall?: unknown };
+    console.error(
+      `[RESOLVE_UPSERT_ERROR] ` +
+      `error_name=${error?.constructor?.name ?? "Error"} ` +
+      `errno=${e.errno?.toString() ?? "none"} ` +
+      `code=${e.code?.toString() ?? "none"} ` +
+      `syscall=${e.syscall?.toString() ?? "none"}`
+    );
     throw error;
   }
 
@@ -224,7 +239,14 @@ export async function resolveOrCreateProviderUser(input: {
     }
     console.error("[RESOLVE_OPENID_OK]");
   } catch (error) {
-    console.error(`[RESOLVE_OPENID_ERROR] error_name=${error?.constructor?.name ?? "Error"}`);
+    const e = error as { code?: unknown; errno?: unknown; syscall?: unknown };
+    console.error(
+      `[RESOLVE_OPENID_ERROR] ` +
+      `error_name=${error?.constructor?.name ?? "Error"} ` +
+      `errno=${e.errno?.toString() ?? "none"} ` +
+      `code=${e.code?.toString() ?? "none"} ` +
+      `syscall=${e.syscall?.toString() ?? "none"}`
+    );
     throw error;
   }
 
@@ -236,7 +258,14 @@ export async function resolveOrCreateProviderUser(input: {
     });
     console.error("[RESOLVE_LINK_OK]");
   } catch (error) {
-    console.error(`[RESOLVE_LINK_ERROR] error_name=${error?.constructor?.name ?? "Error"}`);
+    const e = error as { code?: unknown; errno?: unknown; syscall?: unknown };
+    console.error(
+      `[RESOLVE_LINK_ERROR] ` +
+      `error_name=${error?.constructor?.name ?? "Error"} ` +
+      `errno=${e.errno?.toString() ?? "none"} ` +
+      `code=${e.code?.toString() ?? "none"} ` +
+      `syscall=${e.syscall?.toString() ?? "none"}`
+    );
     throw error;
   }
 
