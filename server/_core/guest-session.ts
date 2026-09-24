@@ -128,6 +128,13 @@ export function isGuestOpenId(openId: string): boolean {
   return openId.startsWith(GUEST_OPENID_PREFIX);
 }
 
+export function refreshGuestCookie(req: Request, res: Response): void {
+  const token = getGuestTokenFromCookie(req);
+  if (token) {
+    res.cookie(GUEST_COOKIE_NAME, token, getGuestCookieOptions(req));
+  }
+}
+
 export async function cleanupExpiredGuests(now = new Date()): Promise<number> {
   const dbInstance = await (await import("../db")).getDb();
   if (!dbInstance) return 0;

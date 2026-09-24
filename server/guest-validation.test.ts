@@ -34,7 +34,7 @@ vi.mock("./cookies", () => ({
   getSessionCookieOptions: vi.fn(() => ({ httpOnly: true, secure: true, sameSite: "none" as const, path: "/" })),
 }));
 
-import { validateGuestToken, validateGuestSession, getOrCreateGuestUser } from "./_core/guest-session";
+import { validateGuestToken, validateGuestSession, getOrCreateGuestUser, refreshGuestCookie } from "./_core/guest-session";
 import * as db from "./db";
 
 function makeGuestUser(id: number, openId: string, overrides: Partial<{ expiresAt: Date | null; createdAt: Date; isGuest: number }> = {}) {
@@ -240,5 +240,52 @@ describe("Activity update call count — no duplicate (SF5)", () => {
     await getOrCreateGuestUser(req, res);
 
     expect(db.updateUserActivity).not.toHaveBeenCalled();
+  });
+});
+
+describe("Normal guest request cookie refresh (userOrGuestProcedure path)", () => {
+  beforeEach(() => {
+    (db.getUserByOpenId as ReturnType<typeof vi.fn>).mockReset();
+    (db.updateUserActivity as ReturnType<typeof vi.fn>).mockReset();
+    (db.upsertUser as ReturnType<typeof vi.fn>).mockReset();
+  });
+
+  it("refreshGuestCookie sets cookie when token present (normal userOrGuestProcedure flow)", () => {
+    const req = makeReq("guest_normal-cookie");
+    const res = makeRes();
+
+    refreshGuestCookie(req, res);
+
+    expect(res.cookie).toHaveBeenCalledTimes(1);
+    expect(res.cookie).toHaveBeenCalledWith(
+      GUEST_COOKIE_NAME,
+      "guest_normal-cookie",
+      expect.objectContaining({ path: "/" })
+    );
+  });
+
+  it("refreshGuestCookie does NOT call updateUserActivity (activity update stays in SDK path only)", () => {
+    const req = makeReq("guest_no-db");
+    const res = makeRes();
+
+    refreshGuestCookie(req, res);
+
+    expect(db.updateUserActivity).not.toHaveBeenCalled();
+    expect(db.getUserByOpenId).not.toHaveBeenCalled();
+  });
+
+  it("normal authenticated guest request path: SDK updates activity once, cookie refreshed by middleware", async () => {
+    const guest = makeGuestUser(42, "guest_normal-flow");
+    (db.getUserByOpenId as ReturnType<typeof vi.fn>).mockResolvedValueOnce(guest);
+    (db.getUserById as ReturnType<typeof vi.fn>).mockResolvedValueOnce(guest);
+
+    const req = makeReq("guest_normal-flow");
+    const res = makeRes();
+
+    await validateGuestSession(req, res);
+
+    expect(db.updateUserActivity).not.toHaveBeenCalled();
+    expect(db.getUserByOpenId).toHaveBeenCalledTimes(1);
+    expect(res.cookie).toHaveBeenCalledTimes(1);
   });
 });
