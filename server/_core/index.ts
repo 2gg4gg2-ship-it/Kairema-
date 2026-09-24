@@ -12,6 +12,7 @@ import { registerProviderHealthScheduleRoute } from "../provider-health-schedule
 import { registerKnowledgeScheduleRoute } from "../knowledge-schedule";
 import { registerMemoryExtractionScheduleRoute } from "../memory-extraction-schedule";
 import { registerGuestCleanupScheduleRoute } from "../guest-cleanup-schedule";
+import { startupCleanupExpiredGuests } from "./guest-session";
 import { registerDevRoute } from "../dev-api";
 import { registerStytchAuthRoutes } from "../stytch-auth";
 import { refreshProviderHealth } from "../providers";
@@ -77,6 +78,8 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    // C4: free-first fallback for Render sleep — runs once at startup
+    void startupCleanupExpiredGuests().catch(() => undefined);
     // Best-effort deployment/start check. Daily rechecks are handled by Heartbeat.
     void refreshProviderHealth().catch(() => undefined);
   });
