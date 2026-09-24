@@ -39,9 +39,13 @@ export async function getOrCreateGuestUser(req: Request, res: Response): Promise
   if (existingToken) {
     const existingUser = await db.getUserByOpenId(existingToken);
     if (existingUser && existingUser.isGuest === 1) {
-      await db.updateUserActivity(existingUser.id);
-      res.cookie(GUEST_COOKIE_NAME, existingToken, getGuestCookieOptions(req));
-      return { userId: existingUser.id, openId: existingToken, isNew: false };
+      // EXG1: Do not resurrect an expired guest. If expiresAt is in the past,
+      // skip updateUserActivity and fall through to create a new guest.
+      if (!existingUser.expiresAt || existingUser.expiresAt >= new Date()) {
+        await db.updateUserActivity(existingUser.id);
+        res.cookie(GUEST_COOKIE_NAME, existingToken, getGuestCookieOptions(req));
+        return { userId: existingUser.id, openId: existingToken, isNew: false };
+      }
     }
   }
 
@@ -109,7 +113,7 @@ export async function cleanupExpiredGuests(now = new Date()): Promise<number> {
   const dbInstance = await (await import("../db")).getDb();
   if (!dbInstance) return 0;
 
-  const { users, chatAttachments } = await import("../../drizzle/schema");
+  const { users, chatAttachments, chatExports } = await import("../../drizzle/schema");
   const { lt, eq, and, inArray } = await import("drizzle-orm");
 
   // 1. Find all expired guest users
@@ -122,28 +126,86 @@ export async function cleanupExpiredGuests(now = new Date()): Promise<number> {
 
   const guestIds = expiredGuests.map(g => g.id);
 
-  // 2. Get all attachments for these guests
-  const attachments = await dbInstance.select({ fileKey: chatAttachments.fileKey }).from(chatAttachments)
+  // 2. Collect all physical B2 file keys for these guests across tables
+  const attachments = await dbInstance.select({ userId: chatAttachments.userId, fileKey: chatAttachments.fileKey }).from(chatAttachments)
     .where(inArray(chatAttachments.userId, guestIds));
+  const exports = await dbInstance.select({ userId: chatExports.userId, fileKey: chatExports.fileKey }).from(chatExports)
+    .where(inArray(chatExports.userId, guestIds));
 
-  // 3. Delete physical S3 files first
-  for (const attachment of attachments) {
-    try {
-      await storageDelete(attachment.fileKey);
-    } catch {
-      // If delete fails, don't delete the DB record - let next cleanup cycle retry
-      console.warn(`[Guest Cleanup] Failed to delete attachment file: ${attachment.fileKey}`);
-      // Remove this attachment's user from guestIds to prevent DB deletion
-      // This is a simplified approach - in production you might want more granular tracking
+  // Build a map: userId -> set of fileKeys to delete
+  const filesByUser = new Map<number, Set<string>>();
+  const trackFile = (userId: number, fileKey: string) => {
+    if (!filesByUser.has(userId)) filesByUser.set(userId, new Set());
+    filesByUser.get(userId)!.add(fileKey);
+  };
+  for (const a of attachments) trackFile(a.userId, a.fileKey);
+  for (const e of exports) trackFile(e.userId, e.fileKey);
+
+  // 3. For each guest, attempt to delete all B2 objects.
+  //    If any delete fails, skip DB deletion for that guest — retry next cycle.
+  const deletableGuestIds: number[] = [];
+  for (const guestId of guestIds) {
+    const fileKeys = filesByUser.get(guestId);
+    if (!fileKeys || fileKeys.size === 0) {
+      deletableGuestIds.push(guestId);
+      continue;
+    }
+
+    let allPhysicalDeleted = true;
+    for (const fileKey of Array.from(fileKeys)) {
+      try {
+        await storageDelete(fileKey);
+      } catch {
+        console.warn(`[Guest Cleanup] Failed to delete B2 object for user ${guestId}: ${fileKey}`);
+        allPhysicalDeleted = false;
+      }
+    }
+
+    if (allPhysicalDeleted) {
+      deletableGuestIds.push(guestId);
+    } else {
+      // H4: Preserve the DB record so the next cleanup cycle can retry B2 deletion.
+      console.warn(`[Guest Cleanup] Skipping DB deletion for user ${guestId} — B2 cleanup incomplete`);
     }
   }
 
-  // 4. Delete guest users (cascades to their attachments via FK)
+  if (deletableGuestIds.length === 0) return 0;
+
+  // 4. Delete only guests whose B2 objects were successfully removed.
   const result = await dbInstance.delete(users).where(and(
     eq(users.isGuest, 1),
-    lt(users.expiresAt, now)
+    inArray(users.id, deletableGuestIds)
   ));
-  return Number((result as { rowsAffected?: number } | undefined)?.rowsAffected ?? 0);
+  return Number(result[0]?.affectedRows ?? 0);
+}
+
+/**
+ * Lazy cleanup pass: triggers cleanup of expired guests on-demand.
+ * Called after Render sleep when the scheduled cron route may be idle.
+ * Best-effort — never throws, never blocks the caller.
+ */
+export async function maybeLazyCleanupExpiredGuests(): Promise<void> {
+  if (process.env.NODE_ENV === "test") return;
+  try {
+    await cleanupExpiredGuests();
+  } catch {
+    // Best-effort; next startup or cron run will retry
+  }
+}
+
+/**
+ * Startup cleanup pass: runs once after the app is ready to serve requests.
+ * This is a free-first fallback when the external cron job was missed
+ * (e.g. Render free tier sleeps).
+ */
+export async function startupCleanupExpiredGuests(): Promise<void> {
+  if (process.env.NODE_ENV === "test") return;
+  try {
+    const deletedCount = await cleanupExpiredGuests();
+    if (deletedCount > 0) console.log(`[Startup Cleanup] Removed ${deletedCount} expired guests`);
+  } catch (error) {
+    console.warn("[Startup Cleanup] failed:", error);
+  }
 }
 
 export type PromoteGuestInput = {
