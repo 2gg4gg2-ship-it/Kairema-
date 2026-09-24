@@ -223,7 +223,7 @@ export async function resolveOrCreateProviderUser(input: {
     });
     console.error("[RESOLVE_UPSERT_OK]");
   } catch (error) {
-          const cause = (error as { cause?: unknown })?.cause;
+    const cause = (error as { cause?: unknown })?.cause;
     const source = cause ?? error;
     const e = source as { code?: unknown; errno?: unknown; syscall?: unknown };
     console.error(
@@ -243,7 +243,7 @@ export async function resolveOrCreateProviderUser(input: {
     }
     console.error("[RESOLVE_OPENID_OK]");
   } catch (error) {
-      const cause = (error as { cause?: unknown })?.cause;
+    const cause = (error as { cause?: unknown })?.cause;
     const source = cause ?? error;
     const e = source as { code?: unknown; errno?: unknown; syscall?: unknown };
     console.error(
@@ -264,7 +264,7 @@ export async function resolveOrCreateProviderUser(input: {
     });
     console.error("[RESOLVE_LINK_OK]");
   } catch (error) {
-      const cause = (error as { cause?: unknown })?.cause;
+    const cause = (error as { cause?: unknown })?.cause;
     const source = cause ?? error;
     const e = source as { code?: unknown; errno?: unknown; syscall?: unknown };
     console.error(
