@@ -28,6 +28,20 @@ type SearchStatus = { state: "found" | "empty" | "degraded" | "error"; verificat
 type SourceEvidence = { title: string; url: string; publishedAt?: string };
 type WebGrounding = { intent: "PREFERRED" | "REQUIRED"; state: "verified" | "disabled" | "empty" | "degraded" | "unavailable" | "admission_denied"; sourcesCount: number; citations: SourceEvidence[]; freshnessBlocked?: boolean };
 
+const ACTIVE_CHAT_STORAGE_KEY = "active-chat-id";
+
+function readStoredActiveChatId(): string {
+  try { return window.localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY) ?? ""; } catch { return ""; }
+}
+
+function writeStoredActiveChatId(id: string): void {
+  try { window.localStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, id); } catch { /* private mode or storage unavailable */ }
+}
+
+function clearStoredActiveChatId(): void {
+  try { window.localStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY); } catch { /* private mode or storage unavailable */ }
+}
+
 function safeSearchStatus(value: unknown): SearchStatus | undefined {
   if (!value || typeof value !== "object") return undefined;
   const status = value as { state?: unknown; verificationStatus?: unknown; sourcesCount?: unknown; freshnessBlocked?: unknown; staleRagOnly?: unknown; sourceDateMin?: unknown; sourceDateMax?: unknown };
@@ -185,7 +199,7 @@ export default function Home() {
   const [, navigate] = useLocation();
   const { theme, toggleTheme, setHighContrast } = useTheme();
   const [activeId, setActiveId] = useState(""); const [newConversation, setNewConversation] = useState(false); const [modelId, setModelId] = useState<ModelId>("fast"); const [search, setSearch] = useState(""); const [uploadStatus, setUploadStatus] = useState<{ sessionId: string; message: string } | null>(null); const [sidebarOpen, setSidebarOpen] = useState(false); const [settingsOpen, setSettingsOpen] = useState(false); const [memoryOpen, setMemoryOpen] = useState(false); const [exportHistoryOpen, setExportHistoryOpen] = useState(false); const [templatesOpen, setTemplatesOpen] = useState(false); const [pendingChatDeletionId, setPendingChatDeletionId] = useState<string | null>(null); const [isChatDeletionConfirming, setIsChatDeletionConfirming] = useState(false); const [pendingHistoryClear, setPendingHistoryClear] = useState(false); const [isHistoryClearConfirming, setIsHistoryClearConfirming] = useState(false); const [composerDraft, setComposerDraft] = useState(""); const [draftHydratedSessionId, setDraftHydratedSessionId] = useState(""); const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]); const [sentAttachmentFallbacks, setSentAttachmentFallbacks] = useState<ChatAttachment[]>([]); const [isStreaming, setIsStreaming] = useState(false); const [isExporting, setIsExporting] = useState<"markdown" | "pdf" | null>(null); const [notice, setNotice] = useState(""); const [settingsOverride, setSettingsOverride] = useState<Record<string, unknown>>({});
-  const streamAbortRef = useRef<AbortController | null>(null); const activeSessionRef = useRef(""); const pagedHistorySessionRef = useRef(""); const deleteConfirmationInFlightRef = useRef(false); const historyClearInFlightRef = useRef(false); const defaultRoleApplied = useRef(false); const themeApplied = useRef(false); const persistedDraftRef = useRef("");
+  const streamAbortRef = useRef<AbortController | null>(null); const activeSessionRef = useRef(""); const pagedHistorySessionRef = useRef(""); const deleteConfirmationInFlightRef = useRef(false); const historyClearInFlightRef = useRef(false); const defaultRoleApplied = useRef(false); const themeApplied = useRef(false); const persistedDraftRef = useRef(""); const activeChatHydrated = useRef(false);
   const [olderHistoryMessages, setOlderHistoryMessages] = useState<any[]>([]); const [olderHistoryCursor, setOlderHistoryCursor] = useState<string | null | undefined>(undefined); const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
   const modelsQuery = trpc.models.list.useQuery(undefined, { refetchInterval: 60_000, refetchOnWindowFocus: true }); const settingsQuery = trpc.settings.get.useQuery(undefined, { enabled: isAuthenticated }); const healthRefreshSeconds = Number(settingsQuery.data?.healthRefreshSeconds ?? 30); const memoryQuery = trpc.memory.get.useQuery(undefined, { enabled: isAuthenticated }); const webStatusQuery = trpc.webSearch.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const knowledgeStatusQuery = trpc.knowledge.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const providerDashboardQuery = trpc.providers.dashboard.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: healthRefreshSeconds > 0 ? healthRefreshSeconds * 1_000 : false, refetchOnWindowFocus: true }); const knowledgeAuditQuery = trpc.knowledge.audit.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const sessionsQuery = trpc.chats.list.useQuery(undefined, { enabled: isAuthenticated, refetchOnWindowFocus: true }); const messagesQuery = trpc.chats.historyPage.useQuery({ sessionId: activeId, limit: 60 }, { enabled: isAuthenticated && Boolean(activeId) }); const attachmentsQuery = trpc.attachments.list.useQuery({ sessionId: activeId }, { enabled: isAuthenticated && Boolean(activeId) }); const draftQuery = trpc.chats.draft.useQuery({ sessionId: activeId }, { enabled: isAuthenticated && Boolean(activeId), refetchOnWindowFocus: false }); const exportsQuery = trpc.exports.list.useQuery(undefined, { enabled: isAuthenticated && exportHistoryOpen }); const searchQuery = trpc.search.query.useQuery({ query: search }, { enabled: isAuthenticated && search.trim().length >= 2 }); const ownerQuery = trpc.owner.isOwner.useQuery(undefined, { enabled: isAuthenticated, staleTime: 300_000 });
   const createMutation = trpc.chats.create.useMutation(); const deleteChatMutation = trpc.chats.delete.useMutation(); const clearHistoryMutation = trpc.chats.clearAll.useMutation(); const draftSaveMutation = trpc.chats.saveDraft.useMutation(); const draftClearMutation = trpc.chats.clearDraft.useMutation(); const settingMutation = trpc.settings.update.useMutation(); const memoryUpdateMutation = trpc.memory.update.useMutation(); const memoryAddMutation = trpc.memory.addFact.useMutation(); const memoryDeleteMutation = trpc.memory.deleteEntry.useMutation(); const memoryClearMutation = trpc.memory.clear.useMutation(); const attachmentDeleteMutation = trpc.attachments.delete.useMutation(); const exportCreateMutation = trpc.exports.create.useMutation(); const exportDeleteMutation = trpc.exports.delete.useMutation(); const knowledgeRefreshMutation = trpc.knowledge.refresh.useMutation(); const utils = trpc.useUtils();
@@ -198,13 +212,35 @@ export default function Home() {
   const results = (searchQuery.data ?? []) as SearchItem[]; const sessionMatches = search.trim().length >= 2 ? [] : sessions.filter((session) => session.title.toLocaleLowerCase(language === "ru" ? "ru-RU" : "en-US").includes(search.toLocaleLowerCase()));
 
   useEffect(() => {
-    if (sessions.length && !activeId && !newConversation) {
+    if (!isAuthenticated) {
+      // A new sign-in must be able to hydrate again; the previous identity's chat never leaves the tab.
+      activeChatHydrated.current = false;
+      activeSessionRef.current = "";
+      setActiveId(""); setNewConversation(false);
+      return;
+    }
+    if (sessionsQuery.isLoading || sessionsQuery.data === undefined) return;
+    if (activeId || newConversation || activeChatHydrated.current) return;
+    const storedId = readStoredActiveChatId();
+    if (storedId) {
+      const restored = sessions.find((session) => session.id === storedId);
+      // The stored chat is gone: never silently open a different old chat for this identity.
+      if (!restored) { clearStoredActiveChatId(); activeSessionRef.current = ""; setNewConversation(true); activeChatHydrated.current = true; return; }
+      activeSessionRef.current = restored.id; setActiveId(restored.id); setNewConversation(false);
+      setModelId(modelById.has(restored.modelId as ModelId) ? restored.modelId as ModelId : settings.defaultRole as ModelId);
+      activeChatHydrated.current = true;
+      return;
+    }
+    if (sessions.length) {
       const initial = sessions[0]!;
+      activeSessionRef.current = initial.id;
       setActiveId(initial.id);
       setNewConversation(false);
       setModelId(modelById.has(initial.modelId as ModelId) ? initial.modelId as ModelId : settings.defaultRole as ModelId);
+      activeChatHydrated.current = true;
     }
-  }, [activeId, modelById, newConversation, sessions, settings.defaultRole]);
+  }, [activeId, isAuthenticated, modelById, newConversation, sessions, sessionsQuery.data, sessionsQuery.isLoading, settings.defaultRole]);
+  useEffect(() => { if (!isAuthenticated || !activeChatHydrated.current) return; if (activeId) writeStoredActiveChatId(activeId); else clearStoredActiveChatId(); }, [activeId, isAuthenticated]);
   useEffect(() => { if (!activeId && settingsQuery.data?.defaultRole && !defaultRoleApplied.current) { setModelId(settingsQuery.data.defaultRole as ModelId); defaultRoleApplied.current = true; } }, [activeId, settingsQuery.data?.defaultRole]);
   useEffect(() => { if (!themeApplied.current && settingsQuery.data?.theme) { if (settingsQuery.data.theme !== theme) toggleTheme?.(); themeApplied.current = true; } }, [settingsQuery.data?.theme, theme, toggleTheme]);
   useEffect(() => { if (settingsQuery.data?.highContrast !== undefined) setHighContrast?.(Boolean(settingsQuery.data.highContrast)); }, [settingsQuery.data?.highContrast, setHighContrast]);

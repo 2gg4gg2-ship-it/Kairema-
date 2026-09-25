@@ -39,6 +39,7 @@ const fixtures = vi.hoisted(() => ({
   startLogin: vi.fn(),
   isAuthenticated: true,
   authLoading: false,
+  sessionsLoading: false,
   isOwner: false,
   navigate: vi.fn(),
   releaseSecondDelta: null as (() => void) | null,
@@ -81,7 +82,7 @@ vi.mock("@/lib/trpc", () => ({
     attachments: { list: { useQuery: () => ({ data: fixtures.attachments }) }, upload: { useMutation: () => ({ mutateAsync: fixtures.uploadAttachment }) }, delete: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
     exports: { list: { useQuery: () => ({ data: fixtures.exports, isLoading: false }) }, create: { useMutation: () => ({ mutateAsync: fixtures.createExport, isPending: false }) }, delete: { useMutation: () => ({ mutateAsync: fixtures.deleteExport, isPending: false, variables: undefined }) } },
     chats: {
-      list: { useQuery: () => ({ data: fixtures.sessions, isLoading: false }) },
+      list: { useQuery: () => ({ data: fixtures.sessionsLoading ? undefined : fixtures.sessions, isLoading: fixtures.sessionsLoading }) },
       messages: { useQuery: () => ({ data: fixtures.messages }) },
       historyPage: { useQuery: () => ({ data: { messages: fixtures.messages, nextCursor: fixtures.historyNextCursor }, isLoading: false }) },
       draft: { useQuery: (input: { sessionId: string }) => { fixtures.draftQueryInput = input; return { data: fixtures.draft, isLoading: false }; } },
@@ -110,6 +111,7 @@ const encoder = new TextEncoder();
 function resetFixtures() {
   fixtures.isAuthenticated = true;
   fixtures.authLoading = false;
+  fixtures.sessionsLoading = false;
   fixtures.startLogin.mockReset();
   fixtures.sessions = [{ id: fixtures.sessionId, modelId: fixtures.modelId, title: "Активная история" }];
   fixtures.messages = [
@@ -154,7 +156,7 @@ function resetFixtures() {
 }
 
 describe("Home integration flows", () => {
-  beforeEach(() => resetFixtures());
+  beforeEach(() => { window.localStorage.clear(); resetFixtures(); });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
   it("always renders exactly four public role cards and never renders the removed Code role", () => {
@@ -596,6 +598,97 @@ describe("Home integration flows", () => {
     expect(fixtures.updateSettings).toHaveBeenCalledWith({ webSearch: true });
   });
 
+  it("opens the stored chat after a reload instead of always the newest one", async () => {
+    const olderSessionId = "33333333-3333-4333-8333-333333333333";
+    fixtures.sessions = [
+      { id: fixtures.sessionId, modelId: fixtures.modelId, title: "Самый новый чат" },
+      { id: olderSessionId, modelId: fixtures.modelId, title: "Чат из истории" },
+    ];
+    window.localStorage.setItem("active-chat-id", olderSessionId);
+    render(<Home />);
+
+    await waitFor(() => expect(document.querySelector(".kairema-topbar-title")?.textContent).toBe("Чат из истории"));
+    expect(fixtures.draftQueryInput).toEqual({ sessionId: olderSessionId });
+    expect(window.localStorage.getItem("active-chat-id")).toBe(olderSessionId);
+  });
+
+  it("keeps the stored chat id in sync when the user switches to another chat", async () => {
+    const user = userEvent.setup();
+    const olderSessionId = "33333333-3333-4333-8333-333333333333";
+    fixtures.sessions = [
+      { id: fixtures.sessionId, modelId: fixtures.modelId, title: "Самый новый чат" },
+      { id: olderSessionId, modelId: fixtures.modelId, title: "Чат из истории" },
+    ];
+    render(<Home />);
+
+    await waitFor(() => expect(window.localStorage.getItem("active-chat-id")).toBe(fixtures.sessionId));
+    await user.click(screen.getByRole("button", { name: "Чат из истории" }));
+
+    await waitFor(() => expect(window.localStorage.getItem("active-chat-id")).toBe(olderSessionId));
+    expect(document.querySelector(".kairema-topbar-title")?.textContent).toBe("Чат из истории");
+  });
+
+  it("drops a stored chat id whose chat was deleted and stays in the empty new-conversation state", async () => {
+    window.localStorage.setItem("active-chat-id", "99999999-9999-4999-8999-999999999999");
+    render(<Home />);
+
+    await waitFor(() => expect(window.localStorage.getItem("active-chat-id")).toBeNull());
+    expect(document.querySelector(".kairema-topbar-title")?.textContent).toBe("Новый разговор");
+    expect(document.querySelector(".kairema-history-active")).toBeNull();
+    expect(fixtures.historyPageFetch).not.toHaveBeenCalled();
+  });
+
+  it("waits for the chat list to load before hydrating the stored chat id", async () => {
+    const olderSessionId = "33333333-3333-4333-8333-333333333333";
+    fixtures.sessions = [
+      { id: fixtures.sessionId, modelId: fixtures.modelId, title: "Самый новый чат" },
+      { id: olderSessionId, modelId: fixtures.modelId, title: "Чат из истории" },
+    ];
+    fixtures.sessionsLoading = true;
+    window.localStorage.setItem("active-chat-id", olderSessionId);
+    const { rerender } = render(<Home />);
+
+    await waitFor(() => expect(screen.getByPlaceholderText("Напишите сообщение…")).toBeTruthy());
+    expect(document.querySelector(".kairema-topbar-title")?.textContent).not.toBe("Чат из истории");
+    expect(fixtures.draftQueryInput).not.toEqual({ sessionId: olderSessionId });
+    expect(window.localStorage.getItem("active-chat-id")).toBe(olderSessionId);
+
+    fixtures.sessionsLoading = false;
+    rerender(<Home />);
+
+    await waitFor(() => expect(document.querySelector(".kairema-topbar-title")?.textContent).toBe("Чат из истории"));
+    expect(fixtures.draftQueryInput).toEqual({ sessionId: olderSessionId });
+    expect(window.localStorage.getItem("active-chat-id")).toBe(olderSessionId);
+  });
+
+  it("drops the previous identity's chat on logout and hydrates the next sign-in instead", async () => {
+    const firstUserChatId = "11111111-1111-4111-8111-111111111111";
+    const secondUserChatId = "22222222-2222-4222-8222-222222222222";
+    fixtures.sessions = [{ id: firstUserChatId, modelId: fixtures.modelId, title: "Чат первого пользователя" }];
+    const { rerender } = render(<Home />);
+
+    await waitFor(() => expect(window.localStorage.getItem("active-chat-id")).toBe(firstUserChatId));
+    expect(fixtures.draftQueryInput).toEqual({ sessionId: firstUserChatId });
+
+    fixtures.isAuthenticated = false;
+    rerender(<Home />);
+
+    await waitFor(() => expect(fixtures.draftQueryInput).toEqual({ sessionId: "" }));
+    expect(fixtures.historyPageFetch).not.toHaveBeenCalledWith({ sessionId: firstUserChatId, limit: 60 });
+    expect(document.querySelector(".kairema-topbar-title")?.textContent).not.toBe("Чат первого пользователя");
+
+    fixtures.isAuthenticated = true;
+    fixtures.sessions = [{ id: secondUserChatId, modelId: fixtures.modelId, title: "Чат второго пользователя" }];
+    rerender(<Home />);
+
+    // The stored id belonged to the previous identity, so it is dropped instead of
+    // silently opening a chat that is not this user's.
+    await waitFor(() => expect(document.querySelector(".kairema-topbar-title")?.textContent).toBe("Новый разговор"));
+    expect(document.querySelector(".kairema-topbar-title")?.textContent).not.toBe("Чат первого пользователя");
+    expect(fixtures.draftQueryInput).not.toEqual({ sessionId: firstUserChatId });
+    expect(fixtures.draftQueryInput).toEqual({ sessionId: "" });
+    await waitFor(() => expect(window.localStorage.getItem("active-chat-id")).toBeNull());
+  });
 
   it("clears the composer as soon as the send is accepted, before the model answers", async () => {
     const user = userEvent.setup();
