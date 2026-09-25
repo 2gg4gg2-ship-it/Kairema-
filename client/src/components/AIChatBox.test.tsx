@@ -283,6 +283,28 @@ describe("AIChatBox user flows", () => {
     expect(screen.queryByText("draft.png")).toBeNull();
   });
 
+  it("closes the photo/file menu when the host bumps the navigation signal", async () => {
+    const user = userEvent.setup();
+    const { container, rerender } = render(<AIChatBox messages={[]} onSendMessage={vi.fn()} onUploadFiles={vi.fn()} navigationCloseSignal={0} />);
+    const menu = container.querySelector("details.kairema-attachment-menu") as HTMLDetailsElement | null;
+    const trigger = menu?.querySelector("summary") as HTMLElement | null;
+    if (!menu || !trigger) throw new Error("Attachment menu is missing");
+
+    await user.click(trigger);
+    expect(menu.open).toBe(true);
+    expect(screen.getByRole("button", { name: "Выбрать фото" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Выбрать файл" })).toBeTruthy();
+
+    rerender(<AIChatBox messages={[]} onSendMessage={vi.fn()} onUploadFiles={vi.fn()} navigationCloseSignal={1} />);
+    await waitFor(() => expect(menu.open).toBe(false));
+
+    // The menu still opens and closes normally between navigation events.
+    await user.click(trigger);
+    expect(menu.open).toBe(true);
+    await user.click(trigger);
+    await waitFor(() => expect(menu.open).toBe(false));
+  });
+
   it("gives the hidden native attachment input an explicit accessible name", () => {
     render(<AIChatBox messages={[]} onSendMessage={vi.fn()} onUploadFiles={vi.fn()} />);
 

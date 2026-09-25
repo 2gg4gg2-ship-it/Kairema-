@@ -55,6 +55,8 @@ type AIChatBoxProps = {
   hasOlderHistory?: boolean;
   isLoadingOlderHistory?: boolean;
   onLoadOlderHistory?: () => void;
+  /** Bumped by the host whenever a navigation surface outside the composer opens or the active chat changes. */
+  navigationCloseSignal?: number;
 };
 
 const copy = {
@@ -100,7 +102,7 @@ export function AIChatBox({
   messages, onSendMessage, onUploadFiles, isLoading = false, placeholder, className, height, emptyStateMessage,
   guestLoginAction,
   onExportMarkdown, onExportPdf, canExport = false, exportBusy = null, exportError = "",
-  onCopyAssistant, onCopyUser, onCancelStream, composerValue, onComposerValueChange, onOpenTemplates, uploadStatus = "", composerSessionId = "new-composer", language = "ru", onRemoveAttachment, hasOlderHistory = false, isLoadingOlderHistory = false, onLoadOlderHistory,
+  onCopyAssistant, onCopyUser, onCancelStream, composerValue, onComposerValueChange, onOpenTemplates, uploadStatus = "", composerSessionId = "new-composer", language = "ru", onRemoveAttachment, hasOlderHistory = false, isLoadingOlderHistory = false,   onLoadOlderHistory, navigationCloseSignal = 0,
 }: AIChatBoxProps) {
   const t = copy[language];
   const attachmentInputLabel = language === "ru" ? "Выбрать файл для вложения" : "Choose a file to attach";
@@ -111,6 +113,10 @@ export function AIChatBox({
   const [isUploading, setIsUploading] = useState(false);
   const [isPreparingAttachments, setIsPreparingAttachments] = useState(false);
   const [attachmentNotice, setAttachmentNotice] = useState("");
+  // The "Choose photo / Choose file" popover is a native <details>; it is tracked in
+  // state so it can be dismissed when the user opens any other interface.
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const attachmentMenuRef = useRef<HTMLDetailsElement | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const preserveHistoryScrollRef = useRef<{ height: number; top: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -197,6 +203,12 @@ export function AIChatBox({
   const closeTextSelection = () => { window.getSelection()?.removeAllRanges(); setSelectedText(""); setLongPressMessageIndex(null); setSelectionModeMessageIndex(null); setSelectionNotice(""); };
 
   useEffect(() => {
+    // Any navigation outside the composer (history, settings, sidebar, another chat)
+    // bumps the signal owned by Home, which dismisses the photo/file menu.
+    setAttachmentMenuOpen(false);
+  }, [navigationCloseSignal]);
+
+  useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     const pending = preserveHistoryScrollRef.current;
@@ -212,8 +224,7 @@ export function AIChatBox({
   const loadOlderHistory = () => {
     const viewport = viewportRef.current;
     if (viewport) preserveHistoryScrollRef.current = { height: viewport.scrollHeight, top: viewport.scrollTop };
-    onLoadOlderHistory?.();
-  };
+    onLoadOlderHistory?.();  };
   useEffect(() => {
     const syncSelection = () => { if (selectionModeMessageIndex !== null) captureSelectedText(selectionModeMessageIndex); };
     document.addEventListener("selectionchange", syncSelection);
@@ -336,7 +347,7 @@ export function AIChatBox({
             <input ref={fileInputRef} className="sr-only" type="file" aria-label={attachmentInputLabel} multiple accept="image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown,.md" onChange={(event) => void addFiles(event.target.files)} />
             <input ref={photoInputRef} className="sr-only" type="file" aria-label={t.attachPhoto} multiple accept="image/png,image/jpeg,image/webp" onChange={(event) => void addFiles(event.target.files)} />
             {onOpenTemplates && <button type="button" onClick={onOpenTemplates} disabled={isLoading} className="kairema-composer-tool" title={language === "ru" ? "Шаблоны промптов" : "Prompt templates"} aria-label={language === "ru" ? "Шаблоны промптов" : "Prompt templates"}><Sparkles className="size-4" /></button>}
-            <details className="kairema-attachment-menu"><summary className="kairema-composer-tool" title={t.attach} aria-label={t.attach}>{isUploading || isPreparingAttachments ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}</summary><div className="kairema-attachment-menu-popover"><button type="button" onClick={() => photoInputRef.current?.click()} disabled={!onUploadFiles || isLoading || isUploading || isPreparingAttachments}>{t.attachPhoto}</button><button type="button" onClick={() => fileInputRef.current?.click()} disabled={!onUploadFiles || isLoading || isUploading || isPreparingAttachments}>{t.attachFile}</button></div></details>
+            <details className="kairema-attachment-menu" ref={attachmentMenuRef} open={attachmentMenuOpen} onToggle={(event) => setAttachmentMenuOpen(event.currentTarget.open)}><summary className="kairema-composer-tool" title={t.attach} aria-label={t.attach}>{isUploading || isPreparingAttachments ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}</summary><div className="kairema-attachment-menu-popover"><button type="button" onClick={() => photoInputRef.current?.click()} disabled={!onUploadFiles || isLoading || isUploading || isPreparingAttachments}>{t.attachPhoto}</button><button type="button" onClick={() => fileInputRef.current?.click()} disabled={!onUploadFiles || isLoading || isUploading || isPreparingAttachments}>{t.attachFile}</button></div></details>
             <Textarea ref={textareaRef} value={currentInput} onChange={(event) => setComposerInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={effectivePlaceholder} className="kairema-textarea" rows={1} />
           </div>
         </div>

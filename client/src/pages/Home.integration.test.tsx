@@ -797,6 +797,80 @@ describe("Home integration flows", () => {
     expect(screen.queryByText("Привязать email-вход")).toBeNull();
   });
 
+  it("closes the attachment menu when the user opens settings from the sidebar", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Home />);
+    const menu = container.querySelector("details.kairema-attachment-menu") as HTMLDetailsElement | null;
+    const trigger = menu?.querySelector("summary") as HTMLElement | null;
+    if (!menu || !trigger) throw new Error("Attachment menu is missing");
+
+    await user.click(screen.getByRole("button", { name: "Показать боковую панель" }));
+    await user.click(trigger);
+    expect(menu.open).toBe(true);
+    expect(screen.getByRole("button", { name: "Выбрать фото" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Настройки" }));
+
+    await waitFor(() => expect(menu.open).toBe(false));
+    expect(screen.getByText("Изменения сохраняются автоматически")).toBeTruthy();
+  });
+
+  it("closes the attachment menu when the user opens chat history and picks another chat", async () => {
+    const user = userEvent.setup();
+    const olderSessionId = "33333333-3333-4333-8333-333333333333";
+    fixtures.sessions = [
+      { id: fixtures.sessionId, modelId: fixtures.modelId, title: "Самый новый чат" },
+      { id: olderSessionId, modelId: fixtures.modelId, title: "Чат из истории" },
+    ];
+    const { container } = render(<Home />);
+    const menu = container.querySelector("details.kairema-attachment-menu") as HTMLDetailsElement | null;
+    const trigger = menu?.querySelector("summary") as HTMLElement | null;
+    if (!menu || !trigger) throw new Error("Attachment menu is missing");
+
+    await user.click(screen.getByRole("button", { name: "Показать боковую панель" }));
+    await user.click(trigger);
+    expect(menu.open).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "Чат из истории" }));
+
+    await waitFor(() => expect(menu.open).toBe(false));
+    expect(document.querySelector(".kairema-topbar-title")?.textContent).toBe("Чат из истории");
+  });
+
+  it("closes the attachment menu when the sidebar itself is opened again", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Home />);
+    const menu = container.querySelector("details.kairema-attachment-menu") as HTMLDetailsElement | null;
+    const trigger = menu?.querySelector("summary") as HTMLElement | null;
+    if (!menu || !trigger) throw new Error("Attachment menu is missing");
+
+    await user.click(screen.getByRole("button", { name: "Показать боковую панель" }));
+    await user.click(trigger);
+    expect(menu.open).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "Скрыть боковую панель" }));
+
+    await waitFor(() => expect(menu.open).toBe(false));
+  });
+
+  it("closes the attachment menu when settings are opened with the keyboard", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Home />);
+    const menu = container.querySelector("details.kairema-attachment-menu") as HTMLDetailsElement | null;
+    const trigger = menu?.querySelector("summary") as HTMLElement | null;
+    if (!menu || !trigger) throw new Error("Attachment menu is missing");
+
+    await user.click(screen.getByRole("button", { name: "Показать боковую панель" }));
+    await user.click(trigger);
+    expect(menu.open).toBe(true);
+
+    screen.getByRole("button", { name: "Настройки" }).focus();
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(menu.open).toBe(false));
+    expect(screen.getByText("Изменения сохраняются автоматически")).toBeTruthy();
+  });
+
   it("clears the composer as soon as the send is accepted, before the model answers", async () => {
     const user = userEvent.setup();
     const fetchSpy = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
