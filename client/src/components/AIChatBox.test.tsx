@@ -78,6 +78,38 @@ describe("AIChatBox user flows", () => {
     expect(onCancelStream).toHaveBeenCalledOnce();
   });
 
+  it("empties the composer as soon as the send is accepted, before the stream finishes", async () => {
+    const user = userEvent.setup();
+    let resolveSend: ((value: boolean) => void) | undefined;
+    const onSendMessage = vi.fn(() => new Promise<boolean>((resolve) => { resolveSend = resolve; }));
+    render(<AIChatBox messages={[]} onSendMessage={onSendMessage} />);
+
+    const composer = screen.getByPlaceholderText("Напишите сообщение…") as HTMLTextAreaElement;
+    await user.type(composer, "Привет");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(onSendMessage).toHaveBeenCalledOnce());
+    expect(composer.value).toBe("");
+
+    await user.type(composer, "Следующий вопрос");
+    expect(composer.value).toBe("Следующий вопрос");
+    resolveSend?.(true);
+    await waitFor(() => expect(composer.value).toBe("Следующий вопрос"));
+  });
+
+  it("keeps the typed text when the send is rejected before it starts", async () => {
+    const user = userEvent.setup();
+    const onSendMessage = vi.fn(async () => false);
+    render(<AIChatBox messages={[]} onSendMessage={onSendMessage} />);
+
+    const composer = screen.getByPlaceholderText("Напишите сообщение…") as HTMLTextAreaElement;
+    await user.type(composer, "Привет");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(onSendMessage).toHaveBeenCalledOnce());
+    await waitFor(() => expect(composer.value).toBe("Привет"));
+  });
+
   it("keeps text selection active after a repeated long-press and copies only the selected fragment", async () => {
     const reply: Message = { id: "assistant-select", role: "assistant", content: "Выделяемый фрагмент ответа", providerLabel: "Kairema", model: "safe", status: "полный ответ" };
     const writeText = vi.fn().mockResolvedValue(undefined);

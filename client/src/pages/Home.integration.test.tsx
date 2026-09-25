@@ -493,7 +493,7 @@ describe("Home integration flows", () => {
     await waitFor(() => expect(screen.getByText(/Не удалось начать потоковый ответ|Service Unavailable/)).toBeTruthy());
     expect(screen.getAllByRole("button", { name: "Открыть предпросмотр: vision.png" }).length).toBeGreaterThanOrEqual(1);
     await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 }));
-    expect((screen.getByPlaceholderText("Напишите сообщение…") as HTMLTextAreaElement).value).toBe("Проверь вложение");
+    expect((screen.getByPlaceholderText("Напишите сообщение…") as HTMLTextAreaElement).value).toBe("");
     expect(fixtures.clearDraft).not.toHaveBeenCalled();
   });
 
@@ -539,7 +539,7 @@ describe("Home integration flows", () => {
     expect(screen.queryByRole("button", { name: "Ещё вариант" })).toBeNull();
   });
 
-  it("aborts an active stream, refreshes persisted history and retains the draft", async () => {
+  it("aborts an active stream, refreshes persisted history and keeps the stored server draft", async () => {
     const user = userEvent.setup();
     const fetchSpy = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
@@ -555,7 +555,7 @@ describe("Home integration flows", () => {
 
     await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Отменить генерацию" })).toBeNull());
-    expect((composer as HTMLTextAreaElement).value).toBe("Отменяемый запрос");
+    expect((composer as HTMLTextAreaElement).value).toBe("");
     expect(fixtures.clearDraft).not.toHaveBeenCalled();
   });
 
@@ -594,6 +594,59 @@ describe("Home integration flows", () => {
     await user.click(screen.getByRole("switch", { name: "Веб-поиск" }));
 
     expect(fixtures.updateSettings).toHaveBeenCalledWith({ webSearch: true });
+  });
+
+
+  it("clears the composer as soon as the send is accepted, before the model answers", async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    }));
+    vi.stubGlobal("fetch", fetchSpy);
+    render(<Home />);
+
+    const composer = await screen.findByPlaceholderText("Напишите сообщение…");
+    await user.type(composer, "Привет");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    expect((composer as HTMLTextAreaElement).value).toBe("");
+    expect(screen.getByText("Привет")).toBeTruthy();
+    await user.type(composer, "Следующий вопрос");
+    await waitFor(() => expect((composer as HTMLTextAreaElement).value).toBe("Следующий вопрос"));
+
+    await user.click(screen.getByRole("button", { name: "Отменить генерацию" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Отменить генерацию" })).toBeNull());
+    expect((composer as HTMLTextAreaElement).value).toBe("Следующий вопрос");
+  });
+
+  it("keeps the typed text when sign-in is required before the send starts", async () => {
+    const user = userEvent.setup();
+    fixtures.isAuthenticated = false;
+    fixtures.sessions = [];
+    render(<Home />);
+
+    const composer = (await screen.findByPlaceholderText("Напишите сообщение…")) as HTMLTextAreaElement;
+    await user.type(composer, "Привет");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(fixtures.startLogin).toHaveBeenCalled());
+    await waitFor(() => expect(composer.value).toBe("Привет"));
+  });
+
+  it("keeps the typed text when the new chat cannot be created", async () => {
+    const user = userEvent.setup();
+    fixtures.sessions = [];
+    fixtures.messages = [];
+    fixtures.createChat.mockRejectedValueOnce(new Error("storage unavailable"));
+    render(<Home />);
+
+    const composer = (await screen.findByPlaceholderText("Напишите сообщение…")) as HTMLTextAreaElement;
+    await user.type(composer, "Привет");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(fixtures.createChat).toHaveBeenCalled());
+    await waitFor(() => expect(composer.value).toBe("Привет"));
   });
 
   it("restores the local theme when its setting save fails", async () => {
