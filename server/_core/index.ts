@@ -66,12 +66,16 @@ async function startServer() {
     serveStatic(app);
   }
 
-  const preferredPort = parseInt(process.env.PORT || "3000");
-  const port = await findAvailablePort(preferredPort);
+  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : await findAvailablePort(3000);
 
-  if (port !== preferredPort) {
-    console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
-  }
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`Port ${port} is already in use`);
+    } else {
+      console.error(err);
+    }
+    process.exitCode = 1;
+  });
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
