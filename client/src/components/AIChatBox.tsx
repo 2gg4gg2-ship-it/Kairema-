@@ -5,12 +5,7 @@ import { InlineMarkdown } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
 import { MAX_COMPOSER_IMAGES, optimizeImageForUpload } from "@/lib/image-attachments";
 import { Copy, Download, FileImage, FileText, Loader2, LogIn, Paperclip, Send, Square, Trash2, User, Sparkles, X } from "lucide-react";
-import React, { useEffect, useId, useRef, useState } from "react";
-
-// TEMP DIAGNOSTIC (composer): remove after the runtime cause is confirmed.
-const composerTraceGlobal = globalThis as unknown as { __COMPOSER_TRACE_SEQ__?: number };
-const nextComposerTraceSeq = () => { composerTraceGlobal.__COMPOSER_TRACE_SEQ__ = (composerTraceGlobal.__COMPOSER_TRACE_SEQ__ ?? 0) + 1; return composerTraceGlobal.__COMPOSER_TRACE_SEQ__; };
-const countTextareas = () => ({ textareas: document.querySelectorAll("textarea").length, kairemaTextareas: document.querySelectorAll(".kairema-textarea").length });
+import React, { useEffect, useRef, useState } from "react";
 
 export type ChatAttachment = { id: string; fileName: string; mimeType: string; sizeBytes: number; kind: "image" | "document"; previewUrl?: string };
 export type SourceEvidence = { title: string; url: string; publishedAt?: string };
@@ -141,18 +136,7 @@ export function AIChatBox({
   const effectivePlaceholder = placeholder ?? (language === "ru" ? "Напишите сообщение…" : "Write a message…");
   const currentInput = composerValue ?? input;
   composerInputRef.current = currentInput;
-  // TEMP DIAGNOSTIC (composer)
-  const traceSeqRef = useRef<number | null>(null);
-  const traceReactId = useId();
-  if (traceSeqRef.current === null) traceSeqRef.current = nextComposerTraceSeq();
-  const traceInstance = `#${traceSeqRef.current}${traceReactId}`;
-  const trace = (step: string, data?: Record<string, unknown>) => { console.log("[COMPOSER_TRACE]", { instance: traceInstance, step, at: Math.round(performance.now()), ...data }); };
-  const lastRenderTraceRef = useRef<string>("");
-  const lastRenderKey = `${currentInput.length}|${(composerValue ?? "").length}|${input.length}`;
-  if (lastRenderTraceRef.current !== lastRenderKey) { lastRenderTraceRef.current = lastRenderKey; trace("render", { inputLen: input.length, propLen: (composerValue ?? "").length, currentLen: currentInput.length, controlled: composerValue !== undefined, domLen: textareaRef.current?.value.length ?? null, ...countTextareas() }); }
-  useEffect(() => { trace("mount", { ...countTextareas() }); return () => { trace("unmount"); }; }, []);
-  useEffect(() => { trace("dom-after-render", { currentLen: currentInput.length, domLen: textareaRef.current?.value.length ?? null, domIsMine: textareaRef.current ? document.contains(textareaRef.current) : false, ...countTextareas() }); }, [currentInput]);
-  const setComposerInput = (value: string, reason = "unknown") => { trace("setComposerInput", { reason, prevLen: composerInputRef.current.length, nextLen: value.length, controlled: composerValue !== undefined }); composerInputRef.current = value; setInput(value); onComposerValueChange?.(value); trace("onComposerValueChange-called", { reason, nextLen: value.length, propLenAfterCall: (composerValue ?? "").length }); };
+  const setComposerInput = (value: string) => { composerInputRef.current = value; setInput(value); onComposerValueChange?.(value); };
 
   const clearLongPress = () => { if (longPressTimerRef.current !== null) { window.clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; } };
   const openTextSelectionMenu = (index: number) => {
@@ -253,16 +237,11 @@ export function AIChatBox({
   const submit = async (event?: React.FormEvent) => {
     event?.preventDefault();
     const value = currentInput.trim();
-    trace("submit", { source: event ? "form-submit" : "enter-keydown", valueLen: value.length, isLoading, isUploading, pendingLocal: pendingLocalAttachments.length, ...countTextareas() });
-    if (!value || isLoading || isUploading || pendingLocalAttachments.length > 0) { trace("submit-blocked-by-guard"); return; }
-    trace("submit-accepted", { valueLen: value.length, domLenAtAccept: textareaRef.current?.value.length ?? null });
-    trace("onSendMessage-start");
+    if (!value || isLoading || isUploading || pendingLocalAttachments.length > 0) return;
+    const typedValue = currentInput;
+    setComposerInput("");
     const sent = await onSendMessage(value, { attachmentIds: attachments.map((attachment) => attachment.id), attachments, clientMessageId: crypto.randomUUID() });
-    trace("onSendMessage-return", { sent: String(sent), domLenNow: textareaRef.current?.value.length ?? null, currentLen: composerInputRef.current.length });
-    if (sent === false) { trace("clear-skipped-send-rejected", { domLen: textareaRef.current?.value.length ?? null }); return; }
-    setComposerInput("", "post-send-clear");
-    queueMicrotask(() => trace("dom-immediately-after-clear", { domLen: textareaRef.current?.value.length ?? null, currentLen: composerInputRef.current.length }));
-    window.setTimeout(() => trace("dom-50ms-after-clear", { domLen: textareaRef.current?.value.length ?? null, currentLen: composerInputRef.current.length, propLen: (composerValue ?? "").length }), 50);
+    if (sent === false) { if (!composerInputRef.current) setComposerInput(typedValue); return; }
     setAttachments([]);
     textareaRef.current?.focus();
   };
@@ -358,7 +337,7 @@ export function AIChatBox({
             <input ref={photoInputRef} className="sr-only" type="file" aria-label={t.attachPhoto} multiple accept="image/png,image/jpeg,image/webp" onChange={(event) => void addFiles(event.target.files)} />
             {onOpenTemplates && <button type="button" onClick={onOpenTemplates} disabled={isLoading} className="kairema-composer-tool" title={language === "ru" ? "Шаблоны промптов" : "Prompt templates"} aria-label={language === "ru" ? "Шаблоны промптов" : "Prompt templates"}><Sparkles className="size-4" /></button>}
             <details className="kairema-attachment-menu"><summary className="kairema-composer-tool" title={t.attach} aria-label={t.attach}>{isUploading || isPreparingAttachments ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}</summary><div className="kairema-attachment-menu-popover"><button type="button" onClick={() => photoInputRef.current?.click()} disabled={!onUploadFiles || isLoading || isUploading || isPreparingAttachments}>{t.attachPhoto}</button><button type="button" onClick={() => fileInputRef.current?.click()} disabled={!onUploadFiles || isLoading || isUploading || isPreparingAttachments}>{t.attachFile}</button></div></details>
-            <Textarea ref={textareaRef} value={currentInput} onChange={(event) => { trace("onChange", { domLen: event.target.value.length, isComposing: Boolean((event.nativeEvent as InputEvent).isComposing), currentLen: currentInput.length }); setComposerInput(event.target.value, "onChange"); }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { trace("keydown-enter", { isComposing: Boolean(event.nativeEvent.isComposing), currentLen: currentInput.length }); event.preventDefault(); submit(); } }} placeholder={effectivePlaceholder} className="kairema-textarea" rows={1} />
+            <Textarea ref={textareaRef} value={currentInput} onChange={(event) => setComposerInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={effectivePlaceholder} className="kairema-textarea" rows={1} />
           </div>
         </div>
         {isLoading && <Button type="button" size="icon" onClick={onCancelStream} className="kairema-cancel" aria-label={t.stop}><Square className="size-3.5 fill-current" /></Button>}<Button type="submit" size="icon" disabled={!currentInput.trim() || isLoading || isUploading || pendingLocalAttachments.length > 0} className="kairema-send" aria-label={t.send}>{isLoading || isUploading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}</Button>
