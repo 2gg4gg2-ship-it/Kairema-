@@ -209,10 +209,13 @@ export default function Home() {
   useEffect(() => { if (!activeId && settingsQuery.data?.defaultRole && !defaultRoleApplied.current) { setModelId(settingsQuery.data.defaultRole as ModelId); defaultRoleApplied.current = true; } }, [activeId, settingsQuery.data?.defaultRole]);
   useEffect(() => { if (!themeApplied.current && settingsQuery.data?.theme) { if (settingsQuery.data.theme !== theme) toggleTheme?.(); themeApplied.current = true; } }, [settingsQuery.data?.theme, theme, toggleTheme]);
   useEffect(() => { if (settingsQuery.data?.highContrast !== undefined) setHighContrast?.(Boolean(settingsQuery.data.highContrast)); }, [settingsQuery.data?.highContrast, setHighContrast]);
-  useEffect(() => { pagedHistorySessionRef.current = activeId; setOlderHistoryMessages([]); setOlderHistoryCursor(undefined); setIsLoadingOlderHistory(false); setOptimisticMessages([]); setSentAttachmentFallbacks([]); setComposerDraft(""); setDraftHydratedSessionId(""); }, [activeId]); useEffect(() => () => streamAbortRef.current?.abort(), []);
+  useEffect(() => { pagedHistorySessionRef.current = activeId; setOlderHistoryMessages([]); setOlderHistoryCursor(undefined); setIsLoadingOlderHistory(false); setOptimisticMessages([]); setSentAttachmentFallbacks([]); setComposerDraft(""); setDraftHydratedSessionId(""); console.log("[COMPOSER_TRACE]", { instance: "Home", step: "effect:activeId-change", at: Math.round(performance.now()), activeId, willSetComposerDraftLen: 0 }); }, [activeId]); useEffect(() => () => streamAbortRef.current?.abort(), []);
+  // TEMP DIAGNOSTIC (composer)
+  useEffect(() => { console.log("[COMPOSER_TRACE]", { instance: "Home", step: "render-composerDraft", at: Math.round(performance.now()), composerDraftLen: composerDraft.length, activeId, draftHydratedSessionId, isStreaming, domLen: (document.querySelector(".kairema-textarea") as HTMLTextAreaElement | null)?.value.length ?? null, kairemaTextareas: document.querySelectorAll(".kairema-textarea").length }); });
   useEffect(() => {
     if (!activeId || !isAuthenticated || draftQuery.isLoading || draftHydratedSessionId === activeId) return;
     const restored = typeof draftQuery.data?.content === "string" ? draftQuery.data.content : "";
+    console.log("[COMPOSER_TRACE]", { instance: "Home", step: "effect:draft-hydrate", at: Math.round(performance.now()), activeId, restoredLen: restored.length });
     setComposerDraft(restored);
     setDraftHydratedSessionId(activeId);
     persistedDraftRef.current = `${activeId}\u0000${restored}`;
@@ -220,6 +223,7 @@ export default function Home() {
   useEffect(() => {
     if (!activeId || !isAuthenticated || draftHydratedSessionId !== activeId) return;
     const signature = `${activeId}\u0000${composerDraft}`;
+    console.log("[COMPOSER_TRACE]", { instance: "Home", step: "effect:draft-persist", at: Math.round(performance.now()), activeId, composerDraftLen: composerDraft.length, willSkip: signature === persistedDraftRef.current, willCall: composerDraft.trim() ? "saveDraft" : "clearDraft" });
     if (signature === persistedDraftRef.current) return;
     const timer = window.setTimeout(() => {
       const mutation = composerDraft.trim() ? draftSaveMutation.mutateAsync({ sessionId: activeId, content: composerDraft }) : draftClearMutation.mutateAsync({ sessionId: activeId });
@@ -308,9 +312,11 @@ export default function Home() {
   };
   const selectSession = (id: string, sessionModel?: string) => { activeSessionRef.current = id; setActiveId(id); setUploadStatus(null); setNewConversation(false); if (sessionModel && modelById.has(sessionModel as ModelId)) setModelId(sessionModel as ModelId); setSidebarOpen(false); };
   const send = async (content: string, options?: { attachmentIds?: string[]; attachments?: ChatAttachment[]; clientMessageId?: string }): Promise<boolean> => {
-    if (!isAuthenticated) { startLogin(); return false; }
+    console.log("[COMPOSER_TRACE]", { instance: "Home", step: "send-enter", at: Math.round(performance.now()), contentLen: content.length, isAuthenticated, activeId, hasActiveChat: Boolean(activeId), composerDraftLen: composerDraft.length });
+    if (!isAuthenticated) { startLogin(); console.log("[COMPOSER_TRACE]", { instance: "Home", step: "send-return", reason: "unauthenticated" }); return false; }
     const sessionId = activeId || await createChat();
-    if (!sessionId) return false;
+    if (!sessionId) { console.log("[COMPOSER_TRACE]", { instance: "Home", step: "send-return", reason: "chat-not-created" }); return false; }
+    console.log("[COMPOSER_TRACE]", { instance: "Home", step: "send-accepted", at: Math.round(performance.now()), contentLen: content.length, sessionId });
     const selectedId = modelId;
     const assistantId = `stream-${Date.now()}`;
     const label = selectedModel.label[language];
@@ -332,12 +338,14 @@ export default function Home() {
       await Promise.all([utils.chats.list.invalidate(), utils.attachments.list.invalidate({ sessionId }), utils.models.list.invalidate(), utils.knowledge.status.invalidate()]);
       setComposerDraft("");
       try { await draftClearMutation.mutateAsync({ sessionId }); persistedDraftRef.current = `${sessionId}\u0000`; } catch { setNotice(language === "ru" ? "Ответ отправлен; очистка черновика будет повторена автоматически." : "The reply was sent; clearing the draft will retry automatically."); }
+      console.log("[COMPOSER_TRACE]", { instance: "Home", step: "send-return", reason: "stream-completed", composerDraftLen: composerDraft.length, domLen: (document.querySelector(".kairema-textarea") as HTMLTextAreaElement | null)?.value.length ?? null });
       return true;
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") { setOptimisticMessages([]); await Promise.all([utils.chats.historyPage.invalidate({ sessionId, limit: 60 }), utils.attachments.list.invalidate({ sessionId })]); return false; }
+      if (error instanceof DOMException && error.name === "AbortError") { setOptimisticMessages([]); await Promise.all([utils.chats.historyPage.invalidate({ sessionId, limit: 60 }), utils.attachments.list.invalidate({ sessionId })]); console.log("[COMPOSER_TRACE]", { instance: "Home", step: "send-return", reason: "aborted", domLen: (document.querySelector(".kairema-textarea") as HTMLTextAreaElement | null)?.value.length ?? null }); return false; }
       const errorMessage = error instanceof Error ? error.message : "Stream error";
       setOptimisticMessages((items) => [...items.filter((item) => item.id !== assistantId), { id: `stream-error-${Date.now()}`, role: "assistant", content: errorMessage, providerLabel: "Kairema", model: selectedId, status: language === "ru" ? "ошибка" : "error", isError: true }]);
       await Promise.all([utils.chats.historyPage.invalidate({ sessionId, limit: 60 }), utils.attachments.list.invalidate({ sessionId })]);
+      console.log("[COMPOSER_TRACE]", { instance: "Home", step: "send-return", reason: "stream-error", domLen: (document.querySelector(".kairema-textarea") as HTMLTextAreaElement | null)?.value.length ?? null });
       return false;
     } finally { streamAbortRef.current = null; setIsStreaming(false); }
   };
