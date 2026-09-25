@@ -40,6 +40,7 @@ const fixtures = vi.hoisted(() => ({
   isAuthenticated: true,
   authLoading: false,
   sessionsLoading: false,
+  sessionsRefetching: false,
   isOwner: false,
   navigate: vi.fn(),
   releaseSecondDelta: null as (() => void) | null,
@@ -82,7 +83,7 @@ vi.mock("@/lib/trpc", () => ({
     attachments: { list: { useQuery: () => ({ data: fixtures.attachments }) }, upload: { useMutation: () => ({ mutateAsync: fixtures.uploadAttachment }) }, delete: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
     exports: { list: { useQuery: () => ({ data: fixtures.exports, isLoading: false }) }, create: { useMutation: () => ({ mutateAsync: fixtures.createExport, isPending: false }) }, delete: { useMutation: () => ({ mutateAsync: fixtures.deleteExport, isPending: false, variables: undefined }) } },
     chats: {
-      list: { useQuery: () => ({ data: fixtures.sessionsLoading ? undefined : fixtures.sessions, isLoading: fixtures.sessionsLoading }) },
+      list: { useQuery: () => ({ data: fixtures.sessionsLoading ? undefined : fixtures.sessions, isLoading: fixtures.sessionsLoading, isFetching: fixtures.sessionsLoading || fixtures.sessionsRefetching }) },
       messages: { useQuery: () => ({ data: fixtures.messages }) },
       historyPage: { useQuery: () => ({ data: { messages: fixtures.messages, nextCursor: fixtures.historyNextCursor }, isLoading: false }) },
       draft: { useQuery: (input: { sessionId: string }) => { fixtures.draftQueryInput = input; return { data: fixtures.draft, isLoading: false }; } },
@@ -653,7 +654,33 @@ describe("Home integration flows", () => {
     expect(fixtures.draftQueryInput).not.toEqual({ sessionId: olderSessionId });
     expect(window.localStorage.getItem("active-chat-id")).toBe(olderSessionId);
 
-    fixtures.sessionsLoading = false;
+  fixtures.sessionsLoading = false;
+  fixtures.sessionsRefetching = false;
+    rerender(<Home />);
+
+    await waitFor(() => expect(document.querySelector(".kairema-topbar-title")?.textContent).toBe("Чат из истории"));
+    expect(fixtures.draftQueryInput).toEqual({ sessionId: olderSessionId });
+    expect(window.localStorage.getItem("active-chat-id")).toBe(olderSessionId);
+  });
+
+  it("keeps the stored chat id while the chat list is still being refetched", async () => {
+    const olderSessionId = "33333333-3333-4333-8333-333333333333";
+    const realSessions = [
+      { id: fixtures.sessionId, modelId: fixtures.modelId, title: "Самый новый чат" },
+      { id: olderSessionId, modelId: fixtures.modelId, title: "Чат из истории" },
+    ];
+    // The list is not settled yet: the cached value is momentarily empty.
+    fixtures.sessions = [];
+    fixtures.sessionsRefetching = true;
+    window.localStorage.setItem("active-chat-id", olderSessionId);
+    const { rerender } = render(<Home />);
+
+    await waitFor(() => expect(screen.getByPlaceholderText("Напишите сообщение…")).toBeTruthy());
+    expect(window.localStorage.getItem("active-chat-id")).toBe(olderSessionId);
+    expect(fixtures.draftQueryInput).not.toEqual({ sessionId: olderSessionId });
+
+    fixtures.sessions = realSessions;
+    fixtures.sessionsRefetching = false;
     rerender(<Home />);
 
     await waitFor(() => expect(document.querySelector(".kairema-topbar-title")?.textContent).toBe("Чат из истории"));

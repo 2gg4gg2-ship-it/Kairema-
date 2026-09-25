@@ -219,12 +219,14 @@ export default function Home() {
       setActiveId(""); setNewConversation(false);
       return;
     }
-    if (sessionsQuery.isLoading || sessionsQuery.data === undefined) return;
+    // A settled list is required: an empty `data` can still be a stale placeholder
+    // while a refetch is in flight, and that must never look like "chat deleted".
+    if (sessionsQuery.isLoading || sessionsQuery.isFetching || sessionsQuery.data === undefined) return;
     if (activeId || newConversation || activeChatHydrated.current) return;
     const storedId = readStoredActiveChatId();
     if (storedId) {
       const restored = sessions.find((session) => session.id === storedId);
-      // The stored chat is gone: never silently open a different old chat for this identity.
+      // The list is settled and does not contain the stored chat: it is really gone.
       if (!restored) { clearStoredActiveChatId(); activeSessionRef.current = ""; setNewConversation(true); activeChatHydrated.current = true; return; }
       activeSessionRef.current = restored.id; setActiveId(restored.id); setNewConversation(false);
       setModelId(modelById.has(restored.modelId as ModelId) ? restored.modelId as ModelId : settings.defaultRole as ModelId);
@@ -239,7 +241,7 @@ export default function Home() {
       setModelId(modelById.has(initial.modelId as ModelId) ? initial.modelId as ModelId : settings.defaultRole as ModelId);
       activeChatHydrated.current = true;
     }
-  }, [activeId, isAuthenticated, modelById, newConversation, sessions, sessionsQuery.data, sessionsQuery.isLoading, settings.defaultRole]);
+  }, [activeId, isAuthenticated, modelById, newConversation, sessions, sessionsQuery.data, sessionsQuery.isFetching, sessionsQuery.isLoading, settings.defaultRole]);
   useEffect(() => { if (!isAuthenticated || !activeChatHydrated.current) return; if (activeId) writeStoredActiveChatId(activeId); else clearStoredActiveChatId(); }, [activeId, isAuthenticated]);
   useEffect(() => { if (!activeId && settingsQuery.data?.defaultRole && !defaultRoleApplied.current) { setModelId(settingsQuery.data.defaultRole as ModelId); defaultRoleApplied.current = true; } }, [activeId, settingsQuery.data?.defaultRole]);
   useEffect(() => { if (!themeApplied.current && settingsQuery.data?.theme) { if (settingsQuery.data.theme !== theme) toggleTheme?.(); themeApplied.current = true; } }, [settingsQuery.data?.theme, theme, toggleTheme]);
