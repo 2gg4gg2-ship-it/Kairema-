@@ -543,6 +543,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
         streamOutcome = "failed";
         chatStreamRuntimeGauges.failed += 1;
       }
+      console.error("[CHAT_STREAM_OUTER_ERROR]", error?.constructor?.name ?? "Error", error instanceof Error ? error.message : String(error), error instanceof Error ? error.stack : "");
       res.status(400).json({ error: historyError(error) });
     } finally {
       if (streamStartedAt !== undefined) addGaugeSample(chatStreamRuntimeGauges.activeDurationMs, performance.now() - streamStartedAt);
