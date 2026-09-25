@@ -244,6 +244,21 @@ describe("Kairema v4 role registry", () => {
     expect(JSON.parse(String(fetchSpy.mock.calls[3]?.[1]?.body))).toMatchObject({ model: "dots-studio/dots3-note-prev" });
   });
 
+  it("sends a different reasoning instruction when the thinking setting is on and off", () => {
+    const role = MODEL_CONFIG.find((item) => item.key === "smart");
+    if (!role) throw new Error("Smart role is missing from the role registry");
+    const history = [{ role: "user" as const, content: "Тест" }];
+    const withReasoning = JSON.stringify(buildOpenRouterMessages(role, history, { thinking: true }));
+    const withoutReasoning = JSON.stringify(buildOpenRouterMessages(role, history, { thinking: false }));
+    const reasoningInstruction = "Дай краткое объяснение итоговой логики, но не показывай скрытые рассуждения или черновые цепочки мыслей.";
+    const plainInstruction = "Не раскрывай скрытые рассуждения или черновые цепочки мыслей.";
+
+    expect(withReasoning).toContain(reasoningInstruction);
+    expect(withReasoning).not.toContain(plainInstruction);
+    expect(withoutReasoning).toContain(plainInstruction);
+    expect(withoutReasoning).not.toContain(reasoningInstruction);
+  });
+
   it("removes reasoning blocks before any response reaches the browser", () => {
     expect(stripReasoningBlocks("<think>скрытая цепочка</think>Итог <reasoning>скрыто</reasoning>")).toBe("Итог");
     expect(statusFromChatPayload({ choices: [{ message: { content: "<think>hidden</think>" } }] }).state).toBe("error");

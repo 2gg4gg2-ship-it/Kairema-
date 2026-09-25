@@ -573,6 +573,23 @@ describe("Home integration flows", () => {
     expect(fixtures.updateSettings).toHaveBeenCalledWith({ thinking: true });
   });
 
+  it("keeps only the reasoning and web-search switches and persists each one to the account", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Открыть настройки" }));
+
+    expect(screen.getByRole("switch", { name: /Дополнительное рассуждение/ })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "Веб-поиск" })).toBeTruthy();
+    expect(screen.queryByRole("switch", { name: /Разрешить инструменты/ })).toBeNull();
+    expect(screen.queryByRole("switch", { name: /Высокая контрастность/ })).toBeNull();
+    expect(screen.queryByRole("switch", { name: /Email-уведомления/ })).toBeNull();
+
+    await user.click(screen.getByRole("switch", { name: "Веб-поиск" }));
+
+    expect(fixtures.updateSettings).toHaveBeenCalledWith({ webSearch: true });
+  });
+
   it("restores the local theme when its setting save fails", async () => {
     const user = userEvent.setup();
     fixtures.updateSettings.mockRejectedValueOnce(new Error("offline"));
