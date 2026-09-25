@@ -39,6 +39,8 @@ const fixtures = vi.hoisted(() => ({
   startLogin: vi.fn(),
   isAuthenticated: true,
   authLoading: false,
+  authUser: { id: 42, name: "Тест", email: "", loginMethod: "stytch-password", isGuest: 0 } as { id: number; name: string | null; email: string | null; loginMethod: string | null; isGuest: number },
+  logout: vi.fn(async () => undefined),
   sessionsLoading: false,
   sessionsRefetching: false,
   isOwner: false,
@@ -54,7 +56,7 @@ Object.defineProperties(HTMLElement.prototype, {
   scrollIntoView: { configurable: true, value: () => undefined },
 });
 
-vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ isAuthenticated: fixtures.isAuthenticated, loading: fixtures.authLoading }) }));
+vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ isAuthenticated: fixtures.isAuthenticated, loading: fixtures.authLoading, user: fixtures.isAuthenticated ? fixtures.authUser : null, logout: fixtures.logout }) }));
 vi.mock("@/const", () => ({ startLogin: fixtures.startLogin }));
 vi.mock("@/lib/runtime-auth", () => ({ runtimeAuthHeaders: () => ({ Authorization: "Bearer test-session" }) }));
 vi.mock("@/contexts/ThemeContext", () => ({ useTheme: () => ({ theme: "dark", toggleTheme: fixtures.toggleTheme, highContrast: false, setHighContrast: vi.fn() }) }));
@@ -112,6 +114,8 @@ const encoder = new TextEncoder();
 function resetFixtures() {
   fixtures.isAuthenticated = true;
   fixtures.authLoading = false;
+  fixtures.authUser = { id: 42, name: "Тест", email: "", loginMethod: "stytch-password", isGuest: 0 };
+  fixtures.logout.mockClear();
   fixtures.sessionsLoading = false;
   fixtures.startLogin.mockReset();
   fixtures.sessions = [{ id: fixtures.sessionId, modelId: fixtures.modelId, title: "Активная история" }];
@@ -337,7 +341,7 @@ describe("Home integration flows", () => {
     await user.click(screen.getByRole("button", { name: "Отправить подтверждение" }));
 
     await waitFor(() => expect(fixtures.beginStytchLink).toHaveBeenCalledWith({ email: "linked@example.test" }));
-    expect(screen.getByText(/Совпадение адреса никогда не объединяет аккаунты автоматически/)).toBeTruthy();
+    expect(screen.getByText(/не объединяет аккаунты автоматически/)).toBeTruthy();
   });
 
   it("routes an owner to the dedicated analytics page instead of rendering inline metrics", async () => {
@@ -715,6 +719,82 @@ describe("Home integration flows", () => {
     expect(fixtures.draftQueryInput).not.toEqual({ sessionId: firstUserChatId });
     expect(fixtures.draftQueryInput).toEqual({ sessionId: "" });
     await waitFor(() => expect(window.localStorage.getItem("active-chat-id")).toBeNull());
+  });
+
+  it("shows the signed-in email account and a logout control instead of the linking form", async () => {
+    const user = userEvent.setup();
+    fixtures.authUser = { id: 42, name: "Тест", email: "owner@example.com", loginMethod: "stytch-password", isGuest: 0 };
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Открыть настройки" }));
+
+    expect(screen.getByLabelText("Email аккаунта")).toBeTruthy();
+    expect((screen.getByLabelText("Email аккаунта") as HTMLInputElement).value).toBe("owner@example.com");
+    expect(screen.getByRole("button", { name: "Выйти" })).toBeTruthy();
+    expect(screen.queryByPlaceholderText("name@example.com")).toBeNull();
+    expect(screen.queryByText("Привязать email-вход")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Отправить подтверждение" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Выйти" }));
+
+    expect(fixtures.logout).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the email linking form for an account without a verified address", async () => {
+    const user = userEvent.setup();
+    fixtures.authUser = { id: 42, name: "Тест", email: null, loginMethod: "stytch-password", isGuest: 0 };
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Открыть настройки" }));
+
+    expect(screen.getByText("Привязать email-вход")).toBeTruthy();
+    const field = screen.getByLabelText("Email для подтверждения") as HTMLInputElement;
+    expect(field.value).toBe("");
+    await user.type(field, "second@example.com");
+    expect(field.value).toBe("second@example.com");
+    expect(screen.getByRole("button", { name: "Отправить подтверждение" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Выйти" })).toBeNull();
+    expect(screen.getByText(/Это не объединяет аккаунты автоматически/)).toBeTruthy();
+  });
+
+  it("clears the authenticated session on logout without deleting the chat data", async () => {
+    const user = userEvent.setup();
+    const sessionId = "44444444-4444-4444-8444-444444444444";
+    fixtures.authUser = { id: 42, name: "Тест", email: "owner@example.com", loginMethod: "stytch-password", isGuest: 0 };
+    fixtures.sessions = [{ id: sessionId, modelId: fixtures.modelId, title: "Чат до выхода" }];
+    fixtures.logout.mockImplementationOnce(async () => {
+      fixtures.isAuthenticated = false;
+      fixtures.authUser = { id: 42, name: "Тест", email: null, loginMethod: "stytch-password", isGuest: 0 };
+    });
+    render(<Home />);
+
+    await waitFor(() => expect(window.localStorage.getItem("active-chat-id")).toBe(sessionId));
+    await user.click(screen.getByRole("button", { name: "Открыть настройки" }));
+    await user.click(screen.getByRole("button", { name: "Выйти" }));
+
+    expect(fixtures.logout).toHaveBeenCalledTimes(1);
+    // The server call owns the session teardown; the client must not delete user data itself.
+    expect(fixtures.deleteChat).not.toHaveBeenCalled();
+    expect(fixtures.clearHistory).not.toHaveBeenCalled();
+    expect(fixtures.clearDraft).not.toHaveBeenCalled();
+    expect(fixtures.createChat).not.toHaveBeenCalled();
+  });
+
+  it("restores the email account after signing in again", async () => {
+    const user = userEvent.setup();
+    fixtures.authUser = { id: 42, name: null, email: null, loginMethod: "stytch-password", isGuest: 0 };
+    const { rerender } = render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Открыть настройки" }));
+    expect(screen.getByText("Привязать email-вход")).toBeTruthy();
+    await user.keyboard("{Escape}");
+
+    fixtures.authUser = { id: 42, name: "Тест", email: "owner@example.com", loginMethod: "stytch-password", isGuest: 0 };
+    rerender(<Home />);
+    await user.click(screen.getByRole("button", { name: "Открыть настройки" }));
+
+    expect((screen.getByLabelText("Email аккаунта") as HTMLInputElement).value).toBe("owner@example.com");
+    expect(screen.queryByText("Привязать email-вход")).toBeNull();
   });
 
   it("clears the composer as soon as the send is accepted, before the model answers", async () => {
