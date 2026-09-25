@@ -645,8 +645,21 @@ export const appRouter = router({
       .input(z.object({ sessionId: z.string().uuid(), before: z.string().min(1).max(512).optional(), limit: z.number().int().min(1).max(100).default(60) }))
       .query(async ({ ctx, input }) => {
         try {
+          console.error("[HISTORY_PAGE]", {
+            userId: ctx.user.id,
+            sessionId: input.sessionId,
+            before: input.before ?? null,
+            limit: input.limit,
+          });
           return await listSessionMessagesPage(ctx.user.id, input.sessionId, { before: input.before, limit: input.limit });
         } catch (error) {
+          console.error("[HISTORY_PAGE_ERROR]", {
+            error_name: error?.constructor?.name ?? "Error",
+            message: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+            userId: ctx.user.id,
+            sessionId: input.sessionId,
+          });
           if (error instanceof Error && error.message.includes("Курсор истории")) {
             throw new TRPCError({ code: "BAD_REQUEST", message: "Некорректный курсор истории." });
           }
