@@ -340,7 +340,7 @@ export function AIChatBox({
             <Textarea ref={textareaRef} value={currentInput} onChange={(event) => setComposerInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={effectivePlaceholder} className="kairema-textarea" rows={1} />
           </div>
         </div>
-        {isLoading && <Button type="button" size="icon" onClick={onCancelStream} className="kairema-cancel" aria-label={t.stop}><Square className="size-3.5 fill-current" /></Button>}<Button type="submit" size="icon" disabled={!currentInput.trim() || isLoading || isUploading || pendingLocalAttachments.length > 0} className="kairema-send" aria-label={t.send}>{isLoading || isUploading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}</Button>
+        {isLoading ? <Button type="button" size="icon" onClick={onCancelStream} className="kairema-cancel" aria-label={t.stop}><Square className="size-3.5 fill-current" /></Button> : <Button type="submit" size="icon" disabled={!currentInput.trim() || isUploading || pendingLocalAttachments.length > 0} className="kairema-send" aria-label={t.send}>{isUploading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}</Button>}
       </form>
       <p className="px-5 pb-4 text-center text-[11px] text-muted-foreground">{t.disclaimer}</p>
       <Dialog open={Boolean(previewAttachment)} onOpenChange={(open) => { if (!open) setPreviewAttachment(null); }}>
