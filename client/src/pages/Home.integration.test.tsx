@@ -584,6 +584,12 @@ describe("Home integration flows", () => {
     expect(screen.queryByRole("switch", { name: /Разрешить инструменты/ })).toBeNull();
     expect(screen.queryByRole("switch", { name: /Высокая контрастность/ })).toBeNull();
     expect(screen.queryByRole("switch", { name: /Email-уведомления/ })).toBeNull();
+    expect(screen.queryByText("Обновление здоровья")).toBeNull();
+    expect(screen.queryByText("30 s")).toBeNull();
+    expect(screen.queryByText("Обновляет только публичный индикатор доступности.")).toBeNull();
+    expect(screen.queryByText("Самодиагностика")).toBeNull();
+    expect(screen.queryByText("Проверить настройки")).toBeNull();
+    expect(screen.queryByText("Показывает только сохранённые пользовательские параметры, без сообщений, ключей и служебных маршрутов.")).toBeNull();
 
     await user.click(screen.getByRole("switch", { name: "Веб-поиск" }));
 
