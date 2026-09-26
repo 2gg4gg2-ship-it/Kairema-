@@ -159,10 +159,68 @@ function webSource(title: unknown, url: unknown, retrievedAt = new Date().toISOS
   return { title: typeof title === "string" && title.trim() ? title.trim().slice(0, 240) : domain ?? url, url, sourceId, retrievedAt, ...(sourceDate ? { publishedAt: sourceDate } : {}), ...(domain ? { domain } : {}) };
 }
 function sourcePriority(source: WebSource) { const domain = source.domain?.toLowerCase() ?? ""; return PREFERRED_GLOBAL_DOMAINS.some((preferred) => domain === preferred || domain.endsWith(preferred)) ? 0 : 1; }
-function uniqueSources(items: Array<WebSource | null>): WebSource[] {
+
+/**
+ * Words that carry no discriminating power between candidate sources: they appear
+ * in almost every research request ("Какой сейчас курс доллара?") and would
+ * otherwise give the same score to unrelated results.
+ */
+const QUERY_TERM_STOPLIST = new Set([
+  "какая", "какой", "какие", "какое", "который", "которая", "которые", "которое", "сколько", "почему", "зачем", "что", "как", "где", "когда", "если",
+  "сейчас", "сегодня", "вчера", "завтра", "теперь", "текущий", "текущая", "текущие", "последний", "последняя", "последние", "последнюю", "новый", "новая", "новые",
+  "новость", "новости", "свежий", "свежая", "свежие", "актуальный", "актуальная", "актуальные", "для", "про", "это", "этот", "можно", "нужно", "найти", "проверь",
+  "the", "and", "for", "with", "about", "what", "which", "current", "today", "now", "latest", "news", "live", "find", "search", "please",
+]);
+/** Shorter words match too much of an unrelated page to be evidence of relevance. */
+const QUERY_TERM_MIN_LENGTH = 4;
+/** Splits on anything that is not a letter or digit, without a Unicode property escape. */
+const TERM_SPLIT_PATTERN = /[^0-9a-z\u00c0-\u024f\u0370-\u04ff]+/i;
+function termTokens(value: string): string[] { return value.toLowerCase().split(TERM_SPLIT_PATTERN).filter(Boolean); }
+/**
+ * Meaningful query terms, reduced to a fixed-length prefix.
+ *
+ * The prefix is the whole of the "morphology": one deterministic truncation
+ * matches every inflected form of the same word ("одессе" / "одессы" / "одесса",
+ * "доллара" / "доллар") without a stemmer, an embedding or a language model.
+ */
+function queryTermStems(query: string): string[] {
+  const stems = new Set<string>();
+  for (const token of termTokens(query).map((part) => part.slice(0, 40))) {
+    if (token.length < QUERY_TERM_MIN_LENGTH || QUERY_TERM_STOPLIST.has(token)) continue;
+    stems.add(token.length > QUERY_TERM_MIN_LENGTH ? token.slice(0, token.length - 2) : token);
+  }
+  return Array.from(stems);
+}
+/** How many meaningful query terms the source carries in its title, url, domain or retrieved text. */
+function sourceRelevanceScore(source: WebSource, text: unknown, stems: string[]): number {
+  if (!stems.length) return 0;
+  const tokens = termTokens(`${source.title} ${source.url} ${source.domain ?? ""} ${typeof text === "string" ? text : ""}`);
+  return stems.filter((stem) => tokens.some((token) => token.startsWith(stem))).length;
+}
+/**
+ * Deduplication, ranking and the existing source limit.
+ *
+ * `sourcePriority` stays the primary key, so a preferred domain can never be
+ * displaced by a busier page. Relevance is the second key and the provider's own
+ * result order is the deterministic tie-breaker. `title.localeCompare` used to be
+ * that tie-breaker, which carried no relevance at all and had a systematic bias:
+ * Latin titles sort before Cyrillic ones, so a Russian query whose provider pool
+ * exceeded SOURCE_LIMIT (You.com returns news next to web results) lost exactly
+ * its own relevant sources and kept unrelated news.
+ */
+function uniqueSources(entries: Array<{ source: WebSource; text?: unknown }>, query = ""): WebSource[] {
+  const stems = queryTermStems(query);
   const seen = new Set<string>();
-  return items.flatMap((item) => !item || seen.has(item.url) ? [] : (seen.add(item.url), [item]))
-    .sort((a, b) => sourcePriority(a) - sourcePriority(b) || a.title.localeCompare(b.title)).slice(0, SOURCE_LIMIT);
+  const ranked = entries.flatMap((entry, index) => {
+    const source = entry?.source;
+    if (!source || seen.has(source.url)) return [];
+    seen.add(source.url);
+    return [{ source, index, score: sourceRelevanceScore(source, entry.text, stems) }];
+  });
+  return ranked
+    .sort((a, b) => sourcePriority(a.source) - sourcePriority(b.source) || b.score - a.score || a.index - b.index)
+    .slice(0, SOURCE_LIMIT)
+    .map((item) => item.source);
 }
 /**
  * The provider query is the normalized user request and nothing else.
@@ -219,42 +277,67 @@ function youPageAgeAsUtc(value: unknown): string | undefined {
   return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed) ? trimmed : `${trimmed}Z`;
 }
 
-function youResult(payload: unknown): Omit<SearchResult, "cascadeUsed" | "state" | "verificationStatus"> | null {
-  const results = (payload as { results?: { web?: Array<{ title?: unknown; url?: unknown; description?: unknown; date?: unknown; publishedAt?: unknown; page_age?: unknown }>; news?: Array<{ title?: unknown; url?: unknown; description?: unknown; date?: unknown; publishedAt?: unknown; page_age?: unknown }> } })?.results;
+/**
+ * You.com carries the page body in `snippets`; `description` is only the page's
+ * meta summary, which for a live-value page (a weather widget, a rate ticker)
+ * names the topic without ever carrying the current value. Reading `description`
+ * alone therefore produced verified evidence containing no value at all.
+ *
+ * Only strings are ever collected, so an unexpected shape degrades to "no extra
+ * text" instead of leaking "[object Object]" into evidence, and the result is
+ * normalised and bounded by the same SNIPPET_LIMIT the evidence stage already
+ * enforces.
+ */
+const YOU_SNIPPET_TEXT_KEYS = ["text", "snippet", "content", "value", "passage"];
+function youSnippetText(value: unknown): string {
+  const fromEntry = (entry: unknown): string => {
+    if (typeof entry === "string") return entry;
+    if (!entry || typeof entry !== "object") return "";
+    const record = entry as Record<string, unknown>;
+    return YOU_SNIPPET_TEXT_KEYS.map((key) => record[key]).filter((part): part is string => typeof part === "string").join(" ");
+  };
+  if (Array.isArray(value)) return value.flatMap(fromEntry).join(" ");
+  return fromEntry(value);
+}
+
+function youResult(payload: unknown, query = ""): Omit<SearchResult, "cascadeUsed" | "state" | "verificationStatus"> | null {
+  const results = (payload as { results?: { web?: Array<{ title?: unknown; url?: unknown; description?: unknown; date?: unknown; publishedAt?: unknown; page_age?: unknown; snippets?: unknown }>; news?: Array<{ title?: unknown; url?: unknown; description?: unknown; date?: unknown; publishedAt?: unknown; page_age?: unknown; snippets?: unknown }> } })?.results;
   const entries = [...(results?.web ?? []), ...(results?.news ?? [])].flatMap((item) => {
     const source = webSource(item.title, item.url, undefined, item.publishedAt ?? item.date ?? youPageAgeAsUtc(item.page_age));
-    return source ? [{ source, text: typeof item.description === "string" ? item.description.replace(/\s+/g, " ").trim().slice(0, SNIPPET_LIMIT) : "" }] : [];
+    // The description stays first so a result without snippets keeps its exact previous text.
+    const parts = [typeof item.description === "string" ? item.description : "", youSnippetText(item.snippets)].filter((part) => part.trim());
+    return source ? [{ source, text: parts.join(" ").replace(/\s+/g, " ").trim().slice(0, SNIPPET_LIMIT) }] : [];
   });
-  const sources = uniqueSources(entries.map((entry) => entry.source));
+  const sources = uniqueSources(entries, query);
   const evidence = evidenceFromEntries(entries, sources);
   return sources.length ? { summary: sourceSummary(evidence), sources, evidence } : null;
 }
-function serperResult(payload: unknown): Omit<SearchResult, "cascadeUsed" | "state" | "verificationStatus"> | null {
+function serperResult(payload: unknown, query = ""): Omit<SearchResult, "cascadeUsed" | "state" | "verificationStatus"> | null {
   const entries = ((payload as { organic?: Array<{ title?: unknown; link?: unknown; snippet?: unknown; date?: unknown; publishedAt?: unknown }> })?.organic ?? []).flatMap((item) => {
     const source = webSource(item.title, item.link, undefined, item.publishedAt ?? item.date);
     return source ? [{ source, text: typeof item.snippet === "string" ? item.snippet.replace(/\s+/g, " ").trim().slice(0, SNIPPET_LIMIT) : "" }] : [];
   });
-  const sources = uniqueSources(entries.map((entry) => entry.source));
+  const sources = uniqueSources(entries, query);
   const evidence = evidenceFromEntries(entries, sources);
   return sources.length ? { summary: sourceSummary(evidence), sources, evidence } : null;
 }
-function exaResult(payload: unknown): Omit<SearchResult, "cascadeUsed" | "state" | "verificationStatus"> | null {
+function exaResult(payload: unknown, query = ""): Omit<SearchResult, "cascadeUsed" | "state" | "verificationStatus"> | null {
   const entries = ((payload as { results?: Array<{ title?: unknown; url?: unknown; text?: unknown; highlights?: unknown; publishedDate?: unknown; publishedAt?: unknown }> })?.results ?? []).flatMap((item) => {
     const source = webSource(item.title, item.url, undefined, item.publishedAt ?? item.publishedDate);
     const highlight = Array.isArray(item.highlights) ? item.highlights.find((value): value is string => typeof value === "string") : null;
     const text = highlight ?? (typeof item.text === "string" ? item.text : "");
     return source ? [{ source, text: text.replace(/\s+/g, " ").trim().slice(0, SNIPPET_LIMIT) }] : [];
   });
-  const sources = uniqueSources(entries.map((entry) => entry.source));
+  const sources = uniqueSources(entries, query);
   const evidence = evidenceFromEntries(entries, sources);
   return sources.length ? { summary: sourceSummary(evidence), sources, evidence } : null;
 }
-function tavilyResult(payload: unknown): Omit<SearchResult, "cascadeUsed" | "state" | "verificationStatus"> | null {
+function tavilyResult(payload: unknown, query = ""): Omit<SearchResult, "cascadeUsed" | "state" | "verificationStatus"> | null {
   const entries = ((payload as { results?: Array<{ title?: unknown; url?: unknown; content?: unknown; published_date?: unknown; publishedAt?: unknown }> })?.results ?? []).flatMap((item) => {
     const source = webSource(item.title, item.url, undefined, item.publishedAt ?? item.published_date);
     return source ? [{ source, text: typeof item.content === "string" ? item.content.replace(/\s+/g, " ").trim().slice(0, SNIPPET_LIMIT) : "" }] : [];
   });
-  const sources = uniqueSources(entries.map((entry) => entry.source));
+  const sources = uniqueSources(entries, query);
   const evidence = evidenceFromEntries(entries, sources);
   return sources.length ? { summary: sourceSummary(evidence), sources, evidence } : null;
 }
@@ -267,7 +350,7 @@ async function requestSearch(layer: SearchLayer, query: string, signal: AbortSig
   const apiKey = (layer === "you" ? process.env.YOU_API_KEY : layer === "serper" ? process.env.SERPER_API_KEY : layer === "exa" ? process.env.EXA_API_KEY : process.env.TAVILY_API_KEY)?.trim() ?? "";
   if (!apiKey) return skippedAttempt();
   try {
-    const request: { url: string; headers: Record<string, string>; body: object; parse: (payload: unknown) => Omit<SearchResult, "cascadeUsed" | "state" | "verificationStatus"> | null } = layer === "you"
+    const request: { url: string; headers: Record<string, string>; body: object; parse: (payload: unknown, query: string) => Omit<SearchResult, "cascadeUsed" | "state" | "verificationStatus"> | null } = layer === "you"
       ? { url: YOU_ENDPOINT, headers: { "Content-Type": "application/json", "X-API-Key": apiKey }, body: { query, count: SOURCE_LIMIT, safesearch: "moderate" }, parse: youResult }
       : layer === "serper"
         ? { url: SERPER_ENDPOINT, headers: { "Content-Type": "application/json", "X-API-KEY": apiKey }, body: { q: query, num: SOURCE_LIMIT }, parse: serperResult }
@@ -275,7 +358,7 @@ async function requestSearch(layer: SearchLayer, query: string, signal: AbortSig
           ? { url: EXA_ENDPOINT, headers: { "Content-Type": "application/json", "x-api-key": apiKey }, body: { query, numResults: SOURCE_LIMIT, contents: { text: { maxCharacters: 2_000 } } }, parse: exaResult }
           : { url: TAVILY_ENDPOINT, headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: { query, max_results: SOURCE_LIMIT, search_depth: "basic" }, parse: tavilyResult };
     const response = await fetch(request.url, { method: "POST", headers: request.headers, body: JSON.stringify(request.body), signal });
-    const parsed = request.parse(await response.json().catch(() => null));
+    const parsed = request.parse(await response.json().catch(() => null), query);
     if (response.ok && parsed) return { http: response.status, latencyMs: Date.now() - startedAt, result: { ...parsed, cascadeUsed: layer, state: "found", verificationStatus: "verified" }, outcome: "success" };
     return { http: response.status, latencyMs: Date.now() - startedAt, result: null, outcome: response.ok ? "empty" : "failed" };
   } catch {
