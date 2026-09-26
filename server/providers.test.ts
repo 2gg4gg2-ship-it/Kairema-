@@ -349,6 +349,33 @@ describe("Kairema v4 role registry", () => {
     }
   });
 
+  it("separates a value timed to another hour from the value the user asks for right now", () => {
+    for (const role of MODEL_CONFIG) {
+      const system = buildOpenRouterMessages(role, [{ role: "user", content: "Какая сейчас погода в Одессе?" }], {
+        webResearch: "Одесса: 13:00 · +19°C · Восход 06:47 Закат 18:48 · Мелкий дождь.",
+        webSources: [{ title: "Погода SINOPTIK", domain: "sinoptik.ua", sourceId: "source-weather", retrievedAt: "2026-09-26T09:34:00.000Z", url: "https://sinoptik.ua/ru/pohoda/odesa" }],
+        searchStatus: { state: "found", verificationStatus: "verified", sourcesCount: 1, cascadeUsed: "you" },
+      })[0]?.content as string;
+
+      // A value labelled with another hour must never be passed off as "right now".
+      expect(system).toContain("не представляй значение, относящееся к другому конкретному часу или периоду, как точное значение «сейчас»");
+      expect(system).toContain("назови это время явно и не называй такое значение текущим наблюдением");
+      // A live value that the sources simply do not contain must never be guessed.
+      expect(system).toContain("не угадывай и не вычисляй текущее значение из косвенной информации");
+      expect(system).toContain("прямо скажи, что точное текущее значение не найдено");
+
+      const precedence = system.indexOf("приоритет имеют подтверждённые сведения этого блока");
+      expect(system.indexOf("как точное значение «сейчас»")).toBeGreaterThan(precedence);
+      expect(system.indexOf("как точное значение «сейчас»")).toBeLessThan(system.indexOf("ПОДТВЕРЖДЁННЫЕ ДАННЫЕ:"));
+      expect(system.indexOf("текущее значение не найдено")).toBeLessThan(system.indexOf("ПОДТВЕРЖДЁННЫЕ ДАННЫЕ:"));
+
+      // Without a sourced block there is nothing to time-anchor, so the rules must be absent.
+      const unsourced = buildOpenRouterMessages(role, [{ role: "user", content: "Какая сейчас погода в Одессе?" }], {})[0]?.content as string;
+      expect(unsourced).not.toContain("как точное значение «сейчас»");
+      expect(unsourced).not.toContain("текущее значение не найдено");
+    }
+  });
+
   it("places memory before current information while preserving verified web-evidence priority", () => {
     const system = buildOpenRouterMessages(MODEL_ROLES[0]!, [{ role: "user", content: "Какая актуальная версия?" }], {
       memoryContext: "Пользователь просит короткие ответы; память не подтверждает версии.",
