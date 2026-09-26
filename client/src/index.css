@@ -324,47 +324,44 @@ body { margin: 0; min-width: 320px; background: #070912; color: #e8edf8; }
 .kairema-cancel { width:44px; height:44px; flex:none; border-radius:12px; color:#ffc0c8!important; background:rgba(234,66,93,.18)!important; }.kairema-cancel:hover { background:rgba(234,66,93,.28)!important; }
 .kairema-export-history { display:flex; flex-direction:column; gap:2px; max-height:172px; overflow:auto; padding:0 2px 6px; }.kairema-export-history-item { display:flex; align-items:center; justify-content:space-between; gap:6px; padding:7px 7px; border-radius:8px; }.kairema-export-history-item:hover { background:rgba(255,255,255,.045); }.kairema-export-history-item>div:first-child { display:grid; min-width:0; gap:2px; }.kairema-export-history-name { overflow:hidden; color:#cfd7e7; font-size:11px; text-overflow:ellipsis; white-space:nowrap; }.kairema-export-history-item span:last-child { color:#657087; font-size:9px; }.kairema-export-history-actions { display:flex; gap:3px; flex:none; }.kairema-export-history-actions button { padding:5px; }
 
-/* Verified sources: one compact block of cards, so a source list never reads as loose text.
-   These rules own the block outright: no legacy `.kairema-sources *` rules may follow them, or
-   they would override the layout, the two-line clamps and the card-sized link. */
-.kairema-sources { display:grid; gap:7px; min-width:0; max-width:100%; }
-.kairema-sources-toggle { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:2px 8px; width:100%; padding:9px 11px; border:1px solid var(--k-line); border-radius:12px; color:var(--k-text); background:var(--k-panel); text-align:left; transition:background .16s ease,border-color .16s ease; }
-.kairema-sources-toggle:hover { background:var(--k-panel-2); }
-.kairema-sources-heading { font-size:12px; font-weight:800; line-height:1.2; }
-.kairema-sources-summary { grid-column:1; overflow:hidden; color:var(--k-muted); font-size:10px; line-height:1.35; text-overflow:ellipsis; white-space:nowrap; }
-.kairema-sources-chevron { grid-column:2; grid-row:1 / span 2; justify-self:end; color:var(--k-muted); transition:transform .18s ease; }.kairema-sources-chevron.is-open { transform:rotate(180deg); }
-.kairema-sources-body { display:grid; gap:7px; min-width:0; }
+/* Verified sources: an entry point in the chat opens one bottom sheet that holds every source
+   as a card. The honest status pill stays inline under the answer; the list does not, so a long
+   list can never stretch or crowd the message column. These rules own the block outright: no legacy
+   `.kairema-sources *` rules may follow them, or they would override the layout and the clamps. */
 .kairema-sources-status { width:max-content; max-width:100%; margin:0; padding:4px 9px; border:1px solid var(--k-line); border-radius:999px; color:var(--k-muted); background:var(--k-panel-2); font-size:10px; line-height:1.4; }
-.kairema-source-list { display:grid; gap:6px; min-width:0; margin:0; padding:0; list-style:none; }
-.kairema-source-item { display:grid; width:100%; min-width:0; }
-/* The card itself is the link, so the whole row opens the source and nothing overlaps it. It is
-   capped at its column, so a long title or URL can never widen the chat around it. */
-.kairema-source-card { box-sizing:border-box; display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:9px; width:100%; max-width:100%; min-width:0; padding:8px 9px; border:1px solid var(--k-line); border-radius:11px; color:var(--k-text); background:var(--k-panel); text-decoration:none; transition:background .16s ease,border-color .16s ease; }
-.kairema-source-card:hover { background:var(--k-panel-2); }
+/* Both entry points: the small chip at the end of the answer and the pill in the action row. */
+.kairema-sources-chip { display:inline-flex; align-items:center; gap:6px; margin-top:10px; padding:6px 10px; border:1px solid var(--k-line); border-radius:999px; color:var(--k-muted); background:var(--k-panel-2); font-size:13px; font-weight:600; transition:background .16s ease,border-color .16s ease,color .16s ease; }
+.kairema-sources-chip:hover { border-color:var(--k-text); color:var(--k-text); background:var(--k-panel); }
+.kairema-sources-pill { display:inline-flex; align-items:center; gap:7px; min-height:36px; margin-left:auto; padding:0 15px; border:1px solid var(--k-line); border-radius:999px; color:var(--k-text); background:var(--k-panel-2); font-size:14px; font-weight:650; transition:background .16s ease,border-color .16s ease; }
+.kairema-sources-pill:hover { border-color:var(--k-text); background:var(--k-panel); }
+.kairema-message-actions-spread { justify-content:space-between; }
+/* The sheet: edge to edge, bottom-anchored, rounded only at the top, safe-area aware. */
+.kairema-sources-sheet-overlay { background:rgb(0 0 0 / .58); }
+.kairema-sources-sheet { position:fixed; inset:auto 0 0 0; z-index:50; display:flex; flex-direction:column; gap:0; height:63dvh; max-height:63dvh; padding-bottom:calc(14px + env(safe-area-inset-bottom, 0px)); border:0; border-radius:22px 22px 0 0; color:var(--k-text); background:var(--k-panel); box-shadow:0 -18px 48px rgb(0 0 0 / .34); }
+.kairema-sources-sheet [data-vaul-handle] { width:38px; margin-top:10px; opacity:.45; background:var(--k-muted); }
+.kairema-sources-sheet-title { display:flex; align-items:center; gap:9px; margin:0; padding:10px 18px 0; color:var(--k-text); font-size:19px; font-weight:800; line-height:1.2; }
+.kairema-sources-sheet-close { display:grid; place-items:center; width:40px; height:40px; min-width:0; margin-left:auto; padding:0; border:0; border-radius:999px; color:var(--k-muted); background:transparent; }
+.kairema-sources-sheet-close:hover { color:var(--k-text); background:var(--k-panel-2); }
+.kairema-sources-sheet-subtitle { margin:0; padding:5px 18px 12px; color:var(--k-muted); font-size:13.5px; line-height:1.35; opacity:.62; }
+/* Only the list scrolls, so the sheet keeps its height once it is fully open. */
+.kairema-sources-sheet .kairema-source-list { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
+.kairema-source-list { display:grid; gap:10px; min-width:0; margin:0; padding:0 18px 4px; list-style:none; }
+.kairema-source-item { display:grid; min-width:0; }
+/* One card, one link: a tap anywhere on it opens the source, and nothing overlaps it. */
+.kairema-source-card { box-sizing:border-box; display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:start; gap:12px; width:100%; max-width:100%; min-width:0; padding:12px 13px; border:1px solid var(--k-line); border-radius:15px; color:var(--k-text); background:var(--k-panel-2); text-decoration:none; transition:background .16s ease,border-color .16s ease; }
+.kairema-source-card:hover { background:var(--k-panel); }
 .kairema-source-card:focus-visible { outline:2px solid var(--k-text); outline-offset:2px; }
-.kairema-source-icon { position:relative; display:grid; place-items:center; width:26px; height:26px; min-width:0; flex:none; border:1px solid var(--k-line); border-radius:8px; color:var(--k-muted); background:var(--k-panel-2); overflow:hidden; }
-.kairema-source-favicon { position:absolute; inset:0; width:100%; height:100%; padding:4px; object-fit:contain; }
-.kairema-source-copy { display:grid; min-width:0; gap:2px; }
-.kairema-source-title { display:-webkit-box; overflow:hidden; min-width:0; color:var(--k-text); font-size:12px; font-weight:700; line-height:1.3; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
-.kairema-source-card:hover .kairema-source-title { text-decoration:underline; text-underline-offset:2px; }
-/* A long URL breaks inside itself and is cut at two lines, so it can never widen the card. */
-.kairema-source-url { display:-webkit-box; overflow:hidden; min-width:0; max-width:100%; color:var(--k-muted); font-size:10px; line-height:1.35; overflow-wrap:anywhere; word-break:break-word; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
-.kairema-source-meta { display:flex; align-items:center; gap:6px; min-width:0; flex:none; }
-.kairema-source-date { min-width:0; color:var(--k-muted); font-size:10px; white-space:nowrap; }
-.kairema-source-open { display:grid; place-items:center; width:24px; height:24px; min-width:0; flex:none; border:1px solid var(--k-line); border-radius:7px; color:var(--k-muted); }
-.kairema-sources-collapse { justify-self:start; padding:4px 8px; border:1px solid var(--k-line); border-radius:8px; color:var(--k-muted); background:var(--k-panel); font-size:10px; font-weight:600; }
-.kairema-sources-collapse:hover { background:var(--k-panel-2); }
-/* On a phone the whole block stops at 90% of the message column, which stays proportional instead of
-   pinned to pixels. `width:100%` plus `border-box` keeps it shrink-only, so a narrower column can
-   never make it overflow, and the cards below keep filling this block rather than the message
-   wrapper. The card stays a single compact row: icon, copy and the date/open group all sit on one
-   line, so the two-column variant no longer reserves an empty cell under the icon, and padding,
-   gaps, the icon and the open affordance all shrink. The list itself is then narrowed to 90% and
-   centred with `margin-inline:auto`, so every card is the same width and leaves equal free space on
-   both sides of the panel instead of padding the list or shrinking the card. The URL keeps one
-   ellipsised line, the title keeps its two-line clamp, and nothing is dropped: no fixed height, no
-   fixed pixel width, no transform, no horizontal overflow. */
-@media(max-width:430px){.kairema-sources{box-sizing:border-box;width:100%;max-width:90%}.kairema-sources-toggle{padding:8px 9px}.kairema-source-list{gap:4px;width:90%;max-width:90%;margin-inline:auto;box-sizing:border-box}.kairema-source-card{grid-template-columns:auto minmax(0,1fr) auto;align-items:center;column-gap:7px;row-gap:0;padding:6px 7px;border-radius:9px}.kairema-source-icon{width:24px;height:24px;border-radius:7px}.kairema-source-copy{gap:1px}.kairema-source-meta{gap:4px;justify-content:flex-end}.kairema-source-url{display:block;white-space:nowrap;text-overflow:ellipsis;-webkit-line-clamp:unset;-webkit-box-orient:initial}.kairema-source-open{width:20px;height:20px;border-radius:6px}}
+.kairema-source-icon { position:relative; display:grid; place-items:center; width:40px; height:40px; min-width:0; border:1px solid var(--k-line); border-radius:11px; color:var(--k-text); background:var(--k-panel); overflow:hidden; }
+.kairema-source-initial { font-size:16px; font-weight:800; line-height:1; }
+.kairema-source-favicon { position:absolute; inset:0; width:100%; height:100%; padding:7px; object-fit:contain; }
+.kairema-source-copy { display:grid; min-width:0; gap:3px; }
+.kairema-source-title { display:-webkit-box; overflow:hidden; min-width:0; color:var(--k-text); font-size:15.5px; font-weight:700; line-height:1.3; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+/* Host and date sit on their own wrapped line, so a card may grow instead of cutting the facts. */
+.kairema-source-meta-line { overflow-wrap:anywhere; min-width:0; color:var(--k-muted); font-size:13.5px; line-height:1.35; opacity:.7; }
+/* One line, cut with an ellipsis, so a long link can never widen the card. */
+.kairema-source-url { overflow:hidden; min-width:0; max-width:100%; color:var(--k-muted); font-size:12.5px; line-height:1.35; opacity:.5; text-overflow:ellipsis; white-space:nowrap; }
+/* The external-link square lines up with the title line, not the centre of a tall card. */
+.kairema-source-open { display:grid; place-items:center; width:20px; height:20px; min-width:0; margin-top:1px; color:var(--k-muted); opacity:.6; }
 
 /* Kairema v5 — monochrome product system. Status colors stay reserved for factual availability. */
 :root { color-scheme: light; --k-bg:#f7f7f5; --k-panel:#ffffff; --k-panel-2:#f0f0ed; --k-text:#121212; --k-muted:#4e4e49; --k-line:#bdbdb7; --k-strong:#181818; --k-invert:#fff; --k-bubble-user-bg:#191919; --k-bubble-user-text:#ffffff; --k-bubble-user-line:#191919; --k-bubble-ai-bg:#ffffff; --k-bubble-ai-text:#121212; --k-bubble-ai-line:#bdbdb7; --foreground:#121212; --card-foreground:#121212; --popover-foreground:#121212; --secondary-foreground:#242422; --muted-foreground:#4e4e49; --accent-foreground:#121212; --sidebar-foreground:#121212; --sidebar-accent-foreground:#121212; }
