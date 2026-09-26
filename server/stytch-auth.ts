@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { COOKIE_NAME } from "../shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { clearGuestCookie } from "./_core/guest-session";
 import { consumeStytchLinkIntent, getUserByProviderIdentity, linkProviderIdentityToUser, resolveOrCreateProviderUser } from "./db";
 import { sdk } from "./_core/sdk";
 import {
@@ -106,6 +107,9 @@ export function registerStytchAuthRoutes(app: Express) {
       // Choosing a verified provider session is an explicit account switch.
       // Existing Manus OAuth remains supported but is not left ambiguous.
       clearManusSessionCookie(res, req);
+      // A pre-login guest cookie must not outlive this login: while it is present
+      // the guest row shadows the canonical Stytch user on every later request.
+      clearGuestCookie(res, req);
       res.redirect(303, "/?auth=verified");
     } catch {
       linkIntent ? redirectLinkFailure(res, req) : (clearStytchSessionCookie(res, req), res.redirect(303, "/?auth=failed"));

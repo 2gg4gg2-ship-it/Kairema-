@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import express from "express";
 import { AttachmentPublicError, uploadOwnedChatAttachmentBytes } from "./attachments";
-import { sdk } from "./_core/sdk";
+import { resolveRequestUser } from "./_core/context";
 import { getOrCreateGuestUser } from "./_core/guest-session";
 
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
@@ -16,7 +16,8 @@ type UploadDependencies = {
 };
 
 const productionUploadDependencies: UploadDependencies = {
-  authenticateRequest: request => sdk.authenticateRequest(request),
+  // Same permanent-first resolver as tRPC createContext and /api/chat/stream.
+  authenticateRequest: request => resolveRequestUser({ req: request }),
   getOrCreateGuestUser: async (request, response) => {
     try {
       const guest = await getOrCreateGuestUser(request, response);

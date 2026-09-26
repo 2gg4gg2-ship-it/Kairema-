@@ -1,7 +1,7 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import { appendChatMessage, consumeChatStreamRequestQuota, enqueueMemoryExtractionJob, getOwnedChatSession, getOwnedSessionMessage, getStoredAssistantForClientMessage, listSessionTranscriptWindow, updateChatTitle } from "./db";
-import { sdk } from "./_core/sdk";
+import { resolveRequestUser } from "./_core/context";
 import { MODEL_IDS, chatWithRoleStream, publicChatError, type Provider, type RoleId } from "./providers";
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
 import { getOrCreateGuestUser } from "./_core/guest-session";
@@ -271,7 +271,10 @@ type StreamDependencies = {
 };
 
 const defaultDependencies: StreamDependencies = {
-  authenticateRequest: async (request) => sdk.authenticateRequest(request) as Promise<{ id: number }>,
+  // Same permanent-first resolver as tRPC createContext, so /api/chat/stream and
+  // auth.me always agree on userId for one browser session. A guest cookie no
+  // longer shadows a verified Stytch/email session here either.
+  authenticateRequest: async (request) => resolveRequestUser({ req: request }) as Promise<{ id: number } | null>,
   getOrCreateGuestUser: async (request, response) => {
     try {
       const guest = await getOrCreateGuestUser(request, response);

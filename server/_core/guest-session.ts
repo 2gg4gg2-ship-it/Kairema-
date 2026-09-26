@@ -208,11 +208,8 @@ export async function cleanupExpiredGuests(now = new Date()): Promise<number> {
 
 /**
  * Lazy cleanup pass: triggers cleanup of expired guests on-demand.
-<<<<<<< HEAD
- * Called after Render sleep when the scheduled cron route may be idle.
-=======
- * Called when an expired guest session is encountered during getOrCreateGuestUser.
->>>>>>> 8c302c02d30d3cb7b2eb78a8aca59e92b2c57c86
+ * Called after Render sleep when the scheduled cron route may be idle, and when an
+ * expired guest session is encountered during getOrCreateGuestUser.
  * Best-effort — never throws, never blocks the caller.
  */
 export async function maybeLazyCleanupExpiredGuests(): Promise<void> {
