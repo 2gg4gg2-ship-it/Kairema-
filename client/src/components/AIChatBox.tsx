@@ -5,7 +5,7 @@ import { InlineMarkdown } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
 import { MAX_COMPOSER_IMAGES, optimizeImageForUpload } from "@/lib/image-attachments";
 import { Copy, Download, FileImage, FileText, Globe, ArrowUpRight, ChevronDown, Loader2, LogIn, Paperclip, Send, Square, Trash2, User, Sparkles, X } from "lucide-react";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useId, useRef, useState } from "react";
 
 export type ChatAttachment = { id: string; fileName: string; mimeType: string; sizeBytes: number; kind: "image" | "document"; previewUrl?: string };
 export type SourceEvidence = { title: string; url: string; publishedAt?: string };
@@ -105,28 +105,32 @@ function sourceDate(publishedAt: string | undefined, language: Language) {
 }
 
 /**
- * One source card. The title is the only link text, so its accessible name stays exactly the
- * source title, and CSS stretches that link over the whole card: the icon, the URL and the date
- * sit beside it as plain text instead of running together on one unstyled line.
+ * One source card. The whole card is a single link, so the icon, the title, the URL and the date
+ * all open the source and nothing has to fake a hit area with an overlay. The link is labelled by
+ * the title alone, so its accessible name stays exactly the source title while the URL and the
+ * date remain readable as the link's own content.
  */
 function SourceCard({ source, language, t }: { source: SourceEvidence; language: Language; t: SourceCopy }) {
+  const titleId = useId();
   const host = sourceHost(source.url);
   const date = sourceDate(source.publishedAt, language);
   return (
-    <li className="kairema-source-card">
-      <span className="kairema-source-icon" aria-hidden="true">
-        <Globe className="size-4" />
-        {host ? <img className="kairema-source-favicon" src={`https://${host}/favicon.ico`} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : null}
-      </span>
-      <span className="kairema-source-copy">
-        <a className="kairema-source-title" href={source.url} target="_blank" rel="noreferrer noopener" title={source.title}>{source.title}</a>
-        <span className="kairema-source-url">{source.url}</span>
-      </span>
-      <span className="kairema-source-meta">
-        {date ? <span className="kairema-source-date">{date}</span> : null}
-        <span className="kairema-source-open" aria-hidden="true"><ArrowUpRight className="size-3.5" /></span>
-        <span className="sr-only">{t.sourceOpen}</span>
-      </span>
+    <li className="kairema-source-item">
+      <a className="kairema-source-card" href={source.url} target="_blank" rel="noreferrer noopener" aria-labelledby={titleId} title={source.title}>
+        <span className="kairema-source-icon" aria-hidden="true">
+          <Globe className="size-4" />
+          {host ? <img className="kairema-source-favicon" src={`https://${host}/favicon.ico`} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : null}
+        </span>
+        <span className="kairema-source-copy">
+          <span className="kairema-source-title" id={titleId}>{source.title}</span>
+          <span className="kairema-source-url">{source.url}</span>
+        </span>
+        <span className="kairema-source-meta">
+          {date ? <span className="kairema-source-date">{date}</span> : null}
+          <span className="kairema-source-open" aria-hidden="true"><ArrowUpRight className="size-3.5" /></span>
+          <span className="sr-only">{t.sourceOpen}</span>
+        </span>
+      </a>
     </li>
   );
 }

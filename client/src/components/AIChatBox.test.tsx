@@ -272,8 +272,12 @@ describe("AIChatBox user flows", () => {
       // The old markup rendered one bare list item per source outside any block.
       expect(container.querySelector(".kairema-source-evidence")).toBeNull();
       expect(container.querySelectorAll("ul")).toHaveLength(1);
-      expect(container.querySelectorAll(".kairema-source-list > .kairema-source-card")).toHaveLength(5);
+      expect(container.querySelectorAll(".kairema-source-list > .kairema-source-item")).toHaveLength(5);
       expect(container.querySelectorAll(".kairema-source-list a")).toHaveLength(5);
+      // Each card is exactly one link, so the whole row opens the source and no card is a bare
+      // list item with a separate link nested inside it.
+      expect(container.querySelectorAll(".kairema-source-card")).toHaveLength(5);
+      expect(container.querySelectorAll(".kairema-source-card a")).toHaveLength(0);
     });
 
     it("keeps a long title and a long URL inside their own card without breaking the layout", () => {
