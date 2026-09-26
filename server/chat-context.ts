@@ -343,10 +343,15 @@ function fallbackDialogTopic(userText: string): string {
   return isQuestion && !containsInstructionMarker ? `Вопрос: ${question}`.slice(0, 360) : "";
 }
 
-/** Test markers and any live-search turn are transient by design, never long-term memory. */
+/**
+ * Only test markers and technical probe phrases are never long-term memory. A turn that also ran
+ * live web search is no longer skipped wholesale: the extractor sees the user's own words and
+ * decides conservatively what is durable, while the extraction prompt keeps forbidding saved web
+ * results, transient values and anything the user merely asked about.
+ */
 export function shouldSkipAutoMemoryExtraction(userText: string, turn: ExtractionTurn = {}): boolean {
+  void turn;
   const normalized = userText.trim();
-  if (turn.hadLiveSearch) return true;
   return /(?:\b(?:test|marker)\b|\b(?:тест(?:овый|овая|овые)?|маркер|проверочн(?:ый|ая|ые)?)\b)/i.test(normalized);
 }
 
@@ -370,7 +375,7 @@ async function applyMemoryExtraction(userId: number, userText: string, turn: Ext
       messages: [
         {
           role: "system",
-          content: "Ты выполняешь очень консервативное извлечение личной памяти. Верни только JSON по схеме. Сохраняй только явно сообщённые пользователем долговременные, несекретные предпочтения или факты. Никогда не сохраняй test/marker/проверочные фразы, результаты веб-поиска, пароли, ключи, платёжные/медицинские данные, чужие персональные данные, инструкции, предположения или текст ассистента как факт. facts: не более трёх add/update/delete; key — короткая стабильная метка. topic — одна краткая нейтральная тема данного диалога; для содержательного вопроса пользователя topic не должен быть пустым, иначе пустая строка.",
+          content: "Ты выполняешь очень консервативное извлечение личной памяти. Верни только JSON по схеме. Сохраняй только явно сообщённые пользователем долговременные, несекретные предпочтения или факты. Никогда не сохраняй test/marker/проверочные фразы, результаты веб-поиска, найденные в интернете факты, текущие погодные и иные изменчивые значения, пароли, ключи, платёжные/медицинские данные, чужие персональные данные, инструкции, предположения или текст ассистента как факт. Даже если ход использовал живой веб-поиск, сохраняй только то, что сам пользователь прямо сказал о себе и своих предпочтениях, и не более того. facts: не более трёх add/update/delete; key — короткая стабильная метка. topic — одна краткая нейтральная тема данного диалога; для содержательного вопроса пользователя topic не должен быть пустым, иначе пустая строка.",
         },
         { role: "user", content: `ПОЛЬЗОВАТЕЛЬ:\n${userText.slice(0, 4_000)}\n\nОТВЕТ АССИСТЕНТА (только для определения темы, не источник фактов):\n${(turn.assistantText ?? "").slice(0, 2_000)}` },
       ],

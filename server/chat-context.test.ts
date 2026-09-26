@@ -58,10 +58,11 @@ beforeEach(() => {
 });
 
 describe("chat context soft web research", () => {
-  it("does not auto-extract test markers or live-search turns into durable memory", () => {
+  it("does not auto-extract test markers into durable memory, but no longer drops a whole live-search turn", () => {
     expect(shouldSkipAutoMemoryExtraction("Это временный тестовый marker для проверки.")).toBe(true);
     expect(shouldSkipAutoMemoryExtraction("Обычный долговременный факт.")).toBe(false);
-    expect(shouldSkipAutoMemoryExtraction("Обычный запрос", { hadLiveSearch: true })).toBe(true);
+    // A turn that also ran live web search must still reach the conservative extractor.
+    expect(shouldSkipAutoMemoryExtraction("Обычный запрос", { hadLiveSearch: true })).toBe(false);
   });
 
   it("retains the server-side policy for exactly four public roles", () => {
@@ -367,6 +368,22 @@ describe("chat context soft web research", () => {
     expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "fact", "Пользователь предпочитает русский язык", expect.objectContaining({ memoryKey: "language", source: "auto" }));
     expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "dialog_topic", expect.stringContaining("Flash: настройка единой памяти"), expect.objectContaining({ role: "fast", sessionId: "11111111-1111-4111-8111-111111111111", source: "auto" }));
     expect(deleteMemoryEntryByKey).not.toHaveBeenCalled();
+  });
+
+  it("still auto-extracts a durable user fact from a turn that ran live web search", async () => {
+    vi.mocked(getMemorySettings).mockResolvedValueOnce({ enabled: 1, autoExtract: 1 });
+    vi.mocked(invokeLLM).mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({
+      facts: [{ action: "add", key: "city", value: "Пользователь живёт в Казани" }],
+      topic: "погода в Казани",
+    }) } }] } as never);
+
+    await extractMemoryFacts(7, "Я живу в Казани, какая там сейчас погода?", { assistantText: "Сейчас +18", role: "flagship", hadLiveSearch: true, sessionId: "11111111-1111-4111-8111-111111111111" });
+
+    // The extractor ran for the same user and wrote the user's own fact, not the weather lookup.
+    expect(invokeLLM).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-5-nano" }));
+    expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "fact", "Пользователь живёт в Казани", expect.objectContaining({ memoryKey: "city", source: "auto" }));
+    expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "dialog_topic", expect.stringContaining("Apex: погода в Казани"), expect.objectContaining({ role: "flagship", source: "auto" }));
+    expect(upsertMemoryEntry).not.toHaveBeenCalledWith(7, "fact", expect.stringContaining("+18"), expect.anything());
   });
 
   it("keeps automatic extraction independently disabled while enabled memory remains readable", async () => {

@@ -183,20 +183,22 @@ describe("Home integration flows", () => {
     ]);
   });
 
-  it("collapses and reopens the desktop sidebar with an accessible stateful control", async () => {
-    const user = userEvent.setup();
+  it("opens the desktop sidebar by default and no longer needs a topbar toggle", async () => {
     render(<Home />);
 
     const sidebar = document.querySelector(".kairema-sidebar");
-    expect(sidebar?.classList.contains("kairema-sidebar-collapsed")).toBe(true);
-    expect(sidebar?.hasAttribute("inert")).toBe(true);
-
-    await user.click(screen.getByRole("button", { name: "Показать боковую панель" }));
+    // On desktop the sidebar is a static column: open, focusable, reachable without any control.
+    expect(sidebar?.classList.contains("kairema-sidebar-collapsed")).toBe(false);
     expect(sidebar?.classList.contains("kairema-sidebar-open")).toBe(true);
     expect(sidebar?.hasAttribute("inert")).toBe(false);
-
-    await user.click(screen.getByRole("button", { name: "Скрыть боковую панель" }));
-    expect(sidebar?.classList.contains("kairema-sidebar-collapsed")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Показать боковую панель" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Скрыть боковую панель" })).toBeNull();
+    // Its own controls stay reachable: new chat, memory, exports, settings and the role list.
+    expect(sidebar?.querySelector(".kairema-new-chat")).not.toBeNull();
+    expect(sidebar?.querySelector(".kairema-providers")).not.toBeNull();
+    expect(sidebar?.querySelector(".kairema-sidebar-footer")).not.toBeNull();
+    // The small-screen drawer opener is untouched.
+    expect(document.querySelector(".kairema-topbar-left .kairema-icon-btn")).not.toBeNull();
   });
 
   it("always exposes a persistent guest login control in the topbar", async () => {
@@ -804,7 +806,6 @@ describe("Home integration flows", () => {
     const trigger = menu?.querySelector("summary") as HTMLElement | null;
     if (!menu || !trigger) throw new Error("Attachment menu is missing");
 
-    await user.click(screen.getByRole("button", { name: "Показать боковую панель" }));
     await user.click(trigger);
     expect(menu.open).toBe(true);
     expect(screen.getByRole("button", { name: "Выбрать фото" })).toBeTruthy();
@@ -827,7 +828,6 @@ describe("Home integration flows", () => {
     const trigger = menu?.querySelector("summary") as HTMLElement | null;
     if (!menu || !trigger) throw new Error("Attachment menu is missing");
 
-    await user.click(screen.getByRole("button", { name: "Показать боковую панель" }));
     await user.click(trigger);
     expect(menu.open).toBe(true);
 
@@ -844,11 +844,12 @@ describe("Home integration flows", () => {
     const trigger = menu?.querySelector("summary") as HTMLElement | null;
     if (!menu || !trigger) throw new Error("Attachment menu is missing");
 
-    await user.click(screen.getByRole("button", { name: "Показать боковую панель" }));
     await user.click(trigger);
     expect(menu.open).toBe(true);
 
-    await user.click(screen.getByRole("button", { name: "Скрыть боковую панель" }));
+    // Picking a role in the sidebar closes the sidebar, which drives the same navigation
+    // signal the removed desktop toggle used to send.
+    await user.click(container.querySelector(".kairema-providers .kairema-provider") as HTMLElement);
 
     await waitFor(() => expect(menu.open).toBe(false));
   });
@@ -860,7 +861,6 @@ describe("Home integration flows", () => {
     const trigger = menu?.querySelector("summary") as HTMLElement | null;
     if (!menu || !trigger) throw new Error("Attachment menu is missing");
 
-    await user.click(screen.getByRole("button", { name: "Показать боковую панель" }));
     await user.click(trigger);
     expect(menu.open).toBe(true);
 
@@ -928,7 +928,9 @@ describe("Home integration flows", () => {
     fixtures.updateSettings.mockRejectedValueOnce(new Error("offline"));
     render(<Home />);
 
-    await user.click(screen.getByTitle("Светлая тема"));
+    // The theme control now lives in Settings rather than in the chat topbar.
+    await user.click(screen.getByTitle("Открыть настройки"));
+    await user.click(await screen.findByTitle("Светлая тема"));
 
     await waitFor(() => expect(fixtures.updateSettings).toHaveBeenCalledWith({ theme: "light" }));
     await waitFor(() => expect(fixtures.toggleTheme).toHaveBeenCalledTimes(2));
