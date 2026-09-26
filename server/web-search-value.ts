@@ -22,9 +22,13 @@ export type ValueStatus = "confirmed" | "unconfirmed";
 export type ValueReason =
   | "confirmed_now_marker"
   | "confirmed_zone_label"
+  | "confirmed_bound_label"
+  | "confirmed_current_conditions"
   | "confirmed_recent_page"
   | "future_label"
+  | "future_statement"
   | "unknown_zone_label"
+  | "page_timestamp_only"
   | "other_entity"
   | "undated_page"
   | "stale_page"
@@ -32,7 +36,7 @@ export type ValueReason =
   | "no_kind"
   | "no_value";
 
-export type ExtractedValue = { kind: LiveValueKind; raw: string; value: string; unit?: string; label?: string; offsetMinutes?: number };
+export type ExtractedValue = { kind: LiveValueKind; raw: string; value: string; unit?: string; label?: string; /** The label sits in the value's own clause and close to the value, so it is that value's own time. */ labelBound?: true; offsetMinutes?: number };
 
 export type ValueValidation = { status: ValueStatus; reason: ValueReason; asOf: string | null; values: ExtractedValue[] };
 
@@ -80,6 +84,28 @@ const HOUR_LABEL_FIRST_PATTERN = /(?<![\d:])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])/
 /** `\b` is ASCII-only, so it never fires next to a Cyrillic letter: explicit boundaries. */
 const RELATIVE_DAY_PATTERN = /(?:^|[^0-9A-Za-zА-Яа-яЁё])(сегодня|вчера|позавчера|today|yesterday)/i;
 const DAY_MONTH_PATTERN = /(?:^|\s)(?:на\s+|от\s+)?(\d{1,2})[.\s](\d{1,2})(?![\d:])/;
+/**
+ * Times that belong to something else on the page and are therefore never an observation
+ * time of a value: "Восход 06:47 Закат 18:48" is real data about the sun, not about the
+ * temperature printed next to it. Treating the first `HH:MM` of a whole weather snippet as
+ * the value's own time is what used to send a genuine current reading to
+ * `unknown_zone_label`.
+ */
+const NON_OBSERVATION_TIME_PATTERN = /(?:восход\w*|закат\w*|заход\w*|лунн\w*\s+восход|sunrise|sunset|moonrise|moonset|sun\s*rise|sun\s*set)/i;
+/** A page's own stamp dates the page, never the reading inside it. */
+const PAGE_TIMESTAMP_PATTERN = /(?:обновлен\w*|обновлени\w*|опубликован\w*|публикац\w*|\bupdated\b|\bpublished\b|last\s+update)/i;
+/**
+ * A statement about a moment that is not the present one. A bare "прогноз погоды" is
+ * deliberately absent: a forecast page that prints the current reading is exactly the page
+ * this layer has to accept, and only an explicit future day or an aggregate rejects.
+ */
+const FUTURE_STATEMENT_PATTERN = /(?:завтра|послезавтра|\btomorrow\b|по\s+прогноз\w*|ожидается|к\s+вечеру|ночью\s+будет|прогноз\w*\s+на\s+(?:завтра|послезавтра)|максимальн\w*|минимальн\w*|\bmaximum\b|\bminimum\b|\bhigh\s+of\b|\blow\s+of\b)/i;
+/** A sentence boundary: nothing on the other side of one is this value's own time. */
+const CLAUSE_BOUNDARY_PATTERN = /[.;!?]/;
+/** How far from the value a time may sit and still read as that value's own time. */
+const LABEL_PROXIMITY_CHARS = 40;
+/** How much text before a time decides what that time is about. */
+const TIME_QUALIFIER_CHARS = 24;
 const TEMPERATURE_PATTERN = /(?<![\d.,])([+-]?\d{1,2}(?:[.,]\d)?)(?![\d])\s*(?:°\s?[CС]|℃|(?<![0-9A-Za-zА-Яа-яЁё])градус(?:а|ов|ам)?(?![0-9A-Za-zА-Яа-яЁё])|(?<![0-9A-Za-zА-Яа-яЁё])[CС](?![0-9A-Za-zА-Яа-яЁё]))/gi;
 const RATE_VALUE_PATTERN = /(\d{1,3}(?:[.,]\d{2,4}))/g;
 const RATE_CONTEXT_PATTERN = /(?:USD|EUR|UAH|RUB|[\$€₽]|доллар|евро|гривн|рубл)/i;
@@ -227,6 +253,76 @@ function labelFor(text: string): string | null {
   return hourLabel(text) ?? dayLabel(text);
 }
 
+/** A date-time is not a clock reading: "13:00 26.09" and "2026-09-26 13:00" are excluded. */
+function isDateTime(text: string, index: number): boolean {
+  return /(?:^|[^0-9])20[0-9]{2}(?:$|[^0-9])/.test(text.slice(Math.max(0, index - 12), index + 18));
+}
+
+/** What a `HH:MM` in a snippet is about, decided by the words right before it. */
+type TimeRole = "value" | "page" | "other";
+function timeRole(text: string, index: number): TimeRole {
+  const before = text.slice(Math.max(0, index - TIME_QUALIFIER_CHARS), index);
+  if (NON_OBSERVATION_TIME_PATTERN.test(before)) return "other";
+  if (PAGE_TIMESTAMP_PATTERN.test(before)) return "page";
+  return "value";
+}
+
+/**
+ * The nearest `HH:MM` that is genuinely this value's own time: close to it, in the same
+ * sentence, and not a sunrise, a sunset or a page stamp. "13:00 · +19°C" binds, and so does
+ * "+19°C в 13:00", while "… · Восход 06:47 Закат 18:48" binds nothing.
+ */
+function boundHourLabel(text: string, start: number, end: number): string | null {
+  const from = Math.max(0, start - LABEL_PROXIMITY_CHARS);
+  const to = Math.min(text.length, end + LABEL_PROXIMITY_CHARS);
+  let best: { label: string; distance: number } | null = null;
+  for (const match of Array.from(text.slice(from, to).matchAll(HOUR_LABEL_PATTERN))) {
+    const index = from + (match.index ?? 0);
+    if (isDateTime(text, index)) continue;
+    if (timeRole(text, index) !== "value") continue;
+    // Nothing on the far side of a sentence boundary is this value's time.
+    const between = text.slice(Math.min(index, start), Math.max(from + (match.index ?? 0) + match[0].length, end));
+    if (CLAUSE_BOUNDARY_PATTERN.test(between)) continue;
+    const label = `${match[1]!.padStart(2, "0")}:${match[2]}`;
+    const distance = index < start ? start - index : index >= end ? index - end + 1 : 0;
+    if (!best || distance < best.distance) best = { label, distance };
+  }
+  return best?.label ?? null;
+}
+
+/**
+ * The first `HH:MM` that claims to describe the data itself ("Данные на 13:00", "at 13:00").
+ * Such a time stays a real temporal claim — it is exactly what proves a value is *not*
+ * current — but it is never borrowed from an unrelated part of the page.
+ */
+function describedHourLabel(text: string): string | null {
+  for (const match of Array.from(text.matchAll(HOUR_LABEL_PATTERN))) {
+    const index = match.index ?? 0;
+    if (isDateTime(text, index)) continue;
+    if (timeRole(text, index) !== "value") continue;
+    return `${match[1]!.padStart(2, "0")}:${match[2]}`;
+  }
+  return null;
+}
+
+/**
+ * The temporal label of one weather value, and whether it is that value's own time.
+ *
+ * The ladder is bound → described → day-level, so a value next to its own hour keeps that
+ * hour, a value whose hour is stated elsewhere on the page still gets that claim, and an
+ * unrelated time (sunrise, sunset, page stamp) is never borrowed. Only the first step sets
+ * `labelBound`, and only it may confirm without a zone.
+ */
+function weatherLabel(text: string, start: number, end: number, offsetMinutes: number | undefined) {
+  const bound = boundHourLabel(text, start, end);
+  const label = bound ?? describedHourLabel(text) ?? dayLabel(text);
+  return {
+    ...(label ? { label } : {}),
+    ...(bound ? { labelBound: true as const } : {}),
+    ...(offsetMinutes === undefined ? {} : { offsetMinutes }),
+  };
+}
+
 /**
  * All values of one kind in a snippet.
  *
@@ -248,7 +344,7 @@ export function extractValues(text: string, kind: LiveValueKind): ExtractedValue
       if (!Number.isFinite(parsed) || parsed < TEMPERATURE_RANGE.min || parsed > TEMPERATURE_RANGE.max) continue;
       const value = textValue(match[1]);
       if (!value) continue;
-      values.push({ kind, raw: textValue(match[0]), value, unit: "°C", ...shared });
+      values.push({ kind, raw: textValue(match[0]), value, unit: "°C", ...weatherLabel(text, match.index ?? 0, (match.index ?? 0) + match[0].length, offsetMinutes) });
     }
     return values;
   }
@@ -256,7 +352,8 @@ export function extractValues(text: string, kind: LiveValueKind): ExtractedValue
     for (const [pattern, canonical] of CONDITION_LEXICON) {
       const hit = text.match(pattern);
       if (!hit) continue;
-      return [{ kind, raw: textValue(hit[0]), value: canonical, ...shared }];
+      const index = hit.index ?? 0;
+      return [{ kind, raw: textValue(hit[0]), value: canonical, ...weatherLabel(text, index, index + hit[0].length, offsetMinutes) }];
     }
     return [];
   }
@@ -304,15 +401,36 @@ function sourceAgeMs(sourceDate: string | null | undefined, now: Date): number |
 function attributeValue(value: ExtractedValue, input: { text: string; now: Date; sourceDate: string | null | undefined }): ValueReason {
   if (NOW_MARKER_PATTERN.test(input.text)) return "confirmed_now_marker";
   const ageMs = sourceAgeMs(input.sourceDate, input.now);
-  const label = value.label ?? labelFor(input.text);
-  if (label && /^[0-9]{1,2}:[0-9]{2}$/.test(label)) {
+  const zoneVerdict = (label: string): ValueReason => {
     if (value.offsetMinutes === undefined) return "unknown_zone_label";
     const labelHour = Number(label.slice(0, 2));
     const zonedNow = new Date(input.now.getTime() + value.offsetMinutes * 60_000);
     const aheadHours = labelHour - zonedNow.getUTCHours();
     if (aheadHours > 0 && aheadHours <= FUTURE_LABEL_TOLERANCE_HOURS) return "future_label";
     return "confirmed_zone_label";
+  };
+  /**
+   * Weather is decided by the time that belongs to the value, not by the first time on the
+   * page. A reading that carries its own hour in its own sentence is that reading's
+   * observation time, so a sunrise, a sunset or a page stamp can neither block it nor be
+   * reported as it. With no attributable time at all, a temperature with its unit, the right
+   * place, no stated future day and no page timestamp is the current condition the page is
+   * describing, and is reported as such — while an explicitly old page is still refused.
+   */
+  if (value.kind === "temperature" || value.kind === "conditions") {
+    const own = value.label && value.labelBound && /^[0-9]{1,2}:[0-9]{2}$/.test(value.label) ? value.label : null;
+    // A reading that carries its own hour is that reading's observation time, and a page
+    // crawled yesterday still prints today's hour: the crawl date must not veto it.
+    if (own) return value.offsetMinutes === undefined ? "confirmed_bound_label" : zoneVerdict(own);
+    const described = describedHourLabel(input.text);
+    if (described) return zoneVerdict(described);
+    if (dayLabel(input.text)) return "unknown_zone_label";
+    if (PAGE_TIMESTAMP_PATTERN.test(input.text)) return "page_timestamp_only";
+    if (FUTURE_STATEMENT_PATTERN.test(input.text)) return "future_statement";
+    if (ageMs === null) return "confirmed_current_conditions";
   }
+  const label = value.label ?? labelFor(input.text);
+  if (label && /^[0-9]{1,2}:[0-9]{2}$/.test(label)) return zoneVerdict(label);
   if (label) return "unknown_zone_label";
   if (ageMs === null) return "undated_page";
   return ageMs <= RECENT_PAGE_WINDOW_MS ? "confirmed_recent_page" : "stale_page";
@@ -394,7 +512,7 @@ function formatValue(value: ExtractedValue): string {
   return `курс ${value.value}`;
 }
 
-export const LIVE_VALUE_UNCONFIRMED_LINE = "ИСКОМОЕ ЗНАЧЕНИЕ НЕ ПОДТВЕРЖДЕНО: найдены релевантные источники, но ни один не содержит значения, отвечающего на вопрос.";
+export const LIVE_VALUE_UNCONFIRMED_LINE = "ИСКОМОЕ ЗНАЧЕНИЕ НЕ ПОДТВЕРЖДЕНО: найдены релевантные источники, но найденное значение нельзя надёжно привязать к текущему моменту.";
 /**
  * The honest sentence the user hears when sources arrived but the value did not: the failure
  * is a missing value, not an unavailable search, and the two must not be conflated.

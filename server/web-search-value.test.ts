@@ -214,3 +214,69 @@ describe("value extraction", () => {
     expect(extractValues("на градуснике 300 °C", "temperature")).toEqual([]);
   });
 });
+
+describe("a time must belong to the value, not to the page", () => {
+  const validate = (text: string, publishedAt: string | null = null, context = text) =>
+    validateValue({
+      values: [...extractValues(text, "temperature"), ...extractValues(text, "conditions")],
+      kinds: liveValueKinds("Какая сейчас погода в Одессе?"),
+      text,
+      entity: "Одессе",
+      now: new Date("2026-09-26T09:34:00.000Z"),
+      sourceDate: publishedAt,
+      context,
+    });
+
+  it("does not let sunrise and sunset block a current reading", () => {
+    // The real defect: the first HH:MM of a weather page belongs to the sun, not to the
+    // temperature printed next to it, and it used to send this reading to unknown_zone_label.
+    const result = validate("Погода в Одессе: +19°C, мелкий дождь. Восход 06:41, закат 19:12.");
+    expect(result.status).toBe("confirmed");
+    expect(result.values.map((value) => value.value)).toContain("+19");
+    expect(result.asOf).toBeNull();
+  });
+
+  it("accepts an hour that sits right next to the temperature, in either order", () => {
+    expect(validate("Погода в Одессе: 13:00 +19°C, мелкий дождь.").status).toBe("confirmed");
+    const after = validate("Погода в Одессе: +19°C в 13:00, мелкий дождь.");
+    expect(after.status).toBe("confirmed");
+    expect(after.asOf).toBe("13:00");
+  });
+
+  it("refuses a page timestamp as the observation time of the temperature", () => {
+    // "Обновлено в 13:00" dates the page; the reading it carries has no time of its own.
+    const result = validate("Погода в Одессе: +19°C. Обновлено в 13:00.");
+    expect(result.status).toBe("unconfirmed");
+    expect(result.reason).toBe("page_timestamp_only");
+  });
+
+  it("still refuses a future day, another city, a bare timezone and an aggregate", () => {
+    expect(validate("Завтра в Одессе +23°C.").status).toBe("unconfirmed");
+    expect(validate("Киев: +19°C.").status).toBe("unconfirmed");
+    expect(validate("Одесса: UTC+3.").status).toBe("unconfirmed");
+    expect(validate("Максимальная температура сегодня +24°C.").status).toBe("unconfirmed");
+  });
+
+  it("confirms a current reading that never says «сейчас»", () => {
+    expect(validate("Погода в Одессе: +19°C, мелкий дождь.").status).toBe("confirmed");
+    expect(validate("Weather in Odesa: 19°C, light rain.", null, "Weather in Odesa: 19°C, light rain.").status).toBe("confirmed");
+  });
+
+  it("still refuses an explicitly old page for a reading with no time of its own", () => {
+    expect(validate("Одесса: +19 °C, солнечно, ветер слабый.", "2026-09-26T04:00:00.000Z").status).toBe("unconfirmed");
+  });
+
+  it("leaves clock and rate attribution exactly as it was", () => {
+    const clock = validateValue({
+      values: extractValues("Время в Берлине: 12:40 (UTC+2)", "clock"),
+      kinds: ["clock"],
+      text: "Время в Берлине: 12:40 (UTC+2)",
+      entity: "Одессе",
+      now: new Date("2026-09-26T09:34:00.000Z"),
+      sourceDate: null,
+      context: "Время в Берлине: 12:40 (UTC+2)",
+    });
+    expect(clock.status).toBe("unconfirmed");
+    expect(extractValues("Восход 06:41, закат 19:12", "clock")).toHaveLength(2);
+  });
+});

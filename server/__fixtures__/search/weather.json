@@ -37,13 +37,49 @@
       "expected": { "status": "unconfirmed", "reason": "unknown_zone_label", "asOf": "13:00" }
     },
     {
-      "name": "weather-undated-page-without-label",
+      "name": "weather-undated-page-without-label-is-a-current-reading",
       "query": "Какая сейчас погода в Одессе?",
       "now": "2026-09-26T09:34:00.000Z",
       "entries": [
         { "title": "Погода в Одессе", "url": "https://example.com/weather/odesa", "publishedAt": null, "text": "Одесса: +19 °C, солнечно, ветер слабый." }
       ],
-      "expected": { "status": "unconfirmed", "reason": "undated_page", "asOf": null }
+      "expected": { "status": "confirmed", "reason": "confirmed_current_conditions", "asOf": null, "value": "+19" }
+    },
+    {
+      "name": "weather-own-hour-in-the-same-sentence-confirms",
+      "query": "Какая сейчас погода в Одессе?",
+      "now": "2026-09-26T09:34:00.000Z",
+      "entries": [
+        { "title": "SINOPTIK: Погода в Одессе", "url": "https://sinoptik.ua/ru/pohoda/odesa", "publishedAt": "2024-12-31T22:00:00.000Z", "text": "Погода в Одессе на неделю. Прогноз погоды Одесса, Украина. Одесса: 13:00 · +19°C · Восход 06:47 Закат 18:48 Мелкий дождь, который пошел в середине дня, закончится еще до наступления вечера." }
+      ],
+      "expected": { "status": "confirmed", "reason": "confirmed_bound_label", "asOf": "13:00", "value": "+19" }
+    },
+    {
+      "name": "weather-sunrise-times-do-not-block-the-reading",
+      "query": "Какая сейчас погода в Одессе?",
+      "now": "2026-09-26T09:34:00.000Z",
+      "entries": [
+        { "title": "Погода в Одессе", "url": "https://example.com/weather/odesa", "publishedAt": null, "text": "Погода в Одессе: +19°C, мелкий дождь. Восход 06:41, закат 19:12." }
+      ],
+      "expected": { "status": "confirmed", "reason": "confirmed_current_conditions", "asOf": null, "value": "+19" }
+    },
+    {
+      "name": "weather-page-timestamp-is-not-the-observation-time",
+      "query": "Какая сейчас погода в Одессе?",
+      "now": "2026-09-26T09:34:00.000Z",
+      "entries": [
+        { "title": "Погода в Одессе", "url": "https://example.com/weather/odesa", "publishedAt": null, "text": "Погода в Одессе: +19°C. Обновлено в 13:00." }
+      ],
+      "expected": { "status": "unconfirmed", "reason": "page_timestamp_only", "asOf": null }
+    },
+    {
+      "name": "weather-explicit-future-day-is-refused",
+      "query": "Какая сейчас погода в Одессе?",
+      "now": "2026-09-26T09:34:00.000Z",
+      "entries": [
+        { "title": "Погода в Одессе", "url": "https://example.com/weather/odesa", "publishedAt": null, "text": "Завтра в Одессе +23°C." }
+      ],
+      "expected": { "status": "unconfirmed", "reason": "future_statement", "asOf": null }
     },
     {
       "name": "weather-recent-page-without-label",

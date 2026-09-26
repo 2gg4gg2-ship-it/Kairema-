@@ -708,15 +708,20 @@ describe("v6-K SearchProvider", () => {
       expect(result.summary).toContain("Прогноз погоды по городам");
     });
 
-    it("never presents a value labelled for a later hour as the current one", async () => {
-      // The real d024b11 shape: a current-looking reading carrying an hour label with no
-      // zone. Without a zone "13:00" cannot be shown to be in the past, so it is not "now".
+    it("reads the hour in the value's own sentence as that value's observation time", async () => {
+      // The real d024b11 shape: "Одесса: 13:00 · +19°C · Восход 06:47". 13:00 belongs to the
+      // temperature, 06:47 belongs to the sun, and the reading is reported with its own time.
+      // A future hour that the page states as the data's time is still refused; that case is
+      // pinned deterministically by the "weather-future-hour-label-is-not-now" corpus fixture,
+      // because an equivalent pipeline assertion would depend on the wall clock.
       stubYouLayer([{ title: "SINOPTIK: Погода в Одессе", url: "https://example.com/pohoda/odesa", description: "Погода в Одессе на неделю.", snippets: ["Одесса: 13:00 · +19°C · Восход 06:47"] }]);
 
       const result = await searchWeb("Какая сейчас погода в Одессе?", { publicCache: false, requireDatedSources: false, taskKind: "LIVE_VALUE" });
 
-      expect(result).toMatchObject({ state: "found", liveValue: { valueStatus: "unconfirmed" } });
-      expect(result.summary).not.toMatch(/^ИСКОМОЕ ЗНАЧЕНИЕ: /);
+      expect(result).toMatchObject({ state: "found", liveValue: { valueStatus: "confirmed" } });
+      expect(result.summary).toMatch(/^ИСКОМОЕ ЗНАЧЕНИЕ: /);
+      expect(result.summary).toContain("температура +19");
+      expect(result.summary).toContain("13:00");
     });
 
     it("sends the untouched user request first and one narrower question only when the value is unproven", async () => {
