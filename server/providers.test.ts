@@ -325,6 +325,30 @@ describe("Kairema v4 role registry", () => {
     }
   });
 
+  it("gives the current verified block priority over contradicting earlier assistant answers", () => {
+    for (const role of MODEL_CONFIG) {
+      const system = buildOpenRouterMessages(role, [
+        { role: "user", content: "Погода в Одессе" },
+        { role: "assistant", content: "В предоставленных данных нет актуальной информации о текущей температуре." },
+        { role: "user", content: "Какая сейчас погода в Одессе?" },
+      ], {
+        webResearch: "Одесса: 13:00 · +19°C · Мелкий дождь.",
+        webSources: [{ title: "Погода SINOPTIK", domain: "sinoptik.ua", sourceId: "source-weather", retrievedAt: "2026-09-26T09:00:00.000Z", url: "https://sinoptik.ua/ru/pohoda/odesa" }],
+        searchStatus: { state: "found", verificationStatus: "verified", sourcesCount: 1, cascadeUsed: "you" },
+      })[0]?.content as string;
+
+      // The precedence rule must be part of the sourced block, not of the empty-block branch.
+      expect(system).toContain("приоритет имеют подтверждённые сведения этого блока");
+      expect(system).toContain("не повторяй их как факт, если они противоречат текущим подтверждённым данным");
+      expect(system.indexOf("приоритет имеют подтверждённые сведения этого блока")).toBeGreaterThan(system.indexOf("Для актуальных внешних фактов опирайся только на этот блок."));
+      expect(system.indexOf("приоритет имеют подтверждённые сведения этого блока")).toBeLessThan(system.indexOf("Одесса: 13:00 · +19°C"));
+
+      // An absent block must not claim precedence over anything.
+      const unsourced = buildOpenRouterMessages(role, [{ role: "user", content: "Погода в Одессе" }], {})[0]?.content as string;
+      expect(unsourced).not.toContain("приоритет имеют подтверждённые сведения этого блока");
+    }
+  });
+
   it("places memory before current information while preserving verified web-evidence priority", () => {
     const system = buildOpenRouterMessages(MODEL_ROLES[0]!, [{ role: "user", content: "Какая актуальная версия?" }], {
       memoryContext: "Пользователь просит короткие ответы; память не подтверждает версии.",
