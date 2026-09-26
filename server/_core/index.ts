@@ -15,6 +15,7 @@ import { registerGuestCleanupScheduleRoute } from "../guest-cleanup-schedule";
 import { startupCleanupExpiredGuests } from "./guest-session";
 import { registerDevRoute } from "../dev-api";
 import { registerStytchAuthRoutes } from "../stytch-auth";
+import { registerWebSearchDiagnosticRoute } from "../web-search-diagnostic";
 import { refreshProviderHealth } from "../providers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -54,6 +55,8 @@ async function startServer() {
   registerMemoryExtractionScheduleRoute(app);
   registerGuestCleanupScheduleRoute(app);
   registerDevRoute(app);
+  // TEMPORARY read-only permanent-user diagnostic; remove together with server/web-search-diagnostic.ts.
+  registerWebSearchDiagnosticRoute(app);
   // tRPC API
   app.use(
     "/api/trpc",
