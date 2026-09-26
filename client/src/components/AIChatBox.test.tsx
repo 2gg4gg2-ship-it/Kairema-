@@ -210,6 +210,117 @@ describe("AIChatBox user flows", () => {
     expect(screen.queryByRole("link")).toBeNull();
   });
 
+  describe("verified source block", () => {
+    const fiveSources = [
+      { title: "SINOPTIK: Погода в Одессе (Украина)", url: "https://sinoptik.ua/ru/pohoda/odesa", publishedAt: "2026-09-26T09:00:00.000Z" },
+      { title: "Погода в Одессе — Прогноз погоды", url: "https://www.meteofor.com/weather-odesa-4982/", publishedAt: "2026-09-25T09:00:00.000Z" },
+      { title: "Погода в Одессе на сегодня", url: "https://meteopost.com/city/18697/" },
+      { title: "Одесса, Украина", url: "https://www.meteopro.com/weather/Odesa/" },
+      { title: "Погода METEOFOR", url: "https://meteofor.com/weather-odesa-4982/forecast", publishedAt: "2026-09-26T09:30:00.000Z" },
+    ];
+    const message = (overrides: Partial<Message> = {}): Message => ({
+      id: "assistant-source-block",
+      role: "assistant",
+      content: "Проверенный ответ модели",
+      searchStatus: { state: "found", verificationStatus: "verified", sourcesCount: 5, sourceDateMin: "2025-01-01T00:00:00.000Z", sourceDateMax: "2026-09-26T00:00:00.000Z" },
+      sources: fiveSources,
+      ...overrides,
+    });
+
+    it("shows a compact header with the verified status, the count and the date range", () => {
+      render(<AIChatBox messages={[message()]} onSendMessage={vi.fn()} />);
+
+      const toggle = screen.getByRole("button", { name: /Ссылки и источники/ });
+      expect(toggle.getAttribute("aria-expanded")).toBe("true");
+      expect(toggle.textContent).toContain("Источники проверены");
+      expect(toggle.textContent).toContain("5 источников");
+      expect(toggle.textContent).toContain("01.01.2025–26.09.2026");
+    });
+
+    it("keeps the honest status line inside the block and lists every source as a card", () => {
+      const { container } = render(<AIChatBox messages={[message()]} onSendMessage={vi.fn()} />);
+
+      expect(screen.getByRole("status").textContent).toContain("Источники проверены");
+      expect(container.querySelectorAll(".kairema-source-card")).toHaveLength(5);
+      expect(container.querySelector(".kairema-source-list")).not.toBeNull();
+      expect(screen.getByRole("link", { name: "SINOPTIK: Погода в Одессе (Украина)" }).getAttribute("href")).toBe("https://sinoptik.ua/ru/pohoda/odesa");
+      expect(screen.getByText("https://meteopost.com/city/18697/")).toBeTruthy();
+    });
+
+    it("collapses and expands the whole list without touching the answer text", async () => {
+      const { container } = render(<AIChatBox messages={[message()]} onSendMessage={vi.fn()} />);
+      const toggle = screen.getByRole("button", { name: /Ссылки и источники/ });
+
+      await userEvent.click(screen.getByRole("button", { name: "Свернуть" }));
+
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      expect(container.querySelectorAll(".kairema-source-card")).toHaveLength(0);
+      expect(container.querySelector(".kairema-sources-summary")?.textContent).toContain("5 источников");
+      // The model's own answer is untouched by the source block.
+      expect(screen.getByText("Проверенный ответ модели")).toBeTruthy();
+
+      await userEvent.click(toggle);
+
+      expect(toggle.getAttribute("aria-expanded")).toBe("true");
+      expect(container.querySelectorAll(".kairema-source-card")).toHaveLength(5);
+      expect(screen.getByText("Проверенный ответ модели")).toBeTruthy();
+    });
+
+    it("does not render a second, loose source list next to the cards", () => {
+      const { container } = render(<AIChatBox messages={[message()]} onSendMessage={vi.fn()} />);
+
+      // The old markup rendered one bare list item per source outside any block.
+      expect(container.querySelector(".kairema-source-evidence")).toBeNull();
+      expect(container.querySelectorAll("ul")).toHaveLength(1);
+      expect(container.querySelectorAll(".kairema-source-list > .kairema-source-card")).toHaveLength(5);
+      expect(container.querySelectorAll(".kairema-source-list a")).toHaveLength(5);
+    });
+
+    it("keeps a long title and a long URL inside their own card without breaking the layout", () => {
+      const longTitle = "Погода в Одессе на сегодня, прогноз по часам, ветер, влажность, давление, ощущается как и подробный прогноз на неделю";
+      const longUrl = "https://example.com/a/very/long/path/to/a/weather/page/segmented/deeply/nested?utm_source=news&utm_campaign=weather&utm_content=card";
+      const { container } = render(<AIChatBox messages={[message({ sources: [{ title: longTitle, url: longUrl, publishedAt: "2026-09-26T09:00:00.000Z" }] })]} onSendMessage={vi.fn()} />);
+
+      const link = screen.getByRole("link", { name: longTitle });
+      expect(link.getAttribute("href")).toBe(longUrl);
+      // Truncation and wrapping are CSS-only, so the DOM keeps one card with both strings
+      // inside it and the long values are never pushed into a sibling row.
+      const card = container.querySelector(".kairema-source-card");
+      expect(card?.querySelector(".kairema-source-title")?.textContent).toBe(longTitle);
+      expect(card?.querySelector(".kairema-source-url")?.textContent).toBe(longUrl);
+      expect(screen.getByText("26.09.2026")).toBeTruthy();
+    });
+
+    it("keeps a card with no date and still shows the open affordance", () => {
+      const { container } = render(<AIChatBox messages={[message({ sources: [{ title: "Без даты", url: "https://example.com/nodate" }] })]} onSendMessage={vi.fn()} />);
+
+      expect(container.querySelector(".kairema-source-date")).toBeNull();
+      expect(container.querySelector(".kairema-source-open")).not.toBeNull();
+      expect(screen.getByRole("link", { name: "Без даты" }).getAttribute("href")).toBe("https://example.com/nodate");
+    });
+
+    it("reports the grounding status inside the block when the reply used web grounding", () => {
+      const { container } = render(<AIChatBox messages={[{
+        id: "assistant-grounding-block",
+        role: "assistant",
+        content: "Ответ с внешним контекстом",
+        webGrounding: { intent: "REQUIRED", state: "verified", sourcesCount: 1, citations: [{ title: "Первичный источник", url: "https://example.com/primary", publishedAt: "2026-08-24T00:00:00.000Z" }] },
+      }]} onSendMessage={vi.fn()} />);
+
+      expect(screen.getByRole("button", { name: /Ссылки и источники/ }).textContent).toContain("Контекст из веб-источников проверен");
+      expect(screen.getByRole("status").textContent).toContain("Контекст из веб-источников");
+      expect(container.querySelectorAll(".kairema-source-card")).toHaveLength(1);
+    });
+
+    it("renders only the status line when there is nothing to expand", () => {
+      const { container } = render(<AIChatBox messages={[message({ sources: [], searchStatus: { state: "found", verificationStatus: "verified", sourcesCount: 0 } })]} onSendMessage={vi.fn()} />);
+
+      expect(screen.queryByRole("button", { name: /Ссылки и источники/ })).toBeNull();
+      expect(container.querySelectorAll(".kairema-source-card")).toHaveLength(0);
+      expect(screen.getByRole("status").textContent).toContain("Источники проверены");
+    });
+  });
+
   it("redacts technical citation markers from legacy assistant replay and copied content", async () => {
     const user = userEvent.setup();
     const onCopyAssistant = vi.fn();
