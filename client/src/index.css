@@ -359,9 +359,11 @@ body { margin: 0; min-width: 320px; background: #070912; color: #e8edf8; }
    never make it overflow, and the cards below keep filling this block rather than the message
    wrapper. The card stays a single compact row: icon, copy and the date/open group all sit on one
    line, so the two-column variant no longer reserves an empty cell under the icon, and padding,
-   gaps, the icon and the open affordance all shrink. The URL keeps one ellipsised line, the title
-   keeps its two-line clamp, and nothing is dropped: no fixed height, no horizontal overflow. */
-@media(max-width:430px){.kairema-sources{box-sizing:border-box;width:100%;max-width:90%}.kairema-sources-toggle{padding:8px 9px}.kairema-source-list{gap:4px}.kairema-source-card{grid-template-columns:auto minmax(0,1fr) auto;align-items:center;column-gap:7px;row-gap:0;padding:6px 7px;border-radius:9px}.kairema-source-icon{width:24px;height:24px;border-radius:7px}.kairema-source-copy{gap:1px}.kairema-source-meta{gap:4px;justify-content:flex-end}.kairema-source-url{display:block;white-space:nowrap;text-overflow:ellipsis;-webkit-line-clamp:unset;-webkit-box-orient:initial}.kairema-source-open{width:20px;height:20px;border-radius:6px}}
+   gaps, the icon and the open affordance all shrink. The list then gets an equal inline inset, so
+   every card is the same width and sits inside the panel instead of spanning it edge to edge. The
+   URL keeps one ellipsised line, the title keeps its two-line clamp, and nothing is dropped: no
+   fixed height, no fixed card width, no horizontal overflow. */
+@media(max-width:430px){.kairema-sources{box-sizing:border-box;width:100%;max-width:90%}.kairema-sources-toggle{padding:8px 9px}.kairema-source-list{gap:4px;padding-inline:4%}.kairema-source-card{grid-template-columns:auto minmax(0,1fr) auto;align-items:center;column-gap:7px;row-gap:0;padding:6px 7px;border-radius:9px}.kairema-source-icon{width:24px;height:24px;border-radius:7px}.kairema-source-copy{gap:1px}.kairema-source-meta{gap:4px;justify-content:flex-end}.kairema-source-url{display:block;white-space:nowrap;text-overflow:ellipsis;-webkit-line-clamp:unset;-webkit-box-orient:initial}.kairema-source-open{width:20px;height:20px;border-radius:6px}}
 
 /* Kairema v5 — monochrome product system. Status colors stay reserved for factual availability. */
 :root { color-scheme: light; --k-bg:#f7f7f5; --k-panel:#ffffff; --k-panel-2:#f0f0ed; --k-text:#121212; --k-muted:#4e4e49; --k-line:#bdbdb7; --k-strong:#181818; --k-invert:#fff; --k-bubble-user-bg:#191919; --k-bubble-user-text:#ffffff; --k-bubble-user-line:#191919; --k-bubble-ai-bg:#ffffff; --k-bubble-ai-text:#121212; --k-bubble-ai-line:#bdbdb7; --foreground:#121212; --card-foreground:#121212; --popover-foreground:#121212; --secondary-foreground:#242422; --muted-foreground:#4e4e49; --accent-foreground:#121212; --sidebar-foreground:#121212; --sidebar-accent-foreground:#121212; }
