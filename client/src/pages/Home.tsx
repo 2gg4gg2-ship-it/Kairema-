@@ -297,7 +297,7 @@ export default function Home() {
   useEffect(() => {
     const host = document.querySelector<HTMLElement>(".kairema-select-wrap");
     const native = host?.querySelector<HTMLSelectElement>("select");
-    if (!host || !native || host.querySelector("[data-kairema-role-menu]")) return;
+    if (!host || !native || host.querySelector(".kairema-role-menu-trigger")) return;
     native.style.display = "none";
     const trigger = document.createElement("button");
     trigger.type = "button";
@@ -310,8 +310,27 @@ export default function Home() {
     menu.dataset.kairemaRoleMenu = "true";
     menu.setAttribute("role", "menu");
     menu.hidden = true;
-    const close = () => { menu.hidden = true; trigger.setAttribute("aria-expanded", "false"); };
-    trigger.addEventListener("click", () => { const open = menu.hidden; menu.hidden = !open; trigger.setAttribute("aria-expanded", String(open)); });
+    const close = () => { menu.hidden = true; menu.remove(); trigger.setAttribute("aria-expanded", "false"); };
+    // The panel lives in document.body and is placed from the trigger's viewport rect, so the open
+    // menu never depends on the page scroll position and can never be clipped by a chat container.
+    const place = () => {
+      if (menu.hidden || !menu.isConnected) return;
+      const rect = trigger.getBoundingClientRect();
+      const edge = 8;
+      menu.style.left = "0px";
+      menu.style.top = "0px";
+      const width = menu.offsetWidth;
+      const height = menu.offsetHeight;
+      const left = Math.min(Math.max(edge, rect.right - width), Math.max(edge, window.innerWidth - width - edge));
+      const below = rect.bottom + edge;
+      const above = rect.top - edge - height;
+      const fitsBelow = below + height <= window.innerHeight - edge;
+      const top = fitsBelow ? below : above >= edge ? above : Math.max(edge, Math.min(below, window.innerHeight - height - edge));
+      menu.style.left = `${Math.round(left)}px`;
+      menu.style.top = `${Math.round(top)}px`;
+    };
+    const open = () => { document.body.append(menu); menu.hidden = false; trigger.setAttribute("aria-expanded", "true"); place(); };
+    trigger.addEventListener("click", () => { if (menu.hidden) open(); else close(); });
     for (const model of modelViews) {
       const item = document.createElement("button");
       item.type = "button";
@@ -328,12 +347,14 @@ export default function Home() {
       menu.append(item);
     }
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
-    const onPointerDown = (event: PointerEvent) => { if (!host.contains(event.target as Node)) close(); };
+    const onPointerDown = (event: PointerEvent) => { if (!host.contains(event.target as Node) && !menu.contains(event.target as Node)) close(); };
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
     if (settingsOpen || memoryOpen || sidebarOpen) close();
-    host.append(trigger, menu);
-    return () => { document.removeEventListener("keydown", onKeyDown); document.removeEventListener("pointerdown", onPointerDown); trigger.remove(); menu.remove(); native.style.display = ""; };
+    host.append(trigger);
+    return () => { document.removeEventListener("keydown", onKeyDown); document.removeEventListener("pointerdown", onPointerDown); window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); trigger.remove(); menu.remove(); native.style.display = ""; };
   }, [language, memoryOpen, modelId, modelViews, settingsOpen, sidebarOpen]);
   const loadOlderHistory = async () => {
     const cursor = olderHistoryCursor === undefined ? messagesQuery.data?.nextCursor : olderHistoryCursor;
