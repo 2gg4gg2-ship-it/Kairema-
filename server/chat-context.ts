@@ -158,7 +158,7 @@ export async function buildChatContext(userId: number, sessionId: string, input:
     try {
       searchLease = input.capacityActor ? await beginCapacitySearch(input.capacityActor, role) : null;
       const search = await searchWeb(
-        "Собери только релевантные актуальные факты и источники для запроса пользователя:\n" + (input.query?.slice(0, 8_000) ?? ""),
+        input.query?.slice(0, 8_000) ?? "",
         {
           ...(role === "fast" ? { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS } : {}),
           // Only a freshness-bound (REQUIRED) request must reject undated sources. A

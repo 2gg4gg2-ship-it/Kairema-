@@ -164,10 +164,26 @@ function uniqueSources(items: Array<WebSource | null>): WebSource[] {
   return items.flatMap((item) => !item || seen.has(item.url) ? [] : (seen.add(item.url), [item]))
     .sort((a, b) => sourcePriority(a) - sourcePriority(b) || a.title.localeCompare(b.title)).slice(0, SOURCE_LIMIT);
 }
-/** Deterministic rewrite only; input remains server-side and is never stored or logged. */
+/**
+ * The provider query is the normalized user request and nothing else.
+ *
+ * This used to wrap the request in a server-side instruction ("Find current,
+ * authoritative global information… Original user request: …"). A search index
+ * matches those instruction words instead of the entity the user asked about, so
+ * a live probe of the same provider returned 0/5 location-relevant results for
+ * "Какая сейчас погода в Одессе?" through the wrapped query against 5/5 for the
+ * bare request. Freshness guidance still reaches the model through the system
+ * prompt, which is the only place it belongs, so no instruction is added here.
+ *
+ * Deterministic normalization only; input remains server-side and is never stored
+ * or logged, and no user wording is ever removed.
+ */
 export function buildGlobalDiscoveryQuery(query: string) {
-  const normalized = query.replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim().slice(0, QUERY_LIMIT);
-  return `Find current, authoritative global information. Prefer official primary sources and English-language source discovery when useful. Original user request: ${normalized}`;
+  return query
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, QUERY_LIMIT);
 }
 function evidenceFromEntries(entries: Array<{ source: WebSource; text: string }>, selected: WebSource[]): WebEvidence[] {
   return selected.flatMap((source) => {

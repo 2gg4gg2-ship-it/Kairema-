@@ -35,11 +35,50 @@ afterEach(() => {
 });
 
 describe("v6-K SearchProvider", () => {
-  it("retains the original request while explicitly broadening discovery to authoritative global sources", () => {
+  it("passes the provider the normalized user request and no server-side instruction", () => {
     const query = buildGlobalDiscoveryQuery("Проверь международный стандарт");
-    expect(query).toContain("Проверь международный стандарт");
-    expect(query).toMatch(/authoritative global information/i);
-    expect(query).toMatch(/English-language source discovery/i);
+    expect(query).toBe("Проверь международный стандарт");
+    // A search index matches instruction words instead of the requested entity, which
+    // is what made location-relevant results disappear, so none may be added here.
+    expect(query).not.toMatch(/authoritative global information/i);
+    expect(query).not.toMatch(/Original user request/i);
+    expect(query).not.toMatch(/English-language source discovery/i);
+    expect(query).not.toMatch(/Собери только релевантные/i);
+  });
+
+  it("never removes user wording that resembles the retired server-side instruction", () => {
+    // The collection instruction is no longer added anywhere, so nothing has to be cut
+    // back out. Guessing "ours vs the user's" would silently drop what the user typed.
+    const legacy = "Собери только релевантные актуальные факты и источники для запроса пользователя: Какая сейчас погода в Одессе?";
+    expect(buildGlobalDiscoveryQuery(legacy)).toBe(legacy);
+    expect(buildGlobalDiscoveryQuery("собери только релевантные актуальные факты и источники для запроса пользователя")).toBe("собери только релевантные актуальные факты и источники для запроса пользователя");
+    // A freshness-bound request must reach the provider undistorted as well.
+    expect(buildGlobalDiscoveryQuery("Какой последний Claude вышел?")).toBe("Какой последний Claude вышел?");
+  });
+
+  it("keeps the existing normalization and the query length limit", () => {
+    expect(buildGlobalDiscoveryQuery("  Какая\r\nсейчас\tпогода в Одессе?  ")).toBe("Какая сейчас погода в Одессе?");
+    expect(buildGlobalDiscoveryQuery("я".repeat(9_000)).length).toBe(8_000);
+  });
+
+  it("sends the provider exactly the user query over a real request body", async () => {
+    process.env.YOU_API_KEY = "test-you";
+    process.env.SERPER_API_KEY = "";
+    process.env.EXA_API_KEY = "";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: { web: [
+      { title: "Погода в Одессе", url: "https://example.com/odesa", description: "Прогноз на сегодня" },
+    ] } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await searchWeb("Какая сейчас погода в Одессе?", { requireDatedSources: false });
+
+    const init = fetchMock.mock.calls[0]?.[1] as { body: string };
+    const sent = JSON.parse(init.body) as { query: string };
+    expect(sent.query).toBe("Какая сейчас погода в Одессе?");
+    expect(sent.query).toMatch(/погода в Одессе/i);
+    expect(sent.query).not.toMatch(/authoritative global information/i);
+    expect(sent.query).not.toMatch(/Original user request/i);
+    expect(sent.query).not.toMatch(/Собери только релевантные/i);
   });
 
   it("uses You.com first, ranks official domains, and returns only deduplicated verifiable sources", async () => {
