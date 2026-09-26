@@ -35,7 +35,7 @@ vi.mock("./knowledge", () => ({
 
 vi.mock("./_core/llm", () => ({ invokeLLM: vi.fn() }));
 
-import { buildChatContext, canUsePublicSearchCache, classifyWebGroundingIntent, extractMemoryFacts, FLASH_WEB_RESEARCH_BUDGET_MS, freshnessSearchPolicy, FRESHNESS_EMPTY_PROMPT, FRESHNESS_UNAVAILABLE_PROMPT, isKairemaIdentityQuery, needsWebResearch, processMemoryExtractionJob, shouldSkipAutoMemoryExtraction, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
+import { buildChatContext, canUsePublicSearchCache, classifyWebGroundingIntent, extractMemoryFacts, FLASH_WEB_RESEARCH_BUDGET_MS, freshnessSearchPolicy, FRESHNESS_EMPTY_PROMPT, FRESHNESS_UNAVAILABLE_PROMPT, isKairemaIdentityQuery, isLiveValueQuery, needsWebResearch, processMemoryExtractionJob, shouldSkipAutoMemoryExtraction, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
 import { claimMemoryExtractionJob, completeMemoryExtractionJob, deleteMemoryEntryByKey, getMemoryExtractionJobTurn, getMemoryProfile, getMemorySettings, getOwnedChatAttachments, getUserSettings, listMemoryEntries, refreshAutoMemoryProfileSummary, retryMemoryExtractionJob, upsertMemoryEntry } from "./db";
 import { invokeLLM } from "./_core/llm";
 import { WebSearchUnavailableError, searchWeb } from "./web-search";
@@ -99,6 +99,46 @@ describe("chat context soft web research", () => {
     // REQUIRED: freshness-bound, so the existing dated-source requirement is preserved.
     await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какая последняя версия браузера?", role: "context" });
     expect(searchWeb).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ requireDatedSources: true, publishedAfter: expect.any(String) }));
+  });
+
+  it("keeps a current-moment live-value request off the publication-date requirement without weakening its grounding", async () => {
+    // A clock, a forecast or a rate is read from page content, so the page itself carries
+    // no `publishedAt`. Grounding stays REQUIRED: live search, the user setting and the
+    // cascade are untouched; only the dated-source requirement is not applied.
+    for (const query of ["Который сейчас час в Одессе?", "Какая сейчас погода в Одессе?"]) {
+      vi.mocked(searchWeb).mockClear();
+      expect(isLiveValueQuery(query)).toBe(true);
+      expect(classifyWebGroundingIntent(query)).toBe("REQUIRED");
+
+      const context = await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query, role: "context" });
+      expect(searchWeb).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ requireDatedSources: false }));
+      expect(context.webGrounding).toMatchObject({ intent: "REQUIRED", state: "verified" });
+      expect(context.searchStatus).toMatchObject({ state: "found", sourcesCount: 1 });
+    }
+  });
+
+  it("keeps a publication-dated current request strictly freshness-bound", async () => {
+    // "latest release" and "news" stay date-bound even though the same queries also
+    // look current, so an undated or old page must still be rejected.
+    for (const query of ["Какой последний Claude вышел?", "Последние новости Украины", "Какая последняя версия браузера?", "Какой сейчас последний релиз Claude?"]) {
+      vi.mocked(searchWeb).mockClear();
+      expect(isLiveValueQuery(query)).toBe(false);
+      expect(classifyWebGroundingIntent(query)).toBe("REQUIRED");
+
+      await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query, role: "context" });
+      expect(searchWeb).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ requireDatedSources: true, publishedAfter: expect.any(String) }));
+    }
+  });
+
+  it("never reaches the search provider for a general-knowledge question", async () => {
+    expect(isLiveValueQuery("Что такое Марс?")).toBe(false);
+    expect(classifyWebGroundingIntent("Что такое Марс?")).toBe("NONE");
+
+    const context = await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Что такое Марс?", role: "context" });
+    expect(searchWeb).not.toHaveBeenCalled();
+    expect(context.webGrounding).toBeUndefined();
+    expect(context.searchStatus).toBeUndefined();
+    expect(context.freshnessWarning).toBeUndefined();
   });
 
   it("recognises a Russian current-data question that has no question mark", () => {

@@ -25,6 +25,15 @@ const CURRENT_LOOKUP_PATTERN = /(?:погод|курс|цен[аы]|стои|к�
 const EXPLICIT_SEARCH_PATTERN = /(?:найд[иите]|поищ[иите]?|\bsearch\b|\bfind\b|look\s+up|гугл)/i;
 const PRIVATE_SEARCH_CONTEXT_PATTERN = /(?:^|[^A-Za-zА-Яа-яЁё0-9_])(?:я|мне|меня|мо(?:й|я|ё|его|ем|ём|и)|наш(?:а|е|и|его|ем|ей|ими|их)?|личн[А-Яа-яЁё]*|аккаунт[А-Яа-яЁё]*|учётн[А-Яа-яЁё]*|парол[А-Яа-яЁё]*|почт[А-Яа-яЁё]*|телефон[А-Яа-яЁё]*|адрес[А-Яа-яЁё]*|документ[А-Яа-яЁё]*|файл[А-Яа-яЁё]*|вложен[А-Яа-яЁё]*|профил[А-Яа-яЁё]*|памят[А-Яа-яЁё]*)(?=$|[^A-Za-zА-Яа-яЁё0-9_])|\b(?:i|me|my|mine|account|password|email|phone|address|attachment|profile|memory)\b|@/i;
 const TODAY_QUERY_PATTERN = /(?:сегодня|сейчас|\bnow\b|\btoday\b)/i;
+/** Topics whose answer is a live value read from page content (a clock, a forecast, a
+ *  rate), not a fact dated by its own publication. Such a page legitimately carries
+ *  no `publishedAt`, so requiring one would discard a current answer. The trailing
+ *  lookahead is an explicit Unicode boundary: ASCII `\b` never fires after a Cyrillic
+ *  letter, the same reason QUESTION_PATTERN spells the class out. */
+const LIVE_VALUE_PATTERN = /(?:врем[яеи]|час[аеу]?(?=\s|$|[^A-Za-zА-Яа-яЁё0-9_])|погод|прогноз|курс|котировк)/i;
+/** An explicit "latest/new" ask keeps publication-date semantics even when the query
+ *  also says "now", e.g. "сейчас последний релиз". */
+const PUBLICATION_DATED_PATTERN = /(?:последн|релиз|новост|верси|обновлен|анонс)/i;
 const RECENT_QUERY_PATTERN = /(?:последн|новост|свеж|актуальн|текущ|обновлен|нов(?:ый|ая|ые|ое)|релиз|\bcurrent\b|\blatest\b|\brecent\b|\bnew\b|\bnews\b|\bupdate\b|\brelease\b)/i;
 const STALE_RAG_AGE_MS = 90 * 24 * 60 * 60_000;
 const IDENTITY_QUERY_PATTERN = /^\s*(?:кто\s+ты|что\s+ты\s+(?:такое|за\s+ассистент)|как\s+тебя\s+зовут|ты\s+(?:kairema|кайрема)|who\s+are\s+you|what\s+are\s+you|what(?:'s|\s+is)\s+your\s+name)\s*[?!。.]?\s*$/i;
@@ -56,6 +65,17 @@ export function classifyWebGroundingIntent(query: string): WebGroundingIntent {
 
 export function needsWebResearch(query: string) {
   return classifyWebGroundingIntent(query) !== "NONE";
+}
+
+/**
+ * True only for a current-moment ask about a live value (time, weather, rate).
+ * Such a request is still freshness-bound enough to run live search, but its
+ * answer is read from page content rather than dated by the page, so requiring
+ * a provider `publishedAt` would reject a correct current result.
+ */
+export function isLiveValueQuery(query: string) {
+  const normalized = query.replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim();
+  return TODAY_QUERY_PATTERN.test(normalized) && LIVE_VALUE_PATTERN.test(normalized) && !PUBLICATION_DATED_PATTERN.test(normalized);
 }
 
 /** Cache/dedup is an optional public optimization, never a way to share user-scoped context. */
@@ -143,8 +163,14 @@ export async function buildChatContext(userId: number, sessionId: string, input:
           ...(role === "fast" ? { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS } : {}),
           // Only a freshness-bound (REQUIRED) request must reject undated sources. A
           // PREFERRED request is source-seeking, not freshness-bound, so evergreen
-          // official/reference pages without publishedAt must stay usable.
-          ...(webGroundingIntent === "REQUIRED" ? freshnessSearchPolicy(input.query ?? "") : { requireDatedSources: false as const }),
+          // official/reference pages without publishedAt must stay usable. A live-value
+          // ask (current time, weather, rate) is also not publication-dated: the value
+          // comes from the page content, so an undated live result must stay usable too.
+          // Grounding intent stays REQUIRED either way, so live search, the user
+          // webSearch setting, searchStatus and webGrounding are unchanged.
+          ...(webGroundingIntent === "REQUIRED" && !isLiveValueQuery(input.query ?? "")
+            ? freshnessSearchPolicy(input.query ?? "")
+            : { requireDatedSources: false as const }),
           publicCache: canUsePublicSearchCache(input.query ?? "", { hasAttachments: attachments.length > 0, hasMemoryContext: Boolean(context.memoryContext) }),
           beforeAttempt: async () => {
             const ticket = searchLease ? await searchLease.reserve() : null;

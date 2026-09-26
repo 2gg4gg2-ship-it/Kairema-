@@ -129,6 +129,22 @@ describe("v6-K SearchProvider", () => {
     });
   });
 
+  it("falls through an undated result and returns only an in-window verified source", async () => {
+    process.env.YOU_API_KEY = "test-you";
+    process.env.SERPER_API_KEY = "test-serper";
+    process.env.EXA_API_KEY = "";
+    const freshDate = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: { web: [{ title: "Без даты", url: "https://example.com/undated", description: "Дата публикации не передана" }] } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ organic: [{ title: "Свежий материал", link: "https://example.com/fresh", snippet: "Новая публикация", date: freshDate }] }), { status: 200 })));
+
+    // An undated primary result must not end the cascade: the next layer may still
+    // return a dated source that satisfies the requested window.
+    await expect(searchWeb("Последние новости", { requireDatedSources: true, publishedAfter: new Date(Date.now() - 3 * 24 * 60 * 60_000).toISOString() })).resolves.toMatchObject({
+      state: "found", cascadeUsed: "serper", sources: [{ url: "https://example.com/fresh", publishedAt: freshDate }],
+    });
+  });
+
   it("returns an honest degraded outcome when all dated sources are older than the requested window", async () => {
     process.env.YOU_API_KEY = "test-you";
     process.env.SERPER_API_KEY = "";
