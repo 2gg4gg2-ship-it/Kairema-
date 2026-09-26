@@ -157,6 +157,16 @@ describe("AIChatBox user flows", () => {
     expect(screen.queryByText(/https?:\/\//i)).toBeNull();
   });
 
+  it("shows the live-value verdict without ever rendering the value itself", () => {
+    const base = { id: "assistant-live-value", role: "assistant" as const, content: "Ответ о погоде", searchStatus: { state: "found" as const, verificationStatus: "verified" as const, sourcesCount: 1 } };
+    const { unmount } = render(<AIChatBox messages={[{ ...base, searchStatus: { ...base.searchStatus, liveValue: { kind: "temperature" as const, status: "confirmed" as const } } }]} onSendMessage={vi.fn()} />);
+    expect(screen.getByText("Значение подтверждено источниками")).toBeTruthy();
+    unmount();
+
+    render(<AIChatBox messages={[{ ...base, searchStatus: { ...base.searchStatus, liveValue: { kind: "temperature" as const, status: "unconfirmed" as const } } }]} onSendMessage={vi.fn()} />);
+    expect(screen.getByText("Значение не подтверждено")).toBeTruthy();
+  });
+
   it("renders only verified public source evidence beneath a verified fresh reply", () => {
     render(<AIChatBox messages={[{
       id: "assistant-source-evidence",

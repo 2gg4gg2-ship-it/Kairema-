@@ -38,8 +38,8 @@ describe("search.qualityPanel", () => {
   beforeEach(() => {
     getSearchQualityPanel.mockReset();
     getSearchQualityPanel.mockResolvedValue({
-      last24h: { sampleCount: 2, counts: { found: 1, empty: 1, degraded: 0, error: 0 }, verifiedSourceCount: 1, zeroSourceCount: 1, staleBlockedCount: 0, foundRate: 0.5, verificationPassRate: 0.5 },
-      last7d: { sampleCount: 4, counts: { found: 2, empty: 1, degraded: 1, error: 0 }, verifiedSourceCount: 2, zeroSourceCount: 2, staleBlockedCount: 1, foundRate: 0.5, verificationPassRate: 0.5 },
+      last24h: { sampleCount: 2, counts: { found: 1, empty: 1, degraded: 0, error: 0 }, verifiedSourceCount: 1, zeroSourceCount: 1, staleBlockedCount: 0, foundRate: 0.5, verificationPassRate: 0.5, liveValue: { sampleCount: 1, confirmed: 1, unconfirmed: 0, notFound: 0, confirmationRate: 100 } },
+      last7d: { sampleCount: 4, counts: { found: 2, empty: 1, degraded: 1, error: 0 }, verifiedSourceCount: 2, zeroSourceCount: 2, staleBlockedCount: 1, foundRate: 0.5, verificationPassRate: 0.5, liveValue: { sampleCount: 2, confirmed: 1, unconfirmed: 1, notFound: 0, confirmationRate: 50 } },
     });
     getSearchQualityChart.mockReset();
     getSearchQualityChart.mockResolvedValue({
@@ -56,6 +56,8 @@ describe("search.qualityPanel", () => {
   it("returns only the aggregate quality DTO to the configured owner", async () => {
     const result = await callerFor("owner-open-id").search.qualityPanel();
     expect(result).toMatchObject({ last7d: { sampleCount: 4, counts: { found: 2, empty: 1, degraded: 1, error: 0 } } });
+    // The live-value aggregate is numbers only: how often an asked-for value was provable.
+    expect(result.last7d.liveValue).toEqual({ sampleCount: 2, confirmed: 1, unconfirmed: 1, notFound: 0, confirmationRate: 50 });
     expect(JSON.stringify(result)).not.toMatch(/https?:\/\/|query|userId|provider|model/i);
   });
 

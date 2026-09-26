@@ -180,6 +180,12 @@ export const searchQualityMetrics = mysqlTable("search_quality_metrics", {
 	attemptedLayerCount: int("attemptedLayerCount").notNull(),
 	staleBlocked: int("staleBlocked").notNull().default(0),
 	latencyMs: int("latencyMs").notNull(),
+	/** Which task kind produced this sample; null for rows written before live-value telemetry. */
+	taskKind: varchar("taskKind", { length: 16 }),
+	/** 1 confirmed, 0 unconfirmed, null for samples of a task kind that has no value to prove. */
+	valueConfirmed: int("valueConfirmed"),
+	/** 1 when the sample comes from the value-shaped second pass. */
+	targetedPass: int("targetedPass"),
 	createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => [index("search_quality_metrics_created_idx").on(table.createdAt)]);
 

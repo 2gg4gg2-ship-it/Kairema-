@@ -675,4 +675,137 @@ describe("v6-K SearchProvider", () => {
       expect(result.evidence.every((entry) => typeof entry.fact === "string" && !entry.fact.includes("[object Object]"))).toBe(true);
     });
   });
+
+  describe("a live value is only reported when a source proves it", () => {
+    const stubYouLayer = (web: unknown[]) => {
+      process.env.YOU_API_KEY = "test-you";
+      process.env.SERPER_API_KEY = "";
+      process.env.EXA_API_KEY = "";
+      process.env.TAVILY_API_KEY = "";
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: { web }, metadata: { query: "q", search_uuid: "u", latency: 1 } }), { status: 200 })));
+    };
+    const sentQueries = (fetchMock: ReturnType<typeof vi.fn>) => fetchMock.mock.calls.map(([, init]) => (JSON.parse(String((init as { body: string }).body)) as { query: string }).query);
+
+    it("confirms the value and puts the machine-checked line first", async () => {
+      stubYouLayer([{ title: "Погода в Одессе", url: "https://example.com/weather/odesa", description: "Погода в Одессе на неделю.", snippets: ["Одесса: сейчас +19 °C, мелкий дождь."] }]);
+
+      const result = await searchWeb("Какая сейчас погода в Одессе?", { publicCache: false, requireDatedSources: false, taskKind: "LIVE_VALUE" });
+
+      expect(result).toMatchObject({ state: "found", liveValue: { valueStatus: "confirmed", liveValueKind: "temperature" } });
+      expect(result.summary.startsWith("ИСКОМОЕ ЗНАЧЕНИЕ: ")).toBe(true);
+      expect(result.summary).toContain("температура +19");
+      expect(result.evidence[0].valueStatus).toBe("confirmed");
+    });
+
+    it("keeps the sources but withholds the value when no source carries it", async () => {
+      stubYouLayer([{ title: "Погода в Одессе", url: "https://example.com/weather/odesa", description: "Прогноз погоды по городам на неделю." }]);
+
+      const result = await searchWeb("Какая сейчас погода в Одессе?", { publicCache: false, requireDatedSources: false, taskKind: "LIVE_VALUE" });
+
+      expect(result).toMatchObject({ state: "found", liveValue: { valueStatus: "unconfirmed" } });
+      expect(result.sources).toHaveLength(1);
+      expect(result.summary.startsWith("ИСКОМОЕ ЗНАЧЕНИЕ НЕ ПОДТВЕРЖДЕНО")).toBe(true);
+      expect(result.summary).toContain("Прогноз погоды по городам");
+    });
+
+    it("never presents a value labelled for a later hour as the current one", async () => {
+      // The real d024b11 shape: a current-looking reading carrying an hour label with no
+      // zone. Without a zone "13:00" cannot be shown to be in the past, so it is not "now".
+      stubYouLayer([{ title: "SINOPTIK: Погода в Одессе", url: "https://example.com/pohoda/odesa", description: "Погода в Одессе на неделю.", snippets: ["Одесса: 13:00 · +19°C · Восход 06:47"] }]);
+
+      const result = await searchWeb("Какая сейчас погода в Одессе?", { publicCache: false, requireDatedSources: false, taskKind: "LIVE_VALUE" });
+
+      expect(result).toMatchObject({ state: "found", liveValue: { valueStatus: "unconfirmed" } });
+      expect(result.summary).not.toMatch(/^ИСКОМОЕ ЗНАЧЕНИЕ: /);
+    });
+
+    it("sends the untouched user request first and one narrower question only when the value is unproven", async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ results: { web: [{ title: "Погода в Одессе", url: "https://example.com/weather/odesa", description: "Прогноз погоды по городам." }] } }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ results: { web: [{ title: "Odesa weather now", url: "https://example.com/weather/now", description: "Odesa.", snippets: ["Odesa: currently +19 °C, light rain."] }] } }), { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = await searchWeb("Какая сейчас погода в Одессе?", { publicCache: false, requireDatedSources: false, taskKind: "LIVE_VALUE" });
+
+      expect(sentQueries(fetchMock)).toEqual(["Какая сейчас погода в Одессе?", "current weather Одессе temperature precipitation"]);
+      expect(result).toMatchObject({ state: "found", cascadeUsed: "you", liveValue: { valueStatus: "confirmed" } });
+    });
+
+    it("never asks the same question twice when the first pass already proved the value", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: { web: [{ title: "Погода в Одессе", url: "https://example.com/weather/odesa", description: "Погода.", snippets: ["Одесса: сейчас +19 °C."] }] } }), { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = await searchWeb("Какая сейчас погода в Одессе?", { publicCache: false, requireDatedSources: false, taskKind: "LIVE_VALUE" });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({ liveValue: { valueStatus: "confirmed" } });
+    });
+
+    it("respects the request budget and skips the second pass when it is exhausted", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: { web: [{ title: "Погода в Одессе", url: "https://example.com/weather/odesa", description: "Прогноз погоды." }] } }), { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = await searchWeb("Какая сейчас погода в Одессе?", { publicCache: false, requireDatedSources: false, taskKind: "LIVE_VALUE", maxNetworkRequests: 1 });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({ state: "found", liveValue: { valueStatus: "unconfirmed" } });
+    });
+
+    it("skips the second pass when no narrower question can be built from the user's own words", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: { web: [{ title: "Погода", url: "https://example.com/weather", description: "Прогноз погоды." }] } }), { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await searchWeb("Какая сейчас погода?", { publicCache: false, requireDatedSources: false, taskKind: "LIVE_VALUE" });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(sentQueries(fetchMock)).toEqual(["Какая сейчас погода?"]);
+    });
+
+    it("leaves an ordinary question exactly as it was: one pass, no verdict, no value line", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: { web: [{ title: "Погода в Одессе", url: "https://example.com/weather/odesa", description: "Прогноз погоды.", snippets: ["Одесса: сейчас +19 °C."] }] } }), { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = await searchWeb("Проверь стандарт", { publicCache: false, requireDatedSources: false, taskKind: "GENERAL" });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(result).not.toHaveProperty("liveValue");
+      expect(result.summary.startsWith("ИСКОМОЕ ЗНАЧЕНИЕ")).toBe(false);
+      expect(result.evidence[0]).not.toHaveProperty("valueStatus");
+    });
+
+    it("records the task kind and the value verdict in anonymous quality telemetry", async () => {
+      stubYouLayer([{ title: "Погода в Одессе", url: "https://example.com/weather/odesa", description: "Погода.", snippets: ["Одесса: сейчас +19 °C."] }]);
+
+      await searchWeb("Какая сейчас погода в Одессе?", { publicCache: false, requireDatedSources: false, taskKind: "LIVE_VALUE" });
+
+      expect(recordSearchQuality).toHaveBeenCalledTimes(1);
+      expect(recordSearchQuality.mock.calls[0]?.[0]).toMatchObject({ outcome: "found", taskKind: "LIVE_VALUE", valueConfirmed: true, targetedPass: false });
+      const serialized = JSON.stringify(recordSearchQuality.mock.calls[0]?.[0]);
+      expect(serialized).not.toContain("Одессе");
+      expect(serialized).not.toContain("https://");
+    });
+
+    it("does not share an unproven value with the next identical request, but shares a proven one", async () => {
+      // A Response body can be read once, so every request needs a fresh one.
+      const unproven = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ results: { web: [{ title: "Погода в Одессе", url: "https://example.com/weather/odesa", description: "Прогноз погоды." }] } }), { status: 200 }));
+      vi.stubGlobal("fetch", unproven);
+
+      const firstUnproven = await searchWeb("Какая сейчас погода в Одессе?", { publicCache: true, requireDatedSources: false, taskKind: "LIVE_VALUE" });
+      const secondUnproven = await searchWeb("Какая сейчас погода в Одессе?", { publicCache: true, requireDatedSources: false, taskKind: "LIVE_VALUE" });
+      expect(firstUnproven).toMatchObject({ liveValue: { valueStatus: "unconfirmed" } });
+      expect(secondUnproven).toMatchObject({ liveValue: { valueStatus: "unconfirmed" } });
+      // Four requests: each unproven call runs its own two passes instead of reading a
+      // shared verdict that a later request could contradict.
+      expect(unproven).toHaveBeenCalledTimes(4);
+
+      resetPublicSearchCacheForTests();
+      unproven.mockImplementation(async () => new Response(JSON.stringify({ results: { web: [{ title: "Погода в Одессе", url: "https://example.com/weather/odesa", description: "Погода.", snippets: ["Одесса: сейчас +19 °C."] }] } }), { status: 200 }));
+      const firstProven = await searchWeb("Какая сейчас погода в Одессе?", { publicCache: true, requireDatedSources: false, taskKind: "LIVE_VALUE" });
+      const secondProven = await searchWeb("Какая сейчас погода в Одессе?", { publicCache: true, requireDatedSources: false, taskKind: "LIVE_VALUE" });
+      expect(firstProven).toMatchObject({ liveValue: { valueStatus: "confirmed" } });
+      expect(secondProven).toMatchObject({ liveValue: { valueStatus: "confirmed" } });
+      // Five: the first proven call confirms in one pass and the second is served from cache.
+      expect(unproven).toHaveBeenCalledTimes(5);
+    });
+  });
 });

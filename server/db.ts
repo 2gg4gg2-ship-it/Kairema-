@@ -8,6 +8,7 @@ import { ENV } from "./_core/env";
 import { GUEST_MAX_LIFETIME_MS, GUEST_TTL_MS } from "@shared/const";
 import { decodeHistoryPageCursor, encodeHistoryPageCursor, normalizeHistoryPageLimit } from "./history-pagination";
 import { selectTranscriptWindow, TRANSCRIPT_WINDOW_BUDGETS, type TranscriptRole } from "./transcript-window";
+import type { SearchTaskKind } from "./web-search-value";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -782,6 +783,10 @@ export type SearchQualityInput = {
   attemptedLayerCount: number;
   staleBlocked: boolean;
   latencyMs: number;
+  taskKind?: SearchTaskKind;
+  /** Only meaningful for a live-value sample: whether a source provably carried the value. */
+  valueConfirmed?: boolean;
+  targetedPass?: boolean;
 };
 
 type SearchQualityPeriod = {
@@ -792,22 +797,33 @@ type SearchQualityPeriod = {
   staleBlockedCount: number;
   foundRate: number;
   verificationPassRate: number;
+  liveValue: SearchQualityLiveValue;
 };
 
-export type SearchQualityPanel = { last24h: SearchQualityPeriod; last7d: SearchQualityPeriod };
+type SearchQualityLiveValue = { sampleCount: number; confirmed: number; unconfirmed: number; notFound: number; confirmationRate: number };
 
-function summarizeSearchQuality(rows: Array<{ outcome: SearchQualityInput["outcome"]; verification: SearchQualityInput["verification"]; verifiedSourceCount: number; staleBlocked: number }>): SearchQualityPeriod {
+function summarizeSearchQuality(rows: Array<{ outcome: SearchQualityInput["outcome"]; verification: SearchQualityInput["verification"]; verifiedSourceCount: number; staleBlocked: number; taskKind?: string | null; valueConfirmed?: number | null }>): SearchQualityPeriod {
   const counts: SearchQualityPeriod["counts"] = { found: 0, empty: 0, degraded: 0, error: 0 };
   let verifiedSourceCount = 0;
   let zeroSourceCount = 0;
   let staleBlockedCount = 0;
   let verificationPassCount = 0;
+  let liveValueSampleCount = 0;
+  let liveValueConfirmed = 0;
+  let liveValueNotFound = 0;
   for (const row of rows) {
     counts[row.outcome] += 1;
     verifiedSourceCount += row.verifiedSourceCount;
     if (row.verifiedSourceCount === 0) zeroSourceCount += 1;
     if (row.staleBlocked) staleBlockedCount += 1;
     if (row.verification === "verified") verificationPassCount += 1;
+    // Only aggregate rows that actually carry a verdict: a task kind without a value to
+    // prove must never be counted as a failed confirmation.
+    if (row.taskKind === "LIVE_VALUE" && typeof row.valueConfirmed === "number") {
+      liveValueSampleCount += 1;
+      if (row.valueConfirmed === 1) liveValueConfirmed += 1;
+      else if (row.verifiedSourceCount === 0) liveValueNotFound += 1;
+    }
   }
   const sampleCount = rows.length;
   return {
@@ -818,6 +834,13 @@ function summarizeSearchQuality(rows: Array<{ outcome: SearchQualityInput["outco
     staleBlockedCount,
     foundRate: sampleCount ? Math.round((counts.found / sampleCount) * 10_000) / 100 : 0,
     verificationPassRate: sampleCount ? Math.round((verificationPassCount / sampleCount) * 10_000) / 100 : 0,
+    liveValue: {
+      sampleCount: liveValueSampleCount,
+      confirmed: liveValueConfirmed,
+      unconfirmed: liveValueSampleCount - liveValueConfirmed - liveValueNotFound,
+      notFound: liveValueNotFound,
+      confirmationRate: liveValueSampleCount ? Math.round((liveValueConfirmed / liveValueSampleCount) * 10_000) / 100 : 0,
+    },
   };
 }
 
@@ -829,9 +852,14 @@ export async function recordSearchQuality(input: SearchQualityInput): Promise<vo
     outcome: input.outcome,
     verification: input.verification,
     verifiedSourceCount: Math.max(0, Math.min(Math.round(input.verifiedSourceCount), 5)),
-    attemptedLayerCount: Math.max(0, Math.min(Math.round(input.attemptedLayerCount), 3)),
+    // A live-value turn may run a second pass over the same layers, so the ceiling is the
+    // request budget, not the number of layers.
+    attemptedLayerCount: Math.max(0, Math.min(Math.round(input.attemptedLayerCount), 6)),
     staleBlocked: input.staleBlocked ? 1 : 0,
     latencyMs: Math.max(0, Math.min(Math.round(input.latencyMs), 30_000)),
+    taskKind: input.taskKind ?? null,
+    valueConfirmed: typeof input.valueConfirmed === "boolean" ? (input.valueConfirmed ? 1 : 0) : null,
+    targetedPass: typeof input.targetedPass === "boolean" ? (input.targetedPass ? 1 : 0) : null,
   });
 }
 
@@ -844,6 +872,8 @@ export async function cleanupSearchQualityMetrics(): Promise<number> {
   return Number((result as { rowsAffected?: number } | undefined)?.rowsAffected ?? 0);
 }
 
+export type SearchQualityPanel = { last24h: SearchQualityPeriod; last7d: SearchQualityPeriod };
+
 /** Narrow owner-only quality DTO. It contains aggregate numbers only and deliberately omits content, identity and routing data. */
 export async function getSearchQualityPanel(): Promise<SearchQualityPanel> {
   const db = await getDb();
@@ -852,7 +882,7 @@ export async function getSearchQualityPanel(): Promise<SearchQualityPanel> {
   const now = Date.now();
   const since7d = new Date(now - 7 * 24 * 60 * 60 * 1_000);
   const since24h = now - 24 * 60 * 60 * 1_000;
-  const rows = await db.select({ outcome: searchQualityMetrics.outcome, verification: searchQualityMetrics.verification, verifiedSourceCount: searchQualityMetrics.verifiedSourceCount, staleBlocked: searchQualityMetrics.staleBlocked, createdAt: searchQualityMetrics.createdAt })
+  const rows = await db.select({ outcome: searchQualityMetrics.outcome, verification: searchQualityMetrics.verification, verifiedSourceCount: searchQualityMetrics.verifiedSourceCount, staleBlocked: searchQualityMetrics.staleBlocked, taskKind: searchQualityMetrics.taskKind, valueConfirmed: searchQualityMetrics.valueConfirmed, createdAt: searchQualityMetrics.createdAt })
     .from(searchQualityMetrics).where(gt(searchQualityMetrics.createdAt, since7d)).orderBy(desc(searchQualityMetrics.createdAt)).limit(20_000);
   return {
     last24h: summarizeSearchQuality(rows.filter((row) => row.createdAt.getTime() >= since24h)),

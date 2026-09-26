@@ -1,0 +1,67 @@
+{
+  "cases": [
+    {
+      "name": "clock-zone-reading",
+      "query": "Который сейчас час в Одессе?",
+      "now": "2026-09-26T09:34:00.000Z",
+      "entries": [
+        { "title": "Время в Одессе", "url": "https://example.com/time/odesa", "publishedAt": null, "text": "Время в Одессе: 12:40 (UTC+3)." }
+      ],
+      "expected": { "status": "confirmed", "reason": "confirmed_zone_label", "asOf": "12:40", "value": "12:40" }
+    },
+    {
+      "name": "clock-now-marker",
+      "query": "Который сейчас час в Одессе?",
+      "now": "2026-09-26T09:34:00.000Z",
+      "entries": [
+        { "title": "Время в Одессе", "url": "https://example.com/time/odesa", "publishedAt": null, "text": "В Одессе сейчас 12:40, дата 26 сентября." }
+      ],
+      "expected": { "status": "confirmed", "reason": "confirmed_now_marker", "asOf": "12:40", "value": "12:40" }
+    },
+    {
+      "name": "clock-timezone-page-without-a-reading",
+      "query": "Который сейчас час в Одессе?",
+      "now": "2026-09-26T09:34:00.000Z",
+      "entries": [
+        { "title": "Часовые пояса Украины", "url": "https://example.com/time/odesa", "publishedAt": "2026-09-26T09:00:00.000Z", "text": "Одесса: часовой пояс UTC+3, перехода на летнее время нет." }
+      ],
+      "expected": { "status": "unconfirmed", "reason": "missing_kind", "asOf": null }
+    },
+    {
+      "name": "clock-iso-date-is-not-a-clock-reading",
+      "query": "Который сейчас час в Одессе?",
+      "now": "2026-09-26T09:34:00.000Z",
+      "entries": [
+        { "title": "Время в Одессе", "url": "https://example.com/time/odesa", "publishedAt": "2026-09-26T09:20:00.000Z", "text": "Время в Одессе обновлено 2026-09-26 12:40." }
+      ],
+      "expected": { "status": "unconfirmed", "reason": "missing_kind", "asOf": null }
+    },
+    {
+      "name": "clock-reading-for-another-city",
+      "query": "Который сейчас час в Одессе?",
+      "now": "2026-09-26T09:34:00.000Z",
+      "entries": [
+        { "title": "Мировое время", "url": "https://example.com/time/world", "publishedAt": null, "text": "Время в Киеве: 12:40 (UTC+3)." }
+      ],
+      "expected": { "status": "unconfirmed", "reason": "other_entity", "asOf": null }
+    },
+    {
+      "name": "clock-hour-label-without-zone",
+      "query": "Который сейчас час в Одессе?",
+      "now": "2026-09-26T09:34:00.000Z",
+      "entries": [
+        { "title": "Время в Одессе", "url": "https://example.com/time/odesa", "publishedAt": "2026-09-26T09:30:00.000Z", "text": "Время в Одессе: 12:40." }
+      ],
+      "expected": { "status": "unconfirmed", "reason": "unknown_zone_label", "asOf": "12:40" }
+    },
+    {
+      "name": "clock-malformed-snippet-array",
+      "query": "Который сейчас час в Одессе?",
+      "now": "2026-09-26T09:34:00.000Z",
+      "entries": [
+        { "title": "Время в Одессе", "url": "https://example.com/time/odesa", "publishedAt": null, "text": ["12:40"] }
+      ],
+      "expected": { "status": "unconfirmed", "reason": "missing_kind", "asOf": null }
+    }
+  ]
+}

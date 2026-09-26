@@ -2,6 +2,7 @@ import { claimMemoryExtractionJob, completeMemoryExtractionJob, deleteMemoryEntr
 import { invokeLLM } from "./_core/llm";
 import type { ChatSettings, WebGrounding, WebGroundingIntent } from "./providers";
 import { searchWeb } from "./web-search";
+import { buildValueTargetedQuery, classifySearchTaskKind, LIVE_VALUE_UNCONFIRMED_PROMPT, liveValueEntity, liveValueKinds, RECENT_QUERY_PATTERN, TODAY_QUERY_PATTERN } from "./web-search-value";
 import { beginCapacitySearch, CapacityAdmissionError, settleCapacityReservation, type CapacityActor } from "./capacity-controller";
 import { retrieveRagContext, type RagRole } from "./knowledge";
 import { getAttachmentPromptText, getOwnedAttachmentVisionDataUrl } from "./attachments";
@@ -24,17 +25,6 @@ const CURRENT_LOOKUP_PATTERN = /(?:погод|курс|цен[аы]|стои|к�
 /** An explicit "go look it up" instruction. Only meaningful together with a verifiable topic, never on its own. */
 const EXPLICIT_SEARCH_PATTERN = /(?:найд[иите]|поищ[иите]?|\bsearch\b|\bfind\b|look\s+up|гугл)/i;
 const PRIVATE_SEARCH_CONTEXT_PATTERN = /(?:^|[^A-Za-zА-Яа-яЁё0-9_])(?:я|мне|меня|мо(?:й|я|ё|его|ем|ём|и)|наш(?:а|е|и|его|ем|ей|ими|их)?|личн[А-Яа-яЁё]*|аккаунт[А-Яа-яЁё]*|учётн[А-Яа-яЁё]*|парол[А-Яа-яЁё]*|почт[А-Яа-яЁё]*|телефон[А-Яа-яЁё]*|адрес[А-Яа-яЁё]*|документ[А-Яа-яЁё]*|файл[А-Яа-яЁё]*|вложен[А-Яа-яЁё]*|профил[А-Яа-яЁё]*|памят[А-Яа-яЁё]*)(?=$|[^A-Za-zА-Яа-яЁё0-9_])|\b(?:i|me|my|mine|account|password|email|phone|address|attachment|profile|memory)\b|@/i;
-const TODAY_QUERY_PATTERN = /(?:сегодня|сейчас|\bnow\b|\btoday\b)/i;
-/** Topics whose answer is a live value read from page content (a clock, a forecast, a
- *  rate), not a fact dated by its own publication. Such a page legitimately carries
- *  no `publishedAt`, so requiring one would discard a current answer. The trailing
- *  lookahead is an explicit Unicode boundary: ASCII `\b` never fires after a Cyrillic
- *  letter, the same reason QUESTION_PATTERN spells the class out. */
-const LIVE_VALUE_PATTERN = /(?:врем[яеи]|час[аеу]?(?=\s|$|[^A-Za-zА-Яа-яЁё0-9_])|погод|прогноз|курс|котировк)/i;
-/** An explicit "latest/new" ask keeps publication-date semantics even when the query
- *  also says "now", e.g. "сейчас последний релиз". */
-const PUBLICATION_DATED_PATTERN = /(?:последн|релиз|новост|верси|обновлен|анонс)/i;
-const RECENT_QUERY_PATTERN = /(?:последн|новост|свеж|актуальн|текущ|обновлен|нов(?:ый|ая|ые|ое)|релиз|\bcurrent\b|\blatest\b|\brecent\b|\bnew\b|\bnews\b|\bupdate\b|\brelease\b)/i;
 const STALE_RAG_AGE_MS = 90 * 24 * 60 * 60_000;
 const IDENTITY_QUERY_PATTERN = /^\s*(?:кто\s+ты|что\s+ты\s+(?:такое|за\s+ассистент)|как\s+тебя\s+зовут|ты\s+(?:kairema|кайрема)|who\s+are\s+you|what\s+are\s+you|what(?:'s|\s+is)\s+your\s+name)\s*[?!。.]?\s*$/i;
 export const FRESHNESS_UNAVAILABLE_PROMPT = "Свежие источники сейчас недоступны, поэтому я не могу надёжно подтвердить актуальные сведения.";
@@ -72,10 +62,12 @@ export function needsWebResearch(query: string) {
  * Such a request is still freshness-bound enough to run live search, but its
  * answer is read from page content rather than dated by the page, so requiring
  * a provider `publishedAt` would reject a correct current result.
+ *
+ * The decision itself now lives with the task-kind classifier, so the freshness
+ * policy and the value layer can never disagree about what a live value is.
  */
 export function isLiveValueQuery(query: string) {
-  const normalized = query.replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim();
-  return TODAY_QUERY_PATTERN.test(normalized) && LIVE_VALUE_PATTERN.test(normalized) && !PUBLICATION_DATED_PATTERN.test(normalized);
+  return classifySearchTaskKind(query) === "LIVE_VALUE";
 }
 
 /** Cache/dedup is an optional public optimization, never a way to share user-scoped context. */
@@ -154,6 +146,8 @@ export async function buildChatContext(userId: number, sessionId: string, input:
 
   if (queryNeedsFreshSources && canUseLiveSearch) {
     const role = input.role ?? "flagship";
+    const liveValueTask = classifySearchTaskKind(input.query ?? "") === "LIVE_VALUE";
+    const liveValueKindsForQuery = liveValueKinds(input.query ?? "");
     let searchLease: Awaited<ReturnType<typeof beginCapacitySearch>> | null = null;
     try {
       searchLease = input.capacityActor ? await beginCapacitySearch(input.capacityActor, role) : null;
@@ -168,9 +162,13 @@ export async function buildChatContext(userId: number, sessionId: string, input:
           // comes from the page content, so an undated live result must stay usable too.
           // Grounding intent stays REQUIRED either way, so live search, the user
           // webSearch setting, searchStatus and webGrounding are unchanged.
-          ...(webGroundingIntent === "REQUIRED" && !isLiveValueQuery(input.query ?? "")
+          ...(webGroundingIntent === "REQUIRED" && !liveValueTask
             ? freshnessSearchPolicy(input.query ?? "")
             : { requireDatedSources: false as const }),
+          taskKind: classifySearchTaskKind(input.query ?? ""),
+          // A live value may need one narrower second question; it is derived from the
+          // user's own words and skipped whenever any part of it cannot be resolved.
+          ...(liveValueTask ? { targetedQuery: buildValueTargetedQuery(input.query ?? "", liveValueKindsForQuery, liveValueEntity(input.query ?? "")) } : {}),
           publicCache: canUsePublicSearchCache(input.query ?? "", { hasAttachments: attachments.length > 0, hasMemoryContext: Boolean(context.memoryContext) }),
           beforeAttempt: async () => {
             const ticket = searchLease ? await searchLease.reserve() : null;
@@ -195,7 +193,13 @@ export async function buildChatContext(userId: number, sessionId: string, input:
           sourcesCount: search.sources.length,
           state: "found",
           verificationStatus: "verified",
+          // Kind and verdict only: the value itself stays in the model context, never in
+          // the ordinary-user status payload.
+          ...(search.liveValue ? { liveValue: { kind: search.liveValue.liveValueKind, status: search.liveValue.valueStatus } } : {}),
         };
+        // Sources without a provable value are still useful context, but the user must be
+        // told that the exact current value is not among them.
+        if (search.liveValue?.valueStatus === "unconfirmed") context.freshnessWarning = LIVE_VALUE_UNCONFIRMED_PROMPT;
       } else {
         context.webGrounding = { intent: webGroundingIntent as Exclude<WebGroundingIntent, "NONE">, state: search.state === "empty" ? "empty" : search.state === "degraded" ? "degraded" : "unavailable", sourcesCount: 0, citations: [], ...(webGroundingIntent === "REQUIRED" ? { freshnessBlocked: true } : {}) };
         context.freshnessWarning = search.state === "empty" ? FRESHNESS_EMPTY_PROMPT : webGroundingIntent === "REQUIRED" ? FRESHNESS_UNAVAILABLE_PROMPT : WEB_RESEARCH_PREFERRED_PROMPT;
@@ -205,13 +209,14 @@ export async function buildChatContext(userId: number, sessionId: string, input:
           state: search.state,
           verificationStatus: search.verificationStatus,
           ...(webGroundingIntent === "REQUIRED" ? { freshnessBlocked: true } : {}),
+          ...(liveValueTask ? { liveValue: { kind: liveValueKindsForQuery[0] ?? "conditions", status: "not_found" as const } } : {}),
         };
       }
     } catch (error) {
       const admissionDenied = error instanceof CapacityAdmissionError;
       context.webGrounding = { intent: webGroundingIntent as Exclude<WebGroundingIntent, "NONE">, state: admissionDenied ? "admission_denied" : "unavailable", sourcesCount: 0, citations: [], ...(webGroundingIntent === "REQUIRED" ? { freshnessBlocked: true } : {}) };
       context.freshnessWarning = webGroundingIntent === "REQUIRED" ? FRESHNESS_UNAVAILABLE_PROMPT : WEB_RESEARCH_PREFERRED_PROMPT;
-      context.searchStatus = { cascadeUsed: null, sourcesCount: 0, state: "error", verificationStatus: "unavailable", ...(webGroundingIntent === "REQUIRED" ? { freshnessBlocked: true } : {}) };
+      context.searchStatus = { cascadeUsed: null, sourcesCount: 0, state: "error", verificationStatus: "unavailable", ...(webGroundingIntent === "REQUIRED" ? { freshnessBlocked: true } : {}), ...(liveValueTask ? { liveValue: { kind: liveValueKindsForQuery[0] ?? "conditions", status: "not_found" as const } } : {}) };
     } finally {
       searchLease?.release();
     }

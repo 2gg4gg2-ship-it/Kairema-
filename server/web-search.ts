@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { SearchResultState, WebEvidence, WebSource } from "./providers";
 import { getWebSearchStatus as getSavedWebSearchStatus, recordSearchOutage, recordSearchQuality, type SearchOutageInput, upsertWebSearchStatus } from "./db";
+import { buildValueTargetedQuery, extractValues, liveValueEntity, liveValueKinds, validateValue, valueSummaryLine, type LiveValueKind, type SearchTaskKind, type ValueStatus } from "./web-search-value";
 
 export type SearchCascadeUsed = "you" | "serper" | "exa" | "tavily";
 type SearchLayer = SearchCascadeUsed;
@@ -19,6 +20,12 @@ export type WebSearchStatus = {
   openrouterHttp: number | null;
   layers: SearchLayerStatus[];
 };
+/**
+ * A live-value ask that reached sources: whether a source provably carries the value the user
+ * asked for. `confirmed` is never inferred from a source merely existing — only the value layer
+ * in `web-search-value.ts` can set it.
+ */
+export type LiveValueReport = { valueStatus: ValueStatus; liveValueKind: LiveValueKind };
 export type SearchResult = {
   summary: string;
   sources: WebSource[];
@@ -26,6 +33,7 @@ export type SearchResult = {
   cascadeUsed: SearchCascadeUsed;
   state: "found";
   verificationStatus: "verified";
+  liveValue?: LiveValueReport;
 };
 export type SearchOutcome = {
   summary: string;
@@ -34,6 +42,7 @@ export type SearchOutcome = {
   cascadeUsed: SearchCascadeUsed | null;
   state: Exclude<SearchResultState, "found">;
   verificationStatus: "no_results" | "degraded" | "unavailable";
+  liveValue?: LiveValueReport;
 };
 export type SearchWebOptions = {
   timeoutMs?: number;
@@ -45,6 +54,12 @@ export type SearchWebOptions = {
   beforeAttempt?: (layer: SearchCascadeUsed) => Promise<void | ((outcome: SearchAttemptOutcome) => void | Promise<void>)>;
   /** Opt-in only after the caller establishes that the query has no user-private context. */
   publicCache?: boolean;
+  /** The kind of question this search answers; only `LIVE_VALUE` enables the value gate and the second pass. */
+  taskKind?: SearchTaskKind;
+  /** Optional caller-built value-shaped second query; otherwise it is derived from the user request. */
+  targetedQuery?: string | null;
+  /** Hard ceiling of provider requests for this call, shared by both passes. */
+  maxNetworkRequests?: number;
 };
 
 const YOU_ENDPOINT = "https://ydc-index.io/v1/search";
@@ -57,6 +72,10 @@ const SOURCE_LIMIT = 5;
 const SNIPPET_LIMIT = 550;
 const PREFERRED_GLOBAL_DOMAINS = [".gov", ".edu", ".int", ".org", "openai.com", "google.com", "microsoft.com", "who.int", "un.org", "europa.eu"];
 const LAYERS: SearchLayer[] = ["you", "serper", "exa", "tavily"];
+/** A second pass over the same layers is legitimate only for a live value, so the budget grows. */
+const LIVE_VALUE_MAX_NETWORK_REQUESTS = 6;
+/** A second pass is skipped when less than a quarter of the turn's time budget is left. */
+const LIVE_VALUE_SECOND_PASS_TIME_SHARE = 0.25;
 const LAYER_COOLDOWN_MS: Record<SearchLayer, number> = { you: 10 * 60_000, serper: 10 * 60_000, exa: 10 * 60_000, tavily: 10 * 60_000 };
 const layerCooldowns: Partial<Record<SearchLayer, number>> = {};
 export const WEB_SEARCH_PUBLIC_CACHE_TTL_MS = 90_000;
@@ -385,7 +404,9 @@ function requiredPublishedAfter(options: SearchWebOptions) {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 function publicCacheKey(preparedQuery: string, options: SearchWebOptions) {
-  return createHash("sha256").update(JSON.stringify({ query: preparedQuery, requireDatedSources: Boolean(options.requireDatedSources), publishedAfter: options.publishedAfter ?? null })).digest("hex");
+  // The task kind is part of the key: the same words answered as a live value carry a value
+  // verdict, and an unproven verdict must never be served to a caller that demands proof.
+  return createHash("sha256").update(JSON.stringify({ query: preparedQuery, requireDatedSources: Boolean(options.requireDatedSources), publishedAfter: options.publishedAfter ?? null, taskKind: options.taskKind ?? "GENERAL" })).digest("hex");
 }
 function clonePublicOutcome(outcome: SearchResult | SearchOutcome) { return structuredClone(outcome); }
 function readPublicSearchCache(key: string) {
@@ -397,6 +418,9 @@ function readPublicSearchCache(key: string) {
 function writePublicSearchCache(key: string, outcome: SearchResult | SearchOutcome) {
   // Caching temporary faults would mask recovery and provide no grounding value.
   if (outcome.state !== "found" && outcome.state !== "empty") return;
+  // An unproven live value is a per-request verdict, not a fact about the query: the same
+  // words a minute later may carry the value, so only a confirmed result is shareable.
+  if (outcome.liveValue && outcome.liveValue.valueStatus !== "confirmed") return;
   while (publicSearchCache.size >= WEB_SEARCH_PUBLIC_CACHE_MAX_ENTRIES) {
     const oldest = publicSearchCache.keys().next().value;
     if (!oldest) break;
@@ -420,17 +444,57 @@ function qualifyingFreshResult(result: SearchResult, options: SearchWebOptions):
   const evidence = result.evidence.filter((entry) => sourceUrls.has(entry.sourceUrl));
   return { ...result, sources, evidence, summary: sourceSummary(evidence) };
 }
+/**
+ * The value verdict for a live-value result.
+ *
+ * Every source is judged on its own snippet; the first one that proves the value wins and
+ * becomes the machine-checked line. When no source proves it, the sources and evidence are
+ * still delivered — the pages are real — but the value claim is withheld, and that is what
+ * the model and the user are told.
+ */
+function withLiveValueReport(result: SearchResult, context: { kinds: readonly LiveValueKind[]; entity: string | null; now: Date }): SearchResult {
+  let confirmedKind: LiveValueKind | null = null;
+  let line: string | null = null;
+  const evidence = result.evidence.map((entry) => {
+    const text = entry.fact;
+    const values = context.kinds.flatMap((kind) => extractValues(text, kind));
+    const validation = validateValue({ values, kinds: context.kinds, text, entity: context.entity, now: context.now, sourceDate: entry.publishedAt ?? null, context: `${entry.sourceTitle} ${entry.sourceUrl}` });
+    if (validation.status === "confirmed" && !confirmedKind) {
+      confirmedKind = values.find((value) => validation.values.includes(value))?.kind ?? context.kinds[0] ?? "conditions";
+      line = valueSummaryLine(validation, entry.sourceDomain ?? entry.sourceTitle);
+    }
+    return { ...entry, valueStatus: validation.status } as WebEvidence;
+  });
+  const valueStatus: ValueStatus = line ? "confirmed" : "unconfirmed";
+  return {
+    ...result,
+    evidence,
+    summary: line ? `${line}\n\n${result.summary}` : `${valueSummaryLine({ status: "unconfirmed", reason: "missing_kind", asOf: null, values: [] }, null)}\n\n${result.summary}`,
+    liveValue: { valueStatus, liveValueKind: confirmedKind ?? context.kinds[0] ?? "conditions" },
+  };
+}
+
+/** Requests and time are budgeted for the whole call, so a second pass cannot double the wait. */
+type CascadeBudget = { remaining: number; deadlineAt: number; pass: 1 | 2 };
+/** The live-value verdict is taken against one fixed "now" so both passes agree on what is current. */
+type LiveValueContext = { kinds: readonly LiveValueKind[]; entity: string | null; now: Date };
+type CascadeRun = { budget?: CascadeBudget; liveValue?: LiveValueContext };
+
 function safeCascadeTelemetry(http: Record<SearchLayer, number | null>, selected: SearchCascadeUsed | null, sources: WebSource[] = []) { console.info("[Kairema search]", JSON.stringify({ event: "search.cascade", youHttp: http.you, serperHttp: http.serper, exaHttp: http.exa, tavilyHttp: http.tavily, selected, sourcesCount: sources.length, ...sourceDateRange(sources) })); }
 function outageClass(http: number | null): SearchOutageInput["errorClass"] { if (http === 429) return "rate_limited"; if (http === 401 || http === 403) return "auth"; if (http === 404) return "not_found"; if (http === null) return "network_error"; if (http >= 400) return "http_error"; return "no_sources"; }
-async function runCascade(query: string, options: SearchWebOptions, recordOutages: boolean): Promise<SearchResult | SearchOutcome> {
+async function runCascade(query: string, options: SearchWebOptions, recordOutages: boolean, run?: CascadeRun): Promise<SearchResult | SearchOutcome> {
+  const budget = run?.budget;
+  const liveContext = run?.liveValue;
   const startedAt = Date.now();
   const checkedAt = new Date().toISOString();
   const previous = await getWebSearchStatus();
-  const signal = AbortSignal.timeout(Math.max(100, Math.min(options.timeoutMs ?? 25_000, 25_000)));
+  const timeBudgetMs = budget ? budget.deadlineAt - Date.now() : options.timeoutMs ?? 25_000;
+  const signal = AbortSignal.timeout(Math.max(100, Math.min(timeBudgetMs, 25_000)));
   const http: Record<SearchLayer, number | null> = { you: null, serper: null, exa: null, tavily: null };
   const outcomes: Array<SearchAttempt["outcome"] | "undated" | "stale"> = [];
   for (const layer of LAYERS) {
     if (signal.aborted || isCooling(layer) || !hasLayerCredentials(layer)) continue;
+    if (budget && budget.remaining <= 0) break;
     const settleAttempt = await options.beforeAttempt?.(layer);
     let attempt: SearchAttempt = { result: null, http: null, latencyMs: 0, outcome: "failed" };
     try {
@@ -441,15 +505,17 @@ async function runCascade(query: string, options: SearchWebOptions, recordOutage
     } finally {
       // Controller settlement never changes a search outcome or causes a second provider request.
       await Promise.resolve(settleAttempt?.(attempt.outcome)).catch(() => undefined);
+      if (budget && attempt.outcome !== "skipped") budget.remaining -= 1;
     }
     http[layer] = attempt.http;
-    const verifiedResult = attempt.result ? qualifyingFreshResult(attempt.result, options) : null;
+    const qualifiedResult = attempt.result ? qualifyingFreshResult(attempt.result, options) : null;
+    const verifiedResult = qualifiedResult && liveContext ? withLiveValueReport(qualifiedResult, liveContext) : qualifiedResult;
     const hasAnyDatedSource = Boolean(attempt.result?.sources.some((source) => Boolean(source.publishedAt)));
     outcomes.push(attempt.result && options.requireDatedSources && !verifiedResult ? hasAnyDatedSource ? "stale" : "undated" : attempt.outcome);
     if (verifiedResult) {
       safeCascadeTelemetry(http, layer, verifiedResult.sources);
       await saveStatus({ available: true, reason: layer === "you" ? "Поиск доступен." : "Поиск доступен через резервный слой.", checkedAt, youHttp: http.you ?? previous.youHttp, serperHttp: http.serper ?? previous.serperHttp, exaHttp: http.exa ?? previous.exaHttp, googleHttp: previous.googleHttp, tavilyHttp: http.tavily ?? previous.tavilyHttp, openrouterHttp: previous.openrouterHttp });
-      if (recordOutages) void recordSearchQuality({ outcome: "found", verification: "verified", verifiedSourceCount: verifiedResult.evidence.length, attemptedLayerCount: outcomes.filter((outcome) => outcome !== "skipped").length, staleBlocked: false, latencyMs: Date.now() - startedAt }).catch(() => undefined);
+      if (recordOutages) void recordSearchQuality({ outcome: "found", verification: "verified", verifiedSourceCount: verifiedResult.evidence.length, attemptedLayerCount: outcomes.filter((outcome) => outcome !== "skipped").length, staleBlocked: false, latencyMs: Date.now() - startedAt, taskKind: options.taskKind ?? "GENERAL", valueConfirmed: verifiedResult.liveValue?.valueStatus === "confirmed", targetedPass: budget?.pass === 2 }).catch(() => undefined);
       return verifiedResult;
     }
     if (recordOutages) void recordSearchOutage({ layer, errorClass: outageClass(attempt.http), latencyMs: attempt.latencyMs, fellBack: layer !== "tavily" && !signal.aborted });
@@ -469,7 +535,7 @@ async function runCascade(query: string, options: SearchWebOptions, recordOutage
   } else if (undatedFreshnessFailure || staleFreshnessFailure || hasEmpty || hasTemporaryFault) {
     state = "degraded";
   }
-  if (recordOutages) void recordSearchQuality({ outcome: state, verification: state === "empty" ? "no_results" : state === "degraded" ? "degraded" : "unavailable", verifiedSourceCount: 0, attemptedLayerCount: attempted.length, staleBlocked: signal.aborted || undatedFreshnessFailure || staleFreshnessFailure, latencyMs: Date.now() - startedAt }).catch(() => undefined);
+  if (recordOutages) void recordSearchQuality({ outcome: state, verification: state === "empty" ? "no_results" : state === "degraded" ? "degraded" : "unavailable", verifiedSourceCount: 0, attemptedLayerCount: attempted.length, staleBlocked: signal.aborted || undatedFreshnessFailure || staleFreshnessFailure, latencyMs: Date.now() - startedAt, taskKind: options.taskKind ?? "GENERAL", valueConfirmed: false, targetedPass: budget?.pass === 2 }).catch(() => undefined);
   return {
     summary: "",
     sources: [],
@@ -479,13 +545,44 @@ async function runCascade(query: string, options: SearchWebOptions, recordOutage
     verificationStatus: state === "empty" ? "no_results" : state === "degraded" ? "degraded" : "unavailable",
   };
 }
+/**
+ * The live-value turn: the user's own question first, then one narrower value-shaped pass.
+ *
+ * The second pass exists because "verified" used to mean "a page came back", which is why a
+ * weather question could be answered with pages that carried no temperature at all. Pass 1
+ * stays byte-identical to every other search; pass 2 runs only when the value is still
+ * unproven, only with a different query, only inside the shared request and time budget, and
+ * its result never replaces a pass-1 result that already proved the value.
+ */
+async function runLiveValueSearch(preparedQuery: string, options: SearchWebOptions, recordOutages: boolean): Promise<SearchResult | SearchOutcome> {
+  const now = new Date();
+  const kinds = liveValueKinds(preparedQuery);
+  const entity = liveValueEntity(preparedQuery);
+  const liveValue: LiveValueContext = { kinds, entity, now };
+  const timeoutMs = Math.max(100, Math.min(options.timeoutMs ?? 25_000, 25_000));
+  const budget: CascadeBudget = { remaining: options.maxNetworkRequests ?? LIVE_VALUE_MAX_NETWORK_REQUESTS, deadlineAt: Date.now() + timeoutMs, pass: 1 };
+  const first = await runCascade(preparedQuery, options, recordOutages, { budget, liveValue });
+  if (first.state === "found" && first.liveValue?.valueStatus === "confirmed") return first;
+  // No sources at all: the caller needs no value verdict, only the honest empty outcome.
+  if (first.state !== "found") return first;
+  const targeted = options.targetedQuery ?? buildValueTargetedQuery(preparedQuery, kinds, entity);
+  if (!targeted || targeted === preparedQuery || budget.remaining <= 0) return first;
+  if (budget.deadlineAt - Date.now() < timeoutMs * LIVE_VALUE_SECOND_PASS_TIME_SHARE) return first;
+  budget.pass = 2;
+  const second = await runCascade(targeted, options, recordOutages, { budget, liveValue });
+  if (second.state === "found" && second.liveValue?.valueStatus === "confirmed") return second;
+  if (second.state === "found" && first.state !== "found") return second;
+  return first;
+}
+
 export async function probeWebSearchStatus(): Promise<WebSearchStatus> { await runCascade("Kairema health check", { timeoutMs: 25_000 }, false); return getWebSearchStatus(); }
 /** Search remains optional context: every outcome is safe for the model and never blocks model generation. */
 export async function searchWeb(query: string, options: SearchWebOptions = {}): Promise<SearchResult | SearchOutcome> {
   const preparedQuery = buildGlobalDiscoveryQuery(query);
   webGroundedRuntimeGauge.searchRequests += 1;
+  const run = (recordOutages: boolean) => (options.taskKind === "LIVE_VALUE" ? runLiveValueSearch(preparedQuery, options, recordOutages) : runCascade(preparedQuery, options, recordOutages));
   if (!options.publicCache) {
-    const outcome = await runCascade(preparedQuery, options, true);
+    const outcome = await run(true);
     noteWebGroundedOutcome(outcome);
     return outcome;
   }
@@ -503,7 +600,7 @@ export async function searchWeb(query: string, options: SearchWebOptions = {}): 
     noteWebGroundedOutcome(outcome);
     return outcome;
   }
-  const pending = runCascade(preparedQuery, options, true)
+  const pending = run(true)
     .then((outcome) => { writePublicSearchCache(key, outcome); return outcome; })
     .finally(() => { publicSearchInFlight.delete(key); });
   publicSearchInFlight.set(key, pending);

@@ -309,6 +309,13 @@
       "when": 1790327352336,
       "tag": "0043_recover_chat_exports",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "5",
+      "when": 1790422210618,
+      "tag": "0044_live_value_quality",
+      "breakpoints": true
     }
   ]
 }

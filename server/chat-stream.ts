@@ -194,6 +194,20 @@ function normalizedDate(value: unknown): string | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
+const LIVE_VALUE_KINDS = ["temperature", "conditions", "clock", "rate"] as const;
+const LIVE_VALUE_STATUSES = ["confirmed", "unconfirmed", "not_found"] as const;
+/**
+ * The live-value verdict crosses the boundary as an enum pair only. The value itself, the
+ * snippet that proved it and the page it came from stay in the model context — an ordinary
+ * user is told whether a value was confirmed, never handed raw provider output.
+ */
+function publicLiveValue(liveValue: NonNullable<StreamResult["searchStatus"]>["liveValue"]) {
+  if (!liveValue) return undefined;
+  const kind = LIVE_VALUE_KINDS.find((candidate) => candidate === liveValue.kind);
+  const status = LIVE_VALUE_STATUSES.find((candidate) => candidate === liveValue.status);
+  return kind && status ? { kind, status } : undefined;
+}
+
 /** The ordinary-user SSE boundary exposes only safe freshness metadata. */
 function publicSearchStatus(status: StreamResult["searchStatus"]) {
   if (!status) return undefined;
@@ -205,6 +219,7 @@ function publicSearchStatus(status: StreamResult["searchStatus"]) {
     sourcesCount: Math.max(0, Math.floor(status.sourcesCount)),
     ...(status.freshnessBlocked ? { freshnessBlocked: true } : {}),
     ...(status.staleRagOnly ? { staleRagOnly: true } : {}),
+    ...(publicLiveValue(status.liveValue) ? { liveValue: publicLiveValue(status.liveValue) } : {}),
     ...(sourceDateMin ? { sourceDateMin } : {}),
     ...(sourceDateMax ? { sourceDateMax } : {}),
   };

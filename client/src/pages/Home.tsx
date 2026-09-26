@@ -9,7 +9,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { startLogin } from "@/const";
 import { memorySearchMatches } from "@/lib/memory-search";
 import { runtimeAuthHeaders } from "@/lib/runtime-auth";
-import { consumeChatStream } from "@/lib/chat-stream";
+import { consumeChatStream, type StreamLiveValue } from "@/lib/chat-stream";
 import { trpc } from "@/lib/trpc";
 import { Archive, Bot, CircleCheck, CircleDot, Clock3, Copy, FileImage, Gauge, Globe2, Languages, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Moon, PanelLeftClose, PanelLeftOpen, Search, Settings2, SlidersHorizontal, Sparkles, Sun, Trash2, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -24,7 +24,7 @@ type PublicRuntime = { state: "ready" | "backup" | "unavailable"; provider: stri
 type PublicRoleLimits = { candidate: "primary" | "backup" | "unavailable"; provider: string | null; quota: "ready" | "limited" | "unavailable"; nextFallback: string | null; lastFallback: boolean };
 type PublicModel = StaticModel & { status?: PublicStatus; runtime?: PublicRuntime | null; limits?: PublicRoleLimits };
 type SearchItem = { type: "chat" | "message"; id: string; sessionId?: string; title: string; snippet: string; createdAt: Date | string };
-type SearchStatus = { state: "found" | "empty" | "degraded" | "error"; verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable"; sourcesCount: number; freshnessBlocked?: boolean; staleRagOnly?: boolean; sourceDateMin?: string; sourceDateMax?: string };
+type SearchStatus = { state: "found" | "empty" | "degraded" | "error"; verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable"; sourcesCount: number; freshnessBlocked?: boolean; staleRagOnly?: boolean; sourceDateMin?: string; sourceDateMax?: string; liveValue?: StreamLiveValue };
 type SourceEvidence = { title: string; url: string; publishedAt?: string };
 type WebGrounding = { intent: "PREFERRED" | "REQUIRED"; state: "verified" | "disabled" | "empty" | "degraded" | "unavailable" | "admission_denied"; sourcesCount: number; citations: SourceEvidence[]; freshnessBlocked?: boolean };
 
@@ -44,10 +44,23 @@ function clearStoredActiveChatId(): void {
 
 function safeSearchStatus(value: unknown): SearchStatus | undefined {
   if (!value || typeof value !== "object") return undefined;
-  const status = value as { state?: unknown; verificationStatus?: unknown; sourcesCount?: unknown; freshnessBlocked?: unknown; staleRagOnly?: unknown; sourceDateMin?: unknown; sourceDateMax?: unknown };
+  const status = value as { state?: unknown; verificationStatus?: unknown; sourcesCount?: unknown; freshnessBlocked?: unknown; staleRagOnly?: unknown; sourceDateMin?: unknown; sourceDateMax?: unknown; liveValue?: unknown };
   if (!(status.state === "found" || status.state === "empty" || status.state === "degraded" || status.state === "error") || typeof status.sourcesCount !== "number") return undefined;
   const iso = (date: unknown) => typeof date === "string" && !Number.isNaN(new Date(date).getTime()) ? new Date(date).toISOString() : undefined;
-  return { state: status.state, ...(status.verificationStatus === "verified" || status.verificationStatus === "no_results" || status.verificationStatus === "degraded" || status.verificationStatus === "unavailable" ? { verificationStatus: status.verificationStatus } : {}), ...(status.freshnessBlocked === true ? { freshnessBlocked: true } : {}), ...(status.staleRagOnly === true ? { staleRagOnly: true } : {}), ...(iso(status.sourceDateMin) ? { sourceDateMin: iso(status.sourceDateMin) } : {}), ...(iso(status.sourceDateMax) ? { sourceDateMax: iso(status.sourceDateMax) } : {}), sourcesCount: status.sourcesCount };
+  return { state: status.state, ...(status.verificationStatus === "verified" || status.verificationStatus === "no_results" || status.verificationStatus === "degraded" || status.verificationStatus === "unavailable" ? { verificationStatus: status.verificationStatus } : {}), ...(status.freshnessBlocked === true ? { freshnessBlocked: true } : {}), ...(status.staleRagOnly === true ? { staleRagOnly: true } : {}), ...(safeLiveValue(status.liveValue) ? { liveValue: safeLiveValue(status.liveValue) } : {}), ...(iso(status.sourceDateMin) ? { sourceDateMin: iso(status.sourceDateMin) } : {}), ...(iso(status.sourceDateMax) ? { sourceDateMax: iso(status.sourceDateMax) } : {}), sourcesCount: status.sourcesCount };
+}
+
+/**
+ * The live-value verdict is re-validated independently of the server, exactly like every
+ * other field of this boundary: only the known kind and status pair is accepted, so a
+ * malformed payload cannot put arbitrary content into the chat UI.
+ */
+function safeLiveValue(value: unknown): StreamLiveValue | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const live = value as { kind?: unknown; status?: unknown };
+  const kind = ["temperature", "conditions", "clock", "rate"].find((candidate) => candidate === live.kind);
+  const status = ["confirmed", "unconfirmed", "not_found"].find((candidate) => candidate === live.status);
+  return kind && status ? { kind: kind as StreamLiveValue["kind"], status: status as StreamLiveValue["status"] } : undefined;
 }
 
 function safeSourceEvidence(value: unknown): SourceEvidence[] {

@@ -41,6 +41,7 @@ import { invokeLLM } from "./_core/llm";
 import { WebSearchUnavailableError, searchWeb } from "./web-search";
 import { getOwnedAttachmentVisionDataUrl } from "./attachments";
 import { retrieveRagContext } from "./knowledge";
+import { LIVE_VALUE_UNCONFIRMED_PROMPT } from "./web-search-value";
 
 const input = { query: "Что нового?", attachmentIds: [] };
 
@@ -139,6 +140,50 @@ describe("chat context soft web research", () => {
     expect(context.webGrounding).toBeUndefined();
     expect(context.searchStatus).toBeUndefined();
     expect(context.freshnessWarning).toBeUndefined();
+  });
+
+  it("asks one narrower second question only for a live value and never for a dated request", async () => {
+    const sessionId = "11111111-1111-4111-8111-111111111111";
+    vi.mocked(searchWeb).mockClear();
+    await buildChatContext(7, sessionId, { ...input, query: "Какая сейчас погода в Одессе?", role: "context" });
+    expect(searchWeb).toHaveBeenCalledWith("Какая сейчас погода в Одессе?", expect.objectContaining({ taskKind: "LIVE_VALUE", targetedQuery: "current weather Одессе temperature precipitation" }));
+
+    vi.mocked(searchWeb).mockClear();
+    await buildChatContext(7, sessionId, { ...input, query: "Какой последний Claude вышел?", role: "context" });
+    expect(searchWeb).toHaveBeenCalledWith("Какой последний Claude вышел?", expect.objectContaining({ taskKind: "RECENT" }));
+    expect(vi.mocked(searchWeb).mock.calls[0]?.[1]).not.toHaveProperty("targetedQuery");
+  });
+
+  it("reports a confirmed live value without a warning and an unproven one honestly", async () => {
+    const sessionId = "11111111-1111-4111-8111-111111111111";
+    const source = { title: "Погода в Одессе", url: "https://example.com/weather/odesa", domain: "example.com", sourceId: "source-001", retrievedAt: "2026-08-21T00:00:00.000Z" };
+    const evidence = { fact: "Фрагмент", sourceUrl: source.url, sourceTitle: source.title, sourceDomain: source.domain, retrievedAt: source.retrievedAt, confidence: "medium" as const, sourceId: source.sourceId };
+
+    vi.mocked(searchWeb).mockResolvedValueOnce({ summary: "ИСКОМОЕ ЗНАЧЕНИЕ: температура +19 °C (example.com)\n\nФрагмент", state: "found", verificationStatus: "verified", cascadeUsed: "you", sources: [source], evidence: [{ ...evidence, valueStatus: "confirmed" }], liveValue: { valueStatus: "confirmed", liveValueKind: "temperature" } });
+    const confirmed = await buildChatContext(7, sessionId, { ...input, query: "Какая сейчас погода в Одессе?", role: "context" });
+    expect(confirmed.searchStatus).toMatchObject({ liveValue: { kind: "temperature", status: "confirmed" } });
+    expect(confirmed.freshnessWarning).toBeUndefined();
+
+    vi.mocked(searchWeb).mockResolvedValueOnce({ summary: "ИСКОМОЕ ЗНАЧЕНИЕ НЕ ПОДТВЕРЖДЕНО\n\nФрагмент", state: "found", verificationStatus: "verified", cascadeUsed: "you", sources: [source], evidence: [{ ...evidence, valueStatus: "unconfirmed" }], liveValue: { valueStatus: "unconfirmed", liveValueKind: "temperature" } });
+    const unconfirmed = await buildChatContext(7, sessionId, { ...input, query: "Какая сейчас погода в Одессе?", role: "context" });
+    expect(unconfirmed.searchStatus).toMatchObject({ liveValue: { kind: "temperature", status: "unconfirmed" } });
+    // The pages are still delivered as context, but the user is told the value is missing.
+    expect(unconfirmed.webGrounding).toMatchObject({ state: "verified", sourcesCount: 1 });
+    expect(unconfirmed.freshnessWarning).toBe(LIVE_VALUE_UNCONFIRMED_PROMPT);
+  });
+
+  it("marks a live value as not found when no source came back at all", async () => {
+    vi.mocked(searchWeb).mockResolvedValueOnce({ summary: "", state: "empty", verificationStatus: "no_results", cascadeUsed: null, sources: [], evidence: [] });
+
+    const context = await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Который сейчас час в Одессе?", role: "context" });
+
+    expect(context.searchStatus).toMatchObject({ liveValue: { kind: "clock", status: "not_found" } });
+  });
+
+  it("carries no live-value verdict for a request that is not a live value", async () => {
+    const context = await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какой последний Claude вышел?", role: "context" });
+
+    expect(context.searchStatus).not.toHaveProperty("liveValue");
   });
 
   it("recognises a Russian current-data question that has no question mark", () => {
