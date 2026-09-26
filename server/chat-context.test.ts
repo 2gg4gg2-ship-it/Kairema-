@@ -74,8 +74,52 @@ describe("chat context soft web research", () => {
     expect(classifyWebGroundingIntent("Сколько будет 2 + 2?")).toBe("NONE");
   });
 
-  it("uses public cache only for non-personal fresh research with no attachments or memory context", () => {
-    expect(canUsePublicSearchCache("Какая последняя версия браузера?", { hasAttachments: false, hasMemoryContext: false })).toBe(true);
+  it("recognises lookup-shaped and explicit search requests without widening search to ordinary questions", () => {
+    // A live-lookup topic plus current framing is freshness-bound even without question punctuation.
+    expect(classifyWebGroundingIntent("Погода в Москве сегодня")).toBe("REQUIRED");
+    // An explicit look-up instruction plus a verifiable topic is source-seeking, not freshness-bound.
+    expect(classifyWebGroundingIntent("Поищи информацию о марс")).toBe("PREFERRED");
+    expect(classifyWebGroundingIntent("Search for OpenAI pricing")).toBe("PREFERRED");
+    // Ordinary knowledge questions stay out of live search.
+    expect(classifyWebGroundingIntent("Что такое Kairema?")).toBe("NONE");
+    expect(classifyWebGroundingIntent("Расскажи про Марс")).toBe("NONE");
+    // An explicit look-up instruction is only source-seeking, never freshness-bound.
+    expect(classifyWebGroundingIntent("Найди, что ты умеешь")).toBe("PREFERRED");
+    expect(classifyWebGroundingIntent("Найди, что ты умеешь")).not.toBe("REQUIRED");
+    expect(searchWeb).not.toHaveBeenCalled();
+  });
+
+  it("requires dated sources only for a freshness-bound request", async () => {
+    // PREFERRED: source-seeking, so an undated reference page must stay usable.
+    await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Поищи информацию о марс", role: "context" });
+    expect(searchWeb).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ requireDatedSources: false }));
+
+    vi.mocked(searchWeb).mockClear();
+
+    // REQUIRED: freshness-bound, so the existing dated-source requirement is preserved.
+    await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какая последняя версия браузера?", role: "context" });
+    expect(searchWeb).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ requireDatedSources: true, publishedAfter: expect.any(String) }));
+  });
+
+  it("recognises a Russian current-data question that has no question mark", () => {
+    // Regression: `\b` is ASCII-only, so the Russian question word could never anchor the
+    // pattern and this request was classified NONE, leaving searchWeb() unreachable.
+    expect(classifyWebGroundingIntent("Какой сейчас год, день и время в Украине, какой последний Клауд вышел.")).toBe("REQUIRED");
+    expect(classifyWebGroundingIntent("Какая погода в Одессе сегодня.")).toBe("REQUIRED");
+    expect(classifyWebGroundingIntent("Сколько стоит подписка.")).not.toBe("NONE");
+    expect(needsWebResearch("Какой сейчас год, день и время в Украине, какой последний Клауд вышел.")).toBe(true);
+  });
+
+  it("keeps identity, arithmetic and general knowledge requests out of live search without a question mark", () => {
+    expect(classifyWebGroundingIntent("Кто ты")).toBe("NONE");
+    expect(classifyWebGroundingIntent("Напиши стихотворение")).toBe("NONE");
+    expect(classifyWebGroundingIntent("Привет, как дела?")).toBe("NONE");
+    expect(classifyWebGroundingIntent("Что такое Kairema?")).toBe("NONE");
+    expect(classifyWebGroundingIntent("Сколько будет 2 + 2?")).toBe("NONE");
+    expect(classifyWebGroundingIntent("Где находится Марс")).toBe("NONE");
+  });
+
+  it("uses public cache only for non-personal fresh research with no attachments or memory context", () => {    expect(canUsePublicSearchCache("Какая последняя версия браузера?", { hasAttachments: false, hasMemoryContext: false })).toBe(true);
     expect(canUsePublicSearchCache("Какая текущая цена для моего аккаунта?", { hasAttachments: false, hasMemoryContext: false })).toBe(false);
     expect(canUsePublicSearchCache("Какая последняя версия браузера?", { hasAttachments: true, hasMemoryContext: false })).toBe(false);
     expect(canUsePublicSearchCache("Какая последняя версия браузера?", { hasAttachments: false, hasMemoryContext: true })).toBe(false);

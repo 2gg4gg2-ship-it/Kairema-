@@ -321,4 +321,60 @@ describe("v6-K SearchProvider", () => {
     expect(JSON.stringify(getWebGroundedRuntimeGaugeSnapshot())).not.toContain("browser");
     expect(JSON.stringify(getWebGroundedRuntimeGaugeSnapshot())).not.toContain("example.com");
   });
+
+  it("keeps undated sources for a source-seeking request and still rejects them for a freshness-bound one", async () => {
+    process.env.YOU_API_KEY = "test-you";
+    process.env.SERPER_API_KEY = "";
+    process.env.EXA_API_KEY = "";
+    const undatedPayload = () => new Response(JSON.stringify({ results: { web: [
+      { title: "Официальная страница", url: "https://agency.gov/about", description: "Справочные сведения" },
+      { title: "Справочная статья", url: "https://en.wikipedia.org/wiki/Topic", description: "Описание" },
+    ] } }), { status: 200 });
+
+    // PREFERRED: an undated evergreen page must not be discarded just for lacking a date.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(undatedPayload()));
+    const preferred = await searchWeb("Поищи информацию о марс", { publicCache: false, requireDatedSources: false });
+    expect(preferred).toMatchObject({ state: "found", verificationStatus: "verified", cascadeUsed: "you" });
+    expect(preferred).toHaveProperty("sources");
+    expect((preferred as { sources: unknown[] }).sources).toHaveLength(2);
+
+    // REQUIRED: the existing freshness requirement must still reject undated results.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(undatedPayload()));
+    const required = await searchWeb("Какая последняя версия браузера?", { publicCache: false, requireDatedSources: true, publishedAfter: "2026-01-01T00:00:00.000Z" });
+    expect(required).toMatchObject({ state: "degraded", verificationStatus: "degraded", sources: [] });
+  });
+
+  it("reads the real You.com page_age field as the publication date for a freshness-bound request", async () => {
+    process.env.YOU_API_KEY = "test-you";
+    process.env.SERPER_API_KEY = "";
+    process.env.EXA_API_KEY = "";
+    process.env.TAVILY_API_KEY = "";
+    // The real You.com response carries page_age and no publishedAt and no date.
+    const pageAge = new Date(Date.now() - 60 * 60_000);
+    const pageAgeWithoutOffset = pageAge.toISOString().slice(0, 19);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      results: { web: [{
+        title: "Публикация о релизе",
+        url: "https://example.com/release",
+        description: "Свежий подтверждённый факт",
+        thumbnail_url: "https://example.com/t.png",
+        original_thumbnail_url: "https://example.com/o.png",
+        page_age: pageAgeWithoutOffset,
+        favicon_url: "https://example.com/f.ico",
+        snippets: ["Свежий подтверждённый факт"],
+      }] },
+      metadata: { query: "q", search_uuid: "u", latency: 1 },
+    }), { status: 200 })));
+
+    const result = await searchWeb("Какой последний Клауд вышел?", {
+      publicCache: false,
+      requireDatedSources: true,
+      publishedAfter: new Date(Date.now() - 48 * 60 * 60_000).toISOString(),
+    });
+
+    expect(result).toMatchObject({ state: "found", verificationStatus: "verified", cascadeUsed: "you" });
+    expect(result.sources).toHaveLength(1);
+    // The offset-less page_age is pinned to UTC, not to the process time zone.
+    expect(result.sources[0].publishedAt).toBe(`${pageAgeWithoutOffset}.000Z`);
+  });
 });

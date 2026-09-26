@@ -188,10 +188,25 @@ function evidenceFromEntries(entries: Array<{ source: WebSource; text: string }>
 function sourceSummary(evidence: WebEvidence[]) {
   return evidence.map((entry) => `Подтверждённый фрагмент [${entry.sourceId}]\nИсточник: ${entry.sourceTitle}\nURL: ${entry.sourceUrl}\nПолучен: ${entry.retrievedAt}\nФакт: ${entry.fact}`).join("\n\n");
 }
+/**
+ * You.com is the only layer whose date field is an offset-less timestamp, and
+ * `page_age` is the only date its real response carries: there is no
+ * `publishedAt` and no `date`. A date-time without an offset is parsed as
+ * local time, which would shift the value by the server offset, so the offset
+ * is pinned to UTC here — in this adapter only, leaving `normaliseSourceDate`
+ * and every other layer untouched.
+ */
+function youPageAgeAsUtc(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed) ? trimmed : `${trimmed}Z`;
+}
+
 function youResult(payload: unknown): Omit<SearchResult, "cascadeUsed" | "state" | "verificationStatus"> | null {
-  const results = (payload as { results?: { web?: Array<{ title?: unknown; url?: unknown; description?: unknown; date?: unknown; publishedAt?: unknown }>; news?: Array<{ title?: unknown; url?: unknown; description?: unknown; date?: unknown; publishedAt?: unknown }> } })?.results;
+  const results = (payload as { results?: { web?: Array<{ title?: unknown; url?: unknown; description?: unknown; date?: unknown; publishedAt?: unknown; page_age?: unknown }>; news?: Array<{ title?: unknown; url?: unknown; description?: unknown; date?: unknown; publishedAt?: unknown; page_age?: unknown }> } })?.results;
   const entries = [...(results?.web ?? []), ...(results?.news ?? [])].flatMap((item) => {
-    const source = webSource(item.title, item.url, undefined, item.publishedAt ?? item.date);
+    const source = webSource(item.title, item.url, undefined, item.publishedAt ?? item.date ?? youPageAgeAsUtc(item.page_age));
     return source ? [{ source, text: typeof item.description === "string" ? item.description.replace(/\s+/g, " ").trim().slice(0, SNIPPET_LIMIT) : "" }] : [];
   });
   const sources = uniqueSources(entries.map((entry) => entry.source));

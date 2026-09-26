@@ -14,7 +14,15 @@ const MEMORY_CONTEXT_TOPIC_LIMIT = 15;
 const FRESHNESS_QUERY_PATTERN = /(?:сегодня|сейчас|нынешн|текущ|последн|новост|свеж|актуальн|обновлен|нов(?:ый|ая|ые|ое)|верси[яиюе]|релиз|курс|цен[аы]|погод|врем[яени]|дата|событи|\bnow\b|\btoday\b|\bcurrent\b|\blatest\b|\brecent\b|\bnew\b|\bnews\b|\bupdate\b|\bversion\b|\brelease\b|\bprice\b|\bweather\b)/i;
 const EXTERNAL_DISCOVERY_PATTERN = /(?:найд[иите]|проверь|поищ|источник|ссылк|официальн|компан|организац|министерств|правительств|президент|рын(?:ок|ка)|акци[яи]|тариф|закон|исследован|статистик|выбор|спорт|матч|фильм|серия|продукт|сервис|сайт|\bsource\b|\bsearch\b|\bofficial\b|\bcompany\b|\bmarket\b|\bstock\b|\blaw\b|\belection\b)/i;
 const DIRECT_CURRENT_PATTERN = /(?:сегодня|сейчас|текущ|последн|свеж|актуальн|новост|курс|цен[аы]|погод|дата|врем[яени]|релиз|обновлен|\bnow\b|\btoday\b|\bcurrent\b|\blatest\b|\brecent\b|\bnews\b|\bprice\b|\bweather\b)/i;
-const QUESTION_PATTERN = /(?:\?|^(?:кто|что|где|когда|какой|какая|какие|сколько|почему|зачем|как|можно\s+ли|есть\s+ли|who|what|where|when|which|how|is|are)\b)/i;
+/** `\b` is ASCII-only (`\w` excludes Cyrillic), so it can never follow a Russian question
+ *  word. Use an explicit Unicode word boundary instead, or Cyrillic questions without a
+ *  "?" were never recognised. The class spells out the Cyrillic ranges because the
+ *  `\p{...}` form needs a Unicode-aware target/flag this project does not compile with. */
+const QUESTION_PATTERN = /(?:\?|^(?:кто|что|где|когда|какой|какая|какие|сколько|почему|зачем|как|можно\s+ли|есть\s+ли|who|what|where|when|which|how|is|are)(?=\s|$|[^A-Za-zА-Яа-яЁё0-9_]))/i;
+/** Topics whose answer is a live lookup by nature, so a current request about them is self-evidently freshness-bound. */
+const CURRENT_LOOKUP_PATTERN = /(?:погод|курс|цен[аы]|стои|котировк|новост|новость|новости|прогноз|расписан)/i;
+/** An explicit "go look it up" instruction. Only meaningful together with a verifiable topic, never on its own. */
+const EXPLICIT_SEARCH_PATTERN = /(?:найд[иите]|поищ[иите]?|\bsearch\b|\bfind\b|look\s+up|гугл)/i;
 const PRIVATE_SEARCH_CONTEXT_PATTERN = /(?:^|[^A-Za-zА-Яа-яЁё0-9_])(?:я|мне|меня|мо(?:й|я|ё|его|ем|ём|и)|наш(?:а|е|и|его|ем|ей|ими|их)?|личн[А-Яа-яЁё]*|аккаунт[А-Яа-яЁё]*|учётн[А-Яа-яЁё]*|парол[А-Яа-яЁё]*|почт[А-Яа-яЁё]*|телефон[А-Яа-яЁё]*|адрес[А-Яа-яЁё]*|документ[А-Яа-яЁё]*|файл[А-Яа-яЁё]*|вложен[А-Яа-яЁё]*|профил[А-Яа-яЁё]*|памят[А-Яа-яЁё]*)(?=$|[^A-Za-zА-Яа-яЁё0-9_])|\b(?:i|me|my|mine|account|password|email|phone|address|attachment|profile|memory)\b|@/i;
 const TODAY_QUERY_PATTERN = /(?:сегодня|сейчас|\bnow\b|\btoday\b)/i;
 const RECENT_QUERY_PATTERN = /(?:последн|новост|свеж|актуальн|текущ|обновлен|нов(?:ый|ая|ые|ое)|релиз|\bcurrent\b|\blatest\b|\brecent\b|\bnew\b|\bnews\b|\bupdate\b|\brelease\b)/i;
@@ -34,10 +42,15 @@ export function classifyWebGroundingIntent(query: string): WebGroundingIntent {
   const isQuestion = QUESTION_PATTERN.test(normalized);
   const hasTemporalSignal = DIRECT_CURRENT_PATTERN.test(normalized);
   const hasExternalSignal = EXTERNAL_DISCOVERY_PATTERN.test(normalized);
-  // Required combines current framing with question structure or a verifiable topic;
-  // preferred supports source-seeking research without silently claiming freshness.
-  if (hasTemporalSignal && (isQuestion || hasExternalSignal)) return "REQUIRED";
-  if (hasExternalSignal && isQuestion) return "PREFERRED";
+  const hasCurrentLookup = CURRENT_LOOKUP_PATTERN.test(normalized);
+  const hasExplicitSearch = EXPLICIT_SEARCH_PATTERN.test(normalized);
+  // Required combines current framing with question structure, a verifiable topic, or a
+  // topic that is a live lookup by itself ("погода в Москве сегодня"). Preferred supports
+  // source-seeking research, including an explicit look-up instruction without question
+  // punctuation ("поищи информацию о марс") and a lookup topic asked without current
+  // framing ("сколько стоит подписка"), without silently claiming freshness.
+  if (hasTemporalSignal && (isQuestion || hasExternalSignal || hasCurrentLookup)) return "REQUIRED";
+  if ((hasExternalSignal || hasCurrentLookup) && (isQuestion || hasExplicitSearch)) return "PREFERRED";
   return "NONE";
 }
 
@@ -128,7 +141,10 @@ export async function buildChatContext(userId: number, sessionId: string, input:
         "Собери только релевантные актуальные факты и источники для запроса пользователя:\n" + (input.query?.slice(0, 8_000) ?? ""),
         {
           ...(role === "fast" ? { timeoutMs: FLASH_WEB_RESEARCH_BUDGET_MS } : {}),
-          ...freshnessSearchPolicy(input.query ?? ""),
+          // Only a freshness-bound (REQUIRED) request must reject undated sources. A
+          // PREFERRED request is source-seeking, not freshness-bound, so evergreen
+          // official/reference pages without publishedAt must stay usable.
+          ...(webGroundingIntent === "REQUIRED" ? freshnessSearchPolicy(input.query ?? "") : { requireDatedSources: false as const }),
           publicCache: canUsePublicSearchCache(input.query ?? "", { hasAttachments: attachments.length > 0, hasMemoryContext: Boolean(context.memoryContext) }),
           beforeAttempt: async () => {
             const ticket = searchLease ? await searchLease.reserve() : null;
