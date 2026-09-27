@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { InlineMarkdown } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
 import { MAX_COMPOSER_IMAGES, optimizeImageForUpload } from "@/lib/image-attachments";
-import { Copy, Download, FileImage, FileText, ChevronRight, Clock3, ExternalLink, Link2, Loader2, LogIn, Paperclip, Send, Square, Trash2, Sparkles, X } from "lucide-react";
+import { Copy, Download, FileImage, FileText, ChevronDown, ChevronRight, ChevronUp, Clock3, ExternalLink, Link2, Loader2, LogIn, Paperclip, Send, Square, Trash2, Sparkles, X } from "lucide-react";
 import { Drawer as DrawerPrimitive } from "vaul";
 import React, { useCallback, useEffect, useId, useRef, useState } from "react";
 
@@ -227,6 +227,8 @@ export function AIChatBox({
   // The "Choose photo / Choose file" popover is a native <details>; it is tracked in
   // state so it can be dismissed when the user opens any other interface.
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  // Toggles only the History caption. Markdown, PDF and Chat / My API are unaffected.
+  const [historyOpen, setHistoryOpen] = useState(true);
   const attachmentMenuRef = useRef<HTMLDetailsElement | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const preserveHistoryScrollRef = useRef<{ height: number; top: number } | null>(null);
@@ -444,7 +446,7 @@ export function AIChatBox({
       {exportError && <p className="kairema-export-error" role="status">{exportError}</p>}
       <div ref={viewportRef} className="kairema-chat-scroll">
         <div className="kairema-chat-sticky">
-          {(onExportMarkdown || onExportPdf) && <div className="kairema-chat-tools"><span className="kairema-chat-tools-label"><Clock3 className="size-3.5" />{t.history}</span><div className="kairema-export-actions"><button type="button" onClick={onExportMarkdown} disabled={!canExport || Boolean(exportBusy)} className="kairema-export-button"><FileText className="size-3.5" />{exportBusy === "markdown" ? t.preparing : t.markdown}</button><button type="button" onClick={onExportPdf} disabled={!canExport || Boolean(exportBusy)} className="kairema-export-button"><Download className="size-3.5" />{exportBusy === "pdf" ? t.preparing : t.pdf}</button></div></div>}
+          {(onExportMarkdown || onExportPdf) && <div className="kairema-chat-tools"><span className="kairema-chat-tools-head">{historyOpen && <span className="kairema-chat-tools-label"><Clock3 className="size-3.5" />{t.history}</span>}<button type="button" className="kairema-chat-tools-toggle" aria-expanded={historyOpen} aria-label={historyOpen ? (language === "ru" ? "Скрыть надпись «История»" : "Hide the History label") : (language === "ru" ? "Показать надпись «История»" : "Show the History label")} title={historyOpen ? (language === "ru" ? "Скрыть надпись «История»" : "Hide the History label") : (language === "ru" ? "Показать надпись «История»" : "Show the History label")} onClick={() => setHistoryOpen((open) => !open)}>{historyOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}</button></span><div className="kairema-export-actions"><button type="button" onClick={onExportMarkdown} disabled={!canExport || Boolean(exportBusy)} className="kairema-export-button"><FileText className="size-3.5" />{exportBusy === "markdown" ? t.preparing : t.markdown}</button><button type="button" onClick={onExportPdf} disabled={!canExport || Boolean(exportBusy)} className="kairema-export-button"><Download className="size-3.5" />{exportBusy === "pdf" ? t.preparing : t.pdf}</button></div></div>}
           {aboveMessages}
         </div>
         {displayMessages.length === 0 ? <div className="flex min-h-[420px] flex-col items-center justify-center px-6 text-center"><div className="kairema-orb mb-6"><Sparkles className="size-7" /></div><h2 className="text-2xl font-semibold tracking-tight text-foreground">{emptyStateMessage}</h2><p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">{t.fourRoles}</p>{guestLoginAction && <button type="button" className="kairema-guest-login kairema-guest-login-empty" onClick={guestLoginAction.onClick}><LogIn className="size-4" /><span>{guestLoginAction.label}</span></button>}</div> : <div className="mx-auto flex w-full max-w-4xl flex-col gap-7 px-4 py-4 sm:px-8">{hasOlderHistory && <div className="flex justify-center"><button type="button" className="kairema-export-button" onClick={loadOlderHistory} disabled={isLoadingOlderHistory}>{isLoadingOlderHistory ? (language === "ru" ? "Загрузка…" : "Loading…") : (language === "ru" ? "Загрузить более ранние сообщения" : "Load older messages")}</button></div>}{displayMessages.map((message, index) => { const hasSources = message.role === "assistant" && messageSources(message).length > 0; return (<article key={message.id ?? `${message.role}-${index}`} className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}>

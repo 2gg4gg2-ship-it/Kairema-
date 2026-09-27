@@ -279,6 +279,9 @@ body { margin: 0; min-width: 320px; background: #070912; color: #e8edf8; }
 .status-auth,.status-unavailable { box-shadow: inset 0 0 0 1px rgba(249,157,166,.14); }
 .kairema-chat-tools { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; align-self:stretch; padding:7px 12px 2px; color:#778298; font-size:11px; font-weight:600; letter-spacing:.03em; }
 .kairema-chat-tools-label { display:inline-flex; min-width:0; align-items:center; gap:6px; }
+.kairema-chat-tools-head { display:inline-flex; min-width:0; align-items:center; gap:5px; }
+.kairema-chat-tools-toggle { width:22px; height:22px; padding:0; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; border:1px solid var(--k-line); background:var(--k-panel-2); color:var(--k-text); border-radius:6px; cursor:pointer; }
+.kairema-chat-tools-toggle:hover { background:var(--k-panel); }
 .kairema-chat-tools-label > svg { flex:0 0 auto; }
 .kairema-table-scroll { max-width:100%; margin:12px 0; overflow-x:auto; border:1px solid rgba(255,255,255,.10); border-radius:10px; background:rgba(7,9,18,.48); }
 .kairema-table-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:max-content; padding:7px 9px; border-bottom:1px solid rgba(255,255,255,.08); color:#98a4b8; background:rgba(255,255,255,.025); font-size:11px; }
@@ -304,10 +307,11 @@ body { margin: 0; min-width: 320px; background: #070912; color: #e8edf8; }
 /* Model name: plain compact topbar label. No pill, no border, no fill. The click
    target and text truncation stay so the existing 4-item menu still opens. */
 .kairema-role-menu-trigger { display:inline-flex; align-items:center; max-width:190px; padding:0 2px; border:0; border-radius:0; color:var(--k-text); background:transparent; font-size:13px; font-weight:700; line-height:1.2; text-align:left; }
-.kairema-topbar-group { display:inline-flex; align-items:center; gap:2px; padding:2px; border:1px solid var(--k-line); border-radius:9px; background:var(--k-panel-2); }
-/* Scoped under .kairema-topbar so it outranks the 44px icon-button sizing that the
-   <=430px block sets, and the group keeps one compact height on mobile too. */
-.kairema-topbar .kairema-topbar-group > .kairema-icon-btn { width:32px; height:32px; min-width:32px; min-height:32px; border-radius:7px; }
+/* Settings and Profile are two independent chips. The gap between them comes from
+   .kairema-topbar-controls; each chip carries its own border and surface. */
+.kairema-topbar-chip { display:inline-flex; align-items:center; flex:0 0 auto; border:1px solid var(--k-line); background:var(--k-panel-2); border-radius:8px; overflow:hidden; }
+.kairema-topbar-chip > button { height:34px; padding:0 9px; display:inline-flex; align-items:center; justify-content:center; gap:6px; border:0; background:transparent; border-radius:8px; color:var(--k-text); font-size:12px; font-weight:600; line-height:1; white-space:nowrap; }
+.kairema-topbar-chip > button:hover { background:var(--k-panel); }
 /* Single sticky header for both control rows. It lives inside the message scrollport
    (see .kairema-chat-scroll) so it pins against that scroller, not the document. */
 .kairema-chat-scroll { min-height:0; flex:1 1 auto; overflow-y:auto; overscroll-behavior:contain; }
