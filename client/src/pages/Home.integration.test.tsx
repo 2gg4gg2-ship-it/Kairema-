@@ -629,16 +629,22 @@ describe("Home integration flows", () => {
     expect(fixtures.updateName).toHaveBeenCalledWith({ name: "Ada" });
   });
 
-  it("keeps Chat / My API inside the chat scroll viewport so it can stay pinned above the messages", () => {
-    render(<Home />);
+  it("keeps both control rows in one sticky header inside the single message scrollport", () => {
+    const { container } = render(<Home />);
+    const root = container;
 
     const modeSwitch = screen.getByRole("group", { name: "Режим чата" });
-    const viewport = modeSwitch.closest(".overflow-y-auto");
-    // Sticky is relative to this scroll container, not position:fixed on the viewport.
+    const sticky = modeSwitch.closest(".kairema-chat-sticky");
+    const viewport = sticky?.closest(".kairema-chat-scroll");
+    expect(sticky).not.toBeNull();
     expect(viewport).not.toBeNull();
-    expect(viewport!.querySelector(".kairema-mode-bar")).not.toBeNull();
-    // The history/export bar stays outside the message scroller.
-    expect(viewport!.querySelector(".kairema-chat-tools-scroll")).toBeNull();
+    // Both rows live in the same sticky wrapper...
+    expect(sticky!.querySelector(".kairema-mode-bar")).not.toBeNull();
+    expect(sticky!.querySelector(".kairema-chat-tools")).not.toBeNull();
+    // ...inside the one scroller that scrolls the messages, with no second scroller.
+    expect(viewport!.querySelector(".kairema-chat-sticky")).not.toBeNull();
+    expect(viewport!.querySelectorAll(".kairema-chat-scroll")).toHaveLength(0);
+    expect(root.querySelectorAll(".kairema-chat-tools-scroll")).toHaveLength(0);
   });
 
   it("still opens the existing model menu from the topbar", async () => {
