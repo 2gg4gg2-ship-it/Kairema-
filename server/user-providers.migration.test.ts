@@ -55,6 +55,15 @@ describe("migration 0046 sql", () => {
     expect("myApiProvider" in userSettings).toBe(true);
   });
 
+  it("uses timestamp syntax the deployed MySQL accepts", () => {
+    // MySQL parses a bare DEFAULT (now()) but rejects a parenthesised expression in the
+    // ON UPDATE clause with ER_PARSE_ERROR 1064, which failed the staging deploy. The ON UPDATE
+    // part therefore has to spell out CURRENT_TIMESTAMP, exactly as every other migration does.
+    expect(migration).not.toMatch(/ON UPDATE\s*\(/i);
+    expect(migration).toMatch(/`createdAt` timestamp NOT NULL DEFAULT \(now\(\)\)/);
+    expect(migration).toMatch(/`updatedAt` timestamp NOT NULL DEFAULT \(now\(\)\) ON UPDATE CURRENT_TIMESTAMP/);
+  });
+
   it("contains no destructive statement", () => {
     // ON DELETE cascade is the intended referential action, so only a leading keyword counts.
     expect(migration).not.toMatch(/^\s*DROP\b/im);
