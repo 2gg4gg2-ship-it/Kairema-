@@ -319,6 +319,12 @@ export const userProviderConfigs = mysqlTable("user_provider_configs", {
   activeModel: varchar("activeModel", { length: 191 }).notNull(),
   encryptedApiKey: text("encryptedApiKey").notNull(),
   keyHint: varchar("keyHint", { length: 16 }).notNull(),
+  /** Present only for a provider the user defined: its label, never a system name. */
+  displayName: varchar("displayName", { length: 64 }),
+  /** Validated https base URL of an OpenAI-compatible API; null for built-in providers. */
+  baseUrl: varchar("baseUrl", { length: 300 }),
+  /** Optional explicit catalog route when the standard /models sibling is wrong. */
+  modelsEndpoint: varchar("modelsEndpoint", { length: 300 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, (table) => [

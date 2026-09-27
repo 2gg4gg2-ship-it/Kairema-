@@ -196,3 +196,78 @@ describe("guest isolation of the byok error surface", () => {
     expect(UserProviderNotConfiguredError).toBeDefined();
   });
 });
+
+describe("custom provider binding in the my api path", () => {
+  const customBinding = {
+    provider: "custom-abc123",
+    displayName: "Мой провайдер",
+    baseUrl: "https://api.example.com/v1",
+    modelsEndpoint: null,
+    model: MODEL,
+    encryptedApiKey: "kbyok1.aXYxLnRhZw.cGF5bG9hZA",
+    keyHint: "••••4321",
+    updatedAt: new Date(0),
+  };
+
+  it("rebuilds the endpoint from the stored row and labels the answer with the given name", async () => {
+    const byok = vi.fn().mockResolvedValue({ content: "ok", modelUsed: MODEL, provider: "custom-abc123", fallbackUsed: false, label: MODEL, status: { state: "ready", badge: "", category: null, http: 200, checkedAt: "", confirmed: "" } });
+    const res = response();
+    await handlerWith({ chatWithUserProviderStream: byok, getActiveUserProviderBinding: vi.fn().mockResolvedValue(customBinding) })({ body: { ...baseBody, myApi: true } } as Request, res, vi.fn());
+
+    const options = byok.mock.calls[0]![0] as { provider: { isCustom: boolean; chatEndpoint: string; displayName: string }; apiKey: string };
+    expect(options.provider).toMatchObject({ isCustom: true, displayName: "Мой провайдер", chatEndpoint: "https://api.example.com/v1/chat/completions" });
+    expect(options.apiKey).toBe(KEY);
+  });
+
+  it("honours a stored models endpoint when the provider configured one", async () => {
+    const byok = vi.fn().mockResolvedValue({ content: "ok", modelUsed: MODEL, provider: "custom-abc123", fallbackUsed: false, label: MODEL, status: { state: "ready", badge: "", category: null, http: 200, checkedAt: "", confirmed: "" } });
+    const res = response();
+    await handlerWith({ chatWithUserProviderStream: byok, getActiveUserProviderBinding: vi.fn().mockResolvedValue({ ...customBinding, modelsEndpoint: "https://api.example.com/catalog" }) })({ body: { ...baseBody, myApi: true } } as Request, res, vi.fn());
+    const options = byok.mock.calls[0]![0] as { provider: { modelsEndpoint: string } };
+    expect(options.provider.modelsEndpoint).toBe("https://api.example.com/catalog");
+  });
+
+  it("never falls back to the system role chain when a custom provider fails", async () => {
+    const byok = vi.fn().mockRejectedValue(new Error("custom endpoint unreachable"));
+    const platform = vi.fn();
+    const res = response();
+    await handlerWith({ chatWithUserProviderStream: byok, chatWithRoleStream: platform, getActiveUserProviderBinding: vi.fn().mockResolvedValue(customBinding) })({ body: { ...baseBody, myApi: true } } as Request, res, vi.fn());
+    expect(byok).toHaveBeenCalledTimes(1);
+    expect(platform).not.toHaveBeenCalled();
+    expect(eventPayload(res, "error")).toMatchObject({ message: expect.stringContaining("Что произошло") });
+  });
+
+  it("does not leak the upstream URL or key in the public error", async () => {
+    const byok = vi.fn().mockRejectedValue(new Error("failed for https://api.example.com/v1 with sk-or-v1-leaked"));
+    const res = response();
+    await handlerWith({ chatWithUserProviderStream: byok, getActiveUserProviderBinding: vi.fn().mockResolvedValue(customBinding) })({ body: { ...baseBody, myApi: true } } as Request, res, vi.fn());
+    const payload = JSON.stringify(eventPayload(res, "error"));
+    expect(payload).not.toContain("api.example.com");
+    expect(payload).not.toContain("sk-or-v1-leaked");
+  });
+});
+
+describe("answer attribution for a custom provider", () => {
+  const customBinding = {
+    provider: "custom-abc123",
+    displayName: "Мой провайдер",
+    baseUrl: "https://api.example.com/v1",
+    modelsEndpoint: null,
+    model: MODEL,
+    encryptedApiKey: "kbyok1.aXYxLnRhZw.cGF5bG9hZA",
+    keyHint: "••••4321",
+    updatedAt: new Date(0),
+  };
+
+  it("UX-2: the custom label is the built-in one, the model id is untouched", async () => {
+    const byok = vi.fn().mockResolvedValue({ content: "ok", modelUsed: MODEL, provider: "custom-abc123", fallbackUsed: false, label: "Мой провайдер · " + MODEL, status: { state: "ready", badge: "", category: null, http: 200, checkedAt: "", confirmed: "" } });
+    const res = response();
+    await handlerWith({ chatWithUserProviderStream: byok, getActiveUserProviderBinding: vi.fn().mockResolvedValue(customBinding) })({ body: { ...baseBody, myApi: true } } as Request, res, vi.fn());
+
+    const options = byok.mock.calls[0]![0] as { model: string; modelLabel: string };
+    // The binding feeds generation unchanged; attribution happens on the way back out.
+    expect(options.model).toBe(MODEL);
+    expect(options.modelLabel).toBe(MODEL);
+    expect(eventPayload(res, "done")).toMatchObject({ modelUsed: MODEL, label: `Мой провайдер · ${MODEL}` });
+  });
+});

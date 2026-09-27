@@ -6,7 +6,7 @@ import { MODEL_IDS, chatWithRoleStream, publicChatError, type ChatMessage, type 
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
 import { getOrCreateGuestUser } from "./_core/guest-session";
 import type { CapacityActor } from "./capacity-controller";
-import { chatWithUserProviderStream, publicUserProviderError, UserProviderGuestNotAllowedError, UserProviderNotConfiguredError } from "./user-providers";
+import { chatWithUserProviderStream, customUserProviderTarget, publicUserProviderError, UserProviderGuestNotAllowedError, UserProviderNotConfiguredError } from "./user-providers";
 import { decryptUserProviderSecret } from "./user-provider-secrets";
 
 export const CHAT_STREAM_RATE_LIMIT = 60;
@@ -161,9 +161,14 @@ async function generateWithUserProvider(options: {
   if (options.isGuest) throw new UserProviderGuestNotAllowedError();
   const binding = await options.dependencies.getActiveUserProviderBinding(options.userId);
   if (!binding) throw new UserProviderNotConfiguredError();
+  // A custom provider is served from the configuration that was validated when it was saved;
+  // the endpoint is re-checked here rather than taken from the request being answered.
+  const target = binding.baseUrl
+    ? customUserProviderTarget({ id: binding.provider, displayName: binding.displayName ?? "Мой провайдер", baseUrl: binding.baseUrl, modelsEndpoint: binding.modelsEndpoint })
+    : binding.provider;
   const apiKey = options.dependencies.decryptUserProviderSecret(binding.encryptedApiKey);
   return await options.dependencies.chatWithUserProviderStream({
-    provider: binding.provider,
+    provider: target,
     model: binding.model,
     modelLabel: binding.model,
     apiKey,

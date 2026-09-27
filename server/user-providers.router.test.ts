@@ -30,7 +30,7 @@ vi.mock("./user-providers", async (importOriginal) => ({
 }));
 
 import { appRouter, type AppRouter } from "./routers";
-import { __resetUserProviderKeyCacheForTests } from "./user-provider-secrets";
+import { __resetUserProviderKeyCacheForTests, encryptUserProviderSecret } from "./user-provider-secrets";
 
 process.env.USER_PROVIDER_KEY_ENCRYPTION_KEY = "d".repeat(64);
 __resetUserProviderKeyCacheForTests();
@@ -44,7 +44,7 @@ function configFor(userId: number, provider = "openrouter") {
     userId,
     provider,
     activeModel: MODEL,
-    encryptedApiKey: "kbyok1.aXYxLnRhZw.cGF5bG9hZA",
+    encryptedApiKey: encryptUserProviderSecret(KEY),
     keyHint: "••••9999",
     createdAt: new Date(0),
     updatedAt: new Date(0),
@@ -77,7 +77,7 @@ describe("userProviders.list", () => {
     scopedDb.listUserProviderConfigs.mockResolvedValue([configFor(42)]);
     const result = await callerFor(42).userProviders.list();
     expect(scopedDb.listUserProviderConfigs).toHaveBeenCalledWith(42);
-    expect(result.configs).toEqual([{ provider: "openrouter", activeModel: MODEL, keyHint: "••••9999", updatedAt: new Date(0).toISOString() }]);
+    expect(result.configs).toEqual([{ provider: "openrouter", activeModel: MODEL, keyHint: "••••9999", updatedAt: new Date(0).toISOString(), displayName: null, baseUrl: null, modelsEndpoint: null }]);
     expect(JSON.stringify(result)).not.toContain("encryptedApiKey");
     expect(JSON.stringify(result)).not.toContain("kbyok1");
     expect(JSON.stringify(result)).not.toContain(KEY);
@@ -144,13 +144,13 @@ describe("userProviders.save", () => {
 describe("userProviders.models", () => {
   it("reads the catalog with a typed key and returns no secret material", async () => {
     const result = await callerFor(42).userProviders.models({ provider: "openrouter", apiKey: KEY });
-    expect(providerApi.listUserProviderModels).toHaveBeenCalledWith("openrouter", KEY);
+    expect(providerApi.listUserProviderModels).toHaveBeenCalledWith(expect.objectContaining({ id: "openrouter", isCustom: false, chatEndpoint: "https://openrouter.ai/api/v1/chat/completions" }), KEY);
     expect(result.models).toEqual([{ id: MODEL, name: "Model A" }, { id: "vendor/model-b", name: "Model B" }]);
     expect(JSON.stringify(result)).not.toContain(KEY);
   });
 
   it("cannot read a catalog through a stored key it cannot decrypt", async () => {
-    scopedDb.getUserProviderConfig.mockImplementation(async (userId: number, provider: string) => (userId === 42 && provider === "openrouter" ? configFor(42) : undefined));
+    scopedDb.getUserProviderConfig.mockImplementation(async (userId: number, provider: string) => (userId === 42 && provider === "openrouter" ? { ...configFor(42), encryptedApiKey: "kbyok1.aXYxLnRhZw.cGF5bG9hZA" } : undefined));
     await expect(callerFor(42).userProviders.models({ provider: "openrouter" })).rejects.toThrow();
     expect(providerApi.listUserProviderModels).not.toHaveBeenCalled();
   });
@@ -171,7 +171,7 @@ describe("userProviders.test", () => {
   it("runs the auth probe and returns only a verdict", async () => {
     providerApi.verifyUserProviderKey.mockResolvedValue({ ok: true, label: "kairema" });
     const result = await callerFor(42).userProviders.test({ provider: "openrouter", apiKey: KEY });
-    expect(providerApi.verifyUserProviderKey).toHaveBeenCalledWith("openrouter", KEY);
+    expect(providerApi.verifyUserProviderKey).toHaveBeenCalledWith(expect.objectContaining({ id: "openrouter", isCustom: false, keyProbeEndpoint: "https://openrouter.ai/api/v1/key" }), KEY);
     expect(result.ok).toBe(true);
     expect(JSON.stringify(result)).not.toContain(KEY);
   });
@@ -256,7 +256,7 @@ describe("userProviders.models over real HTTP", () => {
     const result = await client.userProviders.models.mutate({ provider: "openrouter", apiKey: KEY });
 
     // The catalog itself still works exactly as before.
-    expect(providerApi.listUserProviderModels).toHaveBeenCalledWith("openrouter", KEY);
+    expect(providerApi.listUserProviderModels).toHaveBeenCalledWith(expect.objectContaining({ id: "openrouter", isCustom: false, chatEndpoint: "https://openrouter.ai/api/v1/chat/completions" }), KEY);
     expect(result.models).toEqual([{ id: MODEL, name: "Model A" }, { id: "vendor/model-b", name: "Model B" }]);
 
     const modelsRequest = captured.find((request) => request.url.includes("userProviders.models"));
@@ -268,5 +268,130 @@ describe("userProviders.models over real HTTP", () => {
     expect(modelsRequest?.url).not.toContain("input=");
     // Nor in any other request the batch produced on the way out.
     for (const request of captured) expect(request.url).not.toContain(KEY);
+  });
+});
+
+const CUSTOM_ID = "custom-abc123";
+const BASE_URL = "https://api.example.com/v1";
+
+function customConfigFor(userId: number, provider = CUSTOM_ID) {
+  return {
+    ...configFor(userId, provider),
+    displayName: "Мой провайдер",
+    baseUrl: BASE_URL,
+    modelsEndpoint: null,
+  };
+}
+
+describe("userProviders.createCustom", () => {
+  it("validates the URL, reads the catalog and only then stores an encrypted envelope", async () => {
+    const result = await callerFor(42).userProviders.createCustom({ displayName: "Мой провайдер", baseUrl: BASE_URL, apiKey: KEY, activeModel: MODEL, makeActive: true });
+
+    // The probe happens before the write, so an unreachable endpoint leaves nothing behind.
+    expect(providerApi.listUserProviderModels).toHaveBeenCalledWith(
+      expect.objectContaining({ isCustom: true, modelsEndpoint: "https://api.example.com/v1/models", chatEndpoint: "https://api.example.com/v1/chat/completions" }),
+      KEY,
+    );
+    const input = scopedDb.upsertUserProviderConfig.mock.calls[0]![0] as { userId: number; provider: string; baseUrl: string; encryptedApiKey: string };
+    expect(input.userId).toBe(42);
+    expect(input.provider.startsWith("custom-")).toBe(true);
+    expect(input.baseUrl).toBe(BASE_URL);
+    expect(input.encryptedApiKey.startsWith("kbyok1.")).toBe(true);
+    expect(input.encryptedApiKey).not.toContain(KEY);
+    expect(scopedDb.setActiveUserProvider).toHaveBeenCalledWith(42, input.provider);
+    expect(JSON.stringify(result)).not.toContain(KEY);
+  });
+
+  it("refuses an insecure or internal URL without storing anything", async () => {
+    for (const baseUrl of ["http://api.example.com/v1", "https://127.0.0.1/v1", "https://169.254.169.254/v1", "https://localhost/v1", "https://api.example.com:8443/v1"]) {
+      await expect(callerFor(42).userProviders.createCustom({ displayName: "X", baseUrl, apiKey: KEY, activeModel: MODEL })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+    expect(scopedDb.upsertUserProviderConfig).not.toHaveBeenCalled();
+  });
+
+  it("refuses a model the provider does not actually offer", async () => {
+    await expect(callerFor(42).userProviders.createCustom({ displayName: "X", baseUrl: BASE_URL, apiKey: KEY, activeModel: "vendor/invented" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(scopedDb.upsertUserProviderConfig).not.toHaveBeenCalled();
+  });
+});
+
+describe("userProviders custom target resolution", () => {
+  it("re-validates the stored URL on every use instead of trusting the request", async () => {
+    scopedDb.getUserProviderConfig.mockResolvedValue(customConfigFor(42));
+    await callerFor(42).userProviders.models({ provider: CUSTOM_ID });
+    expect(providerApi.listUserProviderModels).toHaveBeenCalledWith(
+      expect.objectContaining({ id: CUSTOM_ID, isCustom: true, chatEndpoint: "https://api.example.com/v1/chat/completions" }),
+      expect.any(String),
+    );
+  });
+
+  it("probes an unsaved draft without persisting it as a side effect of asking", async () => {
+    await callerFor(42).userProviders.models({
+      provider: "custom-draft",
+      apiKey: KEY,
+      draft: { displayName: "Черновик", baseUrl: BASE_URL },
+    });
+    expect(providerApi.listUserProviderModels).toHaveBeenCalledWith(expect.objectContaining({ isCustom: true, chatEndpoint: "https://api.example.com/v1/chat/completions" }), KEY);
+    expect(scopedDb.upsertUserProviderConfig).not.toHaveBeenCalled();
+  });
+
+  it("will not borrow another user's custom row", async () => {
+    scopedDb.getUserProviderConfig.mockResolvedValue(undefined);
+    await expect(callerFor(42).userProviders.models({ provider: CUSTOM_ID })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("probes a custom provider on its catalog, not a guessed key URL", async () => {
+    providerApi.verifyUserProviderKey.mockResolvedValue({ ok: true, label: "example" });
+    scopedDb.getUserProviderConfig.mockResolvedValue(customConfigFor(42));
+    const result = await callerFor(42).userProviders.test({ provider: CUSTOM_ID });
+    // No `/key` path exists on an OpenAI-compatible host, so the probe must fall back to the
+    // catalog: a real GET that costs no tokens, and never a POST that would run inference.
+    expect(providerApi.verifyUserProviderKey).toHaveBeenCalledWith(
+      expect.objectContaining({ id: CUSTOM_ID, isCustom: true, keyProbeEndpoint: null, modelsEndpoint: "https://api.example.com/v1/models" }),
+      expect.any(String),
+    );
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe("userProviders.setActive with a custom provider", () => {
+  it("accepts the caller's own custom row and refuses somebody else's", async () => {
+    scopedDb.getUserProviderConfig.mockResolvedValue(customConfigFor(42));
+    await expect(callerFor(42).userProviders.setActive({ provider: CUSTOM_ID })).resolves.toEqual({ activeProvider: CUSTOM_ID });
+
+    scopedDb.getUserProviderConfig.mockResolvedValue(undefined);
+    await expect(callerFor(42).userProviders.setActive({ provider: CUSTOM_ID })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("never routes a custom provider through the built-in catalog lookup", async () => {
+    scopedDb.getUserProviderConfig.mockResolvedValue(customConfigFor(42));
+    await callerFor(42).userProviders.setActive({ provider: CUSTOM_ID });
+    expect(scopedDb.setActiveUserProvider).toHaveBeenCalledWith(42, CUSTOM_ID);
+  });
+});
+
+describe("userProviders custom credentials over real HTTP", () => {
+  it("keeps a custom provider's key and URL out of the request line", async () => {
+    scopedDb.getUserProviderConfig.mockResolvedValue(customConfigFor(42));
+    const captured: string[] = [];
+    const customServer = express();
+    customServer.use("/api/trpc", createExpressMiddleware({ router: appRouter, createContext: () => ({ user: { id: 42, openId: "user-42", email: "user@example.com", name: "User", loginMethod: "manus", role: "user", createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date(), isGuest: 0 }, req: { headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] }) }));
+    customServer.use((req, _res, next) => {
+      captured.push(req.url);
+      next();
+    });
+    const listening = customServer.listen(0);
+    await new Promise<void>((resolve) => listening?.once("listening", resolve));
+    const address = listening.address();
+    if (!address || typeof address === "string") throw new Error("Не удалось запустить test server.");
+
+    const client = createTRPCClient<AppRouter>({ links: [httpBatchLink({ url: `http://127.0.0.1:${address.port}/api/trpc`, transformer: superjson })] });
+    await client.userProviders.models.mutate({ provider: CUSTOM_ID });
+
+    for (const url of captured) {
+      expect(url).not.toContain(KEY);
+      expect(url).not.toContain("apiKey");
+      expect(url).not.toContain("api.example.com");
+    }
   });
 });
