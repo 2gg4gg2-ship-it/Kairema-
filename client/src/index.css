@@ -525,7 +525,13 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-panel-tail { display:flex; align-items:center; gap:8px; margin-top:2px; padding:0 12px 5px; }
 .kairema-panel-tail > .kairema-chat-tools-toggle { flex:0 0 auto; align-self:center; width:24px; height:24px; min-width:24px; min-height:24px; margin:0; }
 /* Export is a sibling of the segmented control inside the same row, never inside it. */
-.kairema-chat-tools { display:flex; flex:0 0 auto; align-items:center; justify-content:flex-end; gap:8px; min-width:0; margin:0; padding:0; color:var(--k-muted); font-size:12px; }
+/* Export is a sibling of the segmented control and may compress, so the row can never be
+   pushed wider than the chat header: the fixed-width segment keeps its place on the left
+   and only the Export label gives ground, ending in an ellipsis rather than overflow. */
+.kairema-chat-tools { display:flex; flex:0 1 auto; align-items:center; justify-content:flex-end; gap:8px; min-width:0; margin:0; padding:0; color:var(--k-muted); font-size:12px; }
+/* flex:0 0 auto would pin both to their intrinsic width, so each one is given a shrink
+   factor too: that is what actually lets the row fit instead of overflowing. */
+.kairema-chat-tools .kairema-export-menu,.kairema-export-menu > summary { flex:0 1 auto; min-width:0; max-width:100%; }
 .kairema-export-menu { position:relative; flex:0 0 auto; }
 .kairema-export-menu > summary { list-style:none; cursor:pointer; height:24px; padding:0 9px; font-size:12px; }
 .kairema-export-menu > summary::-webkit-details-marker { display:none; }
@@ -580,3 +586,12 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-role-menu.kairema-role-menu-open { opacity:1; transform:none; }
 .kairema-role-menu.kairema-role-menu-closing { opacity:0; transform:translateY(-4px) scale(.98); }
 @media (prefers-reduced-motion:reduce) { .kairema-role-menu { transition:none; } }
+
+/* v7-E: the model chevron reuses the single arrow that is already in the pill and flips
+   with the same rule the Export caret uses, so the two dropdowns read identically. The
+   rotation is driven by the aria-expanded that the existing open/close path already
+   maintains, which means Escape and picking a model both restore the closed arrow for
+   free, and no second arrow or second state is introduced. */
+.kairema-model-chevron { transition:transform .16s ease; }
+.kairema-select-wrap:has(.kairema-role-menu-trigger[aria-expanded="true"]) + .kairema-model-chevron { transform:rotate(180deg); }
+@media (prefers-reduced-motion:reduce) { .kairema-model-chevron { transition:none; } }
