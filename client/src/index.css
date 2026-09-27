@@ -470,3 +470,90 @@ body { background:var(--k-bg); color:var(--k-text); }
 .kairema-attachment-remove:hover,.kairema-attachment-remove:focus-visible { border-color:var(--k-text)!important; color:var(--k-invert)!important; background:var(--k-strong)!important; }
 .kairema-attachment-remove:focus-visible { outline:2px solid var(--k-text); outline-offset:2px; }
 .kairema-attachment-retry { align-self:stretch; padding:0 4px; font-size:10px; text-decoration:underline; }
+
+/* v7-A: the Kairema control header as exactly three visual rows.
+   Row 1 (system)  — .kairema-topbar: hamburger + live role name | Settings, Profile.
+   Row 2 (modes)   — .kairema-mode-bar: Chat / My API | Chat history.
+   Row 3 (export)  — .kairema-chat-tools: the single Export menu holding Markdown and PDF.
+   Every hex in the spec is expressed with the existing product tokens so the light and
+   dark schemes and the reserved violet accent stay exactly as they were. */
+
+/* One geometry for the four standalone outline buttons: Settings, Profile,
+   Chat history and Export. The label element reuses it without any hover affordance. */
+.kairema-header-button { display:inline-flex; flex:0 0 auto; align-items:center; justify-content:center; gap:6px; height:34px; max-width:100%; padding:0 12px; border:1px solid var(--k-line); border-radius:8px; color:var(--k-text); background:transparent; font:inherit; font-size:13px; font-weight:650; line-height:1.1; white-space:nowrap; }
+.kairema-header-button > svg { flex:0 0 auto; }
+.kairema-header-button > span { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+button.kairema-header-button,.kairema-header-button[role="button"] { cursor:pointer; }
+button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:hover { background:var(--k-panel-2); }
+.kairema-header-button:disabled { cursor:not-allowed; opacity:.45; }
+.kairema-header-button:focus-visible { outline:2px solid var(--k-text); outline-offset:2px; }
+/* The history label was a non-interactive caption before this header and still is: the
+   history list itself lives in the sidebar, so it must not gain a dead button role. */
+.kairema-history-button { cursor:default; }
+
+/* Row 1. */
+.kairema-topbar { display:flex; min-height:40px; height:auto; flex-wrap:nowrap; align-items:center; justify-content:space-between; gap:12px; padding:3px 12px; }
+.kairema-topbar-left { display:flex; flex:1 1 auto; flex-wrap:nowrap; align-items:center; gap:12px; min-width:0; }
+.kairema-topbar-controls { display:flex; flex:0 0 auto; flex-wrap:nowrap; align-items:center; justify-content:flex-end; gap:8px; min-width:0; margin-left:auto; }
+/* The chip is a layout wrapper only: the outline now belongs to the button itself. */
+.kairema-topbar-chip { display:inline-flex; flex:0 0 auto; align-items:center; min-width:0; border:0; background:transparent; border-radius:0; overflow:visible; }
+.kairema-topbar-chip > .kairema-header-button { height:34px; padding:0 12px; border:1px solid var(--k-line); border-radius:8px; color:var(--k-text); background:transparent; font-size:13px; font-weight:650; }
+/* Hamburger: 20x20, no frame, no fill, still a real button. */
+.kairema-topbar-left .kairema-icon-btn { display:inline-flex; flex:0 0 auto; align-items:center; justify-content:center; width:20px; height:20px; min-width:20px; min-height:20px; padding:0; border:0; background:transparent; }
+/* The role name is the visible heading, so the dynamic model/role label keeps driving it
+   and the existing four-item role menu still opens from it. */
+.kairema-select-wrap { display:inline-flex; flex:0 1 auto; min-width:0; }
+.kairema-topbar .kairema-role-menu-trigger { display:inline-flex; flex:0 1 auto; min-width:0; min-height:0; max-width:min(46vw,340px); padding:0; border:0; border-radius:0; color:var(--k-text); background:transparent; font-size:16px; font-weight:600; line-height:1.2; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-topbar .kairema-role-menu-trigger:hover { color:var(--k-text); }
+
+/* Row 2. */
+.kairema-mode-bar { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:10px; padding:0 12px; }
+.kairema-mode-switch { display:inline-flex; flex:0 0 auto; align-items:center; gap:4px; width:fit-content; min-width:0; padding:3px; border:1px solid var(--k-line); border-radius:10px; background:var(--k-panel-2); }
+.kairema-mode-option { display:inline-flex; flex:0 0 auto; align-items:center; justify-content:center; gap:6px; height:30px; min-height:30px; min-width:0; padding:0 14px; border:1px solid transparent; border-radius:7px; color:var(--k-muted); background:transparent; font-size:13px; font-weight:700; line-height:1.15; white-space:nowrap; }
+/* The active tab keeps the product's existing violet accent, unchanged. */
+
+/* Row 3. The trailing 16px is the gap between the header and the message list. */
+.kairema-chat-tools { display:flex; align-items:center; justify-content:flex-end; gap:8px; width:100%; align-self:stretch; margin-top:8px; padding:0 12px 16px; color:var(--k-muted); font-size:12px; }
+.kairema-export-menu { position:relative; flex:0 0 auto; }
+.kairema-export-menu > summary { list-style:none; cursor:pointer; }
+.kairema-export-menu > summary::-webkit-details-marker { display:none; }
+.kairema-export-caret { width:12px; height:12px; transition:transform .16s ease; }
+.kairema-export-menu[open] .kairema-export-caret { transform:rotate(180deg); }
+/* Right-anchored to the button, which already sits at the row's end, so the panel can
+   never push the page sideways; the viewport cap covers very narrow screens. */
+.kairema-export-menu-popover { position:absolute; z-index:45; top:calc(100% + 8px); right:0; display:grid; gap:3px; min-width:148px; max-width:calc(100vw - 24px); padding:5px; border:1px solid var(--k-line); border-radius:9px; background:var(--k-panel); box-shadow:0 14px 30px rgba(0,0,0,.22); }
+.kairema-export-menu-popover button { display:flex; align-items:center; gap:6px; min-height:36px; padding:7px 9px; border:1px solid transparent; border-radius:7px; color:var(--k-text); background:transparent; text-align:left; font-size:12px; font-weight:650; }
+.kairema-export-menu-popover button > svg { flex:0 0 auto; }
+.kairema-export-menu-popover button:hover:not(:disabled),.kairema-export-menu-popover button:focus-visible { border-color:var(--k-line); background:var(--k-panel-2); outline:none; }
+.kairema-export-menu-popover button:disabled { cursor:not-allowed; opacity:.45; }
+/* The author `display: grid` above outranks the user-agent rule that hides non-summary
+   children of a closed <details>, so the popover stayed painted after React removed the
+   `open` attribute. Higher specificity and later in the file, so it actually wins. */
+.kairema-export-menu:not([open]) .kairema-export-menu-popover { display:none; }
+
+/* The collapse toggle belongs to the panel it collapses, so it moves to the row's end
+   instead of indenting rows 2 and 3 away from the row 1 left edge. */
+.kairema-chat-sticky { align-items:stretch; }
+.kairema-chat-sticky > .kairema-chat-tools-toggle { order:2; align-self:center; margin:0 12px 0 0; }
+.kairema-chat-controls { order:1; }
+
+/* Narrow screens: the title and the segmented control are the two shrinkable parts, so
+   the rows keep their geometry and never overflow sideways. */
+@media(max-width:767px){
+  .kairema-topbar { padding:3px 10px; }
+  .kairema-topbar-left { gap:10px; }
+  .kairema-topbar .kairema-role-menu-trigger { max-width:min(42vw,220px); font-size:15px; }
+  .kairema-header-button { gap:5px; height:32px; padding:0 10px; font-size:12px; }
+  .kairema-topbar-chip > .kairema-header-button { height:32px; padding:0 10px; font-size:12px; }
+  .kairema-mode-bar { gap:8px; padding:0 10px; }
+  .kairema-mode-option { gap:5px; height:28px; min-height:28px; padding:0 11px; font-size:12px; }
+  .kairema-chat-tools { padding:0 10px 14px; }
+  .kairema-chat-sticky > .kairema-chat-tools-toggle { margin-right:10px; }
+}
+/* Below this width the four labels stop fitting next to each other, so the outline
+   buttons keep their icon and their accessible name and drop the visible word. */
+@media(max-width:400px){
+  .kairema-topbar-chip .kairema-header-button > span,.kairema-history-button > span { display:none; }
+  .kairema-header-button,.kairema-topbar-chip > .kairema-header-button { padding:0 9px; }
+  .kairema-mode-option { padding:0 9px; }
+}
