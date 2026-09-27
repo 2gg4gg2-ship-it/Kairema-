@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, deleteUserProviderConfig, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserProviderConfig, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, listUserProviderConfigs, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, setActiveUserProvider, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserName, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag, upsertUserProviderConfig } from "./db";
+import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, deleteUserProviderConfig, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserProviderConfig, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, listUserProviderConfigs, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, setActiveUserProvider, setUserProviderActiveModel, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserName, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag, upsertUserProviderConfig } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { clearStytchLinkIntentCookie, clearStytchOtpEmailIdCookie, clearStytchPasswordRecoveryEmailCookie, clearStytchPasswordSessionCookie, clearStytchResetCookie, clearStytchSessionCookie, getSafeStytchDeliveryFailure, getStytchCallbackUrl, getStytchClient, getStytchOtpEmailId, getStytchPasswordRecoveryEmail, getStytchPasswordSessionToken, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, logSafeStytchDiagnostic, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchOtpEmailIdCookie, setStytchPasswordRecoveryEmailCookie, setStytchPasswordSessionCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
 import Stytch, { StytchError } from "stytch";
@@ -707,6 +707,27 @@ export const appRouter = router({
           keyHint: userProviderKeyHint(apiKey),
         });
         if (input.makeActive) await setActiveUserProvider(ctx.user.id, target.id);
+        return publicUserProviderConfig(config!);
+      } catch (error) {
+        throw userProviderTrpcError(error);
+      }
+    }),
+    /**
+     * Switches the model of an already connected provider, which is what the My API model picker
+     * calls. The saved key is reused, so the client never has to send it again, and the model is
+     * checked against the provider's live catalog before it is stored.
+     */
+    setActiveModel: protectedProcedure.input(z.object({ provider: userProviderIdSchema, activeModel: z.string().trim().min(1).max(191) })).mutation(async ({ ctx, input }) => {
+      try {
+        const existing = await requireOwnedUserProviderConfig(ctx.user.id, input.provider);
+        const target = await resolveUserProviderTarget(ctx.user.id, input.provider);
+        // Re-reads the catalog with the caller's own stored credential, so an invented model id
+        // can never become the active one.
+        const models = await listUserProviderModels(target, decryptUserProviderSecret(existing.encryptedApiKey));
+        if (!models.some((model) => model.id === input.activeModel)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Выбранная модель отсутствует в каталоге провайдера. Обновите список моделей." });
+        }
+        const config = await setUserProviderActiveModel(ctx.user.id, input.provider, input.activeModel);
         return publicUserProviderConfig(config!);
       } catch (error) {
         throw userProviderTrpcError(error);

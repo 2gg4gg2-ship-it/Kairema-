@@ -1193,6 +1193,19 @@ export async function upsertUserProviderConfig(input: { userId: number; provider
 }
 
 /**
+ * Switches only the selected model on a row the caller already owns.
+ *
+ * The credential, endpoint and name are deliberately left untouched: switching models must never
+ * require re-entering the key, and must never be able to rewrite the endpoint behind a click.
+ * The WHERE clause still carries the user id, so another user's row is simply not matched.
+ */
+export async function setUserProviderActiveModel(userId: number, provider: string, activeModel: string) {
+  const db = requireDatabase(await getDb());
+  await db.update(userProviderConfigs).set({ activeModel, updatedAt: new Date() }).where(and(eq(userProviderConfigs.userId, userId), eq(userProviderConfigs.provider, provider)));
+  return getUserProviderConfig(userId, provider);
+}
+
+/**
  * The active provider pointer lives in user_settings, so a single column decides which
  * credential backs "My API" and cannot drift into disagreeing with the rows themselves.
  */

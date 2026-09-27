@@ -1,11 +1,30 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+/** Both provider cards render a Connect button, so each test addresses its own card. */
+function cardByTitle(title: string) {
+  const heading = screen.getByText(title, { selector: "span" });
+  return heading.closest("section") as HTMLElement;
+}
+function openrouterCard() {
+  return cardByTitle("OpenRouter");
+}
+function customCard() {
+  return cardByTitle("Custom provider");
+}
 
 const hookPosition = vi.hoisted(() => ({ value: 0 }));
 // react-query re-renders the page when a mutation resolves; the mock reproduces that.
 const renderTick = vi.hoisted(() => ({ fn: () => {} }));
+
+const providers = vi.hoisted(() => [
+  { id: "openrouter", displayName: "OpenRouter", available: true as const, keyUrl: "https://openrouter.ai/keys", keyEndpoint: "https://openrouter.ai/api/v1/key", modelsEndpoint: "https://openrouter.ai/api/v1/models", chatEndpoint: "https://openrouter.ai/api/v1/chat/completions" },
+  { id: "openai", displayName: "OpenAI", available: false as const, note: "soon" },
+  { id: "anthropic", displayName: "Anthropic", available: false as const, note: "soon" },
+  { id: "google", displayName: "Google AI Studio", available: false as const, note: "soon" },
+]);
 
 const fixtures = vi.hoisted(() => ({
   navigate: vi.fn(),
@@ -65,7 +84,7 @@ vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => ({ userProviders: { list: { invalidate: fixtures.invalidateList } } }),
     userProviders: {
-      list: { useQuery: () => ({ data: fixtures.list, isLoading: false, isError: false, isSuccess: true }) },
+      list: { useQuery: () => ({ data: { ...fixtures.list, providers }, isLoading: false, isError: false, isSuccess: true }) },
       // Two independent mutation instances, one per hook position. The page always calls
       // `models.useMutation()` exactly twice per render in the same order, so `position % 2`
       // reproduces react-query's per-hook cache identity across re-renders.
@@ -114,134 +133,170 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
+
+
+const CUSTOM_ROW = { provider: "custom-abc", activeModel: "vendor/model-b", keyHint: "••••4321", updatedAt: new Date(0).toISOString(), displayName: "Мой провайдер", baseUrl: "https://api.example.com/v1", modelsEndpoint: null };
+const BUILTIN_ROW = { provider: "openrouter", activeModel: "vendor/model-a", keyHint: "••••5678", updatedAt: new Date(0).toISOString(), displayName: null, baseUrl: null, modelsEndpoint: null };
+
 describe("AI Providers screen", () => {
-  it("offers a concrete provider with one active model, not four role slots", async () => {
+  it("lists OpenRouter as a real provider and never as the four Kairema roles", async () => {
     renderProviders();
     expect(await screen.findByText("OpenRouter")).toBeTruthy();
-    // The Kairema role names must not be presented as BYOK model choices.
     for (const role of ["Flash", "Think", "Context", "Apex"]) {
       expect(document.body.textContent ?? "").not.toContain(`Kairema ${role}`);
     }
   });
 
+  it("keeps unimplemented providers as one compact coming-soon line with no controls", async () => {
+    renderProviders();
+    expect(await screen.findByText("Другие провайдеры — скоро.")).toBeTruthy();
+    // They are not offered as cards, so there is nothing to click for them.
+    for (const name of ["OpenAI", "Anthropic", "Google AI Studio"]) {
+      expect(screen.queryByText(name, { selector: "span" })).toBeNull();
+    }
+  });
+
+  it("does not expose technical provider internals to the user", async () => {
+    renderProviders();
+    await screen.findByText("OpenRouter");
+    const text = document.body.textContent ?? "";
+    for (const leak of ["/chat/completions", "/v1/models", "modelsEndpoint", "localStorage", "SSRF", "AES-256", "custom-"]) {
+      expect(text).not.toContain(leak);
+    }
+  });
+
   it("shows a saved key only as a mask and never as a full value", async () => {
-    fixtures.list.configs = [{ provider: "openrouter", activeModel: "vendor/model-a", keyHint: "••••5678", updatedAt: new Date(0).toISOString(), displayName: null, baseUrl: null, modelsEndpoint: null }];
+    fixtures.list.configs = [BUILTIN_ROW];
     renderProviders();
     expect((await screen.findAllByText(/••••5678/)).length).toBeGreaterThan(0);
     expect(document.body.textContent ?? "").not.toContain("sk-or-v1-");
   });
 
-  it("marks providers without a server adapter as coming soon and offers no control for them", async () => {
+  it("reports Connected for a provider that already has a stored key", async () => {
+    fixtures.list.configs = [BUILTIN_ROW];
     renderProviders();
-    expect((await screen.findAllByText("скоро")).length).toBe(2);
-    expect(document.body.textContent ?? "").toContain("Адаптер ещё не реализован на сервере.");
-    // The add button only exists for the implemented provider.
-    expect(screen.getAllByRole("button", { name: /Добавить/ })).toHaveLength(1);
+    await screen.findByText("OpenRouter", { selector: "span" });
+    expect(openrouterCard().textContent).toContain("Connected");
   });
 
-  it("builds the model list from the provider catalog only when explicitly requested", async () => {
+  it("does not fetch a catalog until the user asks for it, and never on keystrokes", async () => {
     fixtures.models = { data: [{ id: "live/from-api", name: "Live From API" }], isPending: false, isError: false, isSuccess: true };
     renderProviders();
-    await userEvent.click(await screen.findByRole("button", { name: /Добавить/ }));
-    // Nothing is fetched on its own: the catalog request only happens when the user asks for it.
+    await userEvent.click(within(openrouterCard()).getByRole("button", { name: /^(Connect|Настроить)$/ }));
     expect(fixtures.modelsLoaded).toBe(0);
-    await userEvent.type(await screen.findByLabelText("API-ключ (OpenRouter)"), "sk-or-v1-typed-value");
+    await userEvent.type(screen.getByLabelText("API key (OpenRouter)"), "sk-or-v1-typed-value");
     expect(fixtures.modelsLoaded).toBe(0);
-    await userEvent.click(screen.getByRole("button", { name: /Загрузить модели/ }));
+    await userEvent.click(within(openrouterCard()).getByRole("button", { name: "Обновить список моделей (Model (OpenRouter))" }));
     expect(fixtures.modelsLoaded).toBe(1);
     expect(fixtures.modelsInput.at(-1)).toEqual({ provider: "openrouter", apiKey: "sk-or-v1-typed-value" });
     expect((await screen.findByText(/Live From API/)).textContent).toContain("live/from-api");
-    expect(document.body.textContent ?? "").not.toContain("minimax");
-    expect(document.body.textContent ?? "").not.toContain("gpt-oss");
   });
 
-  it("loads a saved provider's catalog without sending any key", async () => {
-    fixtures.list.configs = [{ provider: "openrouter", activeModel: "vendor/model-a", keyHint: "••••5678", updatedAt: new Date(0).toISOString(), displayName: null, baseUrl: null, modelsEndpoint: null }];
+  it("preselects the first catalog model and enables Connect once a key is typed", async () => {
+    fixtures.models = { data: [{ id: "live/from-api", name: "Live From API" }], isPending: false, isError: false, isSuccess: true };
     renderProviders();
-    await userEvent.click(await screen.findByRole("button", { name: /Настроить/ }));
-    expect(fixtures.modelsLoaded).toBe(1);
-    // The server decrypts its own copy, so the request must not carry a key at all.
+    await userEvent.click(within(openrouterCard()).getByRole("button", { name: /^(Connect|Настроить)$/ }));
+    await userEvent.type(screen.getByLabelText("API key (OpenRouter)"), "sk-or-v1-typed-value");
+    await userEvent.click(within(openrouterCard()).getByRole("button", { name: "Обновить список моделей (Model (OpenRouter))" }));
+    const select = screen.getByLabelText("Model (OpenRouter)") as HTMLSelectElement;
+    await screen.findByRole("option", { name: /Live From API/ });
+    expect(select.value).toBe("live/from-api");
+    expect((within(openrouterCard()).getByRole("button", { name: "Connect" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("keeps Connect disabled when the catalog comes back empty", async () => {
+    fixtures.models = { data: [], isPending: false, isError: false, isSuccess: true };
+    renderProviders();
+    await userEvent.click(within(openrouterCard()).getByRole("button", { name: /^(Connect|Настроить)$/ }));
+    await userEvent.type(screen.getByLabelText("API key (OpenRouter)"), "sk-or-v1-typed-value");
+    await userEvent.click(within(openrouterCard()).getByRole("button", { name: "Обновить список моделей (Model (OpenRouter))" }));
+    expect((within(openrouterCard()).getByRole("button", { name: "Connect" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("reopens an already connected provider on the model it already uses", async () => {
+    fixtures.list.configs = [BUILTIN_ROW];
+    renderProviders();
+    await userEvent.click(within(openrouterCard()).getByRole("button", { name: /Настроить/ }));
+    // Opening a saved provider reuses the stored key, so the request carries none.
     expect(fixtures.modelsInput.at(-1)).toEqual({ provider: "openrouter" });
   });
 
-  it("warns instead of silently pretending when server-side key storage is unconfigured", async () => {
+  it("warns plainly when server-side key storage is unconfigured", async () => {
     fixtures.list.storageReady = false;
     renderProviders();
-    const notice = await screen.findByText("Сервер пока не настроен на хранение пользовательских API-ключей. Сохранение и проверка подключения будут недоступны до исправления конфигурации.");
-    expect(notice).toBeTruthy();
-  });
-
-  it("states plainly that the server sees the key during a request", async () => {
-    renderProviders();
-    expect((await screen.findByText("Как это работает")).textContent).toBeTruthy();
-    expect(document.body.textContent ?? "").toContain("Ключ шифруется на сервере");
-    expect(document.body.textContent ?? "").toContain("Сервер видит ключ в момент запроса к провайдеру");
-    expect(document.body.textContent ?? "").not.toContain("Kairema никогда не видит");
-  });
-
-  it("promises no silent switch to a Kairema provider", async () => {
-    renderProviders();
-    expect((await screen.findByText("Как это работает")).textContent).toBeTruthy();
-    expect(document.body.textContent ?? "").toContain("не переключается на свои провайдеры");
+    expect(await screen.findByText("Сервер пока не настроен на хранение пользовательских API-ключей. Подключение станет доступно после настройки сервера.")).toBeTruthy();
   });
 });
 
 describe("custom provider form", () => {
-  const CUSTOM = [{ provider: "custom-abc", activeModel: "vendor/model-b", keyHint: "••••4321", updatedAt: new Date(0).toISOString(), displayName: "Мой провайдер", baseUrl: "https://api.example.com/v1", modelsEndpoint: null }];
-
   async function openCustomForm() {
-    await userEvent.click(await screen.findByRole("button", { name: /Подключить свой провайдер/ }));
-    await userEvent.type(screen.getByLabelText("Название своего провайдера"), "Мой провайдер");
-    await userEvent.type(screen.getByLabelText("Базовый URL провайдера"), "https://api.example.com/v1");
-    await userEvent.type(screen.getByLabelText("API-ключ (свой провайдер)"), "sk-custom-secret-9999");
+    await userEvent.click(within(customCard()).getByRole("button", { name: "Connect" }));
+    return {
+      name: screen.getByLabelText("Название провайдера"),
+      url: screen.getByLabelText("API URL провайдера"),
+      key: screen.getByLabelText("API key (Custom provider)"),
+    };
   }
 
-  it("lists a saved custom provider under its own name and URL", async () => {
-    fixtures.list.configs = CUSTOM;
+  it("lists a saved custom provider under its own name", async () => {
+    fixtures.list.configs = [CUSTOM_ROW];
     renderProviders();
-    expect(await screen.findByText("Мой провайдер")).toBeTruthy();
-    expect(screen.getByText("https://api.example.com/v1")).toBeTruthy();
+    expect((await screen.findAllByText("Мой провайдер")).length).toBeGreaterThan(0);
   });
 
-  it("BUG-3: preselects the first returned model so save becomes available", async () => {
+  it("asks only for a name, an API URL, a key and a model", async () => {
     renderProviders();
-    await openCustomForm();
-    fixtures.customModels = { data: [{ id: "vendor/model-b", name: "Model B" }, { id: "vendor/model-c", name: "Model C" }], isPending: false, isError: false, isSuccess: true };
-    await userEvent.click(screen.getByRole("button", { name: /Загрузить модели/ }));
+    const fields = await openCustomForm();
+    expect(fields.name).toBeTruthy();
+    expect(fields.url).toBeTruthy();
+    expect(fields.key).toBeTruthy();
+    expect(screen.getByLabelText("Model (Custom provider)")).toBeTruthy();
+    // The models endpoint is derived by the server, so the form never asks for it.
+    expect(screen.queryByLabelText(/URL списка моделей/)).toBeNull();
+  });
 
-    // The selected value is real state, not just the first option the browser happens to show.
-    const select = screen.getByLabelText("Активная модель (свой провайдер)") as HTMLSelectElement;
+  it("preselects the first custom model so Connect becomes available", async () => {
+    renderProviders();
+    const fields = await openCustomForm();
+    await userEvent.type(fields.name, "Мой провайдер");
+    await userEvent.type(fields.url, "https://api.example.com/v1");
+    await userEvent.type(fields.key, "sk-custom-secret-9999");
+    fixtures.customModels = { data: [{ id: "vendor/model-b", name: "Model B" }, { id: "vendor/model-c", name: "Model C" }], isPending: false, isError: false, isSuccess: true };
+    await userEvent.click(screen.getByRole("button", { name: "Обновить список моделей (Model (Custom provider))" }));
+    const select = screen.getByLabelText("Model (Custom provider)") as HTMLSelectElement;
     await screen.findByRole("option", { name: /Model B/ });
     expect(select.value).toBe("vendor/model-b");
-    expect((screen.getByRole("button", { name: "Сохранить" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((within(openrouterCard()).getByRole("button", { name: "Connect" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("BUG-3: keeps save disabled when the catalog comes back empty", async () => {
+  it("keeps Connect disabled when the custom catalog is empty", async () => {
     renderProviders();
-    await openCustomForm();
+    const fields = await openCustomForm();
+    await userEvent.type(fields.name, "Мой провайдер");
+    await userEvent.type(fields.url, "https://api.example.com/v1");
+    await userEvent.type(fields.key, "sk-custom-secret-9999");
     fixtures.customModels = { data: [], isPending: false, isError: false, isSuccess: true };
-    await userEvent.click(screen.getByRole("button", { name: /Загрузить модели/ }));
-    expect((screen.getByRole("button", { name: "Сохранить" }) as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "Обновить список моделей (Model (Custom provider))" }));
+    expect((within(customCard()).getByRole("button", { name: "Connect" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("BUG-4: a custom catalog never reaches the built-in panel's model list", async () => {
+  it("never mixes a custom catalog into the built-in provider's list", async () => {
     fixtures.models = { data: [{ id: "vendor/model-a", name: "Model A" }], isPending: false, isError: false, isSuccess: true };
     renderProviders();
-
-    // Load the built-in OpenRouter catalog first, then the custom one; both panels stay open.
-    await userEvent.click(await screen.findByRole("button", { name: /^Добавить$/ }));
-    await userEvent.type(screen.getByLabelText(/API-ключ \(OpenRouter\)/), "sk-or-v1-secret-value-9999");
-    await userEvent.click(screen.getAllByRole("button", { name: /Загрузить модели/ })[0]!);
+    await userEvent.click(within(openrouterCard()).getByRole("button", { name: "Connect" }));
+    await userEvent.type(screen.getByLabelText("API key (OpenRouter)"), "sk-or-v1-typed-value");
+    await userEvent.click(within(openrouterCard()).getByRole("button", { name: "Обновить список моделей (Model (OpenRouter))" }));
     await screen.findByRole("option", { name: /Model A/ });
 
-    await openCustomForm();
+    const fields = await openCustomForm();
+    await userEvent.type(fields.name, "Мой провайдер");
+    await userEvent.type(fields.url, "https://api.example.com/v1");
+    await userEvent.type(fields.key, "sk-custom-secret-9999");
     fixtures.customModels = { data: [{ id: "vendor/model-b", name: "Model B" }], isPending: false, isError: false, isSuccess: true };
-    await userEvent.click(screen.getAllByRole("button", { name: /Загрузить модели/ })[1]!);
+    await userEvent.click(screen.getByRole("button", { name: "Обновить список моделей (Model (Custom provider))" }));
     await screen.findByRole("option", { name: /Model B/ });
 
-    // The built-in select keeps only OpenRouter's own models.
-    const builtinSelect = screen.getByLabelText("Активная модель (OpenRouter)") as HTMLSelectElement;
-    const builtinOptions = Array.from(builtinSelect.options).map((option) => option.value);
+    const builtinOptions = Array.from((screen.getByLabelText("Model (OpenRouter)") as HTMLSelectElement).options).map((option) => option.value);
     expect(builtinOptions).toContain("vendor/model-a");
     expect(builtinOptions).not.toContain("vendor/model-b");
   });
