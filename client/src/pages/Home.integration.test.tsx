@@ -96,7 +96,8 @@ vi.mock("@/lib/trpc", () => ({
       saveDraft: { useMutation: () => ({ mutateAsync: fixtures.saveDraft, isPending: false }) },
       clearDraft: { useMutation: () => ({ mutateAsync: fixtures.clearDraft, isPending: false }) },
     },
-    useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, auth: { me: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: fixtures.downloadExport } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, historyPage: { invalidate: fixtures.invalidateMessages, fetch: fixtures.historyPageFetch }, list: { invalidate: fixtures.invalidateSessions } } }),
+    userProviders: { list: { useQuery: () => ({ data: { providers: [{ id: "openrouter", displayName: "OpenRouter", available: true }], configs: [], activeProvider: null, storageReady: true } }) } },
+    useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, auth: { me: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: fixtures.downloadExport } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, historyPage: { invalidate: fixtures.invalidateMessages, fetch: fixtures.historyPageFetch }, list: { invalidate: fixtures.invalidateSessions } }, userProviders: { list: { invalidate: vi.fn() } } }),
   },
 }));
 vi.mock("@/components/ui/dialog", () => ({

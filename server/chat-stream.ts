@@ -1,10 +1,13 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
-import { appendChatMessage, consumeChatStreamRequestQuota, enqueueMemoryExtractionJob, getOwnedChatSession, getOwnedSessionMessage, getStoredAssistantForClientMessage, listSessionTranscriptWindow, updateChatTitle } from "./db";
+import { appendChatMessage, consumeChatStreamRequestQuota, enqueueMemoryExtractionJob, getActiveUserProviderBinding, getOwnedChatSession, getOwnedSessionMessage, getStoredAssistantForClientMessage, listSessionTranscriptWindow, updateChatTitle } from "./db";
 import { resolveRequestUser } from "./_core/context";
-import { MODEL_IDS, chatWithRoleStream, publicChatError, type Provider, type RoleId } from "./providers";
+import { MODEL_IDS, chatWithRoleStream, publicChatError, type ChatMessage, type ChatSettings, type Provider, type RoleId } from "./providers";
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
 import { getOrCreateGuestUser } from "./_core/guest-session";
+import type { CapacityActor } from "./capacity-controller";
+import { chatWithUserProviderStream, publicUserProviderError, UserProviderGuestNotAllowedError, UserProviderNotConfiguredError } from "./user-providers";
+import { decryptUserProviderSecret } from "./user-provider-secrets";
 
 export const CHAT_STREAM_RATE_LIMIT = 60;
 export const CHAT_STREAM_MAX_ACTIVE_PER_INSTANCE = 12;
@@ -20,6 +23,8 @@ type ChatStreamAuditRecord = {
   userId: number;
   roleId?: RoleId;
   provider?: Provider;
+  /** Marks a generation that ran on the caller's own provider, so platform metrics stay separable. */
+  executionMode?: "platform" | "my_api";
   searchAttached?: boolean;
   respondedLayer?: "you" | "serper" | "exa" | "tavily" | "rag" | "none";
   sourcesCount?: number;
@@ -132,6 +137,44 @@ function reserveActiveChatStream(userId: number): { allowed: true; release: () =
 }
 
 function replayKey(userId: number, sessionId: string, clientMessageId: string) { return `${userId}:${sessionId}:${clientMessageId}`; }
+
+/**
+ * The "My API" execution path, kept separate from the platform path above.
+ *
+ * A guest is refused before any lookup, and the binding is resolved from the caller's own id
+ * alone. The decrypted key exists only as a local variable for the duration of the upstream
+ * fetch: it is never returned, logged, attached to the audit record or written into the
+ * persisted transcript. There is no fallback branch here by design — if the chosen provider
+ * fails, the user is told so instead of silently receiving an answer billed to someone else.
+ */
+async function generateWithUserProvider(options: {
+  dependencies: StreamDependencies;
+  userId: number;
+  isGuest: boolean;
+  roleId: RoleId;
+  history: ChatMessage[];
+  settings: ChatSettings | undefined;
+  onDelta: (delta: string) => void;
+  signal: AbortSignal;
+  actor: CapacityActor;
+}): Promise<StreamResult> {
+  if (options.isGuest) throw new UserProviderGuestNotAllowedError();
+  const binding = await options.dependencies.getActiveUserProviderBinding(options.userId);
+  if (!binding) throw new UserProviderNotConfiguredError();
+  const apiKey = options.dependencies.decryptUserProviderSecret(binding.encryptedApiKey);
+  return await options.dependencies.chatWithUserProviderStream({
+    provider: binding.provider,
+    model: binding.model,
+    modelLabel: binding.model,
+    apiKey,
+    history: options.history,
+    settings: options.settings,
+    roleId: options.roleId,
+    onDelta: options.onDelta,
+    signal: options.signal,
+    actor: options.actor,
+  });
+}
 function getCompletedReplay(key: string, now = Date.now()): StreamResult | undefined {
   const item = completedChatStreamReplays.get(key);
   if (!item) return undefined;
@@ -174,6 +217,8 @@ const streamInputSchema = z.object({
     thinking: z.boolean().optional(),
   }).optional(),
   attachmentIds: z.array(z.string().uuid()).max(4).optional(),
+  /** Routes this request to the caller's own provider instead of the Kairema roles. */
+  myApi: z.boolean().optional(),
 });
 
 export function writeEvent(res: Response, event: string, payload: unknown) {
@@ -279,6 +324,9 @@ type StreamDependencies = {
   getOwnedSessionMessage: typeof getOwnedSessionMessage;
   listSessionTranscriptWindow: typeof listSessionTranscriptWindow;
   chatWithRoleStream: typeof chatWithRoleStream;
+  chatWithUserProviderStream: typeof chatWithUserProviderStream;
+  getActiveUserProviderBinding: typeof getActiveUserProviderBinding;
+  decryptUserProviderSecret: typeof decryptUserProviderSecret;
   buildChatContext: typeof buildChatContext;
   enqueueMemoryExtractionJob: typeof enqueueMemoryExtractionJob;
   processMemoryExtractionJob: typeof processMemoryExtractionJob;
@@ -306,6 +354,9 @@ const defaultDependencies: StreamDependencies = {
   getOwnedSessionMessage,
   listSessionTranscriptWindow,
   chatWithRoleStream,
+  chatWithUserProviderStream,
+  getActiveUserProviderBinding,
+  decryptUserProviderSecret,
   buildChatContext,
   enqueueMemoryExtractionJob,
   processMemoryExtractionJob,
@@ -463,16 +514,21 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
       addGaugeSample(chatStreamRuntimeGauges.startLatencyMs, streamStartedAt - handlerStartedAt);
 
       try {
-        const result = await dependencies.chatWithRoleStream(
-          input.modelId,
-          (transcript?.messages ?? []).map((message) => ({ role: message.role, content: message.content })),
-          effectiveSettings,
-          (delta: string) => {
-            if (!closed) writeEvent(res, "delta", { content: delta });
-          },
-          controller.signal,
-          { userId: user.id, requestKey: `stream:${user.id}:${input.clientMessageId ?? savedUserMessageId ?? input.regenerateMessageId ?? "generation"}` },
-        );
+        const history = (transcript?.messages ?? []).map((message) => ({ role: message.role, content: message.content }));
+        const onDelta = (delta: string) => { if (!closed) writeEvent(res, "delta", { content: delta }); };
+        const actor = { userId: user.id, requestKey: `stream:${user.id}:${input.clientMessageId ?? savedUserMessageId ?? input.regenerateMessageId ?? "generation"}` };
+        // The two modes differ only here: myApi runs the caller's own provider, the default
+        // keeps the existing Kairema role chain untouched.
+        const result = input.myApi
+          ? await generateWithUserProvider({ dependencies, userId: user.id, isGuest, roleId: input.modelId, history, settings: effectiveSettings, onDelta, signal: controller.signal, actor })
+          : await dependencies.chatWithRoleStream(
+            input.modelId,
+            history,
+            effectiveSettings,
+            onDelta,
+            controller.signal,
+            actor,
+          );
         if (!closed) {
           const allSources = [...(result.sources ?? []), ...(result.ragSources ?? [])];
           const sourceDates = allSources.map((source) => normalizedDate(source.publishedAt) ?? ("retrievedAt" in source ? normalizedDate(source.retrievedAt) : null)).filter((value): value is string => Boolean(value)).sort();
@@ -503,6 +559,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
             userId: user.id,
             roleId: input.modelId,
             provider: result.provider,
+            executionMode: input.myApi ? "my_api" : "platform",
             searchAttached: Boolean(result.searchStatus) || Boolean(result.sources?.length),
             respondedLayer: result.searchStatus?.cascadeUsed ?? (result.ragSources?.length ? "rag" : "none"),
             sourcesCount,
@@ -549,7 +606,8 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
           chatStreamRuntimeGauges.failed += 1;
         }
         if (!closed) {
-          writeEvent(res, "error", { message: publicChatError(input.modelId, error) });
+          // Each mode reports only its own sanitised text; a provider body never crosses the SSE boundary.
+          writeEvent(res, "error", { message: input.myApi ? publicUserProviderError(error) : publicChatError(input.modelId, error) });
           finished = true;
           res.end();
         }

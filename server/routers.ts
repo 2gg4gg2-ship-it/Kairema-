@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserName, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag } from "./db";
+import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, deleteUserProviderConfig, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserProviderConfig, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, listUserProviderConfigs, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, setActiveUserProvider, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserName, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag, upsertUserProviderConfig } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { clearStytchLinkIntentCookie, clearStytchOtpEmailIdCookie, clearStytchPasswordRecoveryEmailCookie, clearStytchPasswordSessionCookie, clearStytchResetCookie, clearStytchSessionCookie, getSafeStytchDeliveryFailure, getStytchCallbackUrl, getStytchClient, getStytchOtpEmailId, getStytchPasswordRecoveryEmail, getStytchPasswordSessionToken, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, logSafeStytchDiagnostic, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchOtpEmailIdCookie, setStytchPasswordRecoveryEmailCookie, setStytchPasswordSessionCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
 import Stytch, { StytchError } from "stytch";
@@ -20,6 +20,8 @@ import { getChatStreamRuntimeGaugeSnapshot } from "./chat-stream";
 import { getCapacityControllerSnapshot, getCapacityPolicy, listCapacityProviderBudgets, updateCapacityPolicy, updateCapacityProviderBudget } from "./capacity-controller";
 import { promoteGuest, clearGuestCookie } from "./_core/guest-session";
 import { GUEST_COOKIE_NAME } from "@shared/const";
+import { decryptUserProviderSecret, encryptUserProviderSecret, isUserProviderKeyEncryptionConfigured, userProviderKeyHint, UserProviderKeyConfigurationError, UserProviderKeyDecryptionError } from "./user-provider-secrets";
+import { listUserProviderModels, listUserProviders, readyUserProvider, verifyUserProviderKey, UserProviderError, UserProviderNotImplementedError } from "./user-providers";
 
 const settingsSchema = z.object({
   style: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional(),
@@ -164,6 +166,45 @@ function storageError(error: unknown) {
     ? error.message
     : "История чата временно недоступна. Повторите попытку позже.";
 }
+
+/**
+ * The public shape of a saved provider. The encrypted envelope and the plaintext key are
+ * deliberately absent from this type, so no procedure can return them by accident.
+ */
+function publicUserProviderConfig(row: { provider: string; activeModel: string; keyHint: string; updatedAt: Date }) {
+  return { provider: row.provider, activeModel: row.activeModel, keyHint: row.keyHint, updatedAt: row.updatedAt.toISOString() };
+}
+
+/**
+ * Resolves a row that the caller must own. Looking it up by (ctx user, provider) means a
+ * provider belonging to somebody else is reported as missing rather than decrypted.
+ */
+async function requireOwnedUserProviderConfig(userId: number, provider: string) {
+  const config = await getUserProviderConfig(userId, provider);
+  if (!config) throw new TRPCError({ code: "NOT_FOUND", message: "Этот провайдер ещё не подключён." });
+  return config;
+}
+
+/** A typed key is used as-is when supplied; otherwise the caller's own stored key is used. */
+async function resolveUserProviderKeyInput(userId: number, provider: string, apiKey?: string) {
+  if (apiKey) return apiKey;
+  const config = await requireOwnedUserProviderConfig(userId, provider);
+  return decryptUserProviderSecret(config.encryptedApiKey);
+}
+
+/** Provider problems reach the client as their fixed, already-sanitised text. */
+function userProviderTrpcError(error: unknown): TRPCError {
+  if (error instanceof TRPCError) return error;
+  if (error instanceof UserProviderNotImplementedError) return new TRPCError({ code: "BAD_REQUEST", message: error.message });
+  if (error instanceof UserProviderKeyConfigurationError) return new TRPCError({ code: "PRECONDITION_FAILED", message: error.message });
+  // A stored envelope that no longer opens is a recoverable per-user condition, not a server fault.
+  if (error instanceof UserProviderKeyDecryptionError) return new TRPCError({ code: "BAD_REQUEST", message: "Сохранённый API-ключ не удалось расшифровать. Укажите ключ заново." });
+  if (error instanceof UserProviderError) return new TRPCError({ code: "BAD_REQUEST", message: error.message });
+  return new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Не удалось выполнить операцию с провайдером. Повторите попытку позже." });
+}
+
+const userProviderIdSchema = z.string().trim().min(1).max(32);
+const userProviderKeySchema = z.string().trim().min(8).max(400);
 
 export const appRouter = router({
   system: systemRouter,
@@ -497,6 +538,89 @@ export const appRouter = router({
         ...(emailNotifications === undefined ? {} : { emailNotifications: emailNotifications ? 1 : 0 }),
         ...(askClarifyingQuestions === undefined ? {} : { askClarifyingQuestions: askClarifyingQuestions ? 1 : 0 }),
       });
+    }),
+  }),
+  /**
+   * BYOK settings. Every procedure is protected, so a guest is rejected before any storage is
+   * touched, and each one resolves the owner from the request context: no input carries a
+   * userId, and a provider name only ever selects a row that already belongs to the caller.
+   */
+  userProviders: router({
+    list: protectedProcedure.query(async ({ ctx }) => {
+      const [configs, settings] = await Promise.all([listUserProviderConfigs(ctx.user.id), getUserSettings(ctx.user.id)]);
+      return {
+        providers: listUserProviders(),
+        configs: configs.map(publicUserProviderConfig),
+        activeProvider: settings.myApiProvider ?? null,
+        storageReady: isUserProviderKeyEncryptionConfigured(),
+      };
+    }),
+    /**
+     * Reads the provider's live catalog. A typed key is used when supplied, so a first-time user
+     * can browse models before saving.
+     *
+     * This must stay a mutation, never a query: tRPC sends query input in the GET query string,
+     * which would put a plaintext API key into the request URL and therefore into proxy and
+     * access logs. As a mutation the key travels in the POST body like every other credential
+     * in this router.
+     */
+    models: protectedProcedure.input(z.object({ provider: userProviderIdSchema, apiKey: userProviderKeySchema.optional() })).mutation(async ({ ctx, input }) => {
+      try {
+        const descriptor = readyUserProvider(input.provider);
+        const apiKey = await resolveUserProviderKeyInput(ctx.user.id, descriptor.id, input.apiKey);
+        return { models: await listUserProviderModels(descriptor.id, apiKey) };
+      } catch (error) {
+        throw userProviderTrpcError(error);
+      }
+    }),
+    /** Auth and credit probe only. It runs no inference and never sends a user prompt. */
+    test: protectedProcedure.input(z.object({ provider: userProviderIdSchema, apiKey: userProviderKeySchema.optional() })).mutation(async ({ ctx, input }) => {
+      try {
+        const descriptor = readyUserProvider(input.provider);
+        const apiKey = await resolveUserProviderKeyInput(ctx.user.id, descriptor.id, input.apiKey);
+        const result = await verifyUserProviderKey(descriptor.id, apiKey);
+        // Metadata only: provider and verdict. The key and the upstream body are never logged.
+        console.info("[Kairema BYOK]", JSON.stringify({ event: "byok.connection_test", provider: descriptor.id, result: result.ok ? "success" : "failure", category: result.ok ? null : result.category }));
+        return result.ok
+          ? ({ ok: true as const, provider: descriptor.id, label: result.label, message: "API-ключ принят провайдером." })
+          : ({ ok: false as const, provider: descriptor.id, category: result.category, http: result.http, message: result.message });
+      } catch (error) {
+        throw userProviderTrpcError(error);
+      }
+    }),
+    /** Requires the key on every save, so a row can never exist without a usable credential. */
+    save: protectedProcedure.input(z.object({ provider: userProviderIdSchema, apiKey: userProviderKeySchema, activeModel: z.string().trim().min(1).max(191), makeActive: z.boolean().optional() })).mutation(async ({ ctx, input }) => {
+      try {
+        const descriptor = readyUserProvider(input.provider);
+        const apiKey = input.apiKey.trim();
+        // The model must exist in the catalog the provider returns right now, so the screen
+        // can never persist an invented model id.
+        const models = await listUserProviderModels(descriptor.id, apiKey);
+        if (!models.some((model) => model.id === input.activeModel)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Выбранная модель отсутствует в каталоге провайдера. Обновите список моделей." });
+        }
+        const config = await upsertUserProviderConfig({
+          userId: ctx.user.id,
+          provider: descriptor.id,
+          activeModel: input.activeModel,
+          encryptedApiKey: encryptUserProviderSecret(apiKey),
+          keyHint: userProviderKeyHint(apiKey),
+        });
+        if (input.makeActive) await setActiveUserProvider(ctx.user.id, descriptor.id);
+        return publicUserProviderConfig(config!);
+      } catch (error) {
+        throw userProviderTrpcError(error);
+      }
+    }),
+    setActive: protectedProcedure.input(z.object({ provider: userProviderIdSchema })).mutation(async ({ ctx, input }) => {
+      const descriptor = readyUserProvider(input.provider);
+      await requireOwnedUserProviderConfig(ctx.user.id, descriptor.id);
+      const settings = await setActiveUserProvider(ctx.user.id, descriptor.id);
+      return { activeProvider: settings.myApiProvider ?? null };
+    }),
+    remove: protectedProcedure.input(z.object({ provider: userProviderIdSchema })).mutation(async ({ ctx, input }) => {
+      await deleteUserProviderConfig(ctx.user.id, input.provider);
+      return { removed: true as const, provider: input.provider };
     }),
   }),
   memory: router({

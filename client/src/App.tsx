@@ -7,6 +7,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import { useAuth } from "./_core/hooks/useAuth";
 import Home from "./pages/Home";
 import OwnerAnalytics from "./pages/OwnerAnalytics";
+import AIProviders from "./pages/AIProviders";
 import Welcome from "./pages/Welcome";
 
 export function VerifiedSessionRoute({ children }: { children: React.ReactNode }) {
@@ -25,7 +26,12 @@ export function OwnerAnalyticsRoute() {
   return <VerifiedSessionRoute><OwnerAnalytics /></VerifiedSessionRoute>;
 }
 
-function Router() { return <Switch><Route path="/" component={RootRoute} /><Route path="/welcome" component={Welcome} /><Route path="/owner-analytics" component={OwnerAnalyticsRoute} /><Route path="/404" component={NotFound} /><Route component={NotFound} /></Switch>; }
+/** BYOK settings: a guest has no permanent storage for a credential, so the route requires a verified session. */
+export function AIProvidersRoute() {
+  return <VerifiedSessionRoute><AIProviders /></VerifiedSessionRoute>;
+}
+
+function Router() { return <Switch><Route path="/" component={RootRoute} /><Route path="/welcome" component={Welcome} /><Route path="/owner-analytics" component={OwnerAnalyticsRoute} /><Route path="/settings/providers" component={AIProvidersRoute} /><Route path="/404" component={NotFound} /><Route component={NotFound} /></Switch>; }
 
 function App() { return <ErrorBoundary><ThemeProvider defaultTheme="dark" switchable><TooltipProvider><Toaster /><Router /></TooltipProvider></ThemeProvider></ErrorBoundary>; }
 

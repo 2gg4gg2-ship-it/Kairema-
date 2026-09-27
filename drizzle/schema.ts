@@ -296,9 +296,35 @@ export const userSettings = mysqlTable("user_settings", {
   highContrast: int("highContrast").notNull().default(0),
   emailNotifications: int("emailNotifications").notNull().default(0),
   askClarifyingQuestions: int("askClarifyingQuestions").notNull().default(0),
+  /**
+   * Which of the caller's own user_provider_configs rows backs "My API". It stores a
+   * preference only, never a secret, and is the single source of truth for the active
+   * provider so the settings row can never disagree with the credential rows.
+   */
+  myApiProvider: varchar("myApiProvider", { length: 32 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
+
+/**
+ * One row per (user, provider). The API key is only ever stored as an AES-256-GCM
+ * envelope; `keyHint` is a masked suffix so the UI can recognise a saved key without
+ * ever receiving the plaintext. The unique (userId, provider) key makes a repeated save
+ * an update instead of a duplicate row.
+ */
+export const userProviderConfigs = mysqlTable("user_provider_configs", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  provider: varchar("provider", { length: 32 }).notNull(),
+  activeModel: varchar("activeModel", { length: 191 }).notNull(),
+  encryptedApiKey: text("encryptedApiKey").notNull(),
+  keyHint: varchar("keyHint", { length: 16 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [
+  uniqueIndex("user_provider_configs_user_provider_unique").on(table.userId, table.provider),
+  index("user_provider_configs_user_idx").on(table.userId),
+]);
 
 export const memoryProfiles = mysqlTable("memory_profiles", {
   userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
@@ -499,6 +525,7 @@ export type KnowledgeDocument = typeof knowledgeDocuments.$inferSelect;
 export type KnowledgeIngestionRun = typeof knowledgeIngestionRuns.$inferSelect;
 export type DevApiAuditRecord = typeof devApiAuditRecords.$inferSelect;
 export type UserSettings = typeof userSettings.$inferSelect;
+export type UserProviderConfig = typeof userProviderConfigs.$inferSelect;
 export type MemoryProfile = typeof memoryProfiles.$inferSelect;
 export type MemorySettings = typeof memorySettings.$inferSelect;
 export type MemoryEntry = typeof memoryEntries.$inferSelect;
