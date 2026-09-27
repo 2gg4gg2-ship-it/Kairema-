@@ -259,6 +259,21 @@ describe("Kairema v4 role registry", () => {
     expect(withoutReasoning).not.toContain(reasoningInstruction);
   });
 
+  it("adds a bounded clarifying-question instruction only when the preference is on", () => {
+    const role = MODEL_CONFIG.find((item) => item.key === "smart");
+    if (!role) throw new Error("Smart role is missing from the role registry");
+    const history = [{ role: "user" as const, content: "Тест" }];
+    const on = JSON.stringify(buildOpenRouterMessages(role, history, { askClarifyingQuestions: true }));
+    const off = JSON.stringify(buildOpenRouterMessages(role, history, { askClarifyingQuestions: false }));
+    const absent = JSON.stringify(buildOpenRouterMessages(role, history, {}));
+    const marker = "задай один уточняющий вопрос";
+
+    expect(on).toContain(marker);
+    expect(off).not.toContain(marker);
+    // Default-off must stay byte-identical to today's prompt.
+    expect(off).toBe(absent);
+  });
+
   it("removes reasoning blocks before any response reaches the browser", () => {
     expect(stripReasoningBlocks("<think>скрытая цепочка</think>Итог <reasoning>скрыто</reasoning>")).toBe("Итог");
     expect(statusFromChatPayload({ choices: [{ message: { content: "<think>hidden</think>" } }] }).state).toBe("error");

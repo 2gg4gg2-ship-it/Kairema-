@@ -36,6 +36,7 @@ const fixtures = vi.hoisted(() => ({
   exports: [] as Array<{ id: string; fileName: string; format: "markdown" | "pdf"; byteSize: number; createdAt: Date }>,
   uploadAttachment: vi.fn(),
   beginStytchLink: vi.fn(),
+  updateName: vi.fn(async () => ({ name: "Тест" })),
   startLogin: vi.fn(),
   isAuthenticated: true,
   authLoading: false,
@@ -68,7 +69,7 @@ vi.mock("@/lib/chat-export", () => ({
 vi.mock("wouter", () => ({ useLocation: () => ["/", fixtures.navigate] }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
-    auth: { beginLink: { useMutation: () => ({ mutateAsync: fixtures.beginStytchLink, isPending: false }) } },
+    auth: { beginLink: { useMutation: () => ({ mutateAsync: fixtures.beginStytchLink, isPending: false }) }, updateName: { useMutation: () => ({ mutateAsync: fixtures.updateName, isPending: false }) } },
     models: { list: { useQuery: () => ({ data: [
       { key: "fast", modelId: "fast", label: "Kairema Flash", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, runtime: { state: "ready", provider: "OpenRouter", modelUsed: "Fast", checkedAt: "2026-08-19T00:00:00.000Z" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
       { key: "smart", modelId: "smart", label: "Kairema Think", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
@@ -95,7 +96,7 @@ vi.mock("@/lib/trpc", () => ({
       saveDraft: { useMutation: () => ({ mutateAsync: fixtures.saveDraft, isPending: false }) },
       clearDraft: { useMutation: () => ({ mutateAsync: fixtures.clearDraft, isPending: false }) },
     },
-    useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: fixtures.downloadExport } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, historyPage: { invalidate: fixtures.invalidateMessages, fetch: fixtures.historyPageFetch }, list: { invalidate: fixtures.invalidateSessions } } }),
+    useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, auth: { me: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: fixtures.downloadExport } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, historyPage: { invalidate: fixtures.invalidateMessages, fetch: fixtures.historyPageFetch }, list: { invalidate: fixtures.invalidateSessions } } }),
   },
 }));
 vi.mock("@/components/ui/dialog", () => ({
@@ -603,6 +604,61 @@ describe("Home integration flows", () => {
     await user.click(screen.getByRole("switch", { name: "Веб-поиск" }));
 
     expect(fixtures.updateSettings).toHaveBeenCalledWith({ webSearch: true });
+  });
+
+  it("opens Profile from the topbar, prefills the stored name and persists both Profile fields", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Открыть профиль" }));
+
+    const nameField = screen.getByRole("textbox", { name: /Как к вам обращаться/ });
+    expect((nameField as HTMLInputElement).value).toBe("Тест");
+    expect(screen.getByText("Ваши предпочтения применяются ко всем разговорам.")).toBeTruthy();
+
+    const clarify = screen.getByRole("switch", { name: "Задавать уточняющие вопросы перед развёрнутым ответом" });
+    expect((clarify as HTMLButtonElement).getAttribute("aria-checked")).toBe("false");
+    await user.click(clarify);
+    expect(fixtures.updateSettings).toHaveBeenCalledWith({ askClarifyingQuestions: true });
+
+    await user.click(screen.getByRole("button", { name: "Обновить профиль" }));
+    expect(fixtures.updateName).not.toHaveBeenCalled();
+    await user.clear(nameField);
+    await user.type(nameField, "Ada");
+    await user.click(screen.getByRole("button", { name: "Обновить профиль" }));
+    expect(fixtures.updateName).toHaveBeenCalledWith({ name: "Ada" });
+  });
+
+  it("keeps Chat / My API inside the chat scroll viewport so it can stay pinned above the messages", () => {
+    render(<Home />);
+
+    const modeSwitch = screen.getByRole("group", { name: "Режим чата" });
+    const viewport = modeSwitch.closest(".overflow-y-auto");
+    // Sticky is relative to this scroll container, not position:fixed on the viewport.
+    expect(viewport).not.toBeNull();
+    expect(viewport!.querySelector(".kairema-mode-bar")).not.toBeNull();
+    // The history/export bar stays outside the message scroller.
+    expect(viewport!.querySelector(".kairema-chat-tools-scroll")).toBeNull();
+  });
+
+  it("still opens the existing model menu from the topbar", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Home />);
+
+    await waitFor(() => expect(container.querySelector(".kairema-role-menu-trigger")).not.toBeNull());
+    await user.click(container.querySelector(".kairema-role-menu-trigger") as HTMLElement);
+
+    await waitFor(() => expect(document.querySelector(".kairema-role-menu")).not.toBeNull());
+    expect(document.querySelectorAll(".kairema-role-menu-item").length).toBe(4);
+  });
+
+  it("hides Profile entirely for a guest account", () => {
+    fixtures.authUser = { id: 43, name: null, email: "", loginMethod: "guest", isGuest: 1 };
+    render(<Home />);
+
+    expect(screen.queryByRole("button", { name: "Открыть профиль" })).toBeNull();
+    // Settings stays available for guests.
+    expect(screen.getByRole("button", { name: "Открыть настройки" })).toBeTruthy();
   });
 
   it("opens the stored chat after a reload instead of always the newest one", async () => {

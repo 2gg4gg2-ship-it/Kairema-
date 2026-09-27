@@ -468,4 +468,18 @@ describe("chat context soft web research", () => {
     await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Обычный вопрос", role: "fast" }))
       .resolves.toMatchObject({ style: "default", responseLength: "balanced", effort: "standard", thinking: false, toolAccess: true });
   });
+
+  it("passes the clarifying-questions preference through as a boolean and defaults it to off", async () => {
+    vi.mocked(getUserSettings).mockResolvedValueOnce({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, webSearch: 0, askClarifyingQuestions: 1 } as never);
+    const on = await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Обычный вопрос", role: "fast" });
+    expect(on.askClarifyingQuestions).toBe(true);
+
+    vi.mocked(getUserSettings).mockResolvedValueOnce({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, webSearch: 0, askClarifyingQuestions: 0 } as never);
+    const off = await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Обычный вопрос", role: "fast" });
+    expect(off.askClarifyingQuestions).toBe(false);
+
+    vi.mocked(getUserSettings).mockResolvedValueOnce({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, webSearch: 0 } as never);
+    const absent = await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Обычный вопрос", role: "fast" });
+    expect(absent.askClarifyingQuestions).toBe(false);
+  });
 });

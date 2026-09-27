@@ -101,6 +101,7 @@ const DEFAULT_CONTEXT_PREFERENCES = {
   responseLength: "balanced" as const,
   effort: "standard" as const,
   thinking: 0,
+  askClarifyingQuestions: 0,
   toolAccess: 1,
   webSearch: 0,
 };
@@ -130,6 +131,7 @@ export async function buildChatContext(userId: number, sessionId: string, input:
     responseLength: preferences.responseLength,
     effort: preferences.effort,
     thinking: Boolean(preferences.thinking),
+    askClarifyingQuestions: Boolean(preferences.askClarifyingQuestions),
     toolAccess: Boolean(preferences.toolAccess),
     ...(memorySettings?.enabled && profile ? { memoryContext: memoryContext(profile, facts, topics) } : {}),
     ...(documentContext ? { documentContext } : {}),

@@ -1012,7 +1012,7 @@ export async function upsertWebSearchStatus(input: WebSearchStatusInput): Promis
   });
 }
 
-export type UserSettingsPatch = Partial<Pick<UserSettings, "language" | "theme" | "responseStyle" | "responseLength" | "effort" | "thinking" | "defaultRole" | "webSearch" | "toolAccess" | "healthRefreshSeconds" | "highContrast" | "emailNotifications">>;
+export type UserSettingsPatch = Partial<Pick<UserSettings, "language" | "theme" | "responseStyle" | "responseLength" | "effort" | "thinking" | "defaultRole" | "webSearch" | "toolAccess" | "healthRefreshSeconds" | "highContrast" | "emailNotifications" | "askClarifyingQuestions">>;
 export type KnowledgeSourcePatch = Omit<KnowledgeSource, "updatedAt">;
 export type KnowledgeDocumentInput = Omit<KnowledgeDocument, "retrievedAt" | "updatedAt">;
 export type KnowledgeRunInput = Omit<KnowledgeIngestionRun, "startedAt" | "finishedAt">;
@@ -1159,6 +1159,12 @@ export async function updateUserSettings(userId: number, patch: UserSettingsPatc
   await ensureUserSettings(userId);
   if (Object.keys(patch).length) await db.update(userSettings).set(patch).where(eq(userSettings.userId, userId));
   return getUserSettings(userId);
+}
+
+/** Profile display name only. Never called with a client-supplied userId. */
+export async function updateUserName(userId: number, name: string | null): Promise<void> {
+  const db = requireDatabase(await getDb());
+  await db.update(users).set({ name }).where(eq(users.id, userId));
 }
 
 async function ensureMemoryProfile(userId: number): Promise<void> {

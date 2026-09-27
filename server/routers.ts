@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag } from "./db";
+import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserName, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { clearStytchLinkIntentCookie, clearStytchOtpEmailIdCookie, clearStytchPasswordRecoveryEmailCookie, clearStytchPasswordSessionCookie, clearStytchResetCookie, clearStytchSessionCookie, getSafeStytchDeliveryFailure, getStytchCallbackUrl, getStytchClient, getStytchOtpEmailId, getStytchPasswordRecoveryEmail, getStytchPasswordSessionToken, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, logSafeStytchDiagnostic, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchOtpEmailIdCookie, setStytchPasswordRecoveryEmailCookie, setStytchPasswordSessionCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
 import Stytch, { StytchError } from "stytch";
@@ -100,6 +100,7 @@ const userSettingsSchema = z.object({
   healthRefreshSeconds: z.union([z.literal(0), z.literal(15), z.literal(30), z.literal(60)]).optional(),
   highContrast: z.boolean().optional(),
   emailNotifications: z.boolean().optional(),
+  askClarifyingQuestions: z.boolean().optional(),
 });
 
 const attachmentInputSchema = z.object({
@@ -168,6 +169,13 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
+    updateName: protectedProcedure
+      .input(z.object({ name: z.string().trim().max(120) }))
+      .mutation(async ({ ctx, input }) => {
+        // Scoped to the caller's own row only; a client-supplied userId is never accepted.
+        await updateUserName(ctx.user.id, input.name || null);
+        return { name: input.name || null };
+      }),
     logout: publicProcedure.mutation(async ({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       await revokeStytchSessionToken(getStytchSessionToken(ctx.req));
@@ -479,7 +487,7 @@ export const appRouter = router({
       return settings;
     }),
     update: protectedProcedure.input(userSettingsSchema).mutation(async ({ ctx, input }) => {
-      const { thinking, webSearch, toolAccess, highContrast, emailNotifications, ...rest } = input;
+      const { thinking, webSearch, toolAccess, highContrast, emailNotifications, askClarifyingQuestions, ...rest } = input;
       return updateUserSettings(ctx.user.id, {
         ...rest,
         ...(thinking === undefined ? {} : { thinking: thinking ? 1 : 0 }),
@@ -487,6 +495,7 @@ export const appRouter = router({
         ...(toolAccess === undefined ? {} : { toolAccess: toolAccess ? 1 : 0 }),
         ...(highContrast === undefined ? {} : { highContrast: highContrast ? 1 : 0 }),
         ...(emailNotifications === undefined ? {} : { emailNotifications: emailNotifications ? 1 : 0 }),
+        ...(askClarifyingQuestions === undefined ? {} : { askClarifyingQuestions: askClarifyingQuestions ? 1 : 0 }),
       });
     }),
   }),

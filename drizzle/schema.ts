@@ -295,6 +295,7 @@ export const userSettings = mysqlTable("user_settings", {
   healthRefreshSeconds: int("healthRefreshSeconds").notNull().default(30),
   highContrast: int("highContrast").notNull().default(0),
   emailNotifications: int("emailNotifications").notNull().default(0),
+  askClarifyingQuestions: int("askClarifyingQuestions").notNull().default(0),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
