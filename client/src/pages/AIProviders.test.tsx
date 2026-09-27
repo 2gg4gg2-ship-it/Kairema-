@@ -17,7 +17,8 @@ const fixtures = vi.hoisted(() => ({
     activeProvider: null as string | null,
     storageReady: true,
   },
-  models: { data: [] as Array<{ id: string; name: string }>, isLoading: false, isError: false, isSuccess: true },
+  models: { data: [] as Array<{ id: string; name: string }>, isPending: false, isError: false, isSuccess: false },
+  modelsLoaded: 0,
   saved: null as unknown,
 }));
 
@@ -27,7 +28,20 @@ vi.mock("@/lib/trpc", () => ({
     useUtils: () => ({ userProviders: { list: { invalidate: fixtures.invalidateList } } }),
     userProviders: {
       list: { useQuery: () => ({ data: fixtures.list, isLoading: false, isError: false, isSuccess: true }) },
-      models: { useQuery: (input: unknown) => { fixtures.modelsInput.push(input); return { data: { models: fixtures.models.data }, isLoading: fixtures.models.isLoading, isError: fixtures.models.isError, isSuccess: fixtures.models.isSuccess }; } },
+      models: {
+        useMutation: () => ({
+          mutateAsync: async (input: unknown) => {
+            fixtures.modelsInput.push(input);
+            fixtures.modelsLoaded += 1;
+            return { models: fixtures.models.data };
+          },
+          reset: () => { fixtures.modelsInput.push("reset"); },
+          data: { models: fixtures.models.data },
+          isPending: fixtures.models.isPending,
+          isError: fixtures.models.isError,
+          isSuccess: fixtures.models.isSuccess,
+        }),
+      },
       test: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }) },
       save: { useMutation: () => ({ mutateAsync: vi.fn(async (input) => { fixtures.saved = input; return {}; }), isPending: false, error: null }) },
       setActive: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }) },
@@ -40,11 +54,12 @@ import AIProviders from "./AIProviders";
 
 beforeEach(() => {
   fixtures.modelsInput.length = 0;
+  fixtures.modelsLoaded = 0;
   fixtures.saved = null;
   fixtures.list.configs = [];
   fixtures.list.activeProvider = null;
   fixtures.list.storageReady = true;
-  fixtures.models = { data: [], isLoading: false, isError: false, isSuccess: true };
+  fixtures.models = { data: [], isPending: false, isError: false, isSuccess: false };
   fixtures.navigate.mockReset();
   fixtures.invalidateList.mockReset();
 });
@@ -76,13 +91,29 @@ describe("AI Providers screen", () => {
     expect(screen.getAllByRole("button", { name: /Добавить/ })).toHaveLength(1);
   });
 
-  it("builds the model list from the provider catalog, with no hardcoded model ids", async () => {
-    fixtures.models = { data: [{ id: "live/from-api", name: "Live From API" }], isLoading: false, isError: false, isSuccess: true };
+  it("builds the model list from the provider catalog only when explicitly requested", async () => {
+    fixtures.models = { data: [{ id: "live/from-api", name: "Live From API" }], isPending: false, isError: false, isSuccess: true };
     render(<AIProviders />);
     await userEvent.click(await screen.findByRole("button", { name: /Добавить/ }));
+    // Nothing is fetched on its own: the catalog request only happens when the user asks for it.
+    expect(fixtures.modelsLoaded).toBe(0);
+    await userEvent.type(await screen.findByLabelText("API-ключ (OpenRouter)"), "sk-or-v1-typed-value");
+    expect(fixtures.modelsLoaded).toBe(0);
+    await userEvent.click(screen.getByRole("button", { name: /Загрузить модели/ }));
+    expect(fixtures.modelsLoaded).toBe(1);
+    expect(fixtures.modelsInput.at(-1)).toEqual({ provider: "openrouter", apiKey: "sk-or-v1-typed-value" });
     expect((await screen.findByText(/Live From API/)).textContent).toContain("live/from-api");
     expect(document.body.textContent ?? "").not.toContain("minimax");
     expect(document.body.textContent ?? "").not.toContain("gpt-oss");
+  });
+
+  it("loads a saved provider's catalog without sending any key", async () => {
+    fixtures.list.configs = [{ provider: "openrouter", activeModel: "vendor/model-a", keyHint: "••••5678", updatedAt: new Date(0).toISOString() }];
+    render(<AIProviders />);
+    await userEvent.click(await screen.findByRole("button", { name: /Настроить/ }));
+    expect(fixtures.modelsLoaded).toBe(1);
+    // The server decrypts its own copy, so the request must not carry a key at all.
+    expect(fixtures.modelsInput.at(-1)).toEqual({ provider: "openrouter" });
   });
 
   it("warns instead of silently pretending when server-side key storage is unconfigured", async () => {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, CheckCircle2, Eye, EyeOff, KeyRound, Plug, Plus, Power, TriangleAlert, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Eye, EyeOff, KeyRound, Plug, Plus, Power, RefreshCw, TriangleAlert, XCircle } from "lucide-react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 
@@ -43,17 +43,17 @@ export default function AIProviders() {
   const selectedConfig = configs.find((config) => config.provider === editingProvider) ?? null;
   const canSubmit = Boolean(selected?.available && apiKey.trim().length >= 8 && modelId.trim().length > 0);
 
-  // A typed key is forwarded to the catalog request and never stored client-side; when there is
-  // none, the server falls back to the caller's own saved key.
-  const modelsQuery = trpc.userProviders.models.useQuery(
-    { provider: editingProvider ?? "", ...(apiKey.trim().length >= 8 ? { apiKey: apiKey.trim() } : {}) },
-    { enabled: Boolean(selected?.available && editingProvider) && (apiKey.trim().length >= 8 || Boolean(selectedConfig)), retry: false, staleTime: 300_000 },
-  );
+  // The catalog is fetched explicitly, never as a declarative query: a query would carry the
+  // typed key in the GET query string, and an automatic fetch would re-send it on every
+  // keystroke. A typed key is forwarded in the POST body and never stored client-side; when no
+  // key is typed the server falls back to the caller's own saved key and no key is sent at all.
+  const modelsMutation = trpc.userProviders.models.useMutation();
   const testMutation = trpc.userProviders.test.useMutation();
   const saveMutation = trpc.userProviders.save.useMutation();
   const setActiveMutation = trpc.userProviders.setActive.useMutation();
   const removeMutation = trpc.userProviders.remove.useMutation();
-  const busy = testMutation.isPending || saveMutation.isPending || setActiveMutation.isPending || removeMutation.isPending;
+  const busy = modelsMutation.isPending || testMutation.isPending || saveMutation.isPending || setActiveMutation.isPending || removeMutation.isPending;
+  const models = modelsMutation.data?.models ?? [];
 
   // Switching provider resets the whole form so one provider's models or result can never be
   // shown next to another provider's key.
@@ -63,13 +63,28 @@ export default function AIProviders() {
     setModelId("");
     setTestResult(null);
     setNotice(null);
+    modelsMutation.reset();
+    // Opening a provider that already has a saved key loads its catalog from the server's own
+    // copy, so this request carries no key at all.
+    if (editingProvider && selectedConfig) void modelsMutation.mutateAsync({ provider: editingProvider }).catch(() => undefined);
   }, [editingProvider]);
 
   useEffect(() => {
-    if (!modelId && modelsQuery.data?.models.length) setModelId(modelsQuery.data.models[0]!.id);
-  }, [modelsQuery.data, modelId]);
+    if (!modelId && modelsMutation.data?.models.length) setModelId(modelsMutation.data.models[0]!.id);
+  }, [modelsMutation.data, modelId]);
 
   const openPanel = (providerId: string) => setEditingProvider((current) => (current === providerId ? null : providerId));
+
+  /** Loads the live catalog for the provider currently being edited. */
+  const loadModels = async () => {
+    if (!selected?.available || !editingProvider) return;
+    if (apiKey.trim().length < 8 && !selectedConfig) return;
+    try {
+      await modelsMutation.mutateAsync({ provider: editingProvider, ...(apiKey.trim().length >= 8 ? { apiKey: apiKey.trim() } : {}) });
+    } catch {
+      // The panel already renders the classified error from the mutation state.
+    }
+  };
 
   const runTest = async () => {
     if (!selected?.available) return;
@@ -221,17 +236,20 @@ export default function AIProviders() {
                           className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-400"
                           value={modelId}
                           onChange={(event) => setModelId(event.target.value)}
-                          disabled={modelsQuery.isLoading}
+                          disabled={modelsMutation.isPending}
                           aria-label={`Активная модель (${selected.displayName})`}
                         >
-                          {modelsQuery.isLoading && <option value="">Загружаем модели…</option>}
-                          {!modelsQuery.isLoading && !modelsQuery.data?.models.length && <option value="">Сначала укажите API-ключ</option>}
-                          {modelsQuery.data?.models.map((model) => (
+                          {modelsMutation.isPending && <option value="">Загружаем модели…</option>}
+                          {!modelsMutation.isPending && !models.length && <option value="">Сначала укажите API-ключ</option>}
+                          {models.map((model) => (
                             <option key={model.id} value={model.id}>{model.name} · {model.id}</option>
                           ))}
                         </select>
-                        {modelsQuery.isError && <span className="text-xs text-rose-300">Каталог моделей сейчас недоступен. Проверьте подключение и повторите.</span>}
-                        {modelsQuery.isSuccess && !modelsQuery.data?.models.length && <span className="text-xs text-slate-500">Провайдер не вернул список моделей для этого ключа.</span>}
+                        {modelsMutation.isError && <span className="text-xs text-rose-300">Каталог моделей сейчас недоступен. Проверьте подключение и повторите.</span>}
+                        {modelsMutation.isSuccess && !models.length && <span className="text-xs text-slate-500">Провайдер не вернул список моделей для этого ключа.</span>}
+                        <button type="button" className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40" onClick={() => void loadModels()} disabled={modelsMutation.isPending || (!apiKey.trim() && !selectedConfig)}>
+                          <RefreshCw className="size-3.5" aria-hidden="true" />Загрузить модели
+                        </button>
                       </label>
 
                       <label className="grid gap-1 text-sm">

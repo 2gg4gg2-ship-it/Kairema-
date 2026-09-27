@@ -555,8 +555,16 @@ export const appRouter = router({
         storageReady: isUserProviderKeyEncryptionConfigured(),
       };
     }),
-    /** Reads the provider's live catalog. A typed key is used when supplied, so a first-time user can browse models before saving. */
-    models: protectedProcedure.input(z.object({ provider: userProviderIdSchema, apiKey: userProviderKeySchema.optional() })).query(async ({ ctx, input }) => {
+    /**
+     * Reads the provider's live catalog. A typed key is used when supplied, so a first-time user
+     * can browse models before saving.
+     *
+     * This must stay a mutation, never a query: tRPC sends query input in the GET query string,
+     * which would put a plaintext API key into the request URL and therefore into proxy and
+     * access logs. As a mutation the key travels in the POST body like every other credential
+     * in this router.
+     */
+    models: protectedProcedure.input(z.object({ provider: userProviderIdSchema, apiKey: userProviderKeySchema.optional() })).mutation(async ({ ctx, input }) => {
       try {
         const descriptor = readyUserProvider(input.provider);
         const apiKey = await resolveUserProviderKeyInput(ctx.user.id, descriptor.id, input.apiKey);

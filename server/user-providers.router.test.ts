@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import express from "express";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createExpressMiddleware } from "@trpc/server/adapters/express";
+import { createTRPCClient, httpBatchLink } from "@trpc/client";
+import superjson from "superjson";
 import type { TrpcContext } from "./_core/context";
 
 const scopedDb = vi.hoisted(() => ({
@@ -25,7 +29,7 @@ vi.mock("./user-providers", async (importOriginal) => ({
   ...providerApi,
 }));
 
-import { appRouter } from "./routers";
+import { appRouter, type AppRouter } from "./routers";
 import { __resetUserProviderKeyCacheForTests } from "./user-provider-secrets";
 
 process.env.USER_PROVIDER_KEY_ENCRYPTION_KEY = "d".repeat(64);
@@ -203,5 +207,66 @@ describe("userProviders.setActive and remove", () => {
     await expect(callerFor(7, 1).userProviders.setActive({ provider: "openrouter" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
     await expect(callerFor(7, 1).userProviders.remove({ provider: "openrouter" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
     expect(scopedDb.deleteUserProviderConfig).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Transport-level regression guard for B-1.
+ *
+ * A direct caller() test cannot see the wire, so this mounts the real router on a real HTTP
+ * server, calls it with the same client configuration the app uses in the browser, and inspects
+ * the request that actually went out. tRPC puts query input in the GET query string, so if
+ * `userProviders.models` were a query again the typed key would be part of the recorded URL and
+ * every proxy or access log upstream would hold it.
+ */
+describe("userProviders.models over real HTTP", () => {
+  type Captured = { method: string; url: string };
+  let server: ReturnType<express.Express["listen"]> | null = null;
+
+  afterEach(async () => {
+    if (server) await new Promise<void>((resolve) => server?.close(() => resolve()));
+    server = null;
+  });
+
+  it("sends the API key in the POST body and never in the URL", async () => {
+    const captured: Captured[] = [];
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      captured.push({ method: req.method, url: req.originalUrl });
+      next();
+    });
+    app.use("/api/trpc", createExpressMiddleware({
+      router: appRouter,
+      transformer: superjson,
+      createContext: ({ req, res }) => ({
+        user: { id: 42, openId: "user-42", email: "user@example.com", name: "User", loginMethod: "manus", role: "user", createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date(), isGuest: 0 },
+        req: req as unknown as TrpcContext["req"],
+        res: res as unknown as TrpcContext["res"],
+      }),
+    }));
+    server = app.listen(0);
+    await new Promise<void>((resolve) => server?.once("listening", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Не удалось запустить test server.");
+
+    const client = createTRPCClient<AppRouter>({
+      links: [httpBatchLink({ url: `http://127.0.0.1:${address.port}/api/trpc`, transformer: superjson })],
+    });
+    const result = await client.userProviders.models.mutate({ provider: "openrouter", apiKey: KEY });
+
+    // The catalog itself still works exactly as before.
+    expect(providerApi.listUserProviderModels).toHaveBeenCalledWith("openrouter", KEY);
+    expect(result.models).toEqual([{ id: MODEL, name: "Model A" }, { id: "vendor/model-b", name: "Model B" }]);
+
+    const modelsRequest = captured.find((request) => request.url.includes("userProviders.models"));
+    expect(modelsRequest).toBeDefined();
+    expect(modelsRequest?.method).toBe("POST");
+    // Nothing secret anywhere in the request line: not the key, not even the field name.
+    expect(modelsRequest?.url).not.toContain(KEY);
+    expect(modelsRequest?.url).not.toContain("apiKey");
+    expect(modelsRequest?.url).not.toContain("input=");
+    // Nor in any other request the batch produced on the way out.
+    for (const request of captured) expect(request.url).not.toContain(KEY);
   });
 });
