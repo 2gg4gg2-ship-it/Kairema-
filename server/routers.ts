@@ -21,7 +21,8 @@ import { getCapacityControllerSnapshot, getCapacityPolicy, listCapacityProviderB
 import { promoteGuest, clearGuestCookie } from "./_core/guest-session";
 import { GUEST_COOKIE_NAME } from "@shared/const";
 import { decryptUserProviderSecret, encryptUserProviderSecret, isUserProviderKeyEncryptionConfigured, userProviderKeyHint, UserProviderKeyConfigurationError, UserProviderKeyDecryptionError } from "./user-provider-secrets";
-import { listUserProviderModels, listUserProviders, readyUserProvider, verifyUserProviderKey, UserProviderError, UserProviderNotImplementedError } from "./user-providers";
+import { builtInUserProviderTarget, customUserProviderTarget, isCustomUserProviderId, listUserProviderModels, listUserProviders, newCustomUserProviderId, readyUserProvider, verifyUserProviderKey, UserProviderError, UserProviderNotImplementedError } from "./user-providers";
+import { MAX_ENDPOINT_URL_LENGTH, MAX_PROVIDER_NAME_LENGTH, UserProviderEndpointError } from "./user-provider-endpoints";
 
 const settingsSchema = z.object({
   style: z.enum(["default", "professional", "friendly", "concise", "steps"]).optional(),
@@ -171,8 +172,16 @@ function storageError(error: unknown) {
  * The public shape of a saved provider. The encrypted envelope and the plaintext key are
  * deliberately absent from this type, so no procedure can return them by accident.
  */
-function publicUserProviderConfig(row: { provider: string; activeModel: string; keyHint: string; updatedAt: Date }) {
-  return { provider: row.provider, activeModel: row.activeModel, keyHint: row.keyHint, updatedAt: row.updatedAt.toISOString() };
+function publicUserProviderConfig(row: { provider: string; activeModel: string; keyHint: string; updatedAt: Date; displayName?: string | null; baseUrl?: string | null; modelsEndpoint?: string | null }) {
+  return {
+    provider: row.provider,
+    activeModel: row.activeModel,
+    keyHint: row.keyHint,
+    updatedAt: row.updatedAt.toISOString(),
+    displayName: row.displayName ?? null,
+    baseUrl: row.baseUrl ?? null,
+    modelsEndpoint: row.modelsEndpoint ?? null,
+  };
 }
 
 /**
@@ -192,6 +201,26 @@ async function resolveUserProviderKeyInput(userId: number, provider: string, api
   return decryptUserProviderSecret(config.encryptedApiKey);
 }
 
+/**
+ * Produces the HTTP target for either a built-in provider or one the user defined.
+ *
+ * A custom provider is resolved from the caller's own row, so its URL is re-validated on every
+ * use and never taken from the request that is being served. When the user is still typing a
+ * new provider, `draft` carries the not-yet-saved values; nothing from a draft is ever stored
+ * as a side effect of asking for a catalog or a connection check.
+ */
+async function resolveUserProviderTarget(userId: number, provider: string, draft?: { baseUrl?: string; modelsEndpoint?: string; displayName?: string }) {
+  if (isCustomUserProviderId(provider)) {
+    const saved = await getUserProviderConfig(userId, provider);
+    const baseUrl = saved?.baseUrl ?? draft?.baseUrl;
+    if (!saved && !baseUrl) throw new TRPCError({ code: "NOT_FOUND", message: "Этот провайдер ещё не добавлен." });
+    const displayName = saved?.displayName ?? draft?.displayName ?? "Мой провайдер";
+    return customUserProviderTarget({ id: provider, displayName, baseUrl: baseUrl!, modelsEndpoint: saved?.modelsEndpoint ?? draft?.modelsEndpoint });
+  }
+  // Unsaved draft values are ignored for a built-in provider: its endpoints are code-owned.
+  return builtInUserProviderTarget(readyUserProvider(provider));
+}
+
 /** Provider problems reach the client as their fixed, already-sanitised text. */
 function userProviderTrpcError(error: unknown): TRPCError {
   if (error instanceof TRPCError) return error;
@@ -199,12 +228,19 @@ function userProviderTrpcError(error: unknown): TRPCError {
   if (error instanceof UserProviderKeyConfigurationError) return new TRPCError({ code: "PRECONDITION_FAILED", message: error.message });
   // A stored envelope that no longer opens is a recoverable per-user condition, not a server fault.
   if (error instanceof UserProviderKeyDecryptionError) return new TRPCError({ code: "BAD_REQUEST", message: "Сохранённый API-ключ не удалось расшифровать. Укажите ключ заново." });
+  // An unsafe or malformed endpoint is the user's own input, not a provider failure.
+  if (error instanceof UserProviderEndpointError) return new TRPCError({ code: "BAD_REQUEST", message: error.message });
   if (error instanceof UserProviderError) return new TRPCError({ code: "BAD_REQUEST", message: error.message });
   return new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Не удалось выполнить операцию с провайдером. Повторите попытку позже." });
 }
 
 const userProviderIdSchema = z.string().trim().min(1).max(32);
 const userProviderKeySchema = z.string().trim().min(8).max(400);
+const userProviderDraftSchema = z.object({
+  displayName: z.string().trim().min(1).max(MAX_PROVIDER_NAME_LENGTH).optional(),
+  baseUrl: z.string().trim().min(1).max(MAX_ENDPOINT_URL_LENGTH).optional(),
+  modelsEndpoint: z.string().trim().min(1).max(MAX_ENDPOINT_URL_LENGTH).optional(),
+});
 
 export const appRouter = router({
   system: systemRouter,
@@ -557,33 +593,96 @@ export const appRouter = router({
     }),
     /**
      * Reads the provider's live catalog. A typed key is used when supplied, so a first-time user
-     * can browse models before saving.
+     * can browse models before saving. Draft values let a brand-new custom provider be probed
+     * before it is stored; nothing from a draft is written as a side effect of asking.
      *
      * This must stay a mutation, never a query: tRPC sends query input in the GET query string,
      * which would put a plaintext API key into the request URL and therefore into proxy and
      * access logs. As a mutation the key travels in the POST body like every other credential
      * in this router.
      */
-    models: protectedProcedure.input(z.object({ provider: userProviderIdSchema, apiKey: userProviderKeySchema.optional() })).mutation(async ({ ctx, input }) => {
+    models: protectedProcedure.input(z.object({ provider: userProviderIdSchema, apiKey: userProviderKeySchema.optional(), draft: userProviderDraftSchema.optional() })).mutation(async ({ ctx, input }) => {
       try {
-        const descriptor = readyUserProvider(input.provider);
-        const apiKey = await resolveUserProviderKeyInput(ctx.user.id, descriptor.id, input.apiKey);
-        return { models: await listUserProviderModels(descriptor.id, apiKey) };
+        const target = await resolveUserProviderTarget(ctx.user.id, input.provider, input.draft);
+        const apiKey = input.apiKey ?? (await resolveUserProviderKeyInput(ctx.user.id, target.id));
+        return { models: await listUserProviderModels(target, apiKey) };
+      } catch (error) {
+        throw userProviderTrpcError(error);
+      }
+    }),
+    /**
+     * Creates a provider the user defined. The URL is validated before anything is stored, and
+     * the credential is encrypted on the way in, so no plaintext key ever reaches the database.
+     */
+    createCustom: protectedProcedure.input(z.object({ displayName: z.string().trim().min(1).max(MAX_PROVIDER_NAME_LENGTH), baseUrl: z.string().trim().min(1).max(MAX_ENDPOINT_URL_LENGTH), modelsEndpoint: z.string().trim().max(MAX_ENDPOINT_URL_LENGTH).optional(), apiKey: userProviderKeySchema, activeModel: z.string().trim().min(1).max(191), makeActive: z.boolean().optional() })).mutation(async ({ ctx, input }) => {
+      try {
+        const apiKey = input.apiKey.trim();
+        const provider = newCustomUserProviderId();
+        const target = customUserProviderTarget({ id: provider, displayName: input.displayName, baseUrl: input.baseUrl, modelsEndpoint: input.modelsEndpoint });
+        // The catalog is read before the row exists, so an unreachable or rejected endpoint can
+        // never leave a half-configured provider behind.
+        const models = await listUserProviderModels(target, apiKey);
+        if (!models.some((model) => model.id === input.activeModel)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Выбранная модель отсутствует в каталоге провайдера. Проверьте подключение и обновите список моделей." });
+        }
+        const config = await upsertUserProviderConfig({
+          userId: ctx.user.id,
+          provider,
+          activeModel: input.activeModel,
+          encryptedApiKey: encryptUserProviderSecret(apiKey),
+          keyHint: userProviderKeyHint(apiKey),
+          displayName: target.displayName,
+          baseUrl: input.baseUrl.trim(),
+          modelsEndpoint: input.modelsEndpoint?.trim() || null,
+        });
+        if (input.makeActive) await setActiveUserProvider(ctx.user.id, provider);
+        return publicUserProviderConfig(config!);
+      } catch (error) {
+        throw userProviderTrpcError(error);
+      }
+    }),
+    /** Replaces the endpoint, name and credential of a provider the caller already owns. */
+    updateCustom: protectedProcedure.input(z.object({ provider: userProviderIdSchema, displayName: z.string().trim().min(1).max(MAX_PROVIDER_NAME_LENGTH).optional(), baseUrl: z.string().trim().min(1).max(MAX_ENDPOINT_URL_LENGTH).optional(), modelsEndpoint: z.string().trim().max(MAX_ENDPOINT_URL_LENGTH).optional(), apiKey: userProviderKeySchema, activeModel: z.string().trim().min(1).max(191) })).mutation(async ({ ctx, input }) => {
+      try {
+        if (!isCustomUserProviderId(input.provider)) throw new TRPCError({ code: "BAD_REQUEST", message: "Этот провайдер не является пользовательским." });
+        const existing = await requireOwnedUserProviderConfig(ctx.user.id, input.provider);
+        const apiKey = input.apiKey.trim();
+        const target = customUserProviderTarget({
+          id: input.provider,
+          displayName: input.displayName ?? existing.displayName ?? "Мой провайдер",
+          baseUrl: input.baseUrl ?? existing.baseUrl ?? "",
+          modelsEndpoint: input.modelsEndpoint ?? existing.modelsEndpoint,
+        });
+        const models = await listUserProviderModels(target, apiKey);
+        if (!models.some((model) => model.id === input.activeModel)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Выбранная модель отсутствует в каталоге провайдера. Проверьте подключение и обновите список моделей." });
+        }
+        const config = await upsertUserProviderConfig({
+          userId: ctx.user.id,
+          provider: input.provider,
+          activeModel: input.activeModel,
+          encryptedApiKey: encryptUserProviderSecret(apiKey),
+          keyHint: userProviderKeyHint(apiKey),
+          displayName: target.displayName,
+          baseUrl: (input.baseUrl ?? existing.baseUrl ?? "").trim(),
+          modelsEndpoint: (input.modelsEndpoint ?? existing.modelsEndpoint) || null,
+        });
+        return publicUserProviderConfig(config!);
       } catch (error) {
         throw userProviderTrpcError(error);
       }
     }),
     /** Auth and credit probe only. It runs no inference and never sends a user prompt. */
-    test: protectedProcedure.input(z.object({ provider: userProviderIdSchema, apiKey: userProviderKeySchema.optional() })).mutation(async ({ ctx, input }) => {
+    test: protectedProcedure.input(z.object({ provider: userProviderIdSchema, apiKey: userProviderKeySchema.optional(), draft: userProviderDraftSchema.optional() })).mutation(async ({ ctx, input }) => {
       try {
-        const descriptor = readyUserProvider(input.provider);
-        const apiKey = await resolveUserProviderKeyInput(ctx.user.id, descriptor.id, input.apiKey);
-        const result = await verifyUserProviderKey(descriptor.id, apiKey);
+        const target = await resolveUserProviderTarget(ctx.user.id, input.provider, input.draft);
+        const apiKey = input.apiKey ?? (await resolveUserProviderKeyInput(ctx.user.id, target.id));
+        const result = await verifyUserProviderKey(target, apiKey);
         // Metadata only: provider and verdict. The key and the upstream body are never logged.
-        console.info("[Kairema BYOK]", JSON.stringify({ event: "byok.connection_test", provider: descriptor.id, result: result.ok ? "success" : "failure", category: result.ok ? null : result.category }));
+        console.info("[Kairema BYOK]", JSON.stringify({ event: "byok.connection_test", provider: target.id, result: result.ok ? "success" : "failure", category: result.ok ? null : result.category }));
         return result.ok
-          ? ({ ok: true as const, provider: descriptor.id, label: result.label, message: "API-ключ принят провайдером." })
-          : ({ ok: false as const, provider: descriptor.id, category: result.category, http: result.http, message: result.message });
+          ? ({ ok: true as const, provider: target.id, label: result.label, message: "API-ключ принят провайдером." })
+          : ({ ok: false as const, provider: target.id, category: result.category, http: result.http, message: result.message });
       } catch (error) {
         throw userProviderTrpcError(error);
       }
@@ -591,31 +690,34 @@ export const appRouter = router({
     /** Requires the key on every save, so a row can never exist without a usable credential. */
     save: protectedProcedure.input(z.object({ provider: userProviderIdSchema, apiKey: userProviderKeySchema, activeModel: z.string().trim().min(1).max(191), makeActive: z.boolean().optional() })).mutation(async ({ ctx, input }) => {
       try {
-        const descriptor = readyUserProvider(input.provider);
+        if (isCustomUserProviderId(input.provider)) throw new TRPCError({ code: "BAD_REQUEST", message: "Для своего провайдера используйте отдельное сохранение." });
+        const target = builtInUserProviderTarget(readyUserProvider(input.provider));
         const apiKey = input.apiKey.trim();
         // The model must exist in the catalog the provider returns right now, so the screen
         // can never persist an invented model id.
-        const models = await listUserProviderModels(descriptor.id, apiKey);
+        const models = await listUserProviderModels(target, apiKey);
         if (!models.some((model) => model.id === input.activeModel)) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Выбранная модель отсутствует в каталоге провайдера. Обновите список моделей." });
         }
         const config = await upsertUserProviderConfig({
           userId: ctx.user.id,
-          provider: descriptor.id,
+          provider: target.id,
           activeModel: input.activeModel,
           encryptedApiKey: encryptUserProviderSecret(apiKey),
           keyHint: userProviderKeyHint(apiKey),
         });
-        if (input.makeActive) await setActiveUserProvider(ctx.user.id, descriptor.id);
+        if (input.makeActive) await setActiveUserProvider(ctx.user.id, target.id);
         return publicUserProviderConfig(config!);
       } catch (error) {
         throw userProviderTrpcError(error);
       }
     }),
     setActive: protectedProcedure.input(z.object({ provider: userProviderIdSchema })).mutation(async ({ ctx, input }) => {
-      const descriptor = readyUserProvider(input.provider);
-      await requireOwnedUserProviderConfig(ctx.user.id, descriptor.id);
-      const settings = await setActiveUserProvider(ctx.user.id, descriptor.id);
+      // Ownership is the only check: a built-in id and a user's own custom row are both valid
+      // targets, while somebody else's row is simply not found.
+      const config = await requireOwnedUserProviderConfig(ctx.user.id, input.provider);
+      if (!isCustomUserProviderId(input.provider)) readyUserProvider(config.provider);
+      const settings = await setActiveUserProvider(ctx.user.id, input.provider);
       return { activeProvider: settings.myApiProvider ?? null };
     }),
     remove: protectedProcedure.input(z.object({ provider: userProviderIdSchema })).mutation(async ({ ctx, input }) => {

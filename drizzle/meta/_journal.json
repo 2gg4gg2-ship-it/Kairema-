@@ -330,6 +330,13 @@
       "when": 1790612400000,
       "tag": "0046_user_provider_configs",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "5",
+      "when": 1790700000000,
+      "tag": "0047_user_provider_custom_endpoints",
+      "breakpoints": true
     }
   ]
 }

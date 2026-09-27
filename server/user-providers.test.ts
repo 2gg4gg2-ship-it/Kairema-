@@ -9,7 +9,7 @@ vi.mock("./capacity-controller", async (importOriginal) => ({
   ...capacity,
 }));
 
-import { chatWithUserProviderStream, listUserProviderModels, publicUserProviderError, readyUserProvider, UserProviderError, UserProviderGuestNotAllowedError, UserProviderNotImplementedError, verifyUserProviderKey } from "./user-providers";
+import { chatWithUserProviderStream, customUserProviderTarget, listUserProviderModels, publicUserProviderError, readyUserProvider, UserProviderError, UserProviderGuestNotAllowedError, UserProviderNotImplementedError, verifyUserProviderKey } from "./user-providers";
 import { UserProviderNotConfiguredError } from "./user-providers";
 
 const KEY = "sk-or-v1-user-secret-1234";
@@ -311,5 +311,29 @@ describe("public error text", () => {  it("explains a missing configuration inst
   it("never leaks a raw provider body for an unclassified error", () => {
     const text = publicUserProviderError(new Error("upstream said: {\"api_key\":\"sk-or-v1-leaked\"}"));
     expect(text).not.toContain("sk-or-v1-leaked");
+  });
+});
+
+describe("answer label for a user-defined provider", () => {
+  it("UX-2: is attributed to the provider's own name, not to the built-in one", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(sse([`data: ${JSON.stringify({ choices: [{ delta: { content: "вет" } }] })}\n\n`, "data: [DONE]\n\n"]));
+    vi.stubGlobal("fetch", fetchMock);
+    const target = customUserProviderTarget({ id: "custom-abc123", displayName: "Мой провайдер", baseUrl: "https://api.example.com/v1" });
+    const actor = { userId: 7, requestKey: "k" };
+    const result = await chatWithUserProviderStream({
+      provider: target,
+      model: "vendor/model-b",
+      modelLabel: "vendor/model-b",
+      apiKey: "sk-custom-9999",
+      history: [{ role: "user", content: "Привет" }],
+      roleId: "flagship",
+      onDelta: () => undefined,
+      actor,
+    });
+    // The request still went to the user's own endpoint, not to a built-in provider.
+    expect(fetchMock.mock.calls[0]![0]).toBe("https://api.example.com/v1/chat/completions");
+    expect(result.label).toBe("Мой провайдер · vendor/model-b");
+    expect(result.modelUsed).toBe("vendor/model-b");
+    expect(result.fallbackUsed).toBe(false);
   });
 });

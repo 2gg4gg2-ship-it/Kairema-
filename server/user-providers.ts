@@ -2,6 +2,7 @@ import { beginCapacityGeneration, settleCapacityReservation, type CapacityActor,
 import { KAIREMA_SYSTEM_PROMPT, dataFromSseBlock, openRouterStreamDelta, sanitizeAssistantContent, type ChatMessage, type ChatSettings, type ModelStatus, type Provider, type StatusCategory } from "./providers";
 import { createRequestBudget } from "./providers";
 import { UserProviderKeyConfigurationError, UserProviderKeyDecryptionError } from "./user-provider-secrets";
+import { MAX_PROVIDER_NAME_LENGTH, UserProviderEndpointError, buildUserProviderChatEndpoint, buildUserProviderModelsEndpoint, normalizeUserProviderDisplayName } from "./user-provider-endpoints";
 
 /**
  * A provider the user can attach their own key to.
@@ -54,6 +55,72 @@ export class UserProviderNotImplementedError extends Error {
     super(`${displayName}: этот провайдер пока не поддерживается.`);
     this.name = "UserProviderNotImplementedError";
   }
+}
+
+/** The user's own provider is addressed by a row id, never by a name the UI can choose freely. */
+export const CUSTOM_PROVIDER_PREFIX = "custom-";
+
+/** Generates a storage-safe id for a new user-defined provider. */
+export function newCustomUserProviderId(): string {
+  return `${CUSTOM_PROVIDER_PREFIX}${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+}
+
+export function isCustomUserProviderId(providerId: string): boolean {
+  return providerId.startsWith(CUSTOM_PROVIDER_PREFIX);
+}
+
+/**
+ * Everything the HTTP layer needs to talk to one provider, already validated.
+ *
+ * A built-in descriptor contributes code-owned endpoints; a custom provider contributes the ones
+ * its owner saved, which passed the endpoint layer at save time. Callers cannot hand an
+ * unvalidated URL in here, so no request is ever issued to a value that skipped the SSRF gate.
+ */
+export type UserProviderTarget = {
+  id: string;
+  displayName: string;
+  isCustom: boolean;
+  /** Where the user obtains a key, shown as a link; absent for a custom provider. */
+  keyUrl: string | null;
+  /** A cheap auth/credit probe that performs no inference. Null means "probe the catalog". */
+  keyProbeEndpoint: string | null;
+  modelsEndpoint: string;
+  chatEndpoint: string;
+};
+
+/** Wraps a built-in descriptor in the shape the HTTP layer consumes. */
+export function builtInUserProviderTarget(descriptor: Extract<UserProviderDescriptor, { available: true }>): UserProviderTarget {
+  return {
+    id: descriptor.id,
+    displayName: descriptor.displayName,
+    isCustom: false,
+    keyUrl: descriptor.keyUrl,
+    keyProbeEndpoint: descriptor.keyEndpoint,
+    modelsEndpoint: descriptor.modelsEndpoint,
+    chatEndpoint: descriptor.chatEndpoint,
+  };
+}
+
+/**
+ * Builds the target for a provider the user defined, validating the URL at this moment.
+ *
+ * A custom provider is treated as an OpenAI-compatible API: the chat route is derived from the
+ * base URL and the catalog from its `/models` sibling, unless an explicit catalog URL was given.
+ */
+export function customUserProviderTarget(input: { id: string; displayName: string; baseUrl: string; modelsEndpoint?: string | null }): UserProviderTarget {
+  const displayName = normalizeUserProviderDisplayName(input.displayName);
+  if (displayName.length > MAX_PROVIDER_NAME_LENGTH) throw new UserProviderEndpointError(`Название провайдера не должно превышать ${MAX_PROVIDER_NAME_LENGTH} символов.`);
+  const chatEndpoint = buildUserProviderChatEndpoint(input.baseUrl);
+  const modelsEndpoint = buildUserProviderModelsEndpoint(input.baseUrl, input.modelsEndpoint);
+  return { id: input.id, displayName, isCustom: true, keyUrl: null, keyProbeEndpoint: null, modelsEndpoint: modelsEndpoint.toString(), chatEndpoint: chatEndpoint.toString() };
+}
+
+/** Accepts either a built-in id or an already-validated target. */
+export type UserProviderSelector = string | UserProviderTarget;
+
+function toTarget(selector: UserProviderSelector): UserProviderTarget {
+  if (typeof selector !== "string") return selector;
+  return builtInUserProviderTarget(readyUserProvider(selector));
 }
 
 export class UserProviderNotConfiguredError extends Error {
@@ -157,15 +224,19 @@ export type UserProviderKeyCheck =
   | { ok: false; category: UserProviderErrorCategory; http: number | null; message: string };
 
 /**
- * Auth/credit probe against the provider's documented key endpoint. It performs no
- * inference, so it never spends the caller's tokens or consumes a generation attempt, and
- * the only thing returned is a classification plus a fixed message.
+ * Auth/credit probe against the provider's own key route. It performs no inference, so it never
+ * spends the caller's tokens or consumes a generation attempt, and the only thing returned is a
+ * classification plus a fixed message.
+ *
+ * A custom provider has no dedicated key route, so the catalog request doubles as the probe: it
+ * is still a read-only call that reveals whether the key is accepted, and it costs nothing.
  */
-export async function verifyUserProviderKey(providerId: string, apiKey: string): Promise<UserProviderKeyCheck> {
-  const descriptor = readyUserProvider(providerId);
+export async function verifyUserProviderKey(selector: UserProviderSelector, apiKey: string): Promise<UserProviderKeyCheck> {
+  const target = toTarget(selector);
+  const probe = target.keyProbeEndpoint ?? target.modelsEndpoint;
   let response: Response;
   try {
-    response = await fetch(descriptor.keyEndpoint, { method: "GET", headers: userProviderHeaders(apiKey), signal: timeoutSignal(undefined, KEY_PROBE_TIMEOUT_MS) });
+    response = await fetch(probe, { method: "GET", headers: userProviderHeaders(apiKey), signal: timeoutSignal(undefined, KEY_PROBE_TIMEOUT_MS) });
   } catch (error) {
     const failure = providerNetworkError(error);
     return { ok: false, category: failure.category, http: null, message: failure.message };
@@ -188,11 +259,11 @@ type CatalogEntry = { id?: unknown; name?: unknown; architecture?: { modality?: 
  * whatever the provider returns right now. Non-text models are dropped because the chat
  * screen only sends text, and the result is bounded so one response cannot flood the client.
  */
-export async function listUserProviderModels(providerId: string, apiKey: string): Promise<UserProviderModel[]> {
-  const descriptor = readyUserProvider(providerId);
+export async function listUserProviderModels(selector: UserProviderSelector, apiKey: string): Promise<UserProviderModel[]> {
+  const target = toTarget(selector);
   let response: Response;
   try {
-    response = await fetch(descriptor.modelsEndpoint, { method: "GET", headers: userProviderHeaders(apiKey), signal: timeoutSignal(undefined, CATALOG_TIMEOUT_MS) });
+    response = await fetch(target.modelsEndpoint, { method: "GET", headers: userProviderHeaders(apiKey), signal: timeoutSignal(undefined, CATALOG_TIMEOUT_MS) });
   } catch (error) {
     throw providerNetworkError(error);
   }
@@ -205,12 +276,14 @@ export async function listUserProviderModels(providerId: string, apiKey: string)
   const seen = new Set<string>();
   const models: UserProviderModel[] = [];
   for (const entry of entries) {
-    if (typeof entry?.id !== "string" || typeof entry.name !== "string") continue;
+    if (typeof entry?.id !== "string" || !entry.id.trim()) continue;
     const modality = entry.architecture?.modality?.input;
     if (typeof modality === "string" && !modality.split(",").some((value) => value.trim() === "text")) continue;
     if (seen.has(entry.id)) continue;
     seen.add(entry.id);
-    models.push({ id: entry.id, name: entry.name.slice(0, 120) });
+    // An OpenAI-compatible catalog entry may carry no display name, so the id stands in for it.
+    const name = typeof entry.name === "string" && entry.name.trim() ? entry.name : entry.id;
+    models.push({ id: entry.id, name: name.slice(0, 120) });
     if (models.length >= MAX_CATALOG_MODELS) break;
   }
   return models;
@@ -251,7 +324,7 @@ export type UserProviderStreamResult = {
  * where this generation actually lands.
  */
 export async function chatWithUserProviderStream(options: {
-  provider: string;
+  provider: UserProviderSelector;
   model: string;
   modelLabel: string;
   apiKey: string;
@@ -262,7 +335,7 @@ export async function chatWithUserProviderStream(options: {
   signal?: AbortSignal;
   actor?: CapacityActor;
 }): Promise<UserProviderStreamResult> {
-  const descriptor = readyUserProvider(options.provider);
+  const target = toTarget(options.provider);
   const capacityLease: CapacityGenerationLease | null = options.actor
     ? await beginCapacityGeneration(options.actor, options.roleId, options.settings ?? {})
     : null;
@@ -278,10 +351,10 @@ export async function chatWithUserProviderStream(options: {
     if (capacityLease) {
       reservation = await capacityLease.reserveAttempt({ provider: "openrouter" as Provider, modelId: options.model }, attemptIndex);
     }
-    logByok("byok.invoke_start", { requestId: budget.requestId, attemptIndex, provider: descriptor.id, model: options.model, budgetRemaining: budget.remaining });
+    logByok("byok.invoke_start", { requestId: budget.requestId, attemptIndex, provider: target.id, model: options.model, budgetRemaining: budget.remaining });
     let response: Response;
     try {
-      response = await fetch(descriptor.chatEndpoint, {
+      response = await fetch(target.chatEndpoint, {
         method: "POST",
         headers: { ...userProviderHeaders(options.apiKey), Accept: "text/event-stream" },
         body: JSON.stringify({ model: options.model, messages: buildUserProviderMessages(options.modelLabel, options.history), stream: true }),
@@ -292,10 +365,10 @@ export async function chatWithUserProviderStream(options: {
       if (options.signal?.aborted) throw error;
       throw providerNetworkError(error);
     }
-    logByok("byok.invoke_response", { requestId: budget.requestId, provider: descriptor.id, model: options.model, httpStatus: response.status, latencyMs: Date.now() - startedAt });
+    logByok("byok.invoke_response", { requestId: budget.requestId, provider: target.id, model: options.model, httpStatus: response.status, latencyMs: Date.now() - startedAt });
     if (!response.ok) {
       const failure = classifyUserProviderFailure(response.status, await readUpstreamJson(response));
-      logByok("byok.invoke_error", { requestId: budget.requestId, provider: descriptor.id, model: options.model, httpStatus: response.status, errorCategory: failure.category });
+      logByok("byok.invoke_error", { requestId: budget.requestId, provider: target.id, model: options.model, httpStatus: response.status, errorCategory: failure.category });
       throw new UserProviderError(failure.category, failure.message, response.status);
     }
     const reader = response.body?.getReader();
@@ -329,8 +402,11 @@ export async function chatWithUserProviderStream(options: {
     }
     const content = sanitizeAssistantContent(parts.join(""));
     if (!content) throw new UserProviderError("UNKNOWN", "Провайдер вернул пустой ответ. Повторите попытку.", response.status);
-    logByok("byok.invoke_succeeded", { requestId: budget.requestId, provider: descriptor.id, model: options.model, latencyMs: Date.now() - startedAt });
-    return { content, modelUsed: options.modelLabel, provider: "openrouter", fallbackUsed: false, label: options.modelLabel, status: byokReadyStatus() };
+    logByok("byok.invoke_succeeded", { requestId: budget.requestId, provider: target.id, model: options.model, latencyMs: Date.now() - startedAt });
+    // A user-defined provider is shown under the name its owner gave it instead of the built-in
+    // one, so the answer is attributed to the provider the user actually configured.
+    const answerLabel = target.isCustom ? `${target.displayName} · ${options.modelLabel}` : options.modelLabel;
+    return { content, modelUsed: options.modelLabel, provider: "openrouter", fallbackUsed: false, label: answerLabel, status: byokReadyStatus() };
   } finally {
     // After a fetch begins the provider may charge even an errored response, so the
     // reservation is settled conservatively; only a pre-fetch denial creates nothing.

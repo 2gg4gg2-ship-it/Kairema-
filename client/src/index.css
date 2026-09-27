@@ -502,6 +502,10 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-model-pill { display:inline-flex; flex:0 1 auto; min-width:0; align-items:center; justify-content:center; gap:10px; height:42px; box-sizing:border-box; padding:8px 16px; border:none; border-radius:999px; background:#242529; }
 .kairema-model-pill:hover { background:#2D2E33; }
 .kairema-model-sparkle { flex:0 0 auto; width:18px; height:18px; color:#FFFFFF; }
+.kairema-mode-hint-link { color:#a096ff; text-decoration:underline; text-underline-offset:2px; }
+.kairema-mode-hint-link:hover { color:#c7bfff; }
+/* My API header: the saved user binding shown in place of the Kairema role selector. */
+.kairema-model-binding { flex:0 1 auto; min-width:0; color:#FFFFFF; font-size:15px; font-weight:600; line-height:1.2; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .kairema-model-chevron { flex:0 0 auto; width:15px; height:15px; color:#FFFFFF; stroke-width:2.25; }
 .kairema-select-wrap { display:inline-flex; flex:0 1 auto; min-width:0; }
 .kairema-topbar .kairema-role-menu-trigger { display:inline-flex; flex:0 1 auto; min-width:0; min-height:0; max-width:min(40vw,300px); padding:0; border:0; border-radius:0; color:#FFFFFF; background:transparent; font-size:15px; font-weight:600; line-height:1.2; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

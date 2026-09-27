@@ -1183,11 +1183,12 @@ export async function getUserProviderConfig(userId: number, provider: string) {
  * provider updates the existing row instead of creating a second one, and two concurrent saves
  * for one provider collapse into a single row rather than duplicating the credential.
  */
-export async function upsertUserProviderConfig(input: { userId: number; provider: string; activeModel: string; encryptedApiKey: string; keyHint: string }) {
+export async function upsertUserProviderConfig(input: { userId: number; provider: string; activeModel: string; encryptedApiKey: string; keyHint: string; displayName?: string | null; baseUrl?: string | null; modelsEndpoint?: string | null }) {
   const db = requireDatabase(await getDb());
   const now = new Date();
-  await db.insert(userProviderConfigs).values({ userId: input.userId, provider: input.provider, activeModel: input.activeModel, encryptedApiKey: input.encryptedApiKey, keyHint: input.keyHint, createdAt: now, updatedAt: now })
-    .onDuplicateKeyUpdate({ set: { activeModel: input.activeModel, encryptedApiKey: input.encryptedApiKey, keyHint: input.keyHint, updatedAt: now } });
+  const identity = { displayName: input.displayName ?? null, baseUrl: input.baseUrl ?? null, modelsEndpoint: input.modelsEndpoint ?? null };
+  await db.insert(userProviderConfigs).values({ userId: input.userId, provider: input.provider, activeModel: input.activeModel, encryptedApiKey: input.encryptedApiKey, keyHint: input.keyHint, ...identity, createdAt: now, updatedAt: now })
+    .onDuplicateKeyUpdate({ set: { activeModel: input.activeModel, encryptedApiKey: input.encryptedApiKey, keyHint: input.keyHint, ...identity, updatedAt: now } });
   return getUserProviderConfig(input.userId, input.provider);
 }
 
@@ -1216,6 +1217,9 @@ export async function deleteUserProviderConfig(userId: number, provider: string)
  * not chosen a provider or when the chosen provider has no saved row; the caller turns that
  * into a clear "not configured" answer, and decrypts the envelope afterwards so a blob that no
  * longer opens is reported as a decryption failure rather than as a missing configuration.
+ *
+ * The endpoint fields travel with the binding so inference reuses the configuration that was
+ * validated at save time instead of accepting an endpoint from the request.
  */
 export async function getActiveUserProviderBinding(userId: number) {
   const settings = await getUserSettings(userId);
@@ -1223,7 +1227,16 @@ export async function getActiveUserProviderBinding(userId: number) {
   if (!provider) return undefined;
   const config = await getUserProviderConfig(userId, provider);
   if (!config) return undefined;
-  return { provider, model: config.activeModel, encryptedApiKey: config.encryptedApiKey, keyHint: config.keyHint, updatedAt: config.updatedAt };
+  return {
+    provider,
+    model: config.activeModel,
+    encryptedApiKey: config.encryptedApiKey,
+    keyHint: config.keyHint,
+    displayName: config.displayName,
+    baseUrl: config.baseUrl,
+    modelsEndpoint: config.modelsEndpoint,
+    updatedAt: config.updatedAt,
+  };
 }
 
 /** Profile display name only. Never called with a client-supplied userId. */

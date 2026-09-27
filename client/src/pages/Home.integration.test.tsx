@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fixtures = vi.hoisted(() => ({
+  userProviders: { providers: [{ id: "openrouter", displayName: "OpenRouter", available: true }], configs: [], activeProvider: null, storageReady: true } as Record<string, unknown>,
   modelId: "fast",
   sessionId: "11111111-1111-4111-8111-111111111111",
   sessions: [] as Array<{ id: string; modelId: string; title: string }>,
@@ -66,7 +67,13 @@ vi.mock("@/lib/chat-export", () => ({
   prepareChatPdf: fixtures.preparePdf,
   downloadPreparedChatExport: fixtures.downloadPrepared,
 }));
-vi.mock("wouter", () => ({ useLocation: () => ["/", fixtures.navigate] }));
+vi.mock("wouter", () => ({
+  useLocation: () => ["/", fixtures.navigate],
+  // Mirrors the real module: a client-side link to the provider settings route.
+  Link: ({ href, children, ...rest }: { href: string; children?: unknown }) => (
+    <a href={href} {...rest}>{children as never}</a>
+  ),
+}));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     auth: { beginLink: { useMutation: () => ({ mutateAsync: fixtures.beginStytchLink, isPending: false }) }, updateName: { useMutation: () => ({ mutateAsync: fixtures.updateName, isPending: false }) } },
@@ -96,7 +103,7 @@ vi.mock("@/lib/trpc", () => ({
       saveDraft: { useMutation: () => ({ mutateAsync: fixtures.saveDraft, isPending: false }) },
       clearDraft: { useMutation: () => ({ mutateAsync: fixtures.clearDraft, isPending: false }) },
     },
-    userProviders: { list: { useQuery: () => ({ data: { providers: [{ id: "openrouter", displayName: "OpenRouter", available: true }], configs: [], activeProvider: null, storageReady: true } }) } },
+    userProviders: { list: { useQuery: () => ({ data: fixtures.userProviders }) } },
     useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, auth: { me: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: fixtures.downloadExport } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, historyPage: { invalidate: fixtures.invalidateMessages, fetch: fixtures.historyPageFetch }, list: { invalidate: fixtures.invalidateSessions } }, userProviders: { list: { invalidate: vi.fn() } } }),
   },
 }));
@@ -114,6 +121,7 @@ import Home, { SettingSwitch } from "./Home";
 const encoder = new TextEncoder();
 
 function resetFixtures() {
+  fixtures.userProviders = { providers: [{ id: "openrouter", displayName: "OpenRouter", available: true }], configs: [], activeProvider: null, storageReady: true };
   fixtures.isAuthenticated = true;
   fixtures.authLoading = false;
   fixtures.authUser = { id: 42, name: "Тест", email: "", loginMethod: "stytch-password", isGuest: 0 };
@@ -1110,5 +1118,72 @@ describe("Home integration flows", () => {
     await user.click(screen.getByRole("button", { name: "Аудит RAG" }));
     expect((await screen.findByRole("dialog")).textContent).toContain("OpenAI News");
     expect(screen.getByRole("dialog").textContent).toContain("Фрагментов");
+  });
+});
+
+describe("My API mode hides the Kairema role selector", () => {
+  beforeEach(() => { window.localStorage.clear(); resetFixtures(); });
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  const customConfig = { provider: "custom-abc", displayName: "Мой провайдер", baseUrl: "https://api.example.com/v1", modelsEndpoint: null, activeModel: "vendor/model-b", keyHint: "••••4321", updatedAt: new Date(0).toISOString() };
+
+  // The sidebar keeps its own list of Kairema roles, so the assertions below are scoped to the
+  // header pill that used to be the system model selector.
+  const headerPill = (container: HTMLElement) => container.querySelector(".kairema-model-pill") as HTMLElement;
+
+  async function enterMyApi() {
+    const user = userEvent.setup();
+    const view = render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    return { user, view };
+  }
+
+  it("BUG-1: replaces the Kairema role dropdown with the saved user binding", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+
+    // The header no longer offers a system role selector, and none of the four roles is
+    // selectable from it any more.
+    const pill = headerPill(container);
+    expect(pill.querySelector("select")).toBeNull();
+    for (const role of ["Kairema Flash", "Kairema Think", "Kairema Context", "Kairema Apex"]) {
+      expect(pill.textContent ?? "").not.toContain(role);
+    }
+    expect(pill.textContent).toContain("Мой провайдер · vendor/model-b");
+  });
+
+  it("BUG-1: the four Kairema roles still work in ordinary Chat mode", async () => {
+    const { container } = render(<Home />);
+    const select = (await screen.findByLabelText("Роли")) as HTMLSelectElement;
+    const options = Array.from(select.options).map((option) => option.textContent);
+    expect(options).toEqual(["Kairema Flash", "Kairema Think", "Kairema Context", "Kairema Apex"]);
+    expect(container.querySelector(".kairema-model-pill select")).not.toBeNull();
+  });
+
+  it("BUG-2: never names a Kairema role in the My API empty state", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    // The empty state is only reachable with an empty transcript.
+    fixtures.messages = [];
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await waitFor(() => expect(container.textContent).toContain("Начните разговор с Мой провайдер · vendor/model-b"));
+    expect(container.textContent ?? "").not.toContain("Начните разговор с Kairema");
+  });
+
+  it("BUG-2: shows a real link to /settings/providers when nothing is configured", async () => {
+    fixtures.userProviders = { providers: [], configs: [], activeProvider: null, storageReady: true };
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+
+    // The header pill and the mode hint both state that nothing is configured yet.
+    await waitFor(() => expect(screen.getAllByText("Мой API не настроен").length).toBeGreaterThan(0));
+    expect(headerPill(container).textContent).toBe("Мой API не настроен");
+    const link = screen.getByRole("link", { name: "Настроить провайдера →" });
+    expect(link.getAttribute("href")).toBe("/settings/providers");
+    expect(container.textContent).not.toContain("Начните разговор с Kairema");
   });
 });
