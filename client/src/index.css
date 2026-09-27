@@ -307,10 +307,11 @@ body { margin: 0; min-width: 320px; background: #070912; color: #e8edf8; }
 /* Model name: plain compact topbar label. No pill, no border, no fill. The click
    target and text truncation stay so the existing 4-item menu still opens. */
 .kairema-role-menu-trigger { display:inline-flex; align-items:center; max-width:190px; padding:0 2px; border:0; border-radius:0; color:var(--k-text); background:transparent; font-size:13px; font-weight:700; line-height:1.2; text-align:left; }
-/* Settings and Profile are two independent chips. The gap between them comes from
-   .kairema-topbar-controls; each chip carries its own border and surface. */
-.kairema-topbar-chip { display:inline-flex; align-items:center; flex:0 0 auto; border:1px solid var(--k-line); background:var(--k-panel-2); border-radius:8px; overflow:hidden; }
-.kairema-topbar-chip > button { height:34px; padding:0 9px; display:inline-flex; align-items:center; justify-content:center; gap:6px; border:0; background:transparent; border-radius:8px; color:var(--k-text); font-size:12px; font-weight:600; line-height:1; white-space:nowrap; }
+/* Settings and Profile are two independent chips, sized like other small topbar
+   items (26px) so they stay well under the 44px model label and never grow the row.
+   The gap between them comes from .kairema-topbar-controls. */
+.kairema-topbar-chip { display:inline-flex; align-items:center; flex:0 0 auto; min-width:0; border:1px solid var(--k-line); background:var(--k-panel-2); border-radius:6px; overflow:hidden; }
+.kairema-topbar-chip > button { height:26px; padding:0 7px; display:inline-flex; align-items:center; justify-content:center; gap:4px; border:0; background:transparent; border-radius:6px; color:var(--k-text); font-size:11px; font-weight:600; line-height:1; white-space:nowrap; }
 .kairema-topbar-chip > button:hover { background:var(--k-panel); }
 /* Single sticky header for both control rows. It lives inside the message scrollport
    (see .kairema-chat-scroll) so it pins against that scroller, not the document. */
