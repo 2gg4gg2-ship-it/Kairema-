@@ -513,17 +513,15 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
    sidebar is a different surface and is untouched here. */
 .kairema-chat-sticky { align-items:stretch; }
 .kairema-chat-controls { order:1; display:block; min-width:0; }
-.kairema-mode-bar { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:2px; padding:0 12px; }
-/* The toggle belongs to the same row as the segment and stays rendered when the panel is
-   collapsed, so the collapsed state never loses its only way back. */
+/* One compact row: Chat/My API, then Export, then the collapse toggle, separated by the
+   same small gap. No space-between, so nothing is pushed to the far edge. */
+.kairema-mode-bar { display:flex; align-items:center; gap:6px; margin-top:2px; padding:0 12px; transition:gap .18s ease; }
 .kairema-mode-switch { display:inline-flex; flex:0 0 auto; align-items:center; gap:3px; width:fit-content; min-width:0; padding:2px; border:1px solid var(--k-line); border-radius:8px; background:var(--k-panel-2); }
 .kairema-mode-option { display:inline-flex; flex:0 0 auto; align-items:center; justify-content:center; gap:5px; height:23px; min-height:23px; min-width:100px; padding:0 12px; border:1px solid transparent; border-radius:7px; color:var(--k-muted); background:transparent; font-size:12px; font-weight:700; line-height:1.15; white-space:nowrap; }
 /* The active tab keeps the product's existing violet accent, unchanged. */
 
-/* Second row: the toggle on the left, Export on the right. The toggle lives inside the
-   always-rendered controls wrapper, so it stays reachable while the panel is collapsed. */
-.kairema-panel-tail { display:flex; align-items:center; gap:8px; margin-top:2px; padding:0 12px 5px; }
-.kairema-panel-tail > .kairema-chat-tools-toggle { flex:0 0 auto; align-self:center; width:24px; height:24px; min-width:24px; min-height:24px; margin:0; }
+/* The toggle is the same existing button, now sitting in the mode row right after Export. */
+.kairema-mode-bar > .kairema-chat-tools-toggle { flex:0 0 auto; align-self:center; width:24px; height:24px; min-width:24px; min-height:24px; margin:0; }
 /* Export is a sibling of the segmented control inside the same row, never inside it. */
 /* Export is a sibling of the segmented control and may compress, so the row can never be
    pushed wider than the chat header: the fixed-width segment keeps its place on the left
@@ -559,8 +557,8 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
   .kairema-topbar-chip > .kairema-header-button { height:32px; padding:0 10px; font-size:12px; }
   .kairema-mode-bar { gap:6px; padding:0 10px; }
   .kairema-mode-option { gap:5px; height:23px; min-height:23px; min-width:92px; padding:0 10px; font-size:12px; }
-  .kairema-panel-tail > .kairema-chat-tools-toggle { width:26px; height:26px; min-width:26px; min-height:26px; }
-  .kairema-panel-tail { gap:6px; padding:0 10px 6px; }
+  .kairema-mode-bar > .kairema-chat-tools-toggle { width:26px; height:26px; min-width:26px; min-height:26px; }
+  .kairema-mode-bar { gap:6px; padding:0 10px 4px; }
   .kairema-export-menu > summary { height:26px; padding:0 9px; }
   .kairema-model-pill { gap:8px; height:38px; padding:6px 12px; }
   .kairema-model-sparkle { width:16px; height:16px; }
@@ -595,3 +593,20 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-model-chevron { transition:transform .16s ease; }
 .kairema-select-wrap:has(.kairema-role-menu-trigger[aria-expanded="true"]) + .kairema-model-chevron { transform:rotate(180deg); }
 @media (prefers-reduced-motion:reduce) { .kairema-model-chevron { transition:none; } }
+
+/* v7-G: the controls collapse to the toggle alone, inside the same row. The height of the
+   row shrinks to the toggle because the segment and Export share one horizontal slot that
+   narrows to zero, and the gap closes with it, so no hollow strip is ever left behind.
+   max-width is used rather than a fixed height so nothing hard-codes a size, and no
+   min-height or margin stays reserved while collapsed. `overflow:clip` keeps the content
+   inside the shrinking slot while a generous bottom clip margin still lets the Export
+   popover escape downwards. The row above is a separate element and never animates. */
+/* The trailing `visibility 0s` keeps the row reachable while open. The collapsed rule
+   delays that same step by the length of the transition, so the fade-out is still seen and
+   the clipped controls then leave the tab order and the accessibility tree together,
+   instead of staying focusable while invisible. Expanding restores them immediately. */
+.kairema-panel-collapse { display:flex; flex:0 1 auto; align-items:center; gap:6px; min-width:0; max-width:100%; overflow:clip; overflow-clip-margin:0 0 240px 0; transition:max-width .18s ease, opacity .18s ease, transform .18s ease, visibility 0s linear 0s; }
+.kairema-chat-controls[data-controls-open="false"] .kairema-panel-collapse { max-width:0; opacity:0; transform:translateY(-8px); visibility:hidden; transition:max-width .18s ease, opacity .18s ease, transform .18s ease, visibility 0s linear .18s; }
+.kairema-chat-controls[data-controls-open="false"] .kairema-mode-bar { gap:0; }
+.kairema-chat-sticky:has(.kairema-chat-controls[data-controls-open="false"]) { border-bottom-color:transparent; }
+@media (prefers-reduced-motion:reduce) { .kairema-panel-collapse { transition:none; } .kairema-mode-bar { transition:none; } }
