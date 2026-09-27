@@ -496,30 +496,35 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-topbar-left .kairema-icon-btn { display:inline-flex; flex:0 0 auto; align-items:center; justify-content:center; width:20px; height:20px; min-width:20px; min-height:20px; padding:0; border:0; background:transparent; }
 /* The role name is the visible heading, so the dynamic model/role label keeps driving it
    and the existing four-item role menu still opens from it. */
+/* The role picker keeps a single interactive trigger inside .kairema-select-wrap, so the
+   sparkle and the chevron are decorative siblings of that wrapper rather than children
+   of it: the trigger stays the only control, and the wrapper stays icon-free. */
+.kairema-model-pill { display:inline-flex; flex:0 1 auto; min-width:0; align-items:center; justify-content:center; gap:10px; height:42px; box-sizing:border-box; padding:8px 16px; border:none; border-radius:999px; background:#242529; }
+.kairema-model-pill:hover { background:#2D2E33; }
+.kairema-model-sparkle { flex:0 0 auto; width:18px; height:18px; color:#FFFFFF; }
+.kairema-model-chevron { flex:0 0 auto; width:15px; height:15px; color:#FFFFFF; stroke-width:2.25; }
 .kairema-select-wrap { display:inline-flex; flex:0 1 auto; min-width:0; }
-.kairema-topbar .kairema-role-menu-trigger { display:inline-flex; flex:0 1 auto; min-width:0; min-height:0; max-width:min(46vw,340px); padding:0; border:0; border-radius:0; color:var(--k-text); background:transparent; font-size:16px; font-weight:600; line-height:1.2; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.kairema-topbar .kairema-role-menu-trigger:hover { color:var(--k-text); }
+.kairema-topbar .kairema-role-menu-trigger { display:inline-flex; flex:0 1 auto; min-width:0; min-height:0; max-width:min(40vw,300px); padding:0; border:0; border-radius:0; color:#FFFFFF; background:transparent; font-size:15px; font-weight:600; line-height:1.2; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-topbar .kairema-role-menu-trigger:hover { color:#FFFFFF; }
 
-/* v7-B: the compact in-chat control panel.
+/* v7-C: header model pill, and the in-chat control panel.
    [ Чат | Мой API ]  on the left, then the collapse toggle directly beneath it, with
    Export held at the right of that second row. The saved-chat history that lives in the
    sidebar is a different surface and is untouched here. */
 .kairema-chat-sticky { align-items:stretch; }
 .kairema-chat-controls { order:1; display:block; min-width:0; }
 .kairema-mode-bar { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:2px; padding:0 12px; }
+/* The toggle belongs to the same row as the segment and stays rendered when the panel is
+   collapsed, so the collapsed state never loses its only way back. */
 .kairema-mode-switch { display:inline-flex; flex:0 0 auto; align-items:center; gap:3px; width:fit-content; min-width:0; padding:2px; border:1px solid var(--k-line); border-radius:8px; background:var(--k-panel-2); }
-.kairema-mode-option { display:inline-flex; flex:0 0 auto; align-items:center; justify-content:center; gap:5px; height:20px; min-height:20px; min-width:0; padding:0 9px; border:1px solid transparent; border-radius:6px; color:var(--k-muted); background:transparent; font-size:12px; font-weight:700; line-height:1.15; white-space:nowrap; }
+.kairema-mode-option { display:inline-flex; flex:0 0 auto; align-items:center; justify-content:center; gap:5px; height:23px; min-height:23px; min-width:100px; padding:0 12px; border:1px solid transparent; border-radius:7px; color:var(--k-muted); background:transparent; font-size:12px; font-weight:700; line-height:1.15; white-space:nowrap; }
 /* The active tab keeps the product's existing violet accent, unchanged. */
 
 /* Second row: the toggle on the left, Export on the right. The toggle lives inside the
    always-rendered controls wrapper, so it stays reachable while the panel is collapsed. */
-.kairema-panel-tail { display:flex; align-items:center; gap:8px; margin-top:2px; padding:0 12px 5px; }
-/* Export now rides the top row, so it is pushed to that row's end rather than
-   growing to fill the tail beside the toggle. */
-.kairema-mode-bar > .kairema-chat-tools { flex:0 0 auto; margin-left:auto; }
-.kairema-panel-tail > .kairema-chat-tools-toggle { flex:0 0 auto; align-self:center; width:24px; height:24px; min-width:24px; min-height:24px; margin:0; }
-/* Export keeps the shared outline geometry but is shortened for this compact row. */
-.kairema-chat-tools { display:flex; flex:1 1 auto; align-items:center; justify-content:flex-end; gap:8px; min-width:0; margin:0; padding:0; color:var(--k-muted); font-size:12px; }
+.kairema-mode-bar > .kairema-chat-tools-toggle { flex:0 0 auto; align-self:center; width:24px; height:24px; min-width:24px; min-height:24px; margin:0; }
+/* Export is its own row, right-aligned under Settings and Profile. */
+.kairema-chat-tools { display:flex; align-items:center; justify-content:flex-end; gap:8px; min-width:0; margin-top:2px; padding:0 12px 5px; color:var(--k-muted); font-size:12px; }
 .kairema-export-menu { position:relative; flex:0 0 auto; }
 .kairema-export-menu > summary { list-style:none; cursor:pointer; height:24px; padding:0 9px; font-size:12px; }
 .kairema-export-menu > summary::-webkit-details-marker { display:none; }
@@ -546,15 +551,21 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
   .kairema-header-button { gap:5px; height:32px; padding:0 10px; font-size:12px; }
   .kairema-topbar-chip > .kairema-header-button { height:32px; padding:0 10px; font-size:12px; }
   .kairema-mode-bar { gap:6px; padding:0 10px; }
-  .kairema-mode-option { gap:4px; height:20px; min-height:20px; padding:0 8px; font-size:12px; }
-  .kairema-panel-tail { gap:6px; padding:0 10px 6px; }
-  .kairema-panel-tail > .kairema-chat-tools-toggle { width:26px; height:26px; min-width:26px; min-height:26px; }
+  .kairema-mode-option { gap:5px; height:23px; min-height:23px; min-width:92px; padding:0 10px; font-size:12px; }
+  .kairema-mode-bar > .kairema-chat-tools-toggle { width:26px; height:26px; min-width:26px; min-height:26px; }
+  .kairema-chat-tools { padding:0 10px 6px; }
   .kairema-export-menu > summary { height:26px; padding:0 9px; }
+  .kairema-model-pill { gap:8px; height:38px; padding:6px 12px; }
+  .kairema-model-sparkle { width:16px; height:16px; }
+  .kairema-model-chevron { width:14px; height:14px; }
+  .kairema-topbar .kairema-role-menu-trigger { max-width:min(34vw,180px); font-size:14px; }
 }
 /* Below this width the labels stop fitting next to each other, so the outline buttons
    keep their icon and their accessible name and drop the visible word. */
 @media(max-width:400px){
   .kairema-topbar-chip .kairema-header-button > span { display:none; }
   .kairema-header-button,.kairema-topbar-chip > .kairema-header-button { padding:0 9px; }
-  .kairema-mode-option { padding:0 7px; }
+  .kairema-mode-option { min-width:84px; padding:0 8px; }
+  .kairema-model-pill { gap:6px; height:36px; padding:6px 10px; }
+  .kairema-topbar .kairema-role-menu-trigger { max-width:min(30vw,140px); font-size:13px; }
 }
