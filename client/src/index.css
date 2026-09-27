@@ -506,7 +506,7 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
    sidebar is a different surface and is untouched here. */
 .kairema-chat-sticky { align-items:stretch; }
 .kairema-chat-controls { order:1; display:block; min-width:0; }
-.kairema-mode-bar { display:flex; align-items:center; gap:8px; margin-top:2px; padding:0 12px; }
+.kairema-mode-bar { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:2px; padding:0 12px; }
 .kairema-mode-switch { display:inline-flex; flex:0 0 auto; align-items:center; gap:3px; width:fit-content; min-width:0; padding:2px; border:1px solid var(--k-line); border-radius:8px; background:var(--k-panel-2); }
 .kairema-mode-option { display:inline-flex; flex:0 0 auto; align-items:center; justify-content:center; gap:5px; height:20px; min-height:20px; min-width:0; padding:0 9px; border:1px solid transparent; border-radius:6px; color:var(--k-muted); background:transparent; font-size:12px; font-weight:700; line-height:1.15; white-space:nowrap; }
 /* The active tab keeps the product's existing violet accent, unchanged. */
@@ -514,6 +514,9 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 /* Second row: the toggle on the left, Export on the right. The toggle lives inside the
    always-rendered controls wrapper, so it stays reachable while the panel is collapsed. */
 .kairema-panel-tail { display:flex; align-items:center; gap:8px; margin-top:2px; padding:0 12px 5px; }
+/* Export now rides the top row, so it is pushed to that row's end rather than
+   growing to fill the tail beside the toggle. */
+.kairema-mode-bar > .kairema-chat-tools { flex:0 0 auto; margin-left:auto; }
 .kairema-panel-tail > .kairema-chat-tools-toggle { flex:0 0 auto; align-self:center; width:24px; height:24px; min-width:24px; min-height:24px; margin:0; }
 /* Export keeps the shared outline geometry but is shortened for this compact row. */
 .kairema-chat-tools { display:flex; flex:1 1 auto; align-items:center; justify-content:flex-end; gap:8px; min-width:0; margin:0; padding:0; color:var(--k-muted); font-size:12px; }
