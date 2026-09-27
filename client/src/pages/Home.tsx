@@ -333,7 +333,20 @@ export default function Home() {
     menu.dataset.kairemaRoleMenu = "true";
     menu.setAttribute("role", "menu");
     menu.hidden = true;
-    const close = () => { menu.hidden = true; menu.remove(); trigger.setAttribute("aria-expanded", "false"); };
+    // The panel fades out before it leaves the document, so closing reads the same way as
+    // opening. `hidden` and the removal are deferred by the same 160ms the CSS uses, and
+    // a reduced-motion preference skips the wait entirely.
+    const reducedMotion = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let closeTimer = 0;
+    const dispose = () => { window.clearTimeout(closeTimer); menu.hidden = true; menu.remove(); };
+    const close = () => {
+      trigger.setAttribute("aria-expanded", "false");
+      if (reducedMotion) { dispose(); return; }
+      menu.classList.remove("kairema-role-menu-open");
+      menu.classList.add("kairema-role-menu-closing");
+      window.clearTimeout(closeTimer);
+      closeTimer = window.setTimeout(dispose, 160);
+    };
     // The panel lives in document.body and is placed from the trigger's viewport rect, so the open
     // menu never depends on the page scroll position and can never be clipped by a chat container.
     const place = () => {
@@ -352,7 +365,9 @@ export default function Home() {
       menu.style.left = `${Math.round(left)}px`;
       menu.style.top = `${Math.round(top)}px`;
     };
-    const open = () => { document.body.append(menu); menu.hidden = false; trigger.setAttribute("aria-expanded", "true"); place(); };
+    // The panel starts transparent, so the reveal runs on the next frame instead of
+    // painting an already-finished frame.
+    const open = () => { document.body.append(menu); menu.hidden = false; menu.classList.remove("kairema-role-menu-closing"); trigger.setAttribute("aria-expanded", "true"); place(); window.requestAnimationFrame(() => menu.classList.add("kairema-role-menu-open")); };
     trigger.addEventListener("click", () => { if (menu.hidden) open(); else close(); });
     for (const model of modelViews) {
       const item = document.createElement("button");
@@ -377,7 +392,7 @@ export default function Home() {
     window.addEventListener("resize", place);
     if (settingsOpen || memoryOpen || sidebarOpen) close();
     host.append(trigger);
-    return () => { document.removeEventListener("keydown", onKeyDown); document.removeEventListener("pointerdown", onPointerDown); window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); trigger.remove(); menu.remove(); native.style.display = ""; };
+    return () => { window.clearTimeout(closeTimer); document.removeEventListener("keydown", onKeyDown); document.removeEventListener("pointerdown", onPointerDown); window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); trigger.remove(); menu.remove(); native.style.display = ""; };
   }, [language, memoryOpen, modelId, modelViews, settingsOpen, sidebarOpen]);
   const loadOlderHistory = async () => {
     const cursor = olderHistoryCursor === undefined ? messagesQuery.data?.nextCursor : olderHistoryCursor;

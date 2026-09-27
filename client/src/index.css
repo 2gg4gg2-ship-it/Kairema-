@@ -522,9 +522,10 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 
 /* Second row: the toggle on the left, Export on the right. The toggle lives inside the
    always-rendered controls wrapper, so it stays reachable while the panel is collapsed. */
-.kairema-mode-bar > .kairema-chat-tools-toggle { flex:0 0 auto; align-self:center; width:24px; height:24px; min-width:24px; min-height:24px; margin:0; }
-/* Export is its own row, right-aligned under Settings and Profile. */
-.kairema-chat-tools { display:flex; align-items:center; justify-content:flex-end; gap:8px; min-width:0; margin-top:2px; padding:0 12px 5px; color:var(--k-muted); font-size:12px; }
+.kairema-panel-tail { display:flex; align-items:center; gap:8px; margin-top:2px; padding:0 12px 5px; }
+.kairema-panel-tail > .kairema-chat-tools-toggle { flex:0 0 auto; align-self:center; width:24px; height:24px; min-width:24px; min-height:24px; margin:0; }
+/* Export is a sibling of the segmented control inside the same row, never inside it. */
+.kairema-chat-tools { display:flex; flex:0 0 auto; align-items:center; justify-content:flex-end; gap:8px; min-width:0; margin:0; padding:0; color:var(--k-muted); font-size:12px; }
 .kairema-export-menu { position:relative; flex:0 0 auto; }
 .kairema-export-menu > summary { list-style:none; cursor:pointer; height:24px; padding:0 9px; font-size:12px; }
 .kairema-export-menu > summary::-webkit-details-marker { display:none; }
@@ -552,8 +553,8 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
   .kairema-topbar-chip > .kairema-header-button { height:32px; padding:0 10px; font-size:12px; }
   .kairema-mode-bar { gap:6px; padding:0 10px; }
   .kairema-mode-option { gap:5px; height:23px; min-height:23px; min-width:92px; padding:0 10px; font-size:12px; }
-  .kairema-mode-bar > .kairema-chat-tools-toggle { width:26px; height:26px; min-width:26px; min-height:26px; }
-  .kairema-chat-tools { padding:0 10px 6px; }
+  .kairema-panel-tail > .kairema-chat-tools-toggle { width:26px; height:26px; min-width:26px; min-height:26px; }
+  .kairema-panel-tail { gap:6px; padding:0 10px 6px; }
   .kairema-export-menu > summary { height:26px; padding:0 9px; }
   .kairema-model-pill { gap:8px; height:38px; padding:6px 12px; }
   .kairema-model-sparkle { width:16px; height:16px; }
@@ -569,3 +570,13 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
   .kairema-model-pill { gap:6px; height:36px; padding:6px 10px; }
   .kairema-topbar .kairema-role-menu-trigger { max-width:min(30vw,140px); font-size:13px; }
 }
+
+/* v7-D: the model dropdown gets the same quick, non-bouncy reveal the Export control
+   already uses. The only animation on the Export control is its caret, which runs
+   `transform .16s ease`, so the panel reuses that exact duration and easing rather than
+   a spring or an overshoot curve. Appearing and disappearing both run it, so the panel
+   never jumps: it starts and ends at the same offset and scale. */
+.kairema-role-menu { opacity:0; transform:translateY(-4px) scale(.98); transform-origin:top right; transition:opacity .16s ease, transform .16s ease; }
+.kairema-role-menu.kairema-role-menu-open { opacity:1; transform:none; }
+.kairema-role-menu.kairema-role-menu-closing { opacity:0; transform:translateY(-4px) scale(.98); }
+@media (prefers-reduced-motion:reduce) { .kairema-role-menu { transition:none; } }
