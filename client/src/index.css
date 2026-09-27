@@ -610,3 +610,4 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-chat-controls[data-controls-open="false"] .kairema-mode-bar { gap:0; }
 .kairema-chat-sticky:has(.kairema-chat-controls[data-controls-open="false"]) { border-bottom-color:transparent; }
 @media (prefers-reduced-motion:reduce) { .kairema-panel-collapse { transition:none; } .kairema-mode-bar { transition:none; } }
+.kairema-mode-hint { flex:0 1 auto; min-width:0; overflow:hidden; padding-left:6px; color:var(--k-muted); font-size:11px; line-height:1.15; text-overflow:ellipsis; white-space:nowrap; }

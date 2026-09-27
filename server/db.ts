@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, isNull, like, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createHash, randomUUID } from "node:crypto";
-import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryExtractionJob, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatDrafts, chatExports, chatSessions, chatStreamRateWindows, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryExtractionJobs, memoryFacts, memoryProfiles, memorySettings, messages, providerControlFlags, providerDailyUsage, providerHealth, providerIdentities, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, technicalEvents, userSettings, users, webSearchStatus } from "../drizzle/schema";
+import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryExtractionJob, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatDrafts, chatExports, chatSessions, chatStreamRateWindows, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryExtractionJobs, memoryFacts, memoryProfiles, memorySettings, messages, providerControlFlags, providerDailyUsage, providerHealth, providerIdentities, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, technicalEvents, userProviderConfigs, userSettings, users, webSearchStatus } from "../drizzle/schema";
 import { providerHealthHistory } from "../drizzle/schema";
 import { stytchLinkIntents } from "../drizzle/schema";
 import { ENV } from "./_core/env";
@@ -1012,8 +1012,7 @@ export async function upsertWebSearchStatus(input: WebSearchStatusInput): Promis
   });
 }
 
-export type UserSettingsPatch = Partial<Pick<UserSettings, "language" | "theme" | "responseStyle" | "responseLength" | "effort" | "thinking" | "defaultRole" | "webSearch" | "toolAccess" | "healthRefreshSeconds" | "highContrast" | "emailNotifications" | "askClarifyingQuestions">>;
-export type KnowledgeSourcePatch = Omit<KnowledgeSource, "updatedAt">;
+export type UserSettingsPatch = Partial<Pick<UserSettings, "language" | "theme" | "responseStyle" | "responseLength" | "effort" | "thinking" | "defaultRole" | "webSearch" | "toolAccess" | "healthRefreshSeconds" | "highContrast" | "emailNotifications" | "askClarifyingQuestions">>;export type KnowledgeSourcePatch = Omit<KnowledgeSource, "updatedAt">;
 export type KnowledgeDocumentInput = Omit<KnowledgeDocument, "retrievedAt" | "updatedAt">;
 export type KnowledgeRunInput = Omit<KnowledgeIngestionRun, "startedAt" | "finishedAt">;
 
@@ -1159,6 +1158,72 @@ export async function updateUserSettings(userId: number, patch: UserSettingsPatc
   await ensureUserSettings(userId);
   if (Object.keys(patch).length) await db.update(userSettings).set(patch).where(eq(userSettings.userId, userId));
   return getUserSettings(userId);
+}
+
+/**
+ * BYOK storage. Every function here takes the resolved owner id from the request context and
+ * filters on it; a provider id alone never selects a row, so no caller can read or overwrite
+ * another user's configuration by guessing a provider.
+ */
+export async function listUserProviderConfigs(userId: number) {
+  const db = requireDatabase(await getDb());
+  const rows = await db.select().from(userProviderConfigs).where(eq(userProviderConfigs.userId, userId));
+  return rows;
+}
+
+export async function getUserProviderConfig(userId: number, provider: string) {
+  const db = requireDatabase(await getDb());
+  const rows = await db.select().from(userProviderConfigs)
+    .where(and(eq(userProviderConfigs.userId, userId), eq(userProviderConfigs.provider, provider))).limit(1);
+  return rows[0];
+}
+
+/**
+ * Saves against the (userId, provider) unique key, so choosing a different model for the same
+ * provider updates the existing row instead of creating a second one, and two concurrent saves
+ * for one provider collapse into a single row rather than duplicating the credential.
+ */
+export async function upsertUserProviderConfig(input: { userId: number; provider: string; activeModel: string; encryptedApiKey: string; keyHint: string }) {
+  const db = requireDatabase(await getDb());
+  const now = new Date();
+  await db.insert(userProviderConfigs).values({ userId: input.userId, provider: input.provider, activeModel: input.activeModel, encryptedApiKey: input.encryptedApiKey, keyHint: input.keyHint, createdAt: now, updatedAt: now })
+    .onDuplicateKeyUpdate({ set: { activeModel: input.activeModel, encryptedApiKey: input.encryptedApiKey, keyHint: input.keyHint, updatedAt: now } });
+  return getUserProviderConfig(input.userId, input.provider);
+}
+
+/**
+ * The active provider pointer lives in user_settings, so a single column decides which
+ * credential backs "My API" and cannot drift into disagreeing with the rows themselves.
+ */
+export async function setActiveUserProvider(userId: number, provider: string | null) {
+  const db = requireDatabase(await getDb());
+  await ensureUserSettings(userId);
+  await db.update(userSettings).set({ myApiProvider: provider }).where(eq(userSettings.userId, userId));
+  return getUserSettings(userId);
+}
+
+/** Deleting the active provider clears the pointer in the same operation, leaving nothing dangling. */
+export async function deleteUserProviderConfig(userId: number, provider: string) {
+  const db = requireDatabase(await getDb());
+  await db.delete(userProviderConfigs).where(and(eq(userProviderConfigs.userId, userId), eq(userProviderConfigs.provider, provider)));
+  const current = await getUserSettings(userId);
+  if (current.myApiProvider === provider) await setActiveUserProvider(userId, null);
+  return { removed: true as const };
+}
+
+/**
+ * Resolves the one binding a "My API" request may use. Returns undefined when the user has
+ * not chosen a provider or when the chosen provider has no saved row; the caller turns that
+ * into a clear "not configured" answer, and decrypts the envelope afterwards so a blob that no
+ * longer opens is reported as a decryption failure rather than as a missing configuration.
+ */
+export async function getActiveUserProviderBinding(userId: number) {
+  const settings = await getUserSettings(userId);
+  const provider = settings.myApiProvider;
+  if (!provider) return undefined;
+  const config = await getUserProviderConfig(userId, provider);
+  if (!config) return undefined;
+  return { provider, model: config.activeModel, encryptedApiKey: config.encryptedApiKey, keyHint: config.keyHint, updatedAt: config.updatedAt };
 }
 
 /** Profile display name only. Never called with a client-supplied userId. */
