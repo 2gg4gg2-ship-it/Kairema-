@@ -57,7 +57,13 @@ vi.mock("./db", async (importOriginal) => ({
     store.configs.set(`${input.userId}:${input.provider}`, row);
     return row;
   }),
-  deleteUserProviderConfig: vi.fn(async (userId: number, provider: string) => { store.configs.delete(`${userId}:${provider}`); return { removed: true as const }; }),
+  // Mirrors the real helper: the pointer is cleared only when the row that went away was the
+  // active binding, so nothing dangles and no other provider's selection is disturbed.
+  deleteUserProviderConfig: vi.fn(async (userId: number, provider: string) => {
+    store.configs.delete(`${userId}:${provider}`);
+    if (store.settings.myApiProvider === provider) store.settings.myApiProvider = null;
+    return { removed: true as const };
+  }),
   setUserProviderActiveModel: vi.fn(async (userId: number, provider: string, activeModel: string) => {
     const key = `${userId}:${provider}`;
     const row = { ...store.configs.get(key), activeModel };
@@ -292,6 +298,25 @@ describe("the My API journey from connecting a provider to a real answer", () =>
     expect(eventData(res, "done")).toMatchObject({ content: "Ответ Kairema" });
   });
 
+  it("keeps the active binding when a different provider is removed", async () => {
+    const api = caller();
+    const custom = await api.userProviders.createCustom({ displayName: "Второй", baseUrl: "https://api.example.com/v1", apiKey: "sk-custom-journey-7777", activeModel: "vendor/custom-1" });
+    await api.userProviders.save({ provider: "openrouter", apiKey: KEY, activeModel: "vendor/model-a", makeActive: true });
+    expect(store.configs.get("42:openrouter")!.encryptedApiKey).toMatch(/^kbyok1\./);
+
+    await api.userProviders.remove({ provider: custom.provider });
+    expect(store.configs.size).toBe(1);
+    // The active provider is untouched: its row, its key and the pointer all survive.
+    expect(store.settings.myApiProvider).toBe("openrouter");
+    const listed = await api.userProviders.list();
+    expect(listed.configs.map((config) => config.provider)).toEqual(["openrouter"]);
+
+    const platformCalls = vi.fn();
+    await streamMessage(streamHandler({ chatWithRoleStream: platformCalls }), true);
+    expect(platformCalls).not.toHaveBeenCalled();
+    expect(upstream.at(-1)!.url).toContain("/chat/completions");
+  });
+
   it("stops using a provider the user disconnects, instead of falling back to Kairema", async () => {
     const api = caller();
     await api.userProviders.save({ provider: "openrouter", apiKey: KEY, activeModel: "vendor/model-a", makeActive: true });
@@ -299,11 +324,12 @@ describe("the My API journey from connecting a provider to a real answer", () =>
 
     await api.userProviders.remove({ provider: "openrouter" });
     expect(store.configs.size).toBe(0);
-    // The stored pointer is left behind on purpose, so the screen decides from the row list, and
-    // the server decides from the row as well.
+    // Removing the active provider leaves nothing dangling: the pointer is cleared in the same
+    // operation, so the screen shows "not configured" and the server finds no binding.
     const listed = await api.userProviders.list();
-    expect(listed.activeProvider).toBe("openrouter");
+    expect(listed.activeProvider).toBeNull();
     expect(listed.configs).toEqual([]);
+    expect(store.settings.myApiProvider).toBeNull();
 
     const platformCalls = vi.fn();
     const before = upstream.length;
