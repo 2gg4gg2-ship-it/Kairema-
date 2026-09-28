@@ -8,13 +8,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const fixtures = vi.hoisted(() => ({
   userProviders: { providers: [{ id: "openrouter", displayName: "OpenRouter", available: true }], configs: [], activeProvider: null, storageReady: true } as Record<string, unknown>,
   modelId: "fast",
-  myApiModels: [] as Array<{ id: string; name: string }>,
+  myApiModels: [] as Array<{ id: string; name: string; displayName?: string | null; isFree?: boolean }>,
   myApiModelsLoaded: false,
   myApiCatalogError: "" as string | null,
   myApiCatalogPending: false,
   switchModelError: "" as string | null,
   myApiCatalogInputs: [] as unknown[],
   switchedModel: null as unknown,
+  switchedProvider: null as unknown,
+  switchProviderError: "" as string | null,
   updatedSettings: [] as Array<Record<string, unknown>>,
 
   sessionId: "11111111-1111-4111-8111-111111111111",
@@ -28,6 +30,7 @@ const fixtures = vi.hoisted(() => ({
   invalidateMessages: vi.fn(),
   historyPageFetch: vi.fn(),
   invalidateSessions: vi.fn(),
+  invalidateUserProviders: () => {},
   createChat: vi.fn(),
   deleteChat: vi.fn(),
   clearHistory: vi.fn(),
@@ -86,7 +89,9 @@ vi.mock("wouter", () => ({
     <a href={href} {...rest}>{children as never}</a>
   ),
 }));
-vi.mock("@/lib/trpc", () => ({
+vi.mock("@/lib/trpc", async () => {
+  const react = await import("react");
+  return ({
   trpc: {
     auth: { beginLink: { useMutation: () => ({ mutateAsync: fixtures.beginStytchLink, isPending: false }) }, updateName: { useMutation: () => ({ mutateAsync: fixtures.updateName, isPending: false }) } },
     models: { list: { useQuery: () => ({ data: [
@@ -116,7 +121,13 @@ vi.mock("@/lib/trpc", () => ({
       clearDraft: { useMutation: () => ({ mutateAsync: fixtures.clearDraft, isPending: false }) },
     },
     userProviders: {
-      list: { useQuery: () => ({ data: fixtures.userProviders }) },
+      // The list is a live read, and an invalidate re-renders it: that is what a provider switch
+      // looks like in production, so no test can pass on a snapshot taken before the switch.
+      list: { useQuery: () => {
+        const [, bump] = react.useState(0);
+        react.useEffect(() => { fixtures.invalidateUserProviders = () => bump((value) => value + 1); return () => { fixtures.invalidateUserProviders = () => {}; }; }, []);
+        return { data: fixtures.userProviders };
+      } },
       // The My API picker reuses the caller's stored key: no key is sent with the request.
       models: {
         useMutation: () => ({
@@ -136,11 +147,17 @@ vi.mock("@/lib/trpc", () => ({
           isSuccess: fixtures.myApiModelsLoaded && !fixtures.myApiCatalogError,
         }),
       },
-      setActiveModel: { useMutation: () => ({ mutateAsync: async (input: unknown) => { if (fixtures.switchModelError) throw new Error(fixtures.switchModelError); fixtures.switchedModel = input; return {}; }, isPending: false, error: null }) },
+      setActiveModel: { useMutation: () => ({ mutateAsync: async (input: unknown) => { if (fixtures.switchModelError) throw new Error(fixtures.switchModelError); fixtures.switchedModel = input; // The server persists the choice, so the next read of the list must show it.
+        const { provider, activeModel } = input as { provider: string; activeModel: string };
+        fixtures.userProviders = { ...fixtures.userProviders, configs: (fixtures.userProviders.configs as Array<Record<string, unknown>>).map((config) => config.provider === provider ? { ...config, activeModel } : config) }; return {}; }, isPending: false, error: null }) },
+      // A provider switch changes only the credential; the model each provider was saved with is
+      // the server's business, which is why the mock reads the fixture list live after the write.
+      setActive: { useMutation: () => ({ mutateAsync: async (input: unknown) => { if (fixtures.switchProviderError) throw new Error(fixtures.switchProviderError); fixtures.switchedProvider = input; fixtures.userProviders = { ...fixtures.userProviders, activeProvider: (input as { provider: string }).provider }; return {}; }, isPending: false, error: null }) },
     },
-    useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, auth: { me: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: fixtures.downloadExport } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, historyPage: { invalidate: fixtures.invalidateMessages, fetch: fixtures.historyPageFetch }, list: { invalidate: fixtures.invalidateSessions } }, userProviders: { list: { invalidate: vi.fn() } } }),
+    useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, auth: { me: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: fixtures.downloadExport } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, historyPage: { invalidate: fixtures.invalidateMessages, fetch: fixtures.historyPageFetch }, list: { invalidate: fixtures.invalidateSessions } }, userProviders: { list: { invalidate: () => fixtures.invalidateUserProviders() } } }),
   },
-}));
+  });
+});
 vi.mock("@/components/ui/dialog", () => ({
   useDialogComposition: () => ({ isComposing: () => false, setComposing: () => {}, justEndedComposing: () => false, markCompositionEnd: () => {} }),
   Dialog: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -168,6 +185,8 @@ function resetFixtures() {
   fixtures.myApiCatalogPending = false;
   fixtures.switchModelError = null;
   fixtures.switchedModel = null;
+  fixtures.switchedProvider = null;
+  fixtures.switchProviderError = null;
   fixtures.updatedSettings = [];
   fixtures.isAuthenticated = true;
   fixtures.authLoading = false;
@@ -1202,7 +1221,10 @@ describe("My API mode hides the Kairema role selector", () => {
       expect(pill.textContent ?? "").not.toContain(role);
       expect(Array.from(pill.querySelectorAll("option")).map((option) => option.textContent ?? "")).not.toContain(role);
     }
-    expect(pill.textContent).toContain("Мой провайдер");
+    // Provider and model are two controls: the pill names the model alone, and the provider is
+    // chosen in the mode row, so neither has to be read out of the other.
+    expect(pill.textContent ?? "").not.toContain("Мой провайдер");
+    expect(screen.getByLabelText("Провайдер «Мой API»").textContent ?? "").toContain("Мой провайдер");
     // The model comes from the active provider's own catalog, not from a system role: the role
     // <select> is gone and the binding's own picker shows the saved model instead.
     expect(pill.querySelector("select")).toBeNull();
@@ -1244,6 +1266,129 @@ describe("My API mode hides the Kairema role selector", () => {
     expect(links.length).toBeGreaterThan(0);
     for (const link of links) expect(link.getAttribute("href")).toBe("/settings/providers");
     expect(container.textContent).not.toContain("Начните разговор с Kairema");
+  });
+});
+
+describe("My API provider and model are two independent controls", () => {
+  beforeEach(() => { window.localStorage.clear(); resetFixtures(); });
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  const configA = { provider: "custom-abc", displayName: "Aria Cloud", baseUrl: "https://api.example.com/v1", modelsEndpoint: null, activeModel: "aria/fast-1", keyHint: "••••4321", updatedAt: new Date(0).toISOString() };
+  const configB = { provider: "custom-xyz", displayName: "Мой провайдер", baseUrl: "https://api.groq.com/openai/v1", modelsEndpoint: null, activeModel: "vendor/model-b", keyHint: "••••1111", updatedAt: new Date(0).toISOString() };
+  const twoProviders = { providers: [], configs: [configA, configB], activeProvider: "custom-abc", storageReady: true };
+
+  async function enterMyApi(user: ReturnType<typeof userEvent.setup>) {
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    return screen.findByLabelText("Модель «Мой API»");
+  }
+
+  it("names the model in the header pill and the provider in the mode row, never both in one", async () => {
+    fixtures.userProviders = twoProviders;
+    fixtures.myApiModels = [{ id: "aria/fast-1", name: "Groq 4 Fast", displayName: "Groq 4 Fast", isFree: false }];
+    fixtures.myApiModelsLoaded = true;
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await screen.findByLabelText("Модель «Мой API»");
+
+    // The pill carries the model and nothing else.
+    expect(headerPill(container).textContent ?? "").toContain("Groq 4 Fast");
+    expect(headerPill(container).textContent ?? "").not.toContain("Aria Cloud");
+    // The provider has its own control below the mode switch, with no model in it.
+    const providerMenu = screen.getByLabelText("Провайдер «Мой API»");
+    expect(providerMenu.textContent ?? "").toContain("Aria Cloud");
+    expect(providerMenu.textContent ?? "").not.toContain("model");
+  });
+
+  it("lists only providers the user really has, and no model name in any of them", async () => {
+    fixtures.userProviders = twoProviders;
+    fixtures.myApiModels = [{ id: "aria/fast-1", name: "Groq 4 Fast", displayName: "Groq 4 Fast", isFree: false }];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    await enterMyApi(user);
+    await user.click(screen.getByLabelText("Провайдер «Мой API»"));
+    const options = await screen.findAllByRole("option");
+    expect(options.map((option) => option.textContent ?? "").map((text) => text.replace(/подключён/g, "").trim())).toEqual(["Aria Cloud", "Мой провайдер"]);
+    // A provider the user never configured is not offered, and no entry leaks a model id.
+    for (const option of options) expect(option.textContent ?? "").not.toContain("/");
+  });
+
+  it("switches the provider on the server and shows the model that provider was saved with", async () => {
+    fixtures.userProviders = twoProviders;
+    fixtures.myApiModels = [{ id: "vendor/model-b", name: "Model B", displayName: "Model B", isFree: false }];
+    fixtures.myApiModelsLoaded = true;
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await screen.findByLabelText("Модель «Мой API»");
+    await user.click(screen.getByLabelText("Провайдер «Мой API»"));
+    await user.click(await screen.findByRole("option", { name: /Мой провайдер/ }));
+
+    expect(fixtures.switchedProvider).toEqual({ provider: "custom-xyz" });
+    // The new provider is bound; its own saved model is what the pill now shows.
+    await waitFor(() => expect((screen.getByLabelText("Провайдер «Мой API»").textContent ?? "")).toContain("Мой провайдер"));
+    expect(headerPill(container).textContent ?? "").not.toContain("Groq 4 Fast");
+    // The catalog that matters is the new provider's, read with the new stored credential.
+    await waitFor(() => expect(fixtures.myApiCatalogInputs.at(-1)).toEqual({ provider: "custom-xyz" }));
+  });
+
+  it("keeps the previous provider when the server refuses the switch", async () => {
+    fixtures.userProviders = twoProviders;
+    fixtures.myApiModels = [{ id: "aria/fast-1", name: "Groq 4 Fast", displayName: "Groq 4 Fast", isFree: false }];
+    fixtures.myApiModelsLoaded = true;
+    fixtures.switchProviderError = "Этот провайдер недоступен.";
+    const user = userEvent.setup();
+    await enterMyApi(user);
+    await user.click(screen.getByLabelText("Провайдер «Мой API»"));
+    await user.click(await screen.findByRole("option", { name: /Мой провайдер/ }));
+
+    await screen.findByText(/Этот провайдер недоступен/);
+    // Nothing moved: the binding and its model are exactly what they were.
+    expect(screen.getByLabelText("Провайдер «Мой API»").textContent ?? "").toContain("Aria Cloud");
+    expect(fixtures.myApiCatalogInputs.at(-1)).toEqual({ provider: "custom-abc" });
+  });
+
+  it("shows a model's own name while the request keeps the provider's real id", async () => {
+    fixtures.userProviders = { ...twoProviders, configs: [{ ...configA, activeModel: "nvidia/nemotron-3-ultra" }] };
+    fixtures.myApiModels = [
+      { id: "nvidia/nemotron-3-ultra", name: "NVIDIA: Nemotron 3 Ultra", displayName: "Nemotron 3 Ultra", isFree: false },
+      { id: "inclusionai/ling-sante:free", name: "inclusionAI: Ling (free)", displayName: "Ling", isFree: true },
+    ];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    await enterMyApi(user);
+    await user.click(screen.getByLabelText("Модель «Мой API»"));
+    const options = await screen.findAllByRole("option");
+    // The catalog's own pricing puts the free model in its own section first, and every entry
+    // keeps the id the request needs even though the label drops the author prefix.
+    expect(options.map((option) => option.getAttribute("title"))).toEqual(["inclusionai/ling-sante:free", "nvidia/nemotron-3-ultra"]);
+    expect(options[1]!.textContent ?? "").not.toContain("NVIDIA");
+    expect(within(options[0]!.parentElement as HTMLElement).getAllByText("Free").length).toBeGreaterThan(0);
+    const trigger = screen.getByRole("button", { name: "Модель «Мой API»" });
+    expect(trigger.textContent ?? "").toContain("Nemotron 3 Ultra");
+    // The pill never shows the raw id: the request path is the only place the id is needed.
+    expect(trigger.textContent ?? "").not.toContain("nvidia/");
+
+    await user.click(options[0]!);
+    expect(fixtures.switchedModel).toEqual({ provider: "custom-abc", activeModel: "inclusionai/ling-sante:free" });
+  });
+
+  it("searches the model list by both the visible name and the real id", async () => {
+    fixtures.userProviders = twoProviders;
+    fixtures.myApiModels = [
+      { id: "vendor/model-b", name: "Model B", displayName: "Model B", isFree: false },
+      { id: "vendor/model-c", name: "Model C", displayName: "Model C", isFree: false },
+    ];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    await enterMyApi(user);
+    await user.click(screen.getByLabelText("Модель «Мой API»"));
+    await user.type(screen.getByLabelText("Поиск моделей"), "model-c");
+    await waitFor(() => expect(screen.getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["vendor/model-c"]));
+    await user.clear(screen.getByLabelText("Поиск моделей"));
+    await user.type(screen.getByLabelText("Поиск моделей"), "zzz");
+    expect(await screen.findByText("Ничего не найдено")).toBeTruthy();
   });
 });
 
@@ -1458,26 +1603,33 @@ describe("My API model picker", () => {
 
     // jsdom neither lays out nor loads the stylesheet, so the contract is asserted on the
     // markup plus the rules that make a long value truncate instead of widening the bar.
-    expect(container.querySelector(".kairema-binding-name")).not.toBeNull();
+    expect(container.querySelector(".kairema-binding-trigger")).not.toBeNull();
     expect(container.querySelector(".kairema-binding-select")).not.toBeNull();
+    // The provider control truncates on its own, so a long provider name cannot widen the bar.
+    expect(container.querySelector(".kairema-provider-trigger-text")).not.toBeNull();
     const css = readFileSync(path.join(import.meta.dirname, "../index.css"), "utf8");
-    const rule = css.slice(css.indexOf(".kairema-binding-name"));
-    expect(rule.slice(0, 400)).toContain("text-overflow:ellipsis");
-    expect(rule.slice(0, 400)).toContain("min-width:0");
-    expect(rule.slice(0, 400)).toContain("max-width:45%");
-    expect(rule.slice(0, 700)).toContain("max-width:100%");
-    expect(rule.slice(0, 700)).toContain("overflow:hidden");
+    const rule = css.slice(css.indexOf(".kairema-binding-trigger-text"));
+    expect(rule.slice(0, 200)).toContain("text-overflow:ellipsis");
+    expect(rule.slice(0, 200)).toContain("min-width:0");
+    const providerRule = css.slice(css.indexOf(".kairema-provider-trigger"));
+    expect(providerRule.slice(0, 400)).toContain("text-overflow:ellipsis");
+    expect(providerRule.slice(0, 400)).toContain("min-width:0");
+    const pillRule = css.slice(css.indexOf(".kairema-model-pill { max-width:100%"));
+    expect(pillRule.slice(0, 200)).toContain("max-width:100%");
+    expect(pillRule.slice(0, 200)).toContain("overflow:hidden");
     // Narrow viewports get their own caps so the bar still truncates on a phone.
     expect(css).toContain("@media (max-width:767px)");
     expect(css).toContain("@media (max-width:430px)");
   });
 
-  it("splits the live catalog into Free and Paid from the :free suffix, never a hardcoded list", async () => {
+  it("splits the live catalog into Free and Paid from the server's pricing verdict, never a hardcoded list", async () => {
     fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
     fixtures.myApiModels = [
-      { id: "vendor/free-flash:free", name: "Vendor Free Flash" },
-      { id: "vendor/model-b", name: "Model B" },
-      { id: "vendor/paid-ultra:extended", name: "Vendor Paid Ultra" },
+      // The provider priced the first at zero, so it is Free although its id says ":extended"; the
+      // third carries ":free" in its id but is billed, which the client must not second-guess.
+      { id: "vendor/zero-priced:extended", name: "Vendor Free Flash", displayName: "Vendor Free Flash", isFree: true },
+      { id: "vendor/model-b", name: "Model B", displayName: "Model B", isFree: false },
+      { id: "vendor/free-flash:free", name: "Vendor Paid Ultra", displayName: "Vendor Paid Ultra", isFree: false },
     ];
     fixtures.myApiModelsLoaded = true;
     const user = userEvent.setup();
@@ -1489,8 +1641,8 @@ describe("My API model picker", () => {
     // The grouping follows the catalog Kairema fetched, so a model the app has never seen still
     // lands in the right section on its own.
     expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual(["Free", "Paid"]);
-    expect(within(groups[0]!).getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["vendor/free-flash:free"]);
-    expect(within(groups[1]!).getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["vendor/model-b", "vendor/paid-ultra:extended"]);
+    expect(within(groups[0]!).getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["vendor/zero-priced:extended"]);
+    expect(within(groups[1]!).getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["vendor/model-b", "vendor/free-flash:free"]);
     // Only the free model carries the marker, so the two sections are distinguishable per item
     // and not just by the section heading.
     const badges = (group: HTMLElement) => Array.from(group.querySelectorAll(".kairema-model-menu-badge")).map((badge) => badge.textContent);
@@ -1501,9 +1653,9 @@ describe("My API model picker", () => {
   it("filters both sections at once while typing, by name and by id", async () => {
     fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
     fixtures.myApiModels = [
-      { id: "vendor/free-flash:free", name: "Vendor Free Flash" },
-      { id: "vendor/model-b", name: "Model B" },
-      { id: "vendor/paid-ultra:extended", name: "Vendor Paid Ultra" },
+      { id: "vendor/free-flash:free", name: "Vendor Free Flash", displayName: "Vendor Free Flash", isFree: true },
+      { id: "vendor/model-b", name: "Model B", displayName: "Model B", isFree: false },
+      { id: "vendor/paid-ultra:extended", name: "Vendor Paid Ultra", displayName: "Vendor Paid Ultra", isFree: false },
     ];
     fixtures.myApiModelsLoaded = true;
     const user = userEvent.setup();

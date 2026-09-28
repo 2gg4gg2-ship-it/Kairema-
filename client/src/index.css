@@ -678,4 +678,22 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-model-menu-item-id { min-width:0; overflow:hidden; color:#7d8496; font-size:11px; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
 .kairema-model-menu-badge { flex:0 0 auto; padding:2px 7px; border:1px solid rgba(147,134,255,.45); border-radius:999px; color:#c7bfff; background:rgba(147,134,255,.12); font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
 .kairema-model-menu-empty { margin:0; padding:14px 10px; color:#8b94a7; font-size:12px; text-align:center; }
+/* The provider trigger lives in the mode row next to the Chat / My API switch, so it is styled
+   as an inline link there rather than as the pill button the model trigger uses. */
+.kairema-provider-trigger { display:inline-flex; max-width:100%; min-width:0; align-items:center; gap:4px; margin:0; padding:0 2px; border:0; border-radius:6px; outline:none; color:var(--k-text); background:transparent; font:inherit; font-weight:600; cursor:pointer; vertical-align:baseline; }
+.kairema-provider-trigger-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-provider-trigger-chevron { flex:0 0 auto; width:12px; height:12px; transition:transform .16s ease; }
+.kairema-provider-trigger[aria-expanded="true"] .kairema-provider-trigger-chevron { transform:rotate(180deg); }
+.kairema-provider-trigger:hover:not(:disabled) { text-decoration:underline; text-underline-offset:2px; }
+.kairema-provider-trigger:focus-visible { outline:2px solid var(--k-text); outline-offset:2px; }
+.kairema-provider-trigger:disabled { cursor:not-allowed; opacity:.6; }
+.kairema-provider-menu { padding:0; }
+.kairema-provider-menu-list { padding:5px; }
+.kairema-provider-menu-item { display:flex; width:100%; align-items:center; gap:8px; padding:8px 9px; border:1px solid transparent; border-radius:9px; color:#e8eaf0; background:transparent; text-align:left; cursor:pointer; }
+.kairema-provider-menu-item:hover,.kairema-provider-menu-item:focus-visible { border-color:rgba(255,255,255,.10); background:#17171b; outline:none; }
+.kairema-provider-menu-item.kairema-model-menu-item-active { border-color:rgba(147,134,255,.55); color:#FFFFFF; background:rgba(147,134,255,.14); }
+.kairema-provider-menu-check { display:grid; flex:0 0 auto; width:14px; height:14px; place-items:center; color:#c7bfff; }
+.kairema-provider-menu-check svg { width:14px; height:14px; }
+.kairema-provider-menu-name { flex:1 1 auto; min-width:0; overflow:hidden; font-size:13px; font-weight:600; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-provider-menu-status { flex:0 0 auto; color:#7d8496; font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
 @media (max-width:430px) { .kairema-model-menu-search-input,.kairema-model-menu-item-title { font-size:12px; } .kairema-model-menu-item { padding:6px 8px; } }

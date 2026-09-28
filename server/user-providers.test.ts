@@ -105,28 +105,96 @@ describe("openrouter model catalog", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true, status: 200,
       json: async () => ({ data: [
-        { id: "live/one", name: "Live One", architecture: { modality: { input: "text" } } },
-        { id: "live/two", name: "Live Two", architecture: { modality: { input: "text,image" } } },
+        { id: "live/one", name: "Live One", architecture: { modality: "text->text", input_modalities: ["text"], output_modalities: ["text"] } },
+        { id: "live/two", name: "Live Two", architecture: { modality: "text+image->text", input_modalities: ["text", "image"], output_modalities: ["text"] }, context_length: 8192 },
       ] }),
     });
     vi.stubGlobal("fetch", fetchMock);
     const models = await listUserProviderModels("openrouter", KEY);
-    expect(models).toEqual([{ id: "live/one", name: "Live One" }, { id: "live/two", name: "Live Two" }]);
+    expect(models).toEqual([
+      { id: "live/one", name: "Live One", displayName: "Live One", isFree: false, acceptsImage: false, contextLength: null },
+      { id: "live/two", name: "Live Two", displayName: "Live Two", isFree: false, acceptsImage: true, contextLength: 8192 },
+    ]);
     const [url] = fetchMock.mock.calls[0] as [string];
     expect(url).toBe("https://openrouter.ai/api/v1/models");
   });
 
-  it("filters out models that cannot accept text", async () => {
+  it("drops specialized endpoints a chat turn cannot use, by their own declared modalities", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true, status: 200,
       json: async () => ({ data: [
-        { id: "text/ok", name: "Text", architecture: { modality: { input: "text" } } },
-        { id: "image/only", name: "Image", architecture: { modality: { input: "image" } } },
-        { id: "no/modality", name: "Unknown" },
+        { id: "chat/ok", name: "Chat", architecture: { modality: "text->text", input_modalities: ["text"], output_modalities: ["text"] } },
+        { id: "embed/vl", name: "Embed VL", architecture: { modality: "text+image->embeddings", input_modalities: ["text", "image"], output_modalities: ["embeddings"] } },
+        { id: "rerank/vl", name: "Rerank VL", architecture: { modality: "text+image->rerank", input_modalities: ["text", "image"], output_modalities: ["rerank"] } },
+        { id: "tts/flux", name: "Flux TTS", architecture: { modality: "text->speech", input_modalities: ["text"], output_modalities: ["speech"] } },
+        { id: "safety/decisions", name: "Span", architecture: { modality: "text->decisions", input_modalities: ["text"], output_modalities: ["decisions"] } },
+        { id: "audio/only", name: "Audio Only", architecture: { modality: "audio->audio", input_modalities: ["audio"], output_modalities: ["audio"] } },
       ] }),
     }));
     const models = await listUserProviderModels("openrouter", KEY);
-    expect(models.map((model) => model.id)).toEqual(["text/ok", "no/modality"]);
+    // Text in and text out is the whole contract: embedding, rerank, TTS, decision and audio-only
+    // endpoints are out, and none of it is decided by reading a word of the model's name.
+    expect(models.map((model) => model.id)).toEqual(["chat/ok"]);
+  });
+
+  it("keeps a catalog entry that declares no capabilities at all", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({ data: [
+        { id: "text/ok", name: "Text", architecture: { modality: "text->text" } },
+        { id: "plain/one", name: "Plain One" },
+      ] }),
+    }));
+    const models = await listUserProviderModels("openrouter", KEY);
+    // Nothing is known about a bare OpenAI-compatible entry, so it is not ruled out.
+    expect(models.map((model) => model.id)).toEqual(["text/ok", "plain/one"]);
+  });
+
+  it("reads free from the catalog's own pricing, not from a list of known models", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({ data: [
+        { id: "vendor/model-b", name: "B", architecture: { modality: "text->text" }, pricing: { prompt: "0.0000006", completion: "0.0000024" } },
+        { id: "vendor/zero-priced", name: "Zero", architecture: { modality: "text->text" }, pricing: { prompt: "0", completion: "0" } },
+        { id: "vendor/zero-priced-no-suffix", name: "Zero As Well", architecture: { modality: "text->text" }, pricing: { prompt: "0", completion: "0" } },
+        { id: "vendor/sante:free", name: "Suffix", architecture: { modality: "text->text" } },
+        { id: "vendor/free-in-the-name", name: "Free Model", architecture: { modality: "text->text" } },
+        { id: "vendor/dynamic-router", name: "Router", architecture: { modality: "text->text" }, pricing: { prompt: "-1", completion: "-1" } },
+      ] }),
+    }));
+    const models = await listUserProviderModels("openrouter", KEY);
+    // Zero input and output pricing is the signal; a ":free" id is only the fallback for a
+    // catalog that reports no pricing, a dynamic price is not free, and the word "free" in a
+    // model name is not a signal at all.
+    expect(models.map((model) => [model.id, model.isFree])).toEqual([
+      ["vendor/model-b", false],
+      ["vendor/zero-priced", true],
+      ["vendor/zero-priced-no-suffix", true],
+      ["vendor/sante:free", true],
+      ["vendor/free-in-the-name", false],
+      ["vendor/dynamic-router", false],
+    ]);
+  });
+
+  it("shows a model without its author prefix while the real id is kept for the request", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({ data: [
+        { id: "nvidia/nemotron-3-ultra-550b-a55b", name: "NVIDIA: Nemotron 3 Ultra", architecture: { modality: "text->text" }, pricing: { prompt: "0.0000006", completion: "0.0000024" } },
+        { id: "inclusionai/ling-3.0-flash-sante:free", name: "inclusionAI: Ling 3.0 Flash Sante (free)", architecture: { modality: "text->text" }, pricing: { prompt: "0", completion: "0" } },
+        { id: "google/gemma-4-26b-a4b-it", name: "Google: Gemma 4 26B A4B ", architecture: { modality: "text+image+video->text" }, pricing: { prompt: "0.00000009", completion: "0.0000003" } },
+        { id: "bare/id", architecture: { modality: "text->text" } },
+      ] }),
+    }));
+    const models = await listUserProviderModels("openrouter", KEY);
+    expect(models.map((model) => [model.id, model.displayName, model.isFree])).toEqual([
+      ["nvidia/nemotron-3-ultra-550b-a55b", "Nemotron 3 Ultra", false],
+      ["inclusionai/ling-3.0-flash-sante:free", "Ling 3.0 Flash Sante", true],
+      ["google/gemma-4-26b-a4b-it", "Gemma 4 26B A4B", false],
+      ["bare/id", "bare/id", false],
+    ]);
+    // The provider's own name is still available, so nothing about the upstream entry is lost.
+    expect(models[0]!.name).toBe("NVIDIA: Nemotron 3 Ultra");
   });
 
   it("never returns the key it was given", async () => {
