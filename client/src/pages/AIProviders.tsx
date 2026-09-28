@@ -19,10 +19,10 @@ function isCustomProvider(providerId: string) {
 }
 
 /** The not-yet-stored values a user is typing into the custom provider form. */
-type CustomDraft = { provider: string | null; displayName: string; baseUrl: string; modelsEndpoint: string; apiKey: string; modelId: string };
+type CustomDraft = { provider: string | null; displayName: string; baseUrl: string; apiKey: string; modelId: string };
 
 function emptyCustomDraft(): CustomDraft {
-  return { provider: null, displayName: "", baseUrl: "", modelsEndpoint: "", apiKey: "", modelId: "" };
+  return { provider: null, displayName: "", baseUrl: "", apiKey: "", modelId: "" };
 }
 
 /** Only server-defined text is shown for a failure; nothing from a provider response is rendered. */
@@ -39,6 +39,132 @@ function savedAt(value: string) {
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
 }
 
+/** One compact provider block: title, connection state, and the form only while it is open. */
+function ProviderCard({ title, subtitle, connected, active, expanded, busy, disabled, onToggle, onMakeActive, onDisconnect, hasConfig, addLabel, summary, children }: {
+  title: string;
+  subtitle: string;
+  connected: boolean;
+  active: boolean;
+  expanded: boolean;
+  busy: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+  onMakeActive?: () => void;
+  onDisconnect?: () => void;
+  hasConfig?: boolean;
+  addLabel?: string;
+  summary?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-slate-800 bg-slate-900/60">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate text-sm font-medium text-slate-100">{title}</span>
+            {active && <span className="rounded-full bg-violet-500/20 px-2 py-0.5 text-[11px] font-semibold text-violet-200">активен</span>}
+          </div>
+          <p className="truncate text-xs text-slate-500">{connected ? `Connected · ${subtitle}` : subtitle}</p>
+        </div>
+        <span className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40"
+            onClick={onToggle}
+            disabled={busy}
+            aria-expanded={expanded}
+          >
+            {expanded ? "Свернуть" : addLabel ?? (hasConfig ? "Настроить" : "Connect")}
+          </button>
+          {onMakeActive && !active && (
+            <button type="button" className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40" onClick={onMakeActive} disabled={busy}>
+              Активировать
+            </button>
+          )}
+          {onDisconnect && (
+            <button type="button" className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-rose-200 transition-colors hover:bg-rose-500/15 disabled:opacity-40" onClick={onDisconnect} disabled={busy}>
+              Отключить
+            </button>
+          )}
+        </span>
+      </div>
+      {!expanded && summary && <div className="border-t border-slate-800 px-3 py-2">{summary}</div>}
+      {expanded && !disabled && <div className="border-t border-slate-800 px-3 py-3">{children}</div>}
+    </section>
+  );
+}
+
+/** Password-style key input with a reveal toggle; the value never leaves this component. */
+function KeyField({ label, fieldLabel, value, visible, onVisibleChange, onChange, placeholder }: { label: string; fieldLabel: string; value: string; visible: boolean; onVisibleChange: (value: boolean) => void; onChange: (value: string) => void; placeholder: string }) {
+  return (
+    <label className="grid gap-1">
+      <span className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
+      <span className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3">
+        <KeyRound className="size-4 shrink-0 text-slate-500" />
+        <input
+          className="min-w-0 flex-1 bg-transparent py-2 text-sm text-slate-100 outline-none"
+          type={visible ? "text" : "password"}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          autoComplete="off"
+          spellCheck={false}
+          aria-label={fieldLabel}
+        />
+        <button type="button" className="shrink-0 text-slate-500 hover:text-slate-200" onClick={() => onVisibleChange(!visible)} aria-label={visible ? "Скрыть ключ" : "Показать ключ"}>
+          {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+        </button>
+      </span>
+    </label>
+  );
+}
+
+/**
+ * Model picker fed only by the provider's live catalog.
+ *
+ * A refresh button sits next to the select because the catalog depends on the key: it cannot be
+ * fetched up front, and re-typing a key must not re-send it on every keystroke.
+ */
+function ModelField({ label, fieldLabel, value, fallback, models, pending, error, empty, errorText: failureText, onChange, onReload, canReload, placeholder }: { label: string; fieldLabel: string; value: string; fallback?: string; models: Array<{ id: string; name: string }>; pending: boolean; error: boolean; empty: boolean; errorText?: string; onChange: (value: string) => void; onReload: () => void; canReload: boolean; placeholder: string }) {
+  return (
+    <label className="grid gap-1">
+      <span className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
+      <span className="flex items-center gap-2">
+        <select
+          className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-400"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          disabled={pending}
+          aria-label={fieldLabel}
+        >
+          {pending && <option value="">Загружаем модели…</option>}
+          {!pending && !models.length && !fallback && <option value="">{placeholder}</option>}
+          {/* A model that is already stored stays visible until the catalog arrives, so reopening
+              a connected provider never shows an empty picker. */}
+          {fallback && !models.some((model) => model.id === fallback) && <option value={fallback}>{fallback}</option>}
+          {models.map((model) => (
+            <option key={model.id} value={model.id}>{model.name} · {model.id}</option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="shrink-0 rounded-lg border border-slate-700 p-2 text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40"
+          onClick={onReload}
+          disabled={pending || !canReload}
+          aria-label={`Обновить список моделей (${fieldLabel})`}
+          title="Обновить список моделей"
+        >
+          <RefreshCw className={`size-4 ${pending ? "animate-spin" : ""}`} />
+        </button>
+      </span>
+      {/* The server's own sanitised reason separates an unreachable provider from a stored key
+          that no longer opens, which a single generic sentence would hide. */}
+      {error && <span className="text-xs text-rose-300">{failureText || "Не удалось загрузить модели. Проверьте ключ и адрес."}</span>}
+      {empty && <span className="text-xs text-slate-500">Провайдер не вернул список моделей для этого ключа.</span>}
+    </label>
+  );
+}
+
 export default function AIProviders() {
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
@@ -47,7 +173,6 @@ export default function AIProviders() {
   const [keyVisible, setKeyVisible] = useState(false);
   const [modelId, setModelId] = useState("");
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
-  const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [customDraft, setCustomDraft] = useState<CustomDraft | null>(null);
 
   const listQuery = trpc.userProviders.list.useQuery(undefined, { staleTime: 30_000 });
@@ -60,9 +185,12 @@ export default function AIProviders() {
   const activeConfig = configs.find((config) => config.provider === activeProvider) ?? null;
   const activeName = activeConfig?.displayName || providers.find((provider) => provider.id === activeProvider)?.displayName || activeProvider;
 
+  const openrouter = providers.find((provider) => provider.id === "openrouter" && provider.available) ?? null;
+  const openrouterConfig = configs.find((config) => config.provider === "openrouter") ?? null;
+  const unavailable = providers.filter((provider) => !provider.available);
   const selected = providers.find((provider) => provider.id === editingProvider) ?? null;
   const selectedConfig = configs.find((config) => config.provider === editingProvider) ?? null;
-  const canSubmit = Boolean(selected?.available && apiKey.trim().length >= 8 && modelId.trim().length > 0);
+
 
   // The catalog is fetched explicitly, never as a declarative query: a query would carry the
   // typed key in the GET query string, and an automatic fetch would re-send it on every
@@ -85,14 +213,18 @@ export default function AIProviders() {
   const customReady = Boolean(customDraft && customDraft.displayName.trim() && customDraft.baseUrl.trim() && customDraft.apiKey.trim().length >= 8);
   // Saving needs a model the provider actually returned, so an empty catalog leaves it disabled.
   const customCanSave = customReady && customModels.some((model) => model.id === customDraft!.modelId) && storageReady;
+  // A model id is only acceptable when the provider's live catalog returned it, so a stale or
+  // invented selection can never be persisted and an empty catalog keeps Save disabled.
+  const canSubmit = Boolean(selected?.available && apiKey.trim().length >= 8 && models.some((model) => model.id === modelId) && storageReady);
 
   // Switching provider resets the whole form so one provider's models or result can never be
   // shown next to another provider's key.
   useEffect(() => {
     setApiKey("");
     setKeyVisible(false);
-    setModelId("");
-    setTestResult(null);
+    // An already connected provider reopens on the model it already uses; a new one starts empty
+    // so the first model the catalog returns is preselected.
+    setModelId(selectedConfig?.activeModel ?? "");
     setNotice(null);
     modelsMutation.reset();
     // Opening a provider that already has a saved key loads its catalog from the server's own
@@ -104,6 +236,33 @@ export default function AIProviders() {
     if (!modelId && modelsMutation.data?.models.length) setModelId(modelsMutation.data.models[0]!.id);
   }, [modelsMutation.data, modelId]);
 
+  /**
+   * Asks the provider whether the typed key is accepted.
+   *
+   * The probe is the provider's own key or catalog route, so it costs no inference and the only
+   * thing that comes back is a verdict. A rejected key is explained before anything is saved,
+   * which is what the user needs to tell a typo from a provider-side problem.
+   */
+  const runKeyCheck = async () => {
+    setNotice(null);
+    try {
+      const result = selected?.available
+        ? await testMutation.mutateAsync({ provider: selected.id, ...(apiKey.trim().length >= 8 ? { apiKey: apiKey.trim() } : {}) })
+        : customDraft
+          ? await testMutation.mutateAsync({
+            provider: customDraft.provider ?? CUSTOM_DRAFT_PROVIDER,
+            apiKey: customDraft.apiKey.trim(),
+            draft: { displayName: customDraft.displayName.trim(), baseUrl: customDraft.baseUrl.trim() },
+          })
+          : null;
+      if (!result) return;
+      if (result.ok) setNotice({ tone: "ok", text: result.label ? `${result.message} (${result.label})` : result.message });
+      else setNotice({ tone: "error", text: result.message });
+    } catch (error) {
+      setNotice({ tone: "error", text: errorText(error, "Не удалось проверить API-ключ.") });
+    }
+  };
+
   const openPanel = (providerId: string) => setEditingProvider((current) => (current === providerId ? null : providerId));
 
   /** Loads the live catalog for the provider currently being edited. */
@@ -114,18 +273,6 @@ export default function AIProviders() {
       await modelsMutation.mutateAsync({ provider: editingProvider, ...(apiKey.trim().length >= 8 ? { apiKey: apiKey.trim() } : {}) });
     } catch {
       // The panel already renders the classified error from the mutation state.
-    }
-  };
-
-  const runTest = async () => {
-    if (!selected?.available) return;
-    setNotice(null);
-    setTestResult(null);
-    try {
-      const result = await testMutation.mutateAsync({ provider: selected.id, ...(apiKey.trim().length >= 8 ? { apiKey: apiKey.trim() } : {}) });
-      setTestResult({ ok: result.ok, text: result.message });
-    } catch (error) {
-      setTestResult({ ok: false, text: errorText(error, "Не удалось проверить подключение.") });
     }
   };
 
@@ -172,14 +319,16 @@ export default function AIProviders() {
   /** Opens the custom form, prefilled from a saved row or empty for a new provider. */
   const openCustomDraft = (config?: SavedConfig) => {
     setNotice(null);
-    setTestResult(null);
     // Only the custom catalog is dropped: the built-in panel keeps its own, separately loaded list.
     customModelsMutation.reset();
     setCustomDraft(
       config
-        ? { provider: config.provider, displayName: config.displayName ?? "", baseUrl: config.baseUrl ?? "", modelsEndpoint: config.modelsEndpoint ?? "", apiKey: "", modelId: config.activeModel }
+        ? { provider: config.provider, displayName: config.displayName ?? "", baseUrl: config.baseUrl ?? "", apiKey: "", modelId: config.activeModel }
         : emptyCustomDraft(),
     );
+    // Reopening a saved provider reads its catalog from the server's own copy of the key, so the
+    // user sees their models again without retyping anything. Nothing is sent from the browser.
+    if (config) void customModelsMutation.mutateAsync({ provider: config.provider }).catch(() => undefined);
   };
 
   const patchCustomDraft = (patch: Partial<CustomDraft>) => setCustomDraft((current) => (current ? { ...current, ...patch } : current));
@@ -202,43 +351,40 @@ export default function AIProviders() {
    * yet, and it travels in the POST body as a draft, never in the URL.
    */
   const loadCustomModels = async () => {
-    if (!customDraft || !customReady) return;
+    if (!customDraft) return;
+    // A provider that is already stored is read with its own saved key; a provider being typed for
+    // the first time has to carry the key, because the server has nothing else to use.
+    if (customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER) {
+      try {
+        await customModelsMutation.mutateAsync({ provider: customDraft.provider });
+      } catch {
+        // The form renders the classified error from the mutation state.
+      }
+      return;
+    }
+    if (!customReady) return;
     try {
       await customModelsMutation.mutateAsync({
-        provider: customDraft.provider ?? CUSTOM_DRAFT_PROVIDER,
+        provider: CUSTOM_DRAFT_PROVIDER,
         apiKey: customDraft.apiKey.trim(),
-        draft: { displayName: customDraft.displayName.trim(), baseUrl: customDraft.baseUrl.trim(), ...(customDraft.modelsEndpoint.trim() ? { modelsEndpoint: customDraft.modelsEndpoint.trim() } : {}) },
+        draft: { displayName: customDraft.displayName.trim(), baseUrl: customDraft.baseUrl.trim() },
       });
     } catch {
       // The form renders the classified error from the mutation state.
     }
   };
 
-  const runCustomTest = async () => {
-    if (!customDraft || !customReady) return;
-    setNotice(null);
-    setTestResult(null);
-    try {
-      // A stored provider is probed with its own saved key, so the form need not ask for it again.
-      const stored = customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER ? customDraft.provider : CUSTOM_DRAFT_PROVIDER;
-      const result = await testMutation.mutateAsync({
-        provider: stored,
-        ...(customDraft.apiKey.trim().length >= 8 ? { apiKey: customDraft.apiKey.trim() } : {}),
-        draft: { displayName: customDraft.displayName.trim(), baseUrl: customDraft.baseUrl.trim(), ...(customDraft.modelsEndpoint.trim() ? { modelsEndpoint: customDraft.modelsEndpoint.trim() } : {}) },
-      });
-      setTestResult({ ok: result.ok, text: result.message });
-    } catch (error) {
-      setTestResult({ ok: false, text: errorText(error, "Не удалось проверить подключение.") });
-    }
-  };
-
   const runCustomSave = async () => {
     if (!customDraft || !customCanSave) return;
     setNotice(null);
-    const payload = { displayName: customDraft.displayName.trim(), baseUrl: customDraft.baseUrl.trim(), ...(customDraft.modelsEndpoint.trim() ? { modelsEndpoint: customDraft.modelsEndpoint.trim() } : {}), apiKey: customDraft.apiKey.trim(), activeModel: customDraft.modelId };
+    const payload = { displayName: customDraft.displayName.trim(), baseUrl: customDraft.baseUrl.trim(), apiKey: customDraft.apiKey.trim(), activeModel: customDraft.modelId };
+    const editingExisting = Boolean(customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER);
     try {
-      if (customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER) {
-        await updateCustomMutation.mutateAsync({ provider: customDraft.provider, ...payload });
+      if (editingExisting) {
+        await updateCustomMutation.mutateAsync({ provider: customDraft.provider!, ...payload });
+        // Saving from this screen means "use this one", the same intent as Connect, so a row that
+        // is not the active binding becomes active instead of leaving My API on the old provider.
+        if (activeProvider !== customDraft.provider) await setActiveMutation.mutateAsync({ provider: customDraft.provider! });
       } else {
         await createCustomMutation.mutateAsync({ ...payload, makeActive: true });
       }
@@ -254,334 +400,218 @@ export default function AIProviders() {
 
   return (
     <main className="min-h-screen bg-slate-950 px-4 py-5 text-slate-100 sm:px-6">
-      <div className="mx-auto max-w-4xl">
-        <header className="mb-5">
-          <button className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800" onClick={() => navigate("/")}>
+      <div className="mx-auto max-w-2xl">
+        <header className="mb-4">
+          <button className="mb-3 inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800" onClick={() => navigate("/")}>
             <ArrowLeft className="size-4" />К чату
           </button>
-          <p className="text-xs font-medium uppercase tracking-[0.16em] text-violet-300">Настройки</p>
-          <h1 className="mt-1 text-2xl font-semibold">AI Providers</h1>
-          <p className="mt-2 max-w-2xl text-sm text-slate-400">
-            Режим «Мой API» отправляет запросы напрямую выбранному вами провайдеру по выбранной вами модели и оплачивается вашим ключом. Обычный режим «Чат» продолжает использовать провайдеры Kairema.
-          </p>
+          <h1 className="text-xl font-semibold">AI Providers</h1>
+          <p className="mt-1 text-sm text-slate-400">Подключите свой API-ключ и используйте выбранную модель в режиме «Мой API».</p>
         </header>
 
         {!storageReady && (
-          <p className="mb-4 flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
+          <p className="mb-3 flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200" role="status">
             <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-            <span>Сервер пока не настроен на хранение пользовательских API-ключей. Сохранение и проверка подключения будут недоступны до исправления конфигурации.</span>
+            <span>Сервер пока не настроен на хранение пользовательских API-ключей. Подключение станет доступно после настройки сервера.</span>
           </p>
         )}
 
         {notice && (
-          <p className={`mb-4 flex items-start gap-2 rounded-xl border p-3 text-sm ${notice.tone === "ok" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-rose-500/40 bg-rose-500/10 text-rose-200"}`}>
+          <p className={`mb-3 flex items-start gap-2 rounded-xl border p-3 text-sm ${notice.tone === "ok" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-rose-500/40 bg-rose-500/10 text-rose-200"}`} role="status">
             {notice.tone === "ok" ? <CheckCircle2 className="mt-0.5 size-4 shrink-0" /> : <XCircle className="mt-0.5 size-4 shrink-0" />}
             <span>{notice.text}</span>
           </p>
         )}
 
-        <section className="mb-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-4" aria-label="Текущий провайдер">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Текущий провайдер</h2>
-          <p className="mt-2 text-sm text-slate-200">
-            {activeProvider ? activeName : "Не выбран"}
-          </p>
-          {activeProvider && (
-            <p className="mt-1 break-all text-xs text-slate-500">
-              Модель: {activeConfig?.activeModel ?? "—"}
-            </p>
-          )}
-        </section>
+        {openrouter && (
+          <ProviderCard
+            title="OpenRouter"
+            subtitle="Модели OpenRouter"
+            connected={Boolean(openrouterConfig)}
+            // "Active" is shown only while the row still exists: disconnecting the active
+            // provider leaves the stored pointer behind, and the screen must not claim a
+            // binding the user no longer has.
+            active={activeProvider === "openrouter" && Boolean(openrouterConfig)}
+            expanded={editingProvider === "openrouter"}
+            busy={busy}
+            disabled={!storageReady}
+            onToggle={() => openPanel("openrouter")}
+            // Only a provider that already has a stored row can be activated; offering it for an
+            // unconnected provider would send the user to a server-side "not found".
+            onMakeActive={openrouterConfig ? () => void makeActive("openrouter") : undefined}
+            onDisconnect={() => void disconnect("openrouter")}
+            hasConfig={Boolean(openrouterConfig)}
+            summary={openrouterConfig ? <p className="truncate text-xs text-slate-500">ключ {openrouterConfig.keyHint} · {openrouterConfig.activeModel}</p> : null}
+          >
+            <div className="grid gap-3">
+              <KeyField
+                label="API key"
+                fieldLabel="API key (OpenRouter)"
+                value={apiKey}
+                visible={keyVisible}
+                onVisibleChange={setKeyVisible}
+                onChange={setApiKey}
+                placeholder={openrouterConfig ? `Сохранённый ключ ${openrouterConfig.keyHint} — введите, чтобы заменить` : "Вставьте API-ключ OpenRouter"}
+              />
+              <ModelField
+                label="Model"
+                fieldLabel="Model (OpenRouter)"
+                value={modelId}
+                fallback={selectedConfig?.activeModel}
+                models={models}
+                pending={modelsMutation.isPending}
+                error={modelsMutation.isError}
+                errorText={errorText(modelsMutation.error, "")}
+                empty={modelsMutation.isSuccess && !models.length}
+                onChange={setModelId}
+                onReload={() => void loadModels()}
+                canReload={apiKey.trim().length >= 8 || Boolean(openrouterConfig)}
+                placeholder={openrouterConfig ? "Нажмите, чтобы обновить список моделей" : "Сначала укажите API-ключ"}
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-500 disabled:opacity-40"
+                  onClick={() => void runSave()}
+                  disabled={busy || !canSubmit}
+                >
+                  {openrouterConfig ? "Save" : "Connect"}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40"
+                  onClick={() => void runKeyCheck()}
+                  disabled={busy || (apiKey.trim().length < 8 && !openrouterConfig)}
+                >
+                  Проверить ключ
+                </button>
+                {openrouterConfig?.keyHint && <span className="text-xs text-slate-500">ключ {openrouterConfig.keyHint}</span>}
+              </div>
+              {!canSubmit && <p className="text-xs text-slate-500">Сохранить можно после проверки ключа и выбора модели из списка провайдера.</p>}
+            </div>
+          </ProviderCard>
+        )}
 
-        <section className="mb-4" aria-label="Мои провайдеры">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Мои провайдеры</h2>
-          </div>
-          <ul className="grid gap-2">
-            {providers.map((provider) => {
-              const config = configs.find((item) => item.provider === provider.id) ?? null;
-              const isActive = activeProvider === provider.id;
-              const expanded = editingProvider === provider.id;
-              return (
-                <li key={provider.id} className="rounded-2xl border border-slate-800 bg-slate-900/60">
-                  <div className="flex flex-wrap items-center gap-2 p-3">
-                    <span className="text-sm font-medium text-slate-100">{provider.displayName}</span>
-                    {isActive && <span className="rounded-full bg-violet-500/20 px-2 py-0.5 text-[11px] font-semibold text-violet-200">активен</span>}
-                    {!provider.available && <span className="rounded-full bg-slate-700/60 px-2 py-0.5 text-[11px] text-slate-300">скоро</span>}
-                    {config && <span className="text-xs text-slate-500">модель {config.activeModel} · ключ {config.keyHint}</span>}
-                    <span className="ml-auto flex items-center gap-2">
-                      {provider.available && (
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40"
-                          onClick={() => openPanel(provider.id)}
-                          disabled={busy}
-                          aria-expanded={expanded}
-                        >
-                          {expanded ? <XCircle className="size-3.5" /> : <Plus className="size-3.5" />}
-                          {expanded ? "Свернуть" : config ? "Настроить" : "Добавить"}
-                        </button>
-                      )}
-                      {config && !isActive && (
-                        <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40" onClick={() => void makeActive(provider.id)} disabled={busy}>
-                          <Power className="size-3.5" />Сделать активным
-                        </button>
-                      )}
-                      {config && (
-                        <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-rose-200 transition-colors hover:bg-rose-500/15 disabled:opacity-40" onClick={() => void disconnect(provider.id)} disabled={busy}>
-                          Отключить
-                        </button>
-                      )}
+        <div className="mt-3">
+          <ProviderCard
+            title="Custom provider"
+            subtitle={customDraft?.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER ? `Редактируется: ${customDraft.displayName || "Мой провайдер"}` : "Любой OpenAI-совместимый API"}
+            connected={customConfigs.length > 0}
+            active={customConfigs.some((config) => config.provider === activeProvider)}
+            expanded={customDraft !== null}
+            busy={busy}
+            disabled={!storageReady}
+            onToggle={() => (customDraft ? setCustomDraft(null) : openCustomDraft())}
+            addLabel="Connect"
+            summary={customConfigs.length > 0 ? (
+              <ul className="grid gap-1.5">
+                {customConfigs.map((config) => (
+                  <li key={config.provider} className="flex flex-wrap items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate text-sm text-slate-200">
+                      {config.displayName || "Мой провайдер"}<span className="text-slate-500"> · {config.activeModel}</span>
                     </span>
-                  </div>
-
-                  {!provider.available && (
-                    <p className="border-t border-slate-800 px-3 py-2 text-xs text-slate-500">{provider.note}</p>
-                  )}
-
-                  {expanded && selected?.available && (
-                    <div className="grid gap-3 border-t border-slate-800 p-3">
-                      <label className="grid gap-1 text-sm">
-                        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Провайдер ИИ</span>
-                        <span className="text-sm text-slate-200">{selected.displayName}</span>
-                      </label>
-
-                      <label className="grid gap-1 text-sm">
-                        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Модель</span>
-                        <select
-                          className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-400"
-                          value={modelId}
-                          onChange={(event) => setModelId(event.target.value)}
-                          disabled={modelsMutation.isPending}
-                          aria-label={`Активная модель (${selected.displayName})`}
-                        >
-                          {modelsMutation.isPending && <option value="">Загружаем модели…</option>}
-                          {!modelsMutation.isPending && !models.length && <option value="">Сначала укажите API-ключ</option>}
-                          {models.map((model) => (
-                            <option key={model.id} value={model.id}>{model.name} · {model.id}</option>
-                          ))}
-                        </select>
-                        {modelsMutation.isError && <span className="text-xs text-rose-300">Каталог моделей сейчас недоступен. Проверьте подключение и повторите.</span>}
-                        {modelsMutation.isSuccess && !models.length && <span className="text-xs text-slate-500">Провайдер не вернул список моделей для этого ключа.</span>}
-                        <button type="button" className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40" onClick={() => void loadModels()} disabled={modelsMutation.isPending || (!apiKey.trim() && !selectedConfig)}>
-                          <RefreshCw className="size-3.5" aria-hidden="true" />Загрузить модели
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {activeProvider !== config.provider && (
+                        <button type="button" className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40" onClick={() => void makeActive(config.provider)} disabled={busy}>
+                          Активировать
                         </button>
-                      </label>
-
-                      <label className="grid gap-1 text-sm">
-                        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Авторизация</span>
-                        <div className="flex items-center gap-2">
-                          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3">
-                            <KeyRound className="size-4 shrink-0 text-slate-500" />
-                            <input
-                              className="min-w-0 flex-1 bg-transparent py-2 text-sm text-slate-100 outline-none"
-                              type={keyVisible ? "text" : "password"}
-                              value={apiKey}
-                              onChange={(event) => setApiKey(event.target.value)}
-                              placeholder={selectedConfig ? `Сохранённый ключ ${selectedConfig.keyHint} — введите, чтобы заменить` : "Вставьте API-ключ провайдера"}
-                              autoComplete="off"
-                              spellCheck={false}
-                              aria-label={`API-ключ (${selected.displayName})`}
-                            />
-                            <button type="button" className="shrink-0 text-slate-500 hover:text-slate-200" onClick={() => setKeyVisible((value) => !value)} aria-label={keyVisible ? "Скрыть ключ" : "Показать ключ"}>
-                              {keyVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                            </button>
-                          </div>
-                        </div>
-                        {selectedConfig && <span className="text-xs text-slate-500">Сохранённый ключ: {selectedConfig.keyHint} · обновлён {savedAt(selectedConfig.updatedAt)}</span>}
-                        <span className="text-xs text-slate-500">Ключ хранится только в зашифрованном виде и не показывается снова после сохранения. Он не попадает в localStorage.</span>
-                        {selected.keyUrl && <a className="text-xs text-violet-300 underline" href={selected.keyUrl} target="_blank" rel="noreferrer noopener">Где взять ключ провайдера</a>}
-                      </label>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40" onClick={() => void runTest()} disabled={busy || (!apiKey.trim() && !selectedConfig)}>
-                          <Plug className="size-4" />Проверить подключение
-                        </button>
-                        <button type="button" className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-500 disabled:opacity-40" onClick={() => void runSave()} disabled={busy || !canSubmit || !storageReady}>
-                          Сохранить
-                        </button>
-                      </div>
-
-                      {testResult && (
-                        <p className={`flex items-start gap-2 rounded-lg border p-2 text-xs ${testResult.ok ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-rose-500/40 bg-rose-500/10 text-rose-200"}`}>
-                          {testResult.ok ? <CheckCircle2 className="mt-0.5 size-3.5 shrink-0" /> : <XCircle className="mt-0.5 size-3.5 shrink-0" />}
-                          <span>{testResult.text}</span>
-                        </p>
                       )}
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-
-        <section className="mb-4" aria-label="Свой провайдер">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Свой провайдер</h2>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40"
-              onClick={() => openCustomDraft()}
-              disabled={busy}
-              aria-expanded={customDraft !== null}
-            >
-              {customDraft ? <XCircle className="size-3.5" /> : <Plus className="size-3.5" />}
-              {customDraft ? "Свернуть форму" : "Подключить свой провайдер"}
-            </button>
-          </div>
-
-          {customConfigs.length > 0 && (
-            <ul className="mb-2 grid gap-2">
-              {customConfigs.map((config) => {
-                const isActive = activeProvider === config.provider;
-                const expanded = customDraft?.provider === config.provider;
-                return (
-                  <li key={config.provider} className="rounded-2xl border border-slate-800 bg-slate-900/60">
-                    <div className="flex flex-wrap items-center gap-2 p-3">
-                      <span className="text-sm font-medium text-slate-100">{config.displayName || "Мой провайдер"}</span>
-                      {isActive && <span className="rounded-full bg-violet-500/20 px-2 py-0.5 text-[11px] font-semibold text-violet-200">активен</span>}
-                      <span className="text-xs text-slate-500">модель {config.activeModel} · ключ {config.keyHint}</span>
-                      <span className="ml-auto flex items-center gap-2">
-                        <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40" onClick={() => (expanded ? setCustomDraft(null) : openCustomDraft(config))} disabled={busy} aria-expanded={expanded}>
-                          {expanded ? <XCircle className="size-3.5" /> : <Plug className="size-3.5" />}
-                          {expanded ? "Свернуть" : "Настроить"}
-                        </button>
-                        {!isActive && (
-                          <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40" onClick={() => void makeActive(config.provider)} disabled={busy}>
-                            <Power className="size-3.5" />Сделать активным
-                          </button>
-                        )}
-                        <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-rose-200 transition-colors hover:bg-rose-500/15 disabled:opacity-40" onClick={() => void disconnect(config.provider)} disabled={busy}>
-                          Отключить
-                        </button>
-                      </span>
-                    </div>
-                    {config.baseUrl && <p className="border-t border-slate-800 px-3 py-2 text-xs break-all text-slate-500">{config.baseUrl}</p>}
+                      <button type="button" className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40" onClick={() => openCustomDraft(config)} disabled={busy}>
+                        Настроить
+                      </button>
+                      <button type="button" className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-rose-200 transition-colors hover:bg-rose-500/15 disabled:opacity-40" onClick={() => void disconnect(config.provider)} disabled={busy}>
+                        Отключить
+                      </button>
+                    </span>
                   </li>
-                );
-              })}
-            </ul>
-          )}
-
-          {customDraft && (
-            <div className="grid gap-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-3" aria-label="Форма своего провайдера">
-              <label className="grid gap-1 text-sm">
-                <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Название</span>
-                <input
-                  className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-400"
-                  value={customDraft.displayName}
-                  onChange={(event) => patchCustomDraft({ displayName: event.target.value })}
-                  placeholder="Например, Мой провайдер"
-                  maxLength={64}
-                  aria-label="Название своего провайдера"
-                />
-              </label>
-
-              <label className="grid gap-1 text-sm">
-                <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Базовый URL</span>
-                <input
-                  className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-400"
-                  value={customDraft.baseUrl}
-                  onChange={(event) => patchCustomDraft({ baseUrl: event.target.value })}
-                  placeholder="https://api.example.com/v1"
-                  inputMode="url"
-                  spellCheck={false}
-                  aria-label="Базовый URL провайдера"
-                />
-                <span className="text-xs text-slate-500">Только https на стандартном порту 443. Путь /v1 добавляется автоматически, к /chat/completions и /models.</span>
-              </label>
-
-              <label className="grid gap-1 text-sm">
-                <span className="text-xs font-medium uppercase tracking-wide text-slate-500">URL списка моделей</span>
-                <input
-                  className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-400"
-                  value={customDraft.modelsEndpoint}
-                  onChange={(event) => patchCustomDraft({ modelsEndpoint: event.target.value })}
-                  placeholder="Необязательно — https://api.example.com/v1/models"
-                  inputMode="url"
-                  spellCheck={false}
-                  aria-label="URL списка моделей"
-                />
-                <span className="text-xs text-slate-500">Оставьте пустым, если каталог моделей лежит по стандартному пути /v1/models.</span>
-              </label>
-
-              <label className="grid gap-1 text-sm">
-                <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Авторизация</span>
-                <div className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3">
-                  <KeyRound className="size-4 shrink-0 text-slate-500" />
+                ))}
+              </ul>
+            ) : null}
+          >
+            {customDraft && (
+              <div className="grid gap-3">
+                <label className="grid gap-1">
+                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Name</span>
                   <input
-                    className="min-w-0 flex-1 bg-transparent py-2 text-sm text-slate-100 outline-none"
-                    type={keyVisible ? "text" : "password"}
-                    value={customDraft.apiKey}
-                    onChange={(event) => patchCustomDraft({ apiKey: event.target.value })}
-                    placeholder="Вставьте API-ключ провайдера"
-                    autoComplete="off"
-                    spellCheck={false}
-                    aria-label="API-ключ (свой провайдер)"
+                    className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-400"
+                    value={customDraft.displayName}
+                    onChange={(event) => patchCustomDraft({ displayName: event.target.value })}
+                    placeholder="My Provider"
+                    maxLength={64}
+                    aria-label="Название провайдера"
                   />
-                  <button type="button" className="shrink-0 text-slate-500 hover:text-slate-200" onClick={() => setKeyVisible((value) => !value)} aria-label={keyVisible ? "Скрыть ключ" : "Показать ключ"}>
-                    {keyVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </label>
+
+                <label className="grid gap-1">
+                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500">API URL</span>
+                  <input
+                    className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-400"
+                    value={customDraft.baseUrl}
+                    onChange={(event) => patchCustomDraft({ baseUrl: event.target.value })}
+                    placeholder="https://api.example.com/v1"
+                    inputMode="url"
+                    spellCheck={false}
+                    aria-label="API URL провайдера"
+                  />
+                </label>
+
+                <KeyField
+                  label="API key"
+                  fieldLabel="API key (Custom provider)"
+                  value={customDraft.apiKey}
+                  visible={keyVisible}
+                  onVisibleChange={setKeyVisible}
+                  onChange={(value) => patchCustomDraft({ apiKey: value })}
+                  placeholder={customDraft.provider ? "Введите, чтобы заменить сохранённый ключ" : "Вставьте API-ключ провайдера"}
+                />
+
+                <ModelField
+                  label="Model"
+                  fieldLabel="Model (Custom provider)"
+                  value={customDraft.modelId}
+                  fallback={customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER ? customDraft.modelId : undefined}
+                  models={customModels}
+                  pending={customModelsMutation.isPending}
+                  error={customModelsMutation.isError}
+                  errorText={errorText(customModelsMutation.error, "")}
+                  empty={customModelsMutation.isSuccess && !customModels.length}
+                  onChange={(value) => patchCustomDraft({ modelId: value })}
+                  onReload={() => void loadCustomModels()}
+                  canReload={customReady || Boolean(customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER)}
+                  placeholder={customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER ? "Нажмите, чтобы обновить список моделей" : "Сначала укажите URL и API-ключ"}
+                />
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-500 disabled:opacity-40"
+                    onClick={() => void runCustomSave()}
+                    disabled={busy || !customCanSave}
+                  >
+                    {customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER ? "Save" : "Connect"}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40"
+                    onClick={() => void runKeyCheck()}
+                    disabled={busy || !customReady}
+                  >
+                    Проверить ключ
                   </button>
                 </div>
-                <span className="text-xs text-slate-500">Ключ шифруется на сервере и не показывается снова после сохранения. Он не попадает в localStorage.</span>
-              </label>
-
-              <label className="grid gap-1 text-sm">
-                <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Модель</span>
-                <select
-                  className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-400"
-                  value={customDraft.modelId}
-                  onChange={(event) => patchCustomDraft({ modelId: event.target.value })}
-                  disabled={customModelsMutation.isPending}
-                  aria-label="Активная модель (свой провайдер)"
-                >
-                  {customModelsMutation.isPending && <option value="">Загружаем модели…</option>}
-                  {!customModelsMutation.isPending && !customModels.length && <option value="">Сначала укажите URL и API-ключ</option>}
-                  {customModels.map((model) => (
-                    <option key={model.id} value={model.id}>{model.name} · {model.id}</option>
-                  ))}
-                </select>
-                {customModelsMutation.isError && <span className="text-xs text-rose-300">Каталог моделей сейчас недоступен. Проверьте URL и ключ.</span>}
-                {customModelsMutation.isSuccess && !customModels.length && <span className="text-xs text-slate-500">Провайдер не вернул список моделей для этого ключа.</span>}
-                <button type="button" className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40" onClick={() => void loadCustomModels()} disabled={busy || !customReady}>
-                  <RefreshCw className="size-3.5" aria-hidden="true" />Загрузить модели
-                </button>
-              </label>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40" onClick={() => void runCustomTest()} disabled={busy || !customDraft.baseUrl.trim()}>
-                  <Plug className="size-4" />Проверить подключение
-                </button>
-                <button type="button" className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-500 disabled:opacity-40" onClick={() => void runCustomSave()} disabled={busy || !customCanSave}>
-                  Сохранить
-                </button>
+                {!customCanSave && <p className="text-xs text-slate-500">Сохранить можно после проверки ключа и выбора модели из списка провайдера.</p>}
               </div>
+            )}
+          </ProviderCard>
+        </div>
 
-              {testResult && (
-                <p className={`flex items-start gap-2 rounded-lg border p-2 text-xs ${testResult.ok ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-rose-500/40 bg-rose-500/10 text-rose-200"}`}>
-                  {testResult.ok ? <CheckCircle2 className="mt-0.5 size-3.5 shrink-0" /> : <XCircle className="mt-0.5 size-3.5 shrink-0" />}
-                  <span>{testResult.text}</span>
-                </p>
-              )}
-            </div>
-          )}
-
-          <p className="mt-2 flex items-start gap-2 rounded-xl border border-slate-800 bg-slate-900/40 p-3 text-xs text-slate-400">
-            <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-            <span>Свой провайдер доступен только в режиме «Мой API». Поиск по интернету, работа с вложениями и память на основе документов в этом режиме не используются.</span>
+        {unavailable.length > 0 && (
+          // The unimplemented providers are not pretended into existence, and the alternative that
+          // already works today is named instead: anything that speaks the OpenAI API shape.
+          <p className="mt-3 text-center text-xs text-slate-500">
+            Другие провайдеры — скоро. Любой совместимый API (например, OpenAI, Groq, Together) подключается через «Custom provider».
           </p>
-        </section>
-
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4" aria-label="Как это работает">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Как это работает</h2>
-          <ul className="mt-2 grid gap-1 text-xs text-slate-400">
-            <li>Список моделей загружается с API провайдера, а не из фиксированного набора.</li>
-            <li>Проверка подключения обращается к провайдеру без запроса к модели, поэтому не тратит токены.</li>
-            <li>Ключ шифруется на сервере; в интерфейс возвращается только последние четыре символа.</li>
-            <li>Сервер видит ключ в момент запроса к провайдеру: иначе отправить запрос от вашего имени невозможно.</li>
-            <li>Если провайдер недоступен, Kairema не переключается на свои провайдеры — вы увидите ошибку.</li>
-          </ul>
-        </section>
+        )}
       </div>
     </main>
   );

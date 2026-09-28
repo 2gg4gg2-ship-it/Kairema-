@@ -505,7 +505,31 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-mode-hint-link { color:#a096ff; text-decoration:underline; text-underline-offset:2px; }
 .kairema-mode-hint-link:hover { color:#c7bfff; }
 /* My API header: the saved user binding shown in place of the Kairema role selector. */
-.kairema-model-binding { flex:0 1 auto; min-width:0; color:#FFFFFF; font-size:15px; font-weight:600; line-height:1.2; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* My API binding in the header: provider name plus a model picker. Both are allowed to shrink
+   to nothing so a long provider/model pair can never widen the bar or start a horizontal
+   scrollbar; the name truncates with an ellipsis and the select is capped to the pill width. */
+.kairema-binding-name { flex:0 1 auto; min-width:0; max-width:45%; color:#FFFFFF; font-size:15px; font-weight:600; line-height:1.2; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-select-wrap.kairema-binding-wrap { flex:0 1 auto; min-width:0; }
+.kairema-binding-select { appearance:none; max-width:100%; min-width:0; padding:7px 10px; border:1px solid rgba(255,255,255,.09); border-radius:9px; outline:none; color:#dce4f4; background:#131725; font-size:12px; font-weight:600; text-overflow:ellipsis; }
+.kairema-binding-select:focus { border-color:#9386ff; }
+.kairema-model-pill { max-width:100%; overflow:hidden; }
+/* Narrow viewports: the binding keeps truncating instead of pushing the bar wider. */
+/* Profile dialog: a single compact column, so it never stretches into a wall of whitespace. */
+.kairema-dialog-narrow { max-width:26rem; }
+.kairema-profile-grid { display:grid; gap:14px; }
+.kairema-profile-grid h3 { margin:0 0 6px; font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#8b94a7; }
+.kairema-profile-grid .kairema-dialog-note { margin:0 0 8px; }
+.kairema-dialog-action { align-self:flex-start; }
+
+@media (max-width:767px) {
+  .kairema-model-pill { max-width:100%; }
+  .kairema-binding-name { max-width:40%; font-size:13px; }
+  .kairema-binding-select { max-width:52vw; font-size:11px; }
+}
+@media (max-width:430px) {
+  .kairema-binding-name { max-width:34%; font-size:12px; }
+  .kairema-binding-select { max-width:46vw; font-size:11px; }
+}
 .kairema-model-chevron { flex:0 0 auto; width:15px; height:15px; color:#FFFFFF; stroke-width:2.25; }
 .kairema-select-wrap { display:inline-flex; flex:0 1 auto; min-width:0; }
 .kairema-topbar .kairema-role-menu-trigger { display:inline-flex; flex:0 1 auto; min-width:0; min-height:0; max-width:min(40vw,300px); padding:0; border:0; border-radius:0; color:#FFFFFF; background:transparent; font-size:15px; font-weight:600; line-height:1.2; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -615,3 +639,6 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-chat-sticky:has(.kairema-chat-controls[data-controls-open="false"]) { border-bottom-color:transparent; }
 @media (prefers-reduced-motion:reduce) { .kairema-panel-collapse { transition:none; } .kairema-mode-bar { transition:none; } }
 .kairema-mode-hint { flex:0 1 auto; min-width:0; overflow:hidden; padding-left:6px; color:var(--k-muted); font-size:11px; line-height:1.15; text-overflow:ellipsis; white-space:nowrap; }
+/* Catalog and switch states sit on the same line; the line itself truncates on a phone. */
+.kairema-mode-hint-state { color:var(--k-muted); }
+.kairema-mode-hint .kairema-mode-hint-link { border:0; padding:0; background:transparent; font:inherit; cursor:pointer; }

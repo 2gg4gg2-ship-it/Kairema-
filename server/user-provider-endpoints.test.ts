@@ -124,6 +124,9 @@ describe("user provider endpoint security", () => {
       expect(parseOptionalUserProviderEndpoint(null, "Models endpoint")).toBeNull();
       expect(parseOptionalUserProviderEndpoint("   ", "Models endpoint")).toBeNull();
       expect(parseOptionalUserProviderEndpoint("https://api.example.com/v1/models", "Models endpoint")?.pathname).toBe("/v1/models");
+      // The message names the field the user actually filled in, not an internal concept.
+      expect(() => parseUserProviderEndpoint("http://api.example.com/v1")).toThrow(/^API URL должен использовать https/);
+      expect(() => parseUserProviderEndpoint("https://127.0.0.1/v1")).toThrow(/^API URL указывает на внутренний адрес/);
     });
   });
 

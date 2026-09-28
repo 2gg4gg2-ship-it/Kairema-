@@ -11,6 +11,7 @@ const scopedDb = vi.hoisted(() => ({
   upsertUserProviderConfig: vi.fn(),
   deleteUserProviderConfig: vi.fn(),
   setActiveUserProvider: vi.fn(),
+  setUserProviderActiveModel: vi.fn(async (userId: number, provider: string, activeModel: string) => ({ ...configFor(userId, provider), activeModel })),
   getUserSettings: vi.fn(),
 }));
 
@@ -67,6 +68,7 @@ beforeEach(() => {
   scopedDb.deleteUserProviderConfig.mockReset().mockResolvedValue({ removed: true as const });
   scopedDb.setActiveUserProvider.mockReset().mockImplementation(async (_userId, provider) => ({ myApiProvider: provider ?? null }));
   scopedDb.getUserSettings.mockReset().mockResolvedValue({ myApiProvider: null });
+  scopedDb.setUserProviderActiveModel.mockReset().mockImplementation(async (userId: number, provider: string, activeModel: string) => ({ ...configFor(userId, provider), activeModel }));
   providerApi.listUserProviderModels.mockReset().mockResolvedValue([{ id: MODEL, name: "Model A" }, { id: "vendor/model-b", name: "Model B" }]);
   providerApi.verifyUserProviderKey.mockReset().mockResolvedValue({ ok: true, label: "kairema" });
   vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -393,5 +395,35 @@ describe("userProviders custom credentials over real HTTP", () => {
       expect(url).not.toContain("apiKey");
       expect(url).not.toContain("api.example.com");
     }
+  });
+});
+
+describe("userProviders.setActiveModel", () => {
+  it("switches the model of an owned provider using the stored key, sending no key in the request", async () => {
+    scopedDb.getUserProviderConfig.mockImplementation(async (userId: number, provider: string) => (userId === 42 && provider === "openrouter" ? configFor(42) : undefined));
+    const result = await callerFor(42).userProviders.setActiveModel({ provider: "openrouter", activeModel: "vendor/model-b" });
+
+    // The catalog is re-read with the caller's own saved credential, so the input carries no key.
+    expect(providerApi.listUserProviderModels).toHaveBeenCalledWith(expect.objectContaining({ id: "openrouter" }), KEY);
+    expect(scopedDb.setUserProviderActiveModel).toHaveBeenCalledWith(42, "openrouter", "vendor/model-b");
+    expect(result).toMatchObject({ provider: "openrouter", activeModel: "vendor/model-b" });
+    expect(JSON.stringify(result)).not.toContain(KEY);
+  });
+
+  it("refuses a model the provider's live catalog does not offer", async () => {
+    scopedDb.getUserProviderConfig.mockImplementation(async (userId: number, provider: string) => (userId === 42 && provider === "openrouter" ? configFor(42) : undefined));
+    providerApi.listUserProviderModels.mockResolvedValue([{ id: MODEL, name: "Model A" }]);
+    await expect(callerFor(42).userProviders.setActiveModel({ provider: "openrouter", activeModel: "vendor/invented" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(scopedDb.setUserProviderActiveModel).not.toHaveBeenCalled();
+  });
+
+  it("will not switch a model on another user's row", async () => {
+    scopedDb.getUserProviderConfig.mockResolvedValue(undefined);
+    await expect(callerFor(42).userProviders.setActiveModel({ provider: "openrouter", activeModel: "vendor/model-b" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(scopedDb.setUserProviderActiveModel).not.toHaveBeenCalled();
+  });
+
+  it("requires an authenticated caller", async () => {
+    await expect(appRouter.createCaller({ user: null, isGuest: true, req: { headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] }).userProviders.setActiveModel({ provider: "openrouter", activeModel: MODEL })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 });
