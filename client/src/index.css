@@ -642,3 +642,40 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 /* Catalog and switch states sit on the same line; the line itself truncates on a phone. */
 .kairema-mode-hint-state { color:var(--k-muted); }
 .kairema-mode-hint .kairema-mode-hint-link { border:0; padding:0; background:transparent; font:inherit; cursor:pointer; }
+
+/* The My API model menu. It is a black panel with its own scroll, portaled to <body> and placed
+   with fixed coordinates, so the header pill keeps the `overflow:hidden` that stops a long
+   binding from widening the bar while this panel still escapes it and can never add horizontal
+   overflow. Free/Paid grouping and the search field are the only additions here: the models
+   themselves always come from the live catalog Kairema already fetched. */
+.kairema-binding-trigger { display:inline-flex; align-items:center; gap:6px; max-width:100%; min-width:0; cursor:pointer; font-family:inherit; background:#111114; }
+.kairema-binding-trigger-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-binding-trigger:disabled { cursor:not-allowed; opacity:.6; }
+.kairema-binding-trigger:hover:not(:disabled),.kairema-binding-trigger[aria-expanded="true"] { border-color:rgba(147,134,255,.55); background:#17171b; }
+.kairema-binding-trigger:focus-visible { border-color:#9386ff; }
+/* The same arrow and the same rotation the role menu uses, driven by the aria-expanded the
+   open/close path already maintains, so Escape and picking a model restore it for free. */
+.kairema-select-wrap:has(.kairema-binding-trigger[aria-expanded="true"]) .kairema-model-chevron { transform:rotate(180deg); }
+.kairema-model-menu { position:fixed; z-index:60; display:flex; flex-direction:column; min-width:0; max-height:calc(100vh - 32px); box-sizing:border-box; overflow:hidden; border:1px solid rgba(147,134,255,.28); border-radius:12px; background:#0a0a0c; box-shadow:0 24px 60px rgba(0,0,0,.65); }
+.kairema-model-menu-search { display:flex; flex:0 0 auto; align-items:center; gap:7px; padding:9px 10px; border-bottom:1px solid rgba(255,255,255,.08); background:#0d0d10; }
+.kairema-model-menu-search-icon { flex:0 0 auto; width:14px; height:14px; color:#8b94a7; }
+.kairema-model-menu-search-input { flex:1 1 auto; min-width:0; padding:6px 8px; border:1px solid rgba(255,255,255,.10); border-radius:8px; outline:none; color:#f4f4f6; background:#000000; font-family:inherit; font-size:13px; }
+.kairema-model-menu-search-input::placeholder { color:#7d8496; }
+.kairema-model-menu-search-input:focus { border-color:#9386ff; }
+/* The list is the only scrolling part: the panel keeps a bounded height, so a long catalog can
+   never stretch the page, and overscroll containment keeps the scroll off the chat behind it. */
+.kairema-model-menu-list { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:6px; }
+.kairema-model-menu-group + .kairema-model-menu-group { margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,.07); }
+.kairema-model-menu-group-title { padding:5px 8px; color:#8b94a7; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+.kairema-model-menu-item { display:flex; width:100%; align-items:center; justify-content:space-between; gap:10px; padding:7px 9px; border:1px solid transparent; border-radius:9px; color:#e8eaf0; background:transparent; text-align:left; cursor:pointer; }
+.kairema-model-menu-item:hover,.kairema-model-menu-item:focus-visible { border-color:rgba(255,255,255,.10); background:#17171b; outline:none; }
+/* The selected model stays visibly active: violet edge, violet tint, white label. */
+.kairema-model-menu-item-active { border-color:rgba(147,134,255,.55); color:#FFFFFF; background:rgba(147,134,255,.14); }
+.kairema-model-menu-item-active .kairema-model-menu-item-id { color:#b9b1ff; }
+/* Long catalog ids truncate with an ellipsis inside the panel instead of pushing it wider. */
+.kairema-model-menu-item-copy { display:flex; min-width:0; flex-direction:column; gap:1px; }
+.kairema-model-menu-item-title { min-width:0; overflow:hidden; font-size:13px; font-weight:600; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-model-menu-item-id { min-width:0; overflow:hidden; color:#7d8496; font-size:11px; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-model-menu-badge { flex:0 0 auto; padding:2px 7px; border:1px solid rgba(147,134,255,.45); border-radius:999px; color:#c7bfff; background:rgba(147,134,255,.12); font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.kairema-model-menu-empty { margin:0; padding:14px 10px; color:#8b94a7; font-size:12px; text-align:center; }
+@media (max-width:430px) { .kairema-model-menu-search-input,.kairema-model-menu-item-title { font-size:12px; } .kairema-model-menu-item { padding:6px 8px; } }
