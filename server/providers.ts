@@ -276,8 +276,25 @@ function network(error: unknown): ModelStatus {
 export class OpenRouterError extends Error { constructor(public readonly status: ModelStatus) { super(status.confirmed); this.name = "OpenRouterError"; } }
 export class InvalidModelSelectionError extends Error { constructor() { super("Выбрана неизвестная роль Kairema."); this.name = "InvalidModelSelectionError"; } }
 
+const RESPONSE_QUALITY_RULE = "Отвечай по-русски, по существу и в проверяемом Markdown: начни с прямого вывода, затем добавляй только необходимые детали. Не повторяй вопрос, не используй пустые вступления и не выдавай догадки за факты. Для изменяемых сведений (даты, версии, новости, цены и события) опирайся только на переданный проверенный контекст; если его нет, честно обозначь ограничение. Отделяй факты от рекомендаций и явно отмечай неопределённость.";
+
+/**
+ * The settings a user picked in the interface: response style, length, effort, thinking and
+ * whether to ask a clarifying question. These are the user's own choices, not a property of any
+ * role, so a user-selected model is given the exact same instructions the platform roles get.
+ * Sharing this builder is what keeps the two paths from drifting apart.
+ */
+export function userPreferenceRules(settings?: ChatSettings) {
+  const style = settings?.style === "concise" ? "Отвечай особенно кратко." : settings?.style === "steps" ? "Разбивай решение на понятные шаги." : settings?.style === "professional" ? "Сохраняй профессиональный, ясный тон." : settings?.style === "friendly" ? "Сохраняй доброжелательный естественный тон." : "";
+  const length = settings?.responseLength === "brief" ? "Ограничь ответ самым необходимым." : settings?.responseLength === "detailed" ? "Дай подробный, хорошо структурированный ответ." : "Сохраняй сбалансированную длину ответа.";
+  const effort = settings?.effort === "low" ? "Выбирай быстрый прямой путь к ответу." : settings?.effort === "high" ? "Тщательно проверь вывод перед финальным ответом, но не раскрывай скрытые рассуждения." : "Проверь ключевые утверждения перед ответом.";
+  const thinking = settings?.thinking ? "Дай краткое объяснение итоговой логики, но не показывай скрытые рассуждения или черновые цепочки мыслей." : "Не раскрывай скрытые рассуждения или черновые цепочки мыслей.";
+  const clarifying = settings?.askClarifyingQuestions ? " Если запрос действительно неоднозначен или не хватает важных данных для полезного ответа, задай один уточняющий вопрос. Не задавай вопрос ради вопроса: на простые и однозначные запросы отвечай сразу. Не превращай это в обязанность задавать вопрос перед каждым подробным ответом." : "";
+  return `${style} ${length} ${effort} ${thinking}${clarifying}`;
+}
+
 function prompt(role: ModelConfig, settings?: ChatSettings) {
-  const quality = "Отвечай по-русски, по существу и в проверяемом Markdown: начни с прямого вывода, затем добавляй только необходимые детали. Не повторяй вопрос, не используй пустые вступления и не выдавай догадки за факты. Для изменяемых сведений (даты, версии, новости, цены и события) опирайся только на переданный проверенный контекст; если его нет, честно обозначь ограничение. Отделяй факты от рекомендаций и явно отмечай неопределённость.";
+  const quality = RESPONSE_QUALITY_RULE;
   const capability = role.key === "fast"
     ? "Возможности Flash: быстро отвечай на повседневные и короткие вопросы. Не имитируй глубокую проверку сложных расчётов, длинных документов или актуальных фактов без переданного контекста; предложи более подходящую роль, только если это действительно необходимо."
     : role.key === "smart"

@@ -40,7 +40,7 @@ const fixtures = vi.hoisted(() => ({
     activeProvider: null as string | null,
     storageReady: true,
   },
-  models: { data: [] as Array<{ id: string; name: string }>, isPending: false, isError: false, isSuccess: false, error: null as { message: string } | null },
+  models: { data: [] as Array<{ id: string; name: string; displayName?: string | null; isFree?: boolean }>, isPending: false, isError: false, isSuccess: false, error: null as { message: string } | null },
   customModels: { data: [] as Array<{ id: string; name: string }>, isPending: false, isError: false, isSuccess: false, error: null as { message: string } | null },
   customModelsInput: [] as unknown[],
   modelsLoaded: 0,
@@ -157,6 +157,16 @@ afterEach(() => cleanup());
 const CUSTOM_ROW = { provider: "custom-abc", activeModel: "vendor/model-b", keyHint: "••••4321", updatedAt: new Date(0).toISOString(), displayName: "Мой провайдер", baseUrl: "https://api.example.com/v1", modelsEndpoint: null };
 const BUILTIN_ROW = { provider: "openrouter", activeModel: "vendor/model-a", keyHint: "••••5678", updatedAt: new Date(0).toISOString(), displayName: null, baseUrl: null, modelsEndpoint: null };
 
+/** The shared model menu is a real button, so the options only exist once it is opened. */
+async function openModelMenu(fieldLabel: string) {
+  await userEvent.click(screen.getByRole("button", { name: fieldLabel }));
+  return screen.findByRole("listbox", { name: fieldLabel });
+}
+async function pickModel(fieldLabel: string, pattern: RegExp) {
+  await openModelMenu(fieldLabel);
+  await userEvent.click(await screen.findByRole("option", { name: pattern }));
+}
+
 describe("AI Providers screen", () => {
   it("lists OpenRouter as a real provider and never as the four Kairema roles", async () => {
     renderProviders();
@@ -210,7 +220,11 @@ describe("AI Providers screen", () => {
     await userEvent.click(within(openrouterCard()).getByRole("button", { name: "Обновить список моделей (Model (OpenRouter))" }));
     expect(fixtures.modelsLoaded).toBe(1);
     expect(fixtures.modelsInput.at(-1)).toEqual({ provider: "openrouter", apiKey: "sk-or-v1-typed-value" });
-    expect((await screen.findByText(/Live From API/)).textContent).toContain("live/from-api");
+    // The name and the id are both reachable in the menu, and the id stays selectable.
+    const listbox = await openModelMenu("Model (OpenRouter)");
+    const option = within(listbox).getByRole("option", { name: /Live From API/ });
+    expect(option.getAttribute("title")).toBe("live/from-api");
+    expect(screen.getByRole("button", { name: "Model (OpenRouter)" }).textContent).toContain("Live From API");
   });
 
   it("preselects the first catalog model and enables Connect once a key is typed", async () => {
@@ -219,9 +233,11 @@ describe("AI Providers screen", () => {
     await userEvent.click(within(openrouterCard()).getByRole("button", { name: /^(Connect|Настроить)$/ }));
     await userEvent.type(screen.getByLabelText("API key (OpenRouter)"), "sk-or-v1-typed-value");
     await userEvent.click(within(openrouterCard()).getByRole("button", { name: "Обновить список моделей (Model (OpenRouter))" }));
-    const select = screen.getByLabelText("Model (OpenRouter)") as HTMLSelectElement;
+    await openModelMenu("Model (OpenRouter)");
     await screen.findByRole("option", { name: /Live From API/ });
-    expect(select.value).toBe("live/from-api");
+    // The id is chosen; the trigger shows the human-readable name and never the raw provider prefix.
+    await userEvent.click(screen.getByRole("option", { name: /Live From API/ }));
+    expect(screen.getByRole("button", { name: "Model (OpenRouter)" }).textContent).toContain("Live From API");
     expect((within(openrouterCard()).getByRole("button", { name: "Connect" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -297,9 +313,10 @@ describe("custom provider form", () => {
     await userEvent.type(fields.key, "sk-custom-secret-9999");
     fixtures.customModels = { data: [{ id: "vendor/model-b", name: "Model B" }, { id: "vendor/model-c", name: "Model C" }], isPending: false, isError: false, isSuccess: true, error: null };
     await userEvent.click(screen.getByRole("button", { name: "Обновить список моделей (Model (Custom provider))" }));
-    const select = screen.getByLabelText("Model (Custom provider)") as HTMLSelectElement;
+    await openModelMenu("Model (Custom provider)");
     await screen.findByRole("option", { name: /Model B/ });
-    expect(select.value).toBe("vendor/model-b");
+    await userEvent.click(screen.getByRole("option", { name: /Model B/ }));
+    expect(screen.getByRole("button", { name: "Model (Custom provider)" }).textContent).toContain("Model B");
     expect((within(openrouterCard()).getByRole("button", { name: "Connect" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -320,7 +337,9 @@ describe("custom provider form", () => {
     await userEvent.click(within(openrouterCard()).getByRole("button", { name: "Connect" }));
     await userEvent.type(screen.getByLabelText("API key (OpenRouter)"), "sk-or-v1-typed-value");
     await userEvent.click(within(openrouterCard()).getByRole("button", { name: "Обновить список моделей (Model (OpenRouter))" }));
+    await openModelMenu("Model (OpenRouter)");
     await screen.findByRole("option", { name: /Model A/ });
+    await userEvent.keyboard("{Escape}");
 
     const fields = await openCustomForm();
     await userEvent.type(fields.name, "Мой провайдер");
@@ -328,11 +347,14 @@ describe("custom provider form", () => {
     await userEvent.type(fields.key, "sk-custom-secret-9999");
     fixtures.customModels = { data: [{ id: "vendor/model-b", name: "Model B" }], isPending: false, isError: false, isSuccess: true, error: null };
     await userEvent.click(screen.getByRole("button", { name: "Обновить список моделей (Model (Custom provider))" }));
+    await openModelMenu("Model (Custom provider)");
     await screen.findByRole("option", { name: /Model B/ });
+    await userEvent.keyboard("{Escape}");
 
-    const builtinOptions = Array.from((screen.getByLabelText("Model (OpenRouter)") as HTMLSelectElement).options).map((option) => option.value);
+    const builtinOptions = await openModelMenu("Model (OpenRouter)").then((listbox) => within(listbox).getAllByRole("option").map((option) => option.getAttribute("title")));
     expect(builtinOptions).toContain("vendor/model-a");
     expect(builtinOptions).not.toContain("vendor/model-b");
+    await userEvent.keyboard("{Escape}");
   });
 
   it("checks the typed key against the provider before anything is saved", async () => {
@@ -392,7 +414,7 @@ describe("custom provider form", () => {
     // Reopening asks only for the provider, exactly like the built-in panel does, and the stored
     // model stays selected so the user sees what they had.
     expect(fixtures.customModelsInput.at(-1)).toEqual({ provider: "custom-abc" });
-    expect((screen.getByLabelText("Model (Custom provider)") as HTMLSelectElement).value).toBe("vendor/model-b");
+    expect(screen.getByRole("button", { name: "Model (Custom provider)" }).textContent).toContain("vendor/model-b");
     expect(fixtures.customModelsInput.at(-1)).not.toHaveProperty("apiKey");
   });
 
@@ -441,10 +463,91 @@ describe("custom provider form", () => {
     await userEvent.type(screen.getByLabelText("API key (Custom provider)"), "sk-custom-secret-9999");
     fixtures.customModels = { data: [{ id: "vendor/model-b", name: "Model B" }], isPending: false, isError: false, isSuccess: true, error: null };
     await userEvent.click(screen.getByRole("button", { name: "Обновить список моделей (Model (Custom provider))" }));
+    await openModelMenu("Model (Custom provider)");
     await screen.findByRole("option", { name: /Model B/ });
+    await userEvent.keyboard("{Escape}");
     await userEvent.click(within(customCard()).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(fixtures.saved).toMatchObject({ op: "update", provider: "custom-abc", activeModel: "vendor/model-b" }));
     await waitFor(() => expect(fixtures.activated).toEqual([{ provider: "custom-abc" }]));
+  });
+});
+
+describe("the settings model menu behaves like the one in chat", () => {
+  beforeEach(() => { fixtures.models = { data: [], isPending: false, isError: false, isSuccess: true, error: null }; });
+  afterEach(() => { cleanup(); });
+
+  async function openWithCatalog() {
+    fixtures.models = {
+      data: [
+        { id: "nvidia/nemotron-3-ultra", name: "NVIDIA: Nemotron 3 Ultra", displayName: "Nemotron 3 Ultra", isFree: false },
+        { id: "inclusionai/ling-sante:free", name: "inclusionAI: Ling (free)", displayName: "Ling", isFree: true },
+        { id: "vendor/model-b", name: "Model B", displayName: "Model B", isFree: false },
+      ],
+      isPending: false, isError: false, isSuccess: true, error: null,
+    };
+    renderProviders();
+    await userEvent.click(within(openrouterCard()).getByRole("button", { name: /^(Connect|Настроить)$/ }));
+    await userEvent.type(screen.getByLabelText("API key (OpenRouter)"), "sk-or-v1-typed-value");
+    await userEvent.click(within(openrouterCard()).getByRole("button", { name: "Обновить список моделей (Model (OpenRouter))" }));
+  }
+
+  it("shows a model's own name and keeps the real id for the request", async () => {
+    await openWithCatalog();
+    const listbox = await openModelMenu("Model (OpenRouter)");
+    const option = within(listbox).getByRole("option", { name: /Nemotron 3 Ultra/ });
+    expect(option.textContent ?? "").not.toContain("NVIDIA");
+    expect(option.getAttribute("title")).toBe("nvidia/nemotron-3-ultra");
+  });
+
+  it("splits the catalog into Free and Paid from the server's pricing verdict", async () => {
+    await openWithCatalog();
+    const listbox = await openModelMenu("Model (OpenRouter)");
+    const groups = within(listbox).getAllByRole("group");
+    expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual(["Free", "Paid"]);
+    expect(within(groups[0]!).getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["inclusionai/ling-sante:free"]);
+  });
+
+  it("searches by display name and by id", async () => {
+    await openWithCatalog();
+    const listbox = await openModelMenu("Model (OpenRouter)");
+    // The search field sits in the panel header, above the listbox it filters.
+    const search = screen.getByLabelText("Поиск моделей");
+    await userEvent.type(search, "ling");
+    await waitFor(() => expect(within(listbox).getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["inclusionai/ling-sante:free"]));
+    await userEvent.clear(search);
+    await userEvent.type(search, "model-b");
+    await waitFor(() => expect(within(listbox).getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["vendor/model-b"]));
+    await userEvent.clear(search);
+    await userEvent.type(search, "zzz");
+    expect(await within(listbox).findByText("Ничего не найдено")).toBeTruthy();
+  });
+
+  it("marks the stored model as the active one", async () => {
+    await openWithCatalog();
+    const listbox = await openModelMenu("Model (OpenRouter)");
+    const chosen = within(listbox).getByRole("option", { name: /Model B/ });
+    await userEvent.click(chosen);
+    const reopened = await openModelMenu("Model (OpenRouter)");
+    expect(within(reopened).getByRole("option", { name: /Model B/ }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("closes on Escape and on a click outside", async () => {
+    await openWithCatalog();
+    const listbox = await openModelMenu("Model (OpenRouter)");
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("listbox", { name: "Model (OpenRouter)" })).toBeNull());
+
+    await openModelMenu("Model (OpenRouter)");
+    await userEvent.click(document.body);
+    await waitFor(() => expect(screen.queryByRole("listbox", { name: "Model (OpenRouter)" })).toBeNull());
+  });
+
+  it("renders the panel outside the form so no container clips it", async () => {
+    await openWithCatalog();
+    await openModelMenu("Model (OpenRouter)");
+    // The panel is portaled to the body, so the settings card's own overflow can never cut it.
+    const listbox = screen.getByRole("listbox", { name: "Model (OpenRouter)" });
+    expect(listbox.closest("form") ?? document.body).toBe(document.body);
   });
 });

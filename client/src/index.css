@@ -557,23 +557,22 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-chat-tools { display:flex; flex:0 1 auto; align-items:center; justify-content:flex-end; gap:8px; min-width:0; margin:0; padding:0; color:var(--k-muted); font-size:12px; }
 /* flex:0 0 auto would pin both to their intrinsic width, so each one is given a shrink
    factor too: that is what actually lets the row fit instead of overflowing. */
-.kairema-chat-tools .kairema-export-menu,.kairema-export-menu > summary { flex:0 1 auto; min-width:0; max-width:100%; }
-.kairema-export-menu { position:relative; flex:0 0 auto; }
-.kairema-export-menu > summary { list-style:none; cursor:pointer; height:24px; padding:0 9px; font-size:12px; }
-.kairema-export-menu > summary::-webkit-details-marker { display:none; }
-.kairema-export-caret { width:12px; height:12px; transition:transform .16s ease; }
-.kairema-export-menu[open] .kairema-export-caret { transform:rotate(180deg); }
 /* Right-anchored to the button, which already sits at the row's end, so the panel can
    never push the page sideways; the viewport cap covers very narrow screens. */
-.kairema-export-menu-popover { position:absolute; z-index:45; top:calc(100% + 6px); right:0; display:grid; gap:3px; min-width:140px; max-width:calc(100vw - 24px); padding:5px; border:1px solid var(--k-line); border-radius:9px; background:var(--k-panel); box-shadow:0 14px 30px rgba(0,0,0,.22); }
+/* A single compact icon button. Its panel is portaled to the body, so no row can clip it. */
+.kairema-export-trigger { display:inline-flex; flex:0 0 auto; width:24px; height:24px; align-items:center; justify-content:center; padding:0; border:1px solid var(--k-line); border-radius:6px; background:var(--k-panel-2); color:var(--k-text); cursor:pointer; }
+.kairema-export-trigger:hover:not(:disabled) { background:var(--k-panel); }
+.kairema-export-trigger:focus-visible { outline:2px solid var(--k-text); outline-offset:2px; }
+.kairema-export-trigger:disabled { cursor:progress; opacity:.7; }
+.kairema-export-menu-popover { position:fixed; z-index:60; display:grid; gap:3px; min-width:140px; max-width:calc(100vw - 24px); padding:5px; border:1px solid var(--k-line); border-radius:9px; background:var(--k-panel); box-shadow:0 14px 30px rgba(0,0,0,.22); }
 .kairema-export-menu-popover button { display:flex; align-items:center; gap:6px; min-height:32px; padding:6px 9px; border:1px solid transparent; border-radius:7px; color:var(--k-text); background:transparent; text-align:left; font-size:12px; font-weight:650; }
 .kairema-export-menu-popover button > svg { flex:0 0 auto; }
 .kairema-export-menu-popover button:hover:not(:disabled),.kairema-export-menu-popover button:focus-visible { border-color:var(--k-line); background:var(--k-panel-2); outline:none; }
 .kairema-export-menu-popover button:disabled { cursor:not-allowed; opacity:.45; }
+.kairema-export-menu-note { margin:2px 4px 1px; color:var(--k-muted); font-size:11px; line-height:1.35; }
 /* The author `display: grid` above outranks the user-agent rule that hides non-summary
    children of a closed <details>, so the popover stayed painted after React removed the
    `open` attribute. Higher specificity and later in the file, so it actually wins. */
-.kairema-export-menu:not([open]) .kairema-export-menu-popover { display:none; }
 
 /* Narrow screens: the title and the segmented control are the two shrinkable parts, so
    the rows keep their geometry and never overflow sideways. */
@@ -587,7 +586,6 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
   .kairema-mode-option { gap:5px; height:23px; min-height:23px; min-width:92px; padding:0 10px; font-size:12px; }
   .kairema-mode-bar > .kairema-chat-tools-toggle { width:26px; height:26px; min-width:26px; min-height:26px; }
   .kairema-mode-bar { gap:6px; padding:0 10px 4px; }
-  .kairema-export-menu > summary { height:26px; padding:0 9px; }
   .kairema-model-pill { gap:8px; height:38px; padding:6px 12px; }
   .kairema-model-sparkle { width:16px; height:16px; }
   .kairema-model-chevron { width:14px; height:14px; }
@@ -678,6 +676,16 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-model-menu-item-id { min-width:0; overflow:hidden; color:#7d8496; font-size:11px; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
 .kairema-model-menu-badge { flex:0 0 auto; padding:2px 7px; border:1px solid rgba(147,134,255,.45); border-radius:999px; color:#c7bfff; background:rgba(147,134,255,.12); font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
 .kairema-model-menu-empty { margin:0; padding:14px 10px; color:#8b94a7; font-size:12px; text-align:center; }
+/* The one caret the shared model menu draws. It rotates while the panel is open, so a trigger
+   anywhere in the app shows the same affordance. */
+.kairema-model-menu-caret { flex:0 0 auto; width:12px; height:12px; transition:transform .16s ease; }
+/* The settings page trigger is a dark field on a dark form; the menu itself is the shared panel. */
+.kairema-settings-model-trigger { display:flex; flex:1 1 auto; min-width:0; align-items:center; justify-content:space-between; gap:8px; padding:9px 11px; border:1px solid #334155; border-radius:8px; outline:none; color:#e2e8f0; background:#020617; font:inherit; font-size:14px; text-align:left; cursor:pointer; }
+.kairema-settings-model-trigger:hover:not(:disabled) { border-color:#8b5cf6; }
+.kairema-settings-model-trigger:focus-visible { border-color:#a78bfa; box-shadow:0 0 0 3px rgba(139,92,246,.18); }
+.kairema-settings-model-trigger:disabled { cursor:not-allowed; opacity:.6; }
+.kairema-settings-model-trigger-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-settings-model-trigger[aria-expanded="true"] .kairema-model-menu-caret { transform:rotate(180deg); }
 /* The provider trigger lives in the mode row next to the Chat / My API switch, so it is styled
    as an inline link there rather than as the pill button the model trigger uses. */
 .kairema-provider-trigger { display:inline-flex; max-width:100%; min-width:0; align-items:center; gap:4px; margin:0; padding:0 2px; border:0; border-radius:6px; outline:none; color:var(--k-text); background:transparent; font:inherit; font-weight:600; cursor:pointer; vertical-align:baseline; }
