@@ -245,9 +245,13 @@ export async function verifyUserProviderKey(selector: UserProviderSelector, apiK
     const failure = classifyUserProviderFailure(response.status, await readUpstreamJson(response));
     return { ok: false, category: failure.category, http: response.status, message: failure.message };
   }
-  const body = (await readUpstreamJson(response)) as { label?: unknown } | null;
-  const label = typeof body?.label === "string" ? body.label.slice(0, 80) : "";
-  return { ok: true, label };
+  // OpenRouter answers the key route as { data: { label } }, while an OpenAI-compatible catalog
+  // carries no name at all. Both are read so a user who named their key sees it, and neither
+  // shape can turn a failed probe into a success: the status check above already passed.
+  const body = (await readUpstreamJson(response)) as { label?: unknown; data?: { label?: unknown } } | null;
+  const label = typeof body?.data?.label === "string" ? body.data.label : typeof body?.label === "string" ? body.label : "";
+  const safeLabel = label.slice(0, 80);
+  return { ok: true, label: safeLabel };
 }
 
 export type UserProviderModel = { id: string; name: string };

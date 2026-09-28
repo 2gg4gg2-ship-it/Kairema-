@@ -56,6 +56,16 @@ describe("openrouter connection test", () => {
     expect(init.method).toBe("GET");
     expect(JSON.stringify(init)).not.toContain("chat/completions");
     expect(JSON.stringify(init)).not.toContain("model");
+    // OpenRouter nests the key name under `data`, so the probe has to read it from there.
+    expect(result.ok ? result.label : "").toBe("kairema-test");
+  });
+
+  it("reads a flat label too and never invents one when the provider sends none", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ label: "flat" }) }));
+    expect(await verifyUserProviderKey("openrouter", KEY)).toEqual({ ok: true, label: "flat" });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ data: {} }) }));
+    expect(await verifyUserProviderKey("openrouter", KEY)).toEqual({ ok: true, label: "" });
   });
 
   it("classifies an invalid key without echoing any upstream payload", async () => {

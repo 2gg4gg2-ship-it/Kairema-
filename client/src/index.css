@@ -639,3 +639,6 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-chat-sticky:has(.kairema-chat-controls[data-controls-open="false"]) { border-bottom-color:transparent; }
 @media (prefers-reduced-motion:reduce) { .kairema-panel-collapse { transition:none; } .kairema-mode-bar { transition:none; } }
 .kairema-mode-hint { flex:0 1 auto; min-width:0; overflow:hidden; padding-left:6px; color:var(--k-muted); font-size:11px; line-height:1.15; text-overflow:ellipsis; white-space:nowrap; }
+/* Catalog and switch states sit on the same line; the line itself truncates on a phone. */
+.kairema-mode-hint-state { color:var(--k-muted); }
+.kairema-mode-hint .kairema-mode-hint-link { border:0; padding:0; background:transparent; font:inherit; cursor:pointer; }

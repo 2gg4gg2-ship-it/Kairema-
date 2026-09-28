@@ -366,6 +366,18 @@ describe("custom provider form", () => {
     expect(card.textContent ?? "").toContain("Редактируется: Мой провайдер");
   });
 
+  it("reloads a saved custom provider's catalog from the server's key, with no key in the request", async () => {
+    fixtures.list.configs = [CUSTOM_ROW];
+    renderProviders();
+    await userEvent.click((await screen.findAllByText("Настроить"))[0]!);
+
+    // Reopening asks only for the provider, exactly like the built-in panel does, and the stored
+    // model stays selected so the user sees what they had.
+    expect(fixtures.customModelsInput.at(-1)).toEqual({ provider: "custom-abc" });
+    expect((screen.getByLabelText("Model (Custom provider)") as HTMLSelectElement).value).toBe("vendor/model-b");
+    expect(fixtures.customModelsInput.at(-1)).not.toHaveProperty("apiKey");
+  });
+
   it("activates and removes a saved custom provider from its own row", async () => {
     fixtures.list.configs = [CUSTOM_ROW];
     renderProviders();

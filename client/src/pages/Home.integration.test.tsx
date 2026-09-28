@@ -10,6 +10,9 @@ const fixtures = vi.hoisted(() => ({
   modelId: "fast",
   myApiModels: [] as Array<{ id: string; name: string }>,
   myApiModelsLoaded: false,
+  myApiCatalogError: "" as string | null,
+  myApiCatalogPending: false,
+  switchModelError: "" as string | null,
   myApiCatalogInputs: [] as unknown[],
   switchedModel: null as unknown,
   updatedSettings: [] as Array<Record<string, unknown>>,
@@ -49,6 +52,7 @@ const fixtures = vi.hoisted(() => ({
   startLogin: vi.fn(),
   isAuthenticated: true,
   authLoading: false,
+  language: "ru" as "ru" | "en",
   authUser: { id: 42, name: "Тест", email: "", loginMethod: "stytch-password", isGuest: 0 } as { id: number; name: string | null; email: string | null; loginMethod: string | null; isGuest: number },
   logout: vi.fn(async () => undefined),
   sessionsLoading: false,
@@ -91,7 +95,7 @@ vi.mock("@/lib/trpc", () => ({
       { key: "context", modelId: "context", label: "Kairema Context", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
       { key: "flagship", modelId: "flagship", label: "Kairema Apex", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
     ] }) } },
-    settings: { get: { useQuery: () => ({ data: { language: "ru", theme: "dark", responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, defaultRole: "fast", webSearch: 0, healthRefreshSeconds: 30, highContrast: 0, askClarifyingQuestions: 0 } }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateSettings }) } },
+    settings: { get: { useQuery: () => ({ data: { language: fixtures.language, theme: "dark", responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, defaultRole: "fast", webSearch: 0, healthRefreshSeconds: 30, highContrast: 0, askClarifyingQuestions: 0 } }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateSettings }) } },
     memory: { get: { useQuery: () => ({ data: fixtures.memoryData }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateMemory }) }, addFact: { useMutation: () => ({ mutateAsync: fixtures.addMemoryFact }) }, deleteEntry: { useMutation: () => ({ mutateAsync: fixtures.deleteMemoryEntry }) }, clear: { useMutation: () => ({ mutateAsync: fixtures.clearMemory }) } },
     webSearch: { status: { useQuery: () => ({ data: { available: false, reason: "Поиск сейчас недоступен", checkedAt: "2026-08-19T00:00:00.000Z", layers: [{ id: "google", state: "limited", retryAt: null }, { id: "tavily", state: "ready", retryAt: null }, { id: "openrouter", state: "ready", retryAt: null }] } }) } },
     knowledge: { status: { useQuery: () => ({ data: { documents: 0, sources: [], lastRun: null } }) }, audit: { useQuery: () => ({ data: { sources: [{ name: "OpenAI News", domain: "openai.com", ...(fixtures.isOwner ? { url: "https://openai.com/news/rss.xml" } : {}), indexedCount: 12, lastSuccessAt: "2026-08-19T00:00:00.000Z" }], latestRun: { state: "completed", startedAt: "2026-08-19T00:00:00.000Z", finishedAt: "2026-08-19T00:01:00.000Z" } } }) }, refresh: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) } },
@@ -114,8 +118,25 @@ vi.mock("@/lib/trpc", () => ({
     userProviders: {
       list: { useQuery: () => ({ data: fixtures.userProviders }) },
       // The My API picker reuses the caller's stored key: no key is sent with the request.
-      models: { useMutation: () => ({ mutateAsync: async (input: unknown) => { fixtures.myApiCatalogInputs.push(input); return { models: fixtures.myApiModels }; }, reset: () => {}, data: fixtures.myApiModelsLoaded ? { models: fixtures.myApiModels } : undefined, isPending: false, isError: false, isSuccess: fixtures.myApiModelsLoaded }) },
-      setActiveModel: { useMutation: () => ({ mutateAsync: async (input: unknown) => { fixtures.switchedModel = input; return {}; }, isPending: false, error: null }) },
+      models: {
+        useMutation: () => ({
+          mutateAsync: async (input: unknown) => {
+            fixtures.myApiCatalogInputs.push(input);
+            // A failing catalog must be observable by the screen, not swallowed.
+            if (fixtures.myApiCatalogError) throw new Error(fixtures.myApiCatalogError);
+            return { models: fixtures.myApiModels };
+          },
+          // The mock is fixture-driven: a test decides whether an attempt failed, and a retry is
+          // observed by the request it issues rather than by internal cache state.
+          reset: () => {},
+          data: fixtures.myApiModelsLoaded ? { models: fixtures.myApiModels } : undefined,
+          isPending: fixtures.myApiCatalogPending,
+          isError: Boolean(fixtures.myApiCatalogError),
+          error: fixtures.myApiCatalogError ? { message: fixtures.myApiCatalogError } : null,
+          isSuccess: fixtures.myApiModelsLoaded && !fixtures.myApiCatalogError,
+        }),
+      },
+      setActiveModel: { useMutation: () => ({ mutateAsync: async (input: unknown) => { if (fixtures.switchModelError) throw new Error(fixtures.switchModelError); fixtures.switchedModel = input; return {}; }, isPending: false, error: null }) },
     },
     useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, auth: { me: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: fixtures.downloadExport } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, historyPage: { invalidate: fixtures.invalidateMessages, fetch: fixtures.historyPageFetch }, list: { invalidate: fixtures.invalidateSessions } }, userProviders: { list: { invalidate: vi.fn() } } }),
   },
@@ -143,10 +164,14 @@ function resetFixtures() {
   fixtures.myApiModels = [];
   fixtures.myApiModelsLoaded = false;
   fixtures.myApiCatalogInputs = [];
+  fixtures.myApiCatalogError = null;
+  fixtures.myApiCatalogPending = false;
+  fixtures.switchModelError = null;
   fixtures.switchedModel = null;
   fixtures.updatedSettings = [];
   fixtures.isAuthenticated = true;
   fixtures.authLoading = false;
+  fixtures.language = "ru";
   fixtures.authUser = { id: 42, name: "Тест", email: "", loginMethod: "stytch-password", isGuest: 0 };
   fixtures.logout.mockClear();
   fixtures.sessionsLoading = false;
@@ -1262,6 +1287,85 @@ describe("My API model picker", () => {
     expect(fixtures.myApiCatalogInputs.at(-1)).toEqual({ provider: "custom-abc" });
   });
 
+  it("states a failed catalog read and offers a retry instead of looking like an empty list", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiCatalogError = "Что произошло: Провайдер ИИ ответил ошибкой (AUTH) | Что делать: Проверьте настройки в Настройках → AI Providers.";
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+
+    await screen.findByText(/Провайдер ИИ ответил ошибкой \(AUTH\)/);
+    // The provider is reachable but its catalog could not be read: that is not "no models".
+    expect(container.textContent ?? "").not.toContain("провайдер не вернул список моделей");
+
+    const attemptsBefore = fixtures.myApiCatalogInputs.length;
+    await user.click(screen.getByRole("button", { name: "Повторить" }));
+    expect(fixtures.myApiCatalogInputs.length).toBeGreaterThan(attemptsBefore);
+  });
+
+  it("reads the catalog once per provider instead of on every switch into My API", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [{ id: "vendor/model-b", name: "Model B" }];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    render(<Home />);
+    const myApi = (await screen.findAllByRole("button", { name: "Мой API" }))[0]!;
+    const chat = screen.getAllByRole("button", { name: "Чат" })[0]!;
+    await user.click(myApi);
+    await screen.findByLabelText("Модель «Мой API»");
+    const afterFirstEntry = fixtures.myApiCatalogInputs.length;
+
+    await user.click(chat);
+    await user.click(myApi);
+    await screen.findByLabelText("Модель «Мой API»");
+    expect(fixtures.myApiCatalogInputs.length).toBe(afterFirstEntry);
+
+    // A different provider, or an explicit retry, still reads it.
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-xyz", storageReady: true };
+    await user.click(chat);
+    await user.click(myApi);
+    await waitFor(() => expect(fixtures.myApiCatalogInputs.at(-1)).toEqual({ provider: "custom-xyz" }));
+  });
+
+  it("shows an empty catalog as empty, not as a failure", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [];
+    fixtures.myApiModelsLoaded = true;
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+
+    await screen.findByText(/провайдер не вернул список моделей/);
+    expect(screen.queryByRole("button", { name: "Повторить" })).toBeNull();
+    // The saved model stays visible, so the user still knows which binding is configured.
+    expect(container.textContent ?? "").toContain("vendor/model-b");
+  });
+
+  it("reports a refused model switch instead of silently reverting the picker", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [{ id: "vendor/model-b", name: "Model B" }, { id: "vendor/model-c", name: "Model C" }];
+    fixtures.myApiModelsLoaded = true;
+    fixtures.switchModelError = "Выбранная модель отсутствует в каталоге провайдера. Обновите список моделей.";
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    const picker = (await screen.findByLabelText("Модель «Мой API»")) as HTMLSelectElement;
+    await user.selectOptions(picker, "vendor/model-c");
+
+    await screen.findByText(/отсутствует в каталоге провайдера/);
+    // The switch never reached the server, so the binding is unchanged.
+    expect(fixtures.switchedModel).toBeNull();
+  });
+
+  it("never shows the stored key in the chat screen", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await screen.findByLabelText("Модель «Мой API»");
+    expect(container.textContent ?? "").not.toContain("••••");
+  });
+
   it("hides the four Kairema roles while My API is selected and shows the binding instead", async () => {
     fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
     const { container } = render(<Home />);
@@ -1369,8 +1473,8 @@ describe("Profile", () => {
   async function openProfile() {
     const user = userEvent.setup();
     render(<Home />);
-    await user.click(await screen.findByRole("button", { name: "Открыть профиль" }));
-    await screen.findByRole("textbox", { name: /Как к вам обращаться/ });
+    await user.click(await screen.findByRole("button", { name: fixtures.language === "en" ? "Open profile" : "Открыть профиль" }));
+    await screen.findByRole("textbox", { name: /Как к вам обращаться|What should we call you/ });
     return user;
   }
 
@@ -1389,6 +1493,22 @@ describe("Profile", () => {
     // Default preference is OFF on a fresh account.
     const toggle = screen.getByRole("switch", { name: /Задавать уточняющие вопросы/ });
     expect(toggle.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("reads as a plain English profile form in the English interface", async () => {
+    fixtures.language = "en";
+    await openProfile();
+
+    expect(screen.getByText("Full name")).not.toBeNull();
+    expect(screen.getByRole("textbox", { name: "What should we call you?" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: /Update Profile/ })).not.toBeNull();
+    expect(screen.getByText("Personal preferences")).not.toBeNull();
+    expect(screen.getByText("What personal preferences should Kairema consider in responses?")).not.toBeNull();
+    expect(screen.getByText("Your preferences will apply to all conversations.")).not.toBeNull();
+    expect(screen.getByRole("switch", { name: /Ask clarifying questions before giving detailed answers/ })).not.toBeNull();
+    expect(screen.getByRole("button", { name: /Save Preferences/ })).not.toBeNull();
+    // No internal wording leaks into the profile screen.
+    expect(document.body.textContent ?? "").not.toMatch(/userId|encrypted|myApiProvider|SSRF/i);
   });
 
   it("saves the display name and the clarifying-questions preference independently", async () => {

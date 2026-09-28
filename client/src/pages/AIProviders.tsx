@@ -125,7 +125,7 @@ function KeyField({ label, fieldLabel, value, visible, onVisibleChange, onChange
  * A refresh button sits next to the select because the catalog depends on the key: it cannot be
  * fetched up front, and re-typing a key must not re-send it on every keystroke.
  */
-function ModelField({ label, fieldLabel, value, models, pending, error, empty, onChange, onReload, canReload, placeholder }: { label: string; fieldLabel: string; value: string; models: Array<{ id: string; name: string }>; pending: boolean; error: boolean; empty: boolean; onChange: (value: string) => void; onReload: () => void; canReload: boolean; placeholder: string }) {
+function ModelField({ label, fieldLabel, value, fallback, models, pending, error, empty, onChange, onReload, canReload, placeholder }: { label: string; fieldLabel: string; value: string; fallback?: string; models: Array<{ id: string; name: string }>; pending: boolean; error: boolean; empty: boolean; onChange: (value: string) => void; onReload: () => void; canReload: boolean; placeholder: string }) {
   return (
     <label className="grid gap-1">
       <span className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
@@ -138,7 +138,10 @@ function ModelField({ label, fieldLabel, value, models, pending, error, empty, o
           aria-label={fieldLabel}
         >
           {pending && <option value="">Загружаем модели…</option>}
-          {!pending && !models.length && <option value="">{placeholder}</option>}
+          {!pending && !models.length && !fallback && <option value="">{placeholder}</option>}
+          {/* A model that is already stored stays visible until the catalog arrives, so reopening
+              a connected provider never shows an empty picker. */}
+          {fallback && !models.some((model) => model.id === fallback) && <option value={fallback}>{fallback}</option>}
           {models.map((model) => (
             <option key={model.id} value={model.id}>{model.name} · {model.id}</option>
           ))}
@@ -321,6 +324,9 @@ export default function AIProviders() {
         ? { provider: config.provider, displayName: config.displayName ?? "", baseUrl: config.baseUrl ?? "", apiKey: "", modelId: config.activeModel }
         : emptyCustomDraft(),
     );
+    // Reopening a saved provider reads its catalog from the server's own copy of the key, so the
+    // user sees their models again without retyping anything. Nothing is sent from the browser.
+    if (config) void customModelsMutation.mutateAsync({ provider: config.provider }).catch(() => undefined);
   };
 
   const patchCustomDraft = (patch: Partial<CustomDraft>) => setCustomDraft((current) => (current ? { ...current, ...patch } : current));
@@ -343,10 +349,21 @@ export default function AIProviders() {
    * yet, and it travels in the POST body as a draft, never in the URL.
    */
   const loadCustomModels = async () => {
-    if (!customDraft || !customReady) return;
+    if (!customDraft) return;
+    // A provider that is already stored is read with its own saved key; a provider being typed for
+    // the first time has to carry the key, because the server has nothing else to use.
+    if (customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER) {
+      try {
+        await customModelsMutation.mutateAsync({ provider: customDraft.provider });
+      } catch {
+        // The form renders the classified error from the mutation state.
+      }
+      return;
+    }
+    if (!customReady) return;
     try {
       await customModelsMutation.mutateAsync({
-        provider: customDraft.provider ?? CUSTOM_DRAFT_PROVIDER,
+        provider: CUSTOM_DRAFT_PROVIDER,
         apiKey: customDraft.apiKey.trim(),
         draft: { displayName: customDraft.displayName.trim(), baseUrl: customDraft.baseUrl.trim() },
       });
@@ -438,6 +455,7 @@ export default function AIProviders() {
                 label="Model"
                 fieldLabel="Model (OpenRouter)"
                 value={modelId}
+                fallback={selectedConfig?.activeModel}
                 models={models}
                 pending={modelsMutation.isPending}
                 error={modelsMutation.isError}
@@ -445,7 +463,7 @@ export default function AIProviders() {
                 onChange={setModelId}
                 onReload={() => void loadModels()}
                 canReload={apiKey.trim().length >= 8 || Boolean(openrouterConfig)}
-                placeholder="Сначала укажите API-ключ"
+                placeholder={openrouterConfig ? "Нажмите, чтобы обновить список моделей" : "Сначала укажите API-ключ"}
               />
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -548,14 +566,15 @@ export default function AIProviders() {
                   label="Model"
                   fieldLabel="Model (Custom provider)"
                   value={customDraft.modelId}
+                  fallback={customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER ? customDraft.modelId : undefined}
                   models={customModels}
                   pending={customModelsMutation.isPending}
                   error={customModelsMutation.isError}
                   empty={customModelsMutation.isSuccess && !customModels.length}
                   onChange={(value) => patchCustomDraft({ modelId: value })}
                   onReload={() => void loadCustomModels()}
-                  canReload={customReady}
-                  placeholder="Сначала укажите URL и API-ключ"
+                  canReload={customReady || Boolean(customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER)}
+                  placeholder={customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER ? "Нажмите, чтобы обновить список моделей" : "Сначала укажите URL и API-ключ"}
                 />
 
                 <div className="flex flex-wrap items-center gap-2">

@@ -112,7 +112,7 @@ function looksLikeIpv6(host: string): boolean {
  * the loopback, private, link-local and metadata ranges. The returned URL is normalised, so
  * callers can build request URLs from it without re-parsing untrusted input.
  */
-export function parseUserProviderEndpoint(raw: string, label = "API endpoint"): URL {
+export function parseUserProviderEndpoint(raw: string, label = "API URL"): URL {
   if (typeof raw !== "string") throw new UserProviderEndpointError(`${label} не указан.`);
   const value = raw.trim();
   if (!value) throw new UserProviderEndpointError(`${label} не указан.`);
@@ -187,10 +187,10 @@ const MODELS_SUFFIX = "/models";
  * as is, which lets a provider expose a non-standard route without inventing a new field.
  */
 export function buildUserProviderChatEndpoint(baseUrl: string): URL {
-  const url = parseUserProviderEndpoint(baseUrl, "API endpoint");
+  const url = parseUserProviderEndpoint(baseUrl, "API URL");
   const path = stripTrailingSlash(url.pathname);
   if (path.endsWith(CHAT_SUFFIX)) return url;
-  return parseUserProviderEndpoint(new URL(joinPath(path, CHAT_SUFFIX), url.origin).toString(), "API endpoint");
+  return parseUserProviderEndpoint(new URL(joinPath(path, CHAT_SUFFIX), url.origin).toString(), "API URL");
 }
 
 /**
@@ -199,14 +199,14 @@ export function buildUserProviderChatEndpoint(baseUrl: string): URL {
  * directory is used, so `.../v1/chat/completions` still yields `.../v1/models`.
  */
 export function buildUserProviderModelsEndpoint(baseUrl: string, modelsEndpoint?: string | null): URL {
-  const explicit = parseOptionalUserProviderEndpoint(modelsEndpoint, "Models endpoint");
+  const explicit = parseOptionalUserProviderEndpoint(modelsEndpoint, "API URL");
   if (explicit) return explicit;
-  const url = parseUserProviderEndpoint(baseUrl, "API endpoint");
+  const url = parseUserProviderEndpoint(baseUrl, "API URL");
   const path = stripTrailingSlash(url.pathname);
   if (path.endsWith(CHAT_SUFFIX)) {
     const base = path.slice(0, -CHAT_SUFFIX.length) || "/";
-    return parseUserProviderEndpoint(new URL(joinPath(base, MODELS_SUFFIX), url.origin).toString(), "Models endpoint");
+    return parseUserProviderEndpoint(new URL(joinPath(base, MODELS_SUFFIX), url.origin).toString(), "API URL");
   }
   if (path.endsWith(MODELS_SUFFIX)) return url;
-  return parseUserProviderEndpoint(new URL(joinPath(path, MODELS_SUFFIX), url.origin).toString(), "Models endpoint");
+  return parseUserProviderEndpoint(new URL(joinPath(path, MODELS_SUFFIX), url.origin).toString(), "API URL");
 }
