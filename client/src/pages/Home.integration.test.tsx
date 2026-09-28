@@ -133,6 +133,11 @@ import Home, { SettingSwitch } from "./Home";
 
 const encoder = new TextEncoder();
 
+/** The chat header's model pill, which carries the role selector or the My API binding. */
+function headerPill(container: HTMLElement) {
+  return container.querySelector(".kairema-model-pill") as HTMLElement;
+}
+
 function resetFixtures() {
   fixtures.userProviders = { providers: [{ id: "openrouter", displayName: "OpenRouter", available: true }], configs: [], activeProvider: null, storageReady: true };
   fixtures.myApiModels = [];
@@ -1151,7 +1156,6 @@ describe("My API mode hides the Kairema role selector", () => {
 
   // The sidebar keeps its own list of Kairema roles, so the assertions below are scoped to the
   // header pill that used to be the system model selector.
-  const headerPill = (container: HTMLElement) => container.querySelector(".kairema-model-pill") as HTMLElement;
 
   async function enterMyApi() {
     const user = userEvent.setup();
@@ -1209,8 +1213,9 @@ describe("My API mode hides the Kairema role selector", () => {
     // The header pill and the mode hint both state that nothing is configured yet.
     await waitFor(() => expect(screen.getAllByText("Мой API не настроен").length).toBeGreaterThan(0));
     expect(headerPill(container).textContent).toBe("Мой API не настроен");
-    const link = screen.getByRole("link", { name: "Настроить провайдера →" });
-    expect(link.getAttribute("href")).toBe("/settings/providers");
+    const links = screen.getAllByRole("link", { name: "Настроить провайдера →" });
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) expect(link.getAttribute("href")).toBe("/settings/providers");
     expect(container.textContent).not.toContain("Начните разговор с Kairema");
   });
 });
@@ -1255,6 +1260,81 @@ describe("My API model picker", () => {
     await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
     // The picker reads the server's own stored credential, so no key travels in this request.
     expect(fixtures.myApiCatalogInputs.at(-1)).toEqual({ provider: "custom-abc" });
+  });
+
+  it("hides the four Kairema roles while My API is selected and shows the binding instead", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    const sidebar = () => container.querySelector(".kairema-sidebar") as HTMLElement;
+    expect(sidebar().textContent ?? "").toContain("Kairema Flash");
+
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await screen.findByLabelText("Модель «Мой API»");
+    for (const role of ["Kairema Flash", "Kairema Think", "Kairema Context", "Kairema Apex"]) {
+      expect(sidebar().textContent ?? "").not.toContain(role);
+      expect(headerPill(container).textContent ?? "").not.toContain(role);
+    }
+    // The sidebar names the provider the turn will actually reach.
+    expect(sidebar().textContent ?? "").toContain("vendor/model-b");
+  });
+
+  it("points an unconfigured My API at provider settings from the sidebar too", async () => {
+    fixtures.userProviders = { providers: [], configs: [], activeProvider: null, storageReady: true };
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+
+    await waitFor(() => expect((container.querySelector(".kairema-sidebar") as HTMLElement).textContent ?? "").not.toContain("Kairema Flash"));
+    const links = screen.getAllByRole("link", { name: "Настроить провайдера →" });
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) expect(link.getAttribute("href")).toBe("/settings/providers");
+  });
+
+  it("sends My API turns flagged for the user's own provider and never a key", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [{ id: "vendor/model-b", name: "Model B" }];
+    fixtures.myApiModelsLoaded = true;
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: done\ndata: {"content":"Ответ провайдера","modelUsed":"vendor/model-b","label":"Мой провайдер · vendor/model-b"}\n\n'));
+        controller.close();
+      },
+    })));
+    vi.stubGlobal("fetch", fetchSpy);
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await user.type(await screen.findByPlaceholderText("Напишите сообщение…"), "Вопрос к своему провайдеру");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    const body = JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body));
+    // The server, not the browser, decides where the turn goes: the flag tells it to use the
+    // active binding, and no credential is ever part of this request.
+    expect(body.myApi).toBe(true);
+    expect(JSON.stringify(body)).not.toContain("apiKey");
+    expect(JSON.stringify(body)).not.toContain("encryptedApiKey");
+    await waitFor(() => expect(fixtures.historyPageFetch).toHaveBeenCalled());
+  });
+
+  it("leaves an ordinary Chat turn unmarked so the platform path is unchanged", async () => {
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: done\ndata: {"content":"Обычный ответ","modelUsed":"fast","label":"Kairema Flash"}\n\n'));
+        controller.close();
+      },
+    })));
+    vi.stubGlobal("fetch", fetchSpy);
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.type(await screen.findByPlaceholderText("Напишите сообщение…"), "Обычный вопрос");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    const body = JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body));
+    expect(body.myApi).toBeUndefined();
+    expect(body.modelId).toBe(fixtures.modelId);
   });
 
   it("keeps long provider and model names inside the header without widening it", async () => {

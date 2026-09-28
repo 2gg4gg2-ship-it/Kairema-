@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -46,6 +46,11 @@ const fixtures = vi.hoisted(() => ({
   modelsLoaded: 0,
   customModelsLoaded: 0,
   saved: null as unknown,
+  tested: [] as unknown[],
+  testResult: { ok: true as boolean, provider: "openrouter", label: "", message: "API-ключ принят провайдером." },
+  activated: [] as unknown[],
+  removed: [] as unknown[],
+  keyCheckTick: vi.fn(),
 }));
 
 vi.mock("wouter", () => ({ useLocation: () => ["/settings/providers", fixtures.navigate] }));
@@ -89,12 +94,19 @@ vi.mock("@/lib/trpc", () => ({
       // `models.useMutation()` exactly twice per render in the same order, so `position % 2`
       // reproduces react-query's per-hook cache identity across re-renders.
       models: { useMutation: () => modelsInstances[hookPosition.value++ % 2]! },
-      test: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }) },
+      test: {
+        useMutation: () => ({
+          mutateAsync: async (input: unknown) => { fixtures.tested.push(input); renderTick.fn(); return fixtures.testResult; },
+          isPending: false,
+          error: null,
+        }),
+      },
       save: { useMutation: () => ({ mutateAsync: vi.fn(async (input) => { fixtures.saved = input; return {}; }), isPending: false, error: null }) },
       createCustom: { useMutation: () => ({ mutateAsync: vi.fn(async (input) => { fixtures.saved = input; return {}; }), isPending: false, error: null }) },
-      updateCustom: { useMutation: () => ({ mutateAsync: vi.fn(async (input) => { fixtures.saved = input; return {}; }), isPending: false, error: null }) },
-      setActive: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }) },
-      remove: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }) },
+      // A saved custom provider is updated and, when it was not the active binding, activated.
+      updateCustom: { useMutation: () => ({ mutateAsync: vi.fn(async (input) => { fixtures.saved = { ...(input as object), op: "update" }; return {}; }), isPending: false, error: null }) },
+      setActive: { useMutation: () => ({ mutateAsync: async (input: unknown) => { fixtures.activated.push(input); return {}; }, isPending: false, error: null }) },
+      remove: { useMutation: () => ({ mutateAsync: async (input: unknown) => { fixtures.removed.push(input); return {}; }, isPending: false, error: null }) },
     },
   },
 }));
@@ -129,6 +141,10 @@ beforeEach(() => {
   fixtures.customModelsLoaded = 0;
   fixtures.navigate.mockReset();
   fixtures.invalidateList.mockReset();
+  fixtures.tested = [];
+  fixtures.testResult = { ok: true as boolean, provider: "openrouter", label: "", message: "API-ключ принят провайдером." };
+  fixtures.activated = [];
+  fixtures.removed = [];
 });
 
 afterEach(() => cleanup());
@@ -299,5 +315,106 @@ describe("custom provider form", () => {
     const builtinOptions = Array.from((screen.getByLabelText("Model (OpenRouter)") as HTMLSelectElement).options).map((option) => option.value);
     expect(builtinOptions).toContain("vendor/model-a");
     expect(builtinOptions).not.toContain("vendor/model-b");
+  });
+
+  it("checks the typed key against the provider before anything is saved", async () => {
+    renderProviders();
+    await userEvent.click(within(openrouterCard()).getByRole("button", { name: "Connect" }));
+    await userEvent.type(screen.getByLabelText("API key (OpenRouter)"), "sk-or-v1-typed-value");
+    await userEvent.click(within(openrouterCard()).getByRole("button", { name: "Проверить ключ" }));
+
+    await screen.findByText(/API-ключ принят провайдером/);
+    // The key is checked in the POST body of the check itself, never as part of a stored row.
+    expect(fixtures.tested).toEqual([{ provider: "openrouter", apiKey: "sk-or-v1-typed-value" }]);
+    expect(fixtures.saved).toBeNull();
+  });
+
+  it("reports a rejected key with the provider's verdict and saves nothing", async () => {
+    fixtures.testResult = { ok: false, provider: "openrouter", label: "", message: "Провайдер отклонил API-ключ. Проверьте ключ и его статус в аккаунте провайдера." };
+    renderProviders();
+    await userEvent.click(within(openrouterCard()).getByRole("button", { name: "Connect" }));
+    await userEvent.type(screen.getByLabelText("API key (OpenRouter)"), "sk-or-wrong-key");
+    await userEvent.click(within(openrouterCard()).getByRole("button", { name: "Проверить ключ" }));
+
+    await screen.findByText(/Провайдер отклонил API-ключ/);
+    expect(fixtures.saved).toBeNull();
+  });
+
+  it("checks an unsaved custom provider on its own endpoint", async () => {
+    renderProviders();
+    const fields = await openCustomForm();
+    await userEvent.type(fields.name, "Мой провайдер");
+    await userEvent.type(fields.url, "https://api.example.com/v1");
+    await userEvent.type(fields.key, "sk-custom-secret-9999");
+    await userEvent.click(within(customCard()).getByRole("button", { name: "Проверить ключ" }));
+
+    await screen.findByText(/API-ключ принят провайдером/);
+    expect(fixtures.tested[0]).toEqual({ provider: "custom-draft", apiKey: "sk-custom-secret-9999", draft: { displayName: "Мой провайдер", baseUrl: "https://api.example.com/v1" } });
+  });
+
+  it("reopens a saved custom provider for editing on its own name, URL and model", async () => {
+    fixtures.list.configs = [CUSTOM_ROW];
+    renderProviders();
+    const row = (await screen.findAllByText("Настроить"))[0]!;
+    await userEvent.click(row);
+
+    const card = customCard();
+    expect((screen.getByLabelText("Название провайдера") as HTMLInputElement).value).toBe("Мой провайдер");
+    expect((screen.getByLabelText("API URL провайдера") as HTMLInputElement).value).toBe("https://api.example.com/v1");
+    // A stored key is never sent to the browser, so the field starts empty and the card says so.
+    expect((screen.getByLabelText("API key (Custom provider)") as HTMLInputElement).value).toBe("");
+    expect(card.textContent ?? "").toContain("Редактируется: Мой провайдер");
+  });
+
+  it("activates and removes a saved custom provider from its own row", async () => {
+    fixtures.list.configs = [CUSTOM_ROW];
+    renderProviders();
+    const card = customCard();
+    await userEvent.click(within(card).getByRole("button", { name: "Активировать" }));
+    await waitFor(() => expect(fixtures.activated).toEqual([{ provider: "custom-abc" }]));
+
+    await userEvent.click(within(card).getByRole("button", { name: "Отключить" }));
+    await waitFor(() => expect(fixtures.removed).toEqual([{ provider: "custom-abc" }]));
+  });
+
+  it("marks a connected provider active while it has a stored row", async () => {
+    fixtures.list.configs = [BUILTIN_ROW];
+    fixtures.list.activeProvider = "openrouter";
+    renderProviders();
+    expect(within(openrouterCard()).queryByText("активен")).toBeTruthy();
+  });
+
+  it("stops calling a provider active once its row is gone", async () => {
+    // Disconnecting the active row leaves the stored pointer behind, so the screen must not
+    // show a binding the user no longer has.
+    fixtures.list.configs = [];
+    fixtures.list.activeProvider = "openrouter";
+    renderProviders();
+    const card = openrouterCard();
+    expect(within(card).queryByText("активен")).toBeNull();
+    // With no stored row there is nothing to activate, so the control is not offered.
+    expect(within(card).queryByRole("button", { name: "Активировать" })).toBeNull();
+  });
+
+  it("does not offer Activate for the custom provider that is already active", async () => {
+    fixtures.list.configs = [CUSTOM_ROW];
+    fixtures.list.activeProvider = "custom-abc";
+    renderProviders();
+    await screen.findAllByText("Мой провайдер");
+    expect(within(customCard()).queryByRole("button", { name: "Активировать" })).toBeNull();
+  });
+
+  it("activates the custom provider it just updated, so My API uses the edited one", async () => {
+    fixtures.list.configs = [CUSTOM_ROW];
+    renderProviders();
+    await userEvent.click((await screen.findAllByText("Настроить"))[0]!);
+    await userEvent.type(screen.getByLabelText("API key (Custom provider)"), "sk-custom-secret-9999");
+    fixtures.customModels = { data: [{ id: "vendor/model-b", name: "Model B" }], isPending: false, isError: false, isSuccess: true };
+    await userEvent.click(screen.getByRole("button", { name: "Обновить список моделей (Model (Custom provider))" }));
+    await screen.findByRole("option", { name: /Model B/ });
+    await userEvent.click(within(customCard()).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(fixtures.saved).toMatchObject({ op: "update", provider: "custom-abc", activeModel: "vendor/model-b" }));
+    await waitFor(() => expect(fixtures.activated).toEqual([{ provider: "custom-abc" }]));
   });
 });

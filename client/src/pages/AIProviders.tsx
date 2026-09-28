@@ -196,12 +196,13 @@ export default function AIProviders() {
   // next to the other provider's key and could preselect a model the provider does not serve.
   const modelsMutation = trpc.userProviders.models.useMutation();
   const customModelsMutation = trpc.userProviders.models.useMutation();
+  const testMutation = trpc.userProviders.test.useMutation();
   const saveMutation = trpc.userProviders.save.useMutation();
   const createCustomMutation = trpc.userProviders.createCustom.useMutation();
   const updateCustomMutation = trpc.userProviders.updateCustom.useMutation();
   const setActiveMutation = trpc.userProviders.setActive.useMutation();
   const removeMutation = trpc.userProviders.remove.useMutation();
-  const busy = modelsMutation.isPending || customModelsMutation.isPending || saveMutation.isPending || createCustomMutation.isPending || updateCustomMutation.isPending || setActiveMutation.isPending || removeMutation.isPending;
+  const busy = modelsMutation.isPending || customModelsMutation.isPending || testMutation.isPending || saveMutation.isPending || createCustomMutation.isPending || updateCustomMutation.isPending || setActiveMutation.isPending || removeMutation.isPending;
   const models = modelsMutation.data?.models ?? [];
   const customModels = customModelsMutation.data?.models ?? [];
   const customReady = Boolean(customDraft && customDraft.displayName.trim() && customDraft.baseUrl.trim() && customDraft.apiKey.trim().length >= 8);
@@ -229,6 +230,33 @@ export default function AIProviders() {
   useEffect(() => {
     if (!modelId && modelsMutation.data?.models.length) setModelId(modelsMutation.data.models[0]!.id);
   }, [modelsMutation.data, modelId]);
+
+  /**
+   * Asks the provider whether the typed key is accepted.
+   *
+   * The probe is the provider's own key or catalog route, so it costs no inference and the only
+   * thing that comes back is a verdict. A rejected key is explained before anything is saved,
+   * which is what the user needs to tell a typo from a provider-side problem.
+   */
+  const runKeyCheck = async () => {
+    setNotice(null);
+    try {
+      const result = selected?.available
+        ? await testMutation.mutateAsync({ provider: selected.id, ...(apiKey.trim().length >= 8 ? { apiKey: apiKey.trim() } : {}) })
+        : customDraft
+          ? await testMutation.mutateAsync({
+            provider: customDraft.provider ?? CUSTOM_DRAFT_PROVIDER,
+            apiKey: customDraft.apiKey.trim(),
+            draft: { displayName: customDraft.displayName.trim(), baseUrl: customDraft.baseUrl.trim() },
+          })
+          : null;
+      if (!result) return;
+      if (result.ok) setNotice({ tone: "ok", text: result.label ? `${result.message} (${result.label})` : result.message });
+      else setNotice({ tone: "error", text: result.message });
+    } catch (error) {
+      setNotice({ tone: "error", text: errorText(error, "Не удалось проверить API-ключ.") });
+    }
+  };
 
   const openPanel = (providerId: string) => setEditingProvider((current) => (current === providerId ? null : providerId));
 
@@ -331,9 +359,13 @@ export default function AIProviders() {
     if (!customDraft || !customCanSave) return;
     setNotice(null);
     const payload = { displayName: customDraft.displayName.trim(), baseUrl: customDraft.baseUrl.trim(), apiKey: customDraft.apiKey.trim(), activeModel: customDraft.modelId };
+    const editingExisting = Boolean(customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER);
     try {
-      if (customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER) {
-        await updateCustomMutation.mutateAsync({ provider: customDraft.provider, ...payload });
+      if (editingExisting) {
+        await updateCustomMutation.mutateAsync({ provider: customDraft.provider!, ...payload });
+        // Saving from this screen means "use this one", the same intent as Connect, so a row that
+        // is not the active binding becomes active instead of leaving My API on the old provider.
+        if (activeProvider !== customDraft.provider) await setActiveMutation.mutateAsync({ provider: customDraft.provider! });
       } else {
         await createCustomMutation.mutateAsync({ ...payload, makeActive: true });
       }
@@ -377,12 +409,17 @@ export default function AIProviders() {
             title="OpenRouter"
             subtitle="Модели OpenRouter"
             connected={Boolean(openrouterConfig)}
-            active={activeProvider === "openrouter"}
+            // "Active" is shown only while the row still exists: disconnecting the active
+            // provider leaves the stored pointer behind, and the screen must not claim a
+            // binding the user no longer has.
+            active={activeProvider === "openrouter" && Boolean(openrouterConfig)}
             expanded={editingProvider === "openrouter"}
             busy={busy}
             disabled={!storageReady}
             onToggle={() => openPanel("openrouter")}
-            onMakeActive={() => void makeActive("openrouter")}
+            // Only a provider that already has a stored row can be activated; offering it for an
+            // unconnected provider would send the user to a server-side "not found".
+            onMakeActive={openrouterConfig ? () => void makeActive("openrouter") : undefined}
             onDisconnect={() => void disconnect("openrouter")}
             hasConfig={Boolean(openrouterConfig)}
             summary={openrouterConfig ? <p className="truncate text-xs text-slate-500">ключ {openrouterConfig.keyHint} · {openrouterConfig.activeModel}</p> : null}
@@ -419,8 +456,17 @@ export default function AIProviders() {
                 >
                   {openrouterConfig ? "Save" : "Connect"}
                 </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40"
+                  onClick={() => void runKeyCheck()}
+                  disabled={busy || (apiKey.trim().length < 8 && !openrouterConfig)}
+                >
+                  Проверить ключ
+                </button>
                 {openrouterConfig?.keyHint && <span className="text-xs text-slate-500">ключ {openrouterConfig.keyHint}</span>}
               </div>
+              {!canSubmit && <p className="text-xs text-slate-500">Сохранить можно после проверки ключа и выбора модели из списка провайдера.</p>}
             </div>
           </ProviderCard>
         )}
@@ -428,9 +474,9 @@ export default function AIProviders() {
         <div className="mt-3">
           <ProviderCard
             title="Custom provider"
-            subtitle="Любой OpenAI-совместимый API"
+            subtitle={customDraft?.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER ? `Редактируется: ${customDraft.displayName || "Мой провайдер"}` : "Любой OpenAI-совместимый API"}
             connected={customConfigs.length > 0}
-            active={Boolean(activeProvider && isCustomProvider(activeProvider))}
+            active={customConfigs.some((config) => config.provider === activeProvider)}
             expanded={customDraft !== null}
             busy={busy}
             disabled={!storageReady}
@@ -440,8 +486,22 @@ export default function AIProviders() {
               <ul className="grid gap-1.5">
                 {customConfigs.map((config) => (
                   <li key={config.provider} className="flex flex-wrap items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate text-sm text-slate-200">{config.displayName || "Мой провайдер"}</span>
-                    <span className="shrink-0 truncate text-xs text-slate-500">{config.activeModel}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-slate-200">
+                      {config.displayName || "Мой провайдер"}<span className="text-slate-500"> · {config.activeModel}</span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {activeProvider !== config.provider && (
+                        <button type="button" className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40" onClick={() => void makeActive(config.provider)} disabled={busy}>
+                          Активировать
+                        </button>
+                      )}
+                      <button type="button" className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40" onClick={() => openCustomDraft(config)} disabled={busy}>
+                        Настроить
+                      </button>
+                      <button type="button" className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-rose-200 transition-colors hover:bg-rose-500/15 disabled:opacity-40" onClick={() => void disconnect(config.provider)} disabled={busy}>
+                        Отключить
+                      </button>
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -505,9 +565,18 @@ export default function AIProviders() {
                     onClick={() => void runCustomSave()}
                     disabled={busy || !customCanSave}
                   >
-                    {customDraft.provider ? "Save" : "Connect"}
+                    {customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER ? "Save" : "Connect"}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40"
+                    onClick={() => void runKeyCheck()}
+                    disabled={busy || !customReady}
+                  >
+                    Проверить ключ
                   </button>
                 </div>
+                {!customCanSave && <p className="text-xs text-slate-500">Сохранить можно после проверки ключа и выбора модели из списка провайдера.</p>}
               </div>
             )}
           </ProviderCard>
