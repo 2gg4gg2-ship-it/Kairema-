@@ -292,6 +292,27 @@ describe("the My API journey from connecting a provider to a real answer", () =>
     expect(eventData(res, "done")).toMatchObject({ content: "Ответ Kairema" });
   });
 
+  it("stops using a provider the user disconnects, instead of falling back to Kairema", async () => {
+    const api = caller();
+    await api.userProviders.save({ provider: "openrouter", apiKey: KEY, activeModel: "vendor/model-a", makeActive: true });
+    expect((await streamMessage(streamHandler({}), true)) && upstream.at(-1)!.url).toContain("/chat/completions");
+
+    await api.userProviders.remove({ provider: "openrouter" });
+    expect(store.configs.size).toBe(0);
+    // The stored pointer is left behind on purpose, so the screen decides from the row list, and
+    // the server decides from the row as well.
+    const listed = await api.userProviders.list();
+    expect(listed.activeProvider).toBe("openrouter");
+    expect(listed.configs).toEqual([]);
+
+    const platformCalls = vi.fn();
+    const before = upstream.length;
+    const res = await streamMessage(streamHandler({ chatWithRoleStream: platformCalls }), true);
+    expect(platformCalls).not.toHaveBeenCalled();
+    expect(upstream.length).toBe(before);
+    expect(eventData(res, "error")?.message).toMatch(/не настроен/);
+  });
+
   it("refuses a My API turn with no saved provider and never silently answers from Kairema", async () => {
     const platformCalls = vi.fn();
     const res = await streamMessage(streamHandler({ chatWithRoleStream: platformCalls }), true);
