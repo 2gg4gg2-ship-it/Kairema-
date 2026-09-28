@@ -11,7 +11,7 @@ import { memorySearchMatches } from "@/lib/memory-search";
 import { runtimeAuthHeaders } from "@/lib/runtime-auth";
 import { consumeChatStream, type StreamLiveValue } from "@/lib/chat-stream";
 import { trpc } from "@/lib/trpc";
-import { Archive, Bot, ChevronDown, CircleDot, Clock3, Copy, FileImage, Gauge, Globe2, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Repeat, Search, Settings2, SlidersHorizontal, Sparkles, Trash2, TriangleAlert, UserIcon, X } from "lucide-react";
+import { Archive, Bot, Check, ChevronDown, CircleDot, Clock3, Copy, FileImage, Gauge, Globe2, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Repeat, Search, Settings2, SlidersHorizontal, Sparkles, Trash2, TriangleAlert, UserIcon, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { createPortal } from "react-dom";
@@ -114,39 +114,36 @@ function AppDropdown({ value, onValueChange, options, ariaLabel }: { value: stri
   return <Select value={value} onValueChange={onValueChange}><SelectTrigger role="combobox" aria-label={ariaLabel} className="w-full"><SelectValue>{current?.label ?? value}</SelectValue></SelectTrigger><SelectContent>{options.map((option) => <SelectItem key={option.value} value={option.value} className="py-2"><span className="flex min-w-0 flex-col gap-0.5 text-left"><span className="break-words font-medium leading-5">{option.label}</span>{option.description && <span className="whitespace-normal break-words text-xs leading-5 text-muted-foreground">{option.description}</span>}</span></SelectItem>)}</SelectContent></Select>;
 }
 
-type MyApiModelOption = { id: string; name?: string | null };
-
-/** OpenRouter marks a free model with a `:free` suffix in its live id, so the Free/Paid split
-    is read off the catalog Kairema already fetched instead of a hardcoded model list. */
-function isFreeMyApiModel(id: string) {
-  return id.toLowerCase().includes(":free");
-}
+/**
+ * One catalog entry, as the server normalized it from the provider's live response. `id` is the
+ * provider's real model id and is what a request must send; `displayName` is the same name
+ * without the author prefix, and `isFree` comes from the catalog's own pricing.
+ */
+type MyApiModelOption = { id: string; name?: string | null; displayName?: string | null; isFree?: boolean; acceptsImage?: boolean };
 
 function myApiModelTitle(model: MyApiModelOption) {
-  return model.name?.trim() || model.id;
+  return model.displayName?.trim() || model.name?.trim() || model.id;
 }
 
-/** The My API model menu: a searchable, grouped, black panel that is portaled to the body so the
-    header pill can keep its own `overflow:hidden` and the menu can never widen the page. The live
-    catalog stays the only source of models; only the grouping and the search are UI. */
-function MyApiModelMenu({ value, models, disabled, ariaLabel, labels, onSelect }: { value: string; models: readonly MyApiModelOption[]; disabled: boolean; ariaLabel: string; labels: { search: string; free: string; paid: string; empty: string; badge: string }; onSelect: (id: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const [placement, setPlacement] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null);
+/**
+ * Free is whatever the provider's own catalog priced at zero. The client never guesses it from
+ * a model name, and it never keeps a list of "known free" models of its own.
+ */
+function isFreeMyApiModel(model: MyApiModelOption) {
+  return model.isFree === true;
+}
 
-  const selected = models.find((model) => model.id === value) ?? null;
-  const term = query.trim().toLowerCase();
-  const matched = term ? models.filter((model) => model.id.toLowerCase().includes(term) || myApiModelTitle(model).toLowerCase().includes(term)) : models;
-  // With no search the saved model always stays in the list, even when the provider's catalog no
-  // longer offers it; while searching, only real matches show so "no models found" is truthful.
-  const visible = term ? matched : (matched.some((model) => model.id === value) ? matched : [...matched, { id: value, name: selected?.name ?? "" }]);
-  const freeModels = visible.filter((model) => isFreeMyApiModel(model.id));
-  const paidModels = visible.filter((model) => !isFreeMyApiModel(model.id));
+type MenuPlacement = { top: number; left: number; width: number; maxHeight: number };
 
+/**
+ * Places a menu panel next to its trigger and closes it the way a menu should behave: Escape or
+ * a click outside. The panel is portaled to the body with fixed coordinates, so the header keeps
+ * its own clipping and the menu can never widen the page or grow past the viewport.
+ */
+function useAnchoredMenu(open: boolean, triggerRef: React.RefObject<HTMLElement | null>, panelRef: React.RefObject<HTMLElement | null>, setOpen: (value: boolean) => void) {
+  const [placement, setPlacement] = useState<MenuPlacement | null>(null);
   useEffect(() => {
-    if (!open) { setQuery(""); return; }
+    if (!open) return;
     const place = () => {
       const rect = triggerRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -156,6 +153,7 @@ function MyApiModelMenu({ value, models, disabled, ariaLabel, labels, onSelect }
       const left = Math.min(Math.max(8, rect.right - width), Math.max(8, viewportWidth - width - 8));
       const below = viewportHeight - rect.bottom - 16;
       const above = rect.top - 16;
+      // Near the bottom of the viewport the panel opens upward instead of off-screen.
       const flipUp = below < 220 && above > below;
       const maxHeight = Math.max(160, Math.min(340, flipUp ? above : below));
       setPlacement({ top: flipUp ? Math.max(8, rect.top - 6 - maxHeight) : rect.bottom + 6, left, width, maxHeight });
@@ -180,7 +178,35 @@ function MyApiModelMenu({ value, models, disabled, ariaLabel, labels, onSelect }
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
-  }, [open]);
+  }, [open, triggerRef, panelRef, setOpen]);
+  return placement;
+}
+
+function menuPanelStyle(placement: MenuPlacement | null) {
+  return placement ? { top: `${placement.top}px`, left: `${placement.left}px`, width: `${placement.width}px`, maxHeight: `${placement.maxHeight}px` } : undefined;
+}
+
+/** The My API model menu: a searchable, grouped, black panel over the selected provider's own
+    live catalog. It never lists a model the client invented, and the ids it hands back are the
+    provider's real ids. */
+function MyApiModelMenu({ value, models, disabled, ariaLabel, labels, onSelect }: { value: string; models: readonly MyApiModelOption[]; disabled: boolean; ariaLabel: string; labels: { search: string; free: string; paid: string; empty: string; badge: string }; onSelect: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const placement = useAnchoredMenu(open, triggerRef, panelRef, setOpen);
+
+  const selected = models.find((model) => model.id === value) ?? null;
+  const term = query.trim().toLowerCase();
+  // Search matches what the user reads and what the request needs: the display name and the id.
+  const matched = term ? models.filter((model) => model.id.toLowerCase().includes(term) || myApiModelTitle(model).toLowerCase().includes(term)) : models;
+  // With no search the saved model always stays in the list, even when the provider's catalog no
+  // longer offers it; while searching, only real matches show so "no models found" is truthful.
+  const visible = term ? matched : (matched.some((model) => model.id === value) ? matched : [...matched, { id: value, name: selected?.name ?? "", displayName: selected?.displayName ?? null, isFree: selected?.isFree }]);
+  const freeModels = visible.filter(isFreeMyApiModel);
+  const paidModels = visible.filter((model) => !isFreeMyApiModel(model));
+
+  useEffect(() => { if (!open) setQuery(""); }, [open]);
 
   const renderGroup = (title: string, items: readonly MyApiModelOption[]) => items.length === 0 ? null : (
     <div className="kairema-model-menu-group" role="group" aria-label={title} key={title}>
@@ -200,7 +226,7 @@ function MyApiModelMenu({ value, models, disabled, ariaLabel, labels, onSelect }
             <span className="kairema-model-menu-item-title">{title2}</span>
             {title2 !== model.id && <span className="kairema-model-menu-item-id">{model.id}</span>}
           </span>
-          {isFreeMyApiModel(model.id) && <span className="kairema-model-menu-badge">{labels.badge}</span>}
+          {isFreeMyApiModel(model) && <span className="kairema-model-menu-badge">{labels.badge}</span>}
         </button>;
       })}
     </div>
@@ -216,13 +242,14 @@ function MyApiModelMenu({ value, models, disabled, ariaLabel, labels, onSelect }
       aria-expanded={open}
       disabled={disabled}
       onClick={() => setOpen((value) => !value)}>
+      {/* The model alone: the provider is chosen in its own menu, so its name is not repeated. */}
       <span className="kairema-binding-trigger-text">{selected ? myApiModelTitle(selected) : value}</span>
     </button>
     {open && typeof document !== "undefined" && createPortal(
       <div
         ref={panelRef}
         className="kairema-model-menu"
-        style={placement ? { top: `${placement.top}px`, left: `${placement.left}px`, width: `${placement.width}px`, maxHeight: `${placement.maxHeight}px` } : undefined}>
+        style={menuPanelStyle(placement)}>
         <div className="kairema-model-menu-search">
           <Search className="kairema-model-menu-search-icon" aria-hidden="true" />
           <input
@@ -244,6 +271,56 @@ function MyApiModelMenu({ value, models, disabled, ariaLabel, labels, onSelect }
   </>;
 }
 
+type MyApiProviderOption = { id: string; name: string; activeModel: string };
+
+/** The provider menu: only the providers this user really has. Each entry is a stored,
+    server-validated credential, so an entry that would fail can never be offered here, and a
+    model name never appears in it. */
+function MyApiProviderMenu({ value, providers, disabled, ariaLabel, labels, onSelect }: { value: string; providers: readonly MyApiProviderOption[]; disabled: boolean; ariaLabel: string; labels: { connected: string; empty: string }; onSelect: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const placement = useAnchoredMenu(open, triggerRef, panelRef, setOpen);
+  const current = providers.find((provider) => provider.id === value) ?? null;
+
+  return <>
+    <button
+      ref={triggerRef}
+      type="button"
+      className="kairema-provider-trigger"
+      aria-label={ariaLabel}
+      aria-haspopup="listbox"
+      aria-expanded={open}
+      disabled={disabled}
+      onClick={() => setOpen((value) => !value)}>
+      {/* Provider only. The model has its own picker, so this never reads "provider · model". */}
+      <span className="kairema-provider-trigger-text">{current?.name ?? value}</span>
+      <ChevronDown className="kairema-provider-trigger-chevron" aria-hidden="true" />
+    </button>
+    {open && typeof document !== "undefined" && createPortal(
+      <div ref={panelRef} className="kairema-model-menu kairema-provider-menu" style={menuPanelStyle(placement)}>
+        <div className="kairema-model-menu-list kairema-provider-menu-list" role="listbox" aria-label={ariaLabel}>
+          {providers.length === 0 && <p className="kairema-model-menu-empty">{labels.empty}</p>}
+          {providers.map((provider) => {
+            const isActive = provider.id === value;
+            return <button
+              key={provider.id}
+              type="button"
+              role="option"
+              aria-selected={isActive}
+              className={`kairema-provider-menu-item ${isActive ? "kairema-model-menu-item-active" : ""}`}
+              onClick={() => { setOpen(false); onSelect(provider.id); }}>
+              <span className="kairema-provider-menu-check" aria-hidden="true">{isActive ? <Check /> : null}</span>
+              <span className="kairema-provider-menu-name">{provider.name}</span>
+              <span className="kairema-provider-menu-status">{labels.connected}</span>
+            </button>;
+          })}
+        </div>
+      </div>,
+      document.body)}
+  </>;
+}
+
 /** The sidebar is a static column from this width up, so it starts open and needs no topbar toggle. */
 const SIDEBAR_DESKTOP_BREAKPOINT = 768;
 
@@ -255,8 +332,8 @@ const MODELS: readonly StaticModel[] = [
 ];
 
 const copy = {
-  ru: { newChat: "Новый чат", models: "Роли", modelLimits: "Модели и лимиты", healthRefresh: "Обновление здоровья", history: "История", search: "Поиск", memory: "Память", settings: "Настройки", noHistory: "История пока пуста.", loginHistory: "Войти для истории", newConversation: "Новый разговор", loginChat: "Войдите, чтобы начать чат с Kairema", start: "Начните разговор с", secure: "Модели и ключи — только на сервере", light: "Светлая тема", dark: "Тёмная тема", language: "Язык", theme: "Тема", profile: "Профиль памяти", facts: "Факты памяти", addFact: "Добавить факт", clear: "Очистить память", autoMemory: "Автоматически извлекать новые факты", memoryEnabled: "Использовать память в ответах", response: "Ответ", style: "Стиль", length: "Длина", effort: "Усилия", thinking: "Дополнительное рассуждение", defaultRole: "Роль по умолчанию", web: "Web-поиск", webStatus: "Статус web-поиска", searchResults: "Результаты поиска", chats: "Чаты", messages: "Сообщения", save: "Изменения сохраняются автоматически", openSettings: "Открыть настройки", modeChat: "Чат", modeMyApi: "Мой API", modeSwitch: "Режим чата", activeUserBinding: "Активная связка «Мой API»", myApiNotConfigured: "Мой API не настроен", myApiModelPicker: "Модель «Мой API»", configureProvider: "Настроить провайдера →", myApiLoadingModels: "загружаем модели", myApiModelsRetry: "Повторить", myApiNoModels: "провайдер не вернул список моделей", myApiSwitchFailed: "Не удалось сменить модель", myApiModelSearch: "Поиск моделей", myApiModelFreeGroup: "Free", myApiModelPaidGroup: "Paid", myApiModelNoResults: "Ничего не найдено", myApiModelFreeBadge: "Free", delete: "Удалить", unsupportedSearch: "Поиск недоступен", uploadFailed: "Не удалось загрузить вложение.", noSearch: "Ничего не найдено.", profileTitle: "Профиль", openProfile: "Открыть профиль", fullName: "Полное имя", nameFieldLabel: "Как к вам обращаться?", namePlaceholder: "Имя", updateProfile: "Обновить профиль", profileUpdated: "Профиль обновлён", personalPreferences: "Персональные предпочтения", preferencesPrompt: "Какие личные предпочтения Kairema должен учитывать в ответах?", preferencesScope: "Ваши предпочтения применяются ко всем разговорам.", askClarifying: "Задавать уточняющие вопросы перед развёрнутым ответом", savePreferences: "Сохранить предпочтения", preferencesSaved: "Предпочтения сохранены" },
-  en: { newChat: "New chat", models: "Roles", modelLimits: "Models & limits", healthRefresh: "Health refresh", history: "History", search: "Search", memory: "Memory", settings: "Settings", noHistory: "No chat history yet.", loginHistory: "Sign in for history", newConversation: "New conversation", loginChat: "Sign in to start chatting with Kairema", start: "Start a conversation with", secure: "Models and keys stay on the server", light: "Light theme", dark: "Dark theme", language: "Language", theme: "Theme", profile: "Memory profile", facts: "Memory facts", addFact: "Add a fact", clear: "Clear memory", autoMemory: "Automatically extract new facts", memoryEnabled: "Use memory in replies", response: "Response", style: "Style", length: "Length", effort: "Effort", thinking: "Extra reasoning", defaultRole: "Default role", web: "Web search", webStatus: "Web search status", searchResults: "Search results", chats: "Chats", messages: "Messages", save: "Changes save automatically", openSettings: "Open settings", modeChat: "Chat", modeMyApi: "My API", modeSwitch: "Chat mode", activeUserBinding: "Active My API binding", myApiNotConfigured: "My API is not configured", myApiModelPicker: "My API model", configureProvider: "Set up a provider →", myApiLoadingModels: "loading models", myApiModelsRetry: "Retry", myApiNoModels: "the provider returned no models", myApiSwitchFailed: "Could not switch the model", myApiModelSearch: "Search models", myApiModelFreeGroup: "Free", myApiModelPaidGroup: "Paid", myApiModelNoResults: "No models found", myApiModelFreeBadge: "Free", delete: "Delete", unsupportedSearch: "Search unavailable", uploadFailed: "Could not upload the attachment.", noSearch: "No results found.", profileTitle: "Profile", openProfile: "Open profile", fullName: "Full name", nameFieldLabel: "What should we call you?", namePlaceholder: "Name", updateProfile: "Update Profile", profileUpdated: "Profile updated", personalPreferences: "Personal preferences", preferencesPrompt: "What personal preferences should Kairema consider in responses?", preferencesScope: "Your preferences will apply to all conversations.", askClarifying: "Ask clarifying questions before giving detailed answers", savePreferences: "Save Preferences", preferencesSaved: "Preferences saved" },
+  ru: { newChat: "Новый чат", models: "Роли", modelLimits: "Модели и лимиты", healthRefresh: "Обновление здоровья", history: "История", search: "Поиск", memory: "Память", settings: "Настройки", noHistory: "История пока пуста.", loginHistory: "Войти для истории", newConversation: "Новый разговор", loginChat: "Войдите, чтобы начать чат с Kairema", start: "Начните разговор с", secure: "Модели и ключи — только на сервере", light: "Светлая тема", dark: "Тёмная тема", language: "Язык", theme: "Тема", profile: "Профиль памяти", facts: "Факты памяти", addFact: "Добавить факт", clear: "Очистить память", autoMemory: "Автоматически извлекать новые факты", memoryEnabled: "Использовать память в ответах", response: "Ответ", style: "Стиль", length: "Длина", effort: "Усилия", thinking: "Дополнительное рассуждение", defaultRole: "Роль по умолчанию", web: "Web-поиск", webStatus: "Статус web-поиска", searchResults: "Результаты поиска", chats: "Чаты", messages: "Сообщения", save: "Изменения сохраняются автоматически", openSettings: "Открыть настройки", modeChat: "Чат", modeMyApi: "Мой API", modeSwitch: "Режим чата", activeUserBinding: "Активная связка «Мой API»", myApiNotConfigured: "Мой API не настроен", myApiModelPicker: "Модель «Мой API»", configureProvider: "Настроить провайдера →", myApiLoadingModels: "загружаем модели", myApiModelsRetry: "Повторить", myApiNoModels: "провайдер не вернул список моделей", myApiSwitchFailed: "Не удалось сменить модель", myApiSwitchProviderFailed: "Не удалось сменить провайдера", myApiProviderPicker: "Провайдер «Мой API»", myApiProviderEmpty: "Настройте провайдера в разделе «AI-провайдеры»", myApiProviderConnected: "подключён", myApiModelSearch: "Поиск моделей", myApiModelFreeGroup: "Free", myApiModelPaidGroup: "Paid", myApiModelNoResults: "Ничего не найдено", myApiModelFreeBadge: "Free", delete: "Удалить", unsupportedSearch: "Поиск недоступен", uploadFailed: "Не удалось загрузить вложение.", noSearch: "Ничего не найдено.", profileTitle: "Профиль", openProfile: "Открыть профиль", fullName: "Полное имя", nameFieldLabel: "Как к вам обращаться?", namePlaceholder: "Имя", updateProfile: "Обновить профиль", profileUpdated: "Профиль обновлён", personalPreferences: "Персональные предпочтения", preferencesPrompt: "Какие личные предпочтения Kairema должен учитывать в ответах?", preferencesScope: "Ваши предпочтения применяются ко всем разговорам.", askClarifying: "Задавать уточняющие вопросы перед развёрнутым ответом", savePreferences: "Сохранить предпочтения", preferencesSaved: "Предпочтения сохранены" },
+  en: { newChat: "New chat", models: "Roles", modelLimits: "Models & limits", healthRefresh: "Health refresh", history: "History", search: "Search", memory: "Memory", settings: "Settings", noHistory: "No chat history yet.", loginHistory: "Sign in for history", newConversation: "New conversation", loginChat: "Sign in to start chatting with Kairema", start: "Start a conversation with", secure: "Models and keys stay on the server", light: "Light theme", dark: "Dark theme", language: "Language", theme: "Theme", profile: "Memory profile", facts: "Memory facts", addFact: "Add a fact", clear: "Clear memory", autoMemory: "Automatically extract new facts", memoryEnabled: "Use memory in replies", response: "Response", style: "Style", length: "Length", effort: "Effort", thinking: "Extra reasoning", defaultRole: "Default role", web: "Web search", webStatus: "Web search status", searchResults: "Search results", chats: "Chats", messages: "Messages", save: "Changes save automatically", openSettings: "Open settings", modeChat: "Chat", modeMyApi: "My API", modeSwitch: "Chat mode", activeUserBinding: "Active My API binding", myApiNotConfigured: "My API is not configured", myApiModelPicker: "My API model", configureProvider: "Set up a provider →", myApiLoadingModels: "loading models", myApiModelsRetry: "Retry", myApiNoModels: "the provider returned no models", myApiSwitchFailed: "Could not switch the model", myApiSwitchProviderFailed: "Could not switch the provider", myApiProviderPicker: "My API provider", myApiProviderEmpty: "Set a provider up in AI providers", myApiProviderConnected: "connected", myApiModelSearch: "Search models", myApiModelFreeGroup: "Free", myApiModelPaidGroup: "Paid", myApiModelNoResults: "No models found", myApiModelFreeBadge: "Free", delete: "Delete", unsupportedSearch: "Search unavailable", uploadFailed: "Could not upload the attachment.", noSearch: "No results found.", profileTitle: "Profile", openProfile: "Open profile", fullName: "Full name", nameFieldLabel: "What should we call you?", namePlaceholder: "Name", updateProfile: "Update Profile", profileUpdated: "Profile updated", personalPreferences: "Personal preferences", preferencesPrompt: "What personal preferences should Kairema consider in responses?", preferencesScope: "Your preferences will apply to all conversations.", askClarifying: "Ask clarifying questions before giving detailed answers", savePreferences: "Save Preferences", preferencesSaved: "Preferences saved" },
 } as const;
 
 const styles: Record<ResponseStyle, Record<Language, string>> = { default: { ru: "По умолчанию", en: "Default" }, professional: { ru: "Профессиональный", en: "Professional" }, friendly: { ru: "Дружелюбный", en: "Friendly" }, concise: { ru: "Кратко", en: "Concise" }, steps: { ru: "По шагам", en: "Step by step" } };
@@ -360,6 +437,8 @@ export default function Home() {
   const modelsQuery = trpc.models.list.useQuery(undefined, { refetchInterval: 60_000, refetchOnWindowFocus: true }); const settingsQuery = trpc.settings.get.useQuery(undefined, { enabled: isAuthenticated }); const healthRefreshSeconds = Number(settingsQuery.data?.healthRefreshSeconds ?? 30); const memoryQuery = trpc.memory.get.useQuery(undefined, { enabled: isAuthenticated }); const webStatusQuery = trpc.webSearch.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const knowledgeStatusQuery = trpc.knowledge.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const providerDashboardQuery = trpc.providers.dashboard.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: healthRefreshSeconds > 0 ? healthRefreshSeconds * 1_000 : false, refetchOnWindowFocus: true }); const knowledgeAuditQuery = trpc.knowledge.audit.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const sessionsQuery = trpc.chats.list.useQuery(undefined, { enabled: isAuthenticated, refetchOnWindowFocus: true }); const messagesQuery = trpc.chats.historyPage.useQuery({ sessionId: activeId, limit: 60 }, { enabled: isAuthenticated && Boolean(activeId) }); const attachmentsQuery = trpc.attachments.list.useQuery({ sessionId: activeId }, { enabled: isAuthenticated && Boolean(activeId) }); const draftQuery = trpc.chats.draft.useQuery({ sessionId: activeId }, { enabled: isAuthenticated && Boolean(activeId), refetchOnWindowFocus: false }); const exportsQuery = trpc.exports.list.useQuery(undefined, { enabled: isAuthenticated && exportHistoryOpen }); const searchQuery = trpc.search.query.useQuery({ query: search }, { enabled: isAuthenticated && search.trim().length >= 2 }); const ownerQuery = trpc.owner.isOwner.useQuery(undefined, { enabled: isAuthenticated, staleTime: 300_000 });
   const createMutation = trpc.chats.create.useMutation(); const deleteChatMutation = trpc.chats.delete.useMutation(); const clearHistoryMutation = trpc.chats.clearAll.useMutation(); const draftSaveMutation = trpc.chats.saveDraft.useMutation(); const draftClearMutation = trpc.chats.clearDraft.useMutation(); const settingMutation = trpc.settings.update.useMutation(); const updateNameMutation = trpc.auth.updateName.useMutation(); const memoryUpdateMutation = trpc.memory.update.useMutation(); const memoryAddMutation = trpc.memory.addFact.useMutation(); const memoryDeleteMutation = trpc.memory.deleteEntry.useMutation(); const memoryClearMutation = trpc.memory.clear.useMutation(); const attachmentDeleteMutation = trpc.attachments.delete.useMutation(); const exportCreateMutation = trpc.exports.create.useMutation(); const exportDeleteMutation = trpc.exports.delete.useMutation(); const knowledgeRefreshMutation = trpc.knowledge.refresh.useMutation(); const utils = trpc.useUtils();
   const setActiveModelMutation = trpc.userProviders.setActiveModel.useMutation();
+  // The provider menu binds the credential; the model menu binds the model. Two independent moves.
+  const setActiveProviderMutation = trpc.userProviders.setActive.useMutation();
   // Only fetched while "My API" is on screen, and it returns masked keys only.
   const userProvidersQuery = trpc.userProviders.list.useQuery(undefined, { enabled: isAuthenticated && chatMode === "myApi", staleTime: 30_000 });
   // The My API picker is fed by the active provider's own live catalog, never by the Kairema roles.
@@ -392,6 +471,25 @@ export default function Home() {
     void loadMyApiCatalog();
   }, [chatMode, myApiCatalogProvider]);
 
+  // Only providers the user really has: every entry is a stored, server-validated credential, so
+  // nothing that would fail can be offered, and a built-in catalog needs no label of its own.
+  const myApiProviderOptions = useMemo(() => (userProvidersQuery.data?.configs ?? []).map((config) => ({ id: config.provider, name: config.displayName || config.provider, activeModel: config.activeModel })), [userProvidersQuery.data]);
+
+  // Switching providers changes the credential and nothing else: the new provider keeps the model
+  // it was saved with, so the two pickers never fight over the same value.
+  const selectMyApiProvider = async (provider: string) => {
+    if (provider === myApiCatalogProvider) return;
+    setMyApiSwitchError("");
+    try {
+      await setActiveProviderMutation.mutateAsync({ provider });
+      await utils.userProviders.list.invalidate();
+    } catch (error) {
+      // The server rejected the switch, so the previous provider and its model stay exactly as
+      // they were and the reason is shown instead of a menu that silently reverts.
+      setMyApiSwitchError(error instanceof Error && error.message ? error.message : t.myApiSwitchProviderFailed);
+    }
+  };
+
   const selectMyApiModel = async (activeModel: string) => {
     if (!myApiCatalogProvider || activeModel === myApiActiveConfig?.activeModel) return;
     setMyApiSwitchError("");
@@ -405,6 +503,17 @@ export default function Home() {
     }
   };
   const myApiActiveConfig = (userProvidersQuery.data?.activeProvider ? userProvidersQuery.data.configs.find((config) => config.provider === userProvidersQuery.data.activeProvider) : null) ?? null;
+  const myApiModelAdoptedFor = useRef<string | null>(null);
+  useEffect(() => {
+    const config = myApiActiveConfig;
+    if (chatMode !== "myApi" || !myApiCatalogProvider || !config || !myApiModels.length || myApiCatalogMutation.isPending) return;
+    // A provider whose saved model its live catalog no longer offers would otherwise send a model
+    // the provider rejects, so the first model it does offer is adopted once, not on every render.
+    if (myApiModels.some((model) => model.id === config.activeModel)) { myApiModelAdoptedFor.current = myApiCatalogProvider; return; }
+    if (myApiModelAdoptedFor.current === myApiCatalogProvider) return;
+    myApiModelAdoptedFor.current = myApiCatalogProvider;
+    void selectMyApiModel(myApiModels[0]!.id);
+  }, [chatMode, myApiCatalogProvider, myApiModels, myApiActiveConfig, myApiCatalogMutation.isPending]);
   const settings = { ...(settingsQuery.data ?? { language: "ru" as Language, theme: "dark" as const, responseStyle: "default" as ResponseStyle, responseLength: "balanced" as const, effort: "standard" as const, thinking: 0, defaultRole: "fast" as ModelId, webSearch: 0, healthRefreshSeconds: 30, highContrast: 0, askClarifyingQuestions: 0 }), ...settingsOverride } as { language: Language; theme: "dark" | "light"; responseStyle: ResponseStyle; responseLength: "balanced" | "brief" | "detailed"; effort: "low" | "standard" | "high"; thinking: boolean | number; defaultRole: ModelId; webSearch: boolean | number; healthRefreshSeconds: 0 | 15 | 30 | 60; highContrast: boolean | number; askClarifyingQuestions: boolean | number };
   const language = settings.language as Language; const t = copy[language]; const sessions = sessionsQuery.data ?? []; const selectedModel = MODELS.find((item) => item.modelId === modelId) ?? MODELS[0]; const activeSession = sessions.find((session) => session.id === activeId); const attachments = attachmentsQuery.data ?? [];
   const modelViews = useMemo<PublicModel[]>(() => { const byId = new Map((modelsQuery.data as PublicModel[] | undefined)?.map((model) => [model.modelId, model]) ?? []); return MODELS.map((model) => ({ ...model, status: byId.get(model.modelId)?.status, runtime: byId.get(model.modelId)?.runtime ?? null, limits: byId.get(model.modelId)?.limits })); }, [modelsQuery.data]); const modelById = useMemo(() => new Map(modelViews.map((model) => [model.modelId, model])), [modelViews]);
@@ -721,11 +830,11 @@ export default function Home() {
       {sidebarOpen && <button className="kairema-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Close" />}
       <section className="kairema-main">
         <header className="kairema-topbar">
-          <div className="kairema-topbar-left"><button className="kairema-icon-btn md:hidden" onClick={() => setSidebarOpen(true)} aria-label="Menu"><Menu className="size-5" /></button><span className="kairema-topbar-title sr-only">{activeSession?.title ?? t.newConversation}</span>{chatMode === "chat" ? (<div className="kairema-model-pill"><Sparkles className="kairema-model-sparkle" aria-hidden="true" /><div className="kairema-select-wrap" data-kairema-role-select="true"><select value={modelId} onChange={(event) => setModelId(event.target.value as ModelId)} aria-label={t.models}>{modelViews.map((model) => <option key={model.modelId} value={model.modelId}>{model.label[language]}</option>)}</select></div><ChevronDown className="kairema-model-chevron" aria-hidden="true" /></div>) : (<div className="kairema-model-pill" role="group" aria-label={t.activeUserBinding}><Sparkles className="kairema-model-sparkle" aria-hidden="true" /><span className="kairema-binding-name">{myApiActiveConfig ? myApiActiveConfig.displayName || myApiActiveConfig.provider : t.myApiNotConfigured}</span>{myApiActiveConfig && <span className="kairema-select-wrap kairema-binding-wrap"><MyApiModelMenu value={myApiActiveConfig.activeModel} models={myApiModels} disabled={myApiCatalogMutation.isPending || setActiveModelMutation.isPending || !myApiModels.length} ariaLabel={t.myApiModelPicker} labels={{ search: t.myApiModelSearch, free: t.myApiModelFreeGroup, paid: t.myApiModelPaidGroup, empty: t.myApiModelNoResults, badge: t.myApiModelFreeBadge }} onSelect={(modelId) => void selectMyApiModel(modelId)} /><ChevronDown className="kairema-model-chevron" aria-hidden="true" /></span>}</div>)}{!isAuthenticated && <button type="button" className="kairema-guest-login" onClick={() => startLogin()}><LogIn className="size-4" /><span>{t.loginHistory}</span></button>}</div>
+          <div className="kairema-topbar-left"><button className="kairema-icon-btn md:hidden" onClick={() => setSidebarOpen(true)} aria-label="Menu"><Menu className="size-5" /></button><span className="kairema-topbar-title sr-only">{activeSession?.title ?? t.newConversation}</span>{chatMode === "chat" ? (<div className="kairema-model-pill"><Sparkles className="kairema-model-sparkle" aria-hidden="true" /><div className="kairema-select-wrap" data-kairema-role-select="true"><select value={modelId} onChange={(event) => setModelId(event.target.value as ModelId)} aria-label={t.models}>{modelViews.map((model) => <option key={model.modelId} value={model.modelId}>{model.label[language]}</option>)}</select></div><ChevronDown className="kairema-model-chevron" aria-hidden="true" /></div>) : (<div className="kairema-model-pill" role="group" aria-label={t.activeUserBinding}><Sparkles className="kairema-model-sparkle" aria-hidden="true" />{myApiActiveConfig ? <MyApiModelMenu value={myApiActiveConfig.activeModel} models={myApiModels} disabled={myApiCatalogMutation.isPending || setActiveModelMutation.isPending || !myApiModels.length} ariaLabel={t.myApiModelPicker} labels={{ search: t.myApiModelSearch, free: t.myApiModelFreeGroup, paid: t.myApiModelPaidGroup, empty: t.myApiModelNoResults, badge: t.myApiModelFreeBadge }} onSelect={(modelId) => void selectMyApiModel(modelId)} /> : <span className="kairema-binding-name">{t.myApiNotConfigured}</span>}</div>)}{!isAuthenticated && <button type="button" className="kairema-guest-login" onClick={() => startLogin()}><LogIn className="size-4" /><span>{t.loginHistory}</span></button>}</div>
           <div className="kairema-topbar-controls"><span className="kairema-topbar-chip"><button type="button" className="kairema-header-button" onClick={() => setSettingsOpen(true)} title={t.openSettings} aria-label={t.openSettings}><Settings2 className="size-3.5" /><span>{t.settings}</span></button></span>{!isGuestUser && <span className="kairema-topbar-chip"><button type="button" className="kairema-header-button" onClick={() => setProfileOpen(true)} title={t.openProfile} aria-label={t.openProfile}><UserIcon className="size-3.5" /><span>{t.profileTitle}</span></button></span>}</div>
         </header>
         <AIChatBox aboveMessages={<div className="kairema-mode-switch" role="group" aria-label={t.modeSwitch}><button type="button" className="kairema-mode-option" aria-pressed={chatMode === "chat"} onClick={() => setChatMode("chat")}><MessageSquare className="size-4" /><span>{t.modeChat}</span></button><button type="button" className="kairema-mode-option" aria-pressed={chatMode === "myApi"} onClick={() => setChatMode("myApi")}><Repeat className="size-4" /><span>{t.modeMyApi}</span></button>{chatMode === "myApi" && <span className="kairema-mode-hint" role="status">{myApiActiveConfig ? (<>
-        {myApiActiveConfig.displayName || myApiActiveConfig.provider} · {myApiActiveConfig.activeModel}
+        <MyApiProviderMenu value={myApiCatalogProvider ?? myApiActiveConfig.provider} providers={myApiProviderOptions} disabled={setActiveProviderMutation.isPending || !myApiProviderOptions.length} ariaLabel={t.myApiProviderPicker} labels={{ connected: t.myApiProviderConnected, empty: t.myApiProviderEmpty }} onSelect={(provider) => void selectMyApiProvider(provider)} />
         {myApiCatalogMutation.isPending ? <span className="kairema-mode-hint-state"> · {t.myApiLoadingModels}…</span> : null}
         {myApiCatalogMutation.isError ? <span className="kairema-mode-hint-state"> · {myApiCatalogMutation.error?.message ?? t.myApiNoModels} <button type="button" className="kairema-mode-hint-link" onClick={() => void loadMyApiCatalog({ force: true })}>{t.myApiModelsRetry}</button></span> : null}
         {myApiCatalogMutation.isSuccess && !myApiModels.length ? <span className="kairema-mode-hint-state"> · {t.myApiNoModels}</span> : null}

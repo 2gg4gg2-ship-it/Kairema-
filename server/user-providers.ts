@@ -177,7 +177,13 @@ function classifyUserProviderFailure(http: number | null, upstream: unknown): { 
 const USER_PROVIDER_TIMEOUT_MS = 25_000;
 const KEY_PROBE_TIMEOUT_MS = 12_000;
 const CATALOG_TIMEOUT_MS = 15_000;
-const MAX_CATALOG_MODELS = 400;
+/**
+ * A bound against a pathological response, not a ranking: OpenRouter's live catalog holds 458
+ * usable chat models today, and a 400 cap silently hid 58 of them (including openai/o1 and
+ * deepseek/deepseek-r1) simply because they came late in the provider's own order. The cap is
+ * applied after the capability filter, so raising it costs nothing but defence.
+ */
+const MAX_CATALOG_MODELS = 1_000;
 
 export function listUserProviders(): readonly UserProviderDescriptor[] {
   return USER_PROVIDERS;
@@ -254,14 +260,109 @@ export async function verifyUserProviderKey(selector: UserProviderSelector, apiK
   return { ok: true, label: safeLabel };
 }
 
-export type UserProviderModel = { id: string; name: string };
+export type UserProviderModel = {
+  /** The provider's real model id. It is never rewritten: this is what a request must send. */
+  id: string;
+  /** The display name exactly as the provider reported it. */
+  name: string;
+  /** The same name without its author prefix and free marker, for the model picker. */
+  displayName: string;
+  /** True when the catalog prices input and output at zero, or the id is the official :free variant. */
+  isFree: boolean;
+  /** True when the catalog says the model accepts images. */
+  acceptsImage: boolean;
+  contextLength: number | null;
+};
 
-type CatalogEntry = { id?: unknown; name?: unknown; architecture?: { modality?: { input?: unknown } } };
+/**
+ * The catalog fields this normalizer reads. They are the ones OpenRouter's live `/models`
+ * response actually carries today: `architecture.input_modalities` / `output_modalities`
+ * arrays, the compact `architecture.modality` string, numeric-string `pricing`, and
+ * `context_length`. A generic OpenAI-compatible catalog may carry none of them.
+ */
+type CatalogEntry = {
+  id?: unknown;
+  name?: unknown;
+  context_length?: unknown;
+  architecture?: { modality?: unknown; input_modalities?: unknown; output_modalities?: unknown };
+  pricing?: { prompt?: unknown; completion?: unknown };
+};
+
+function modalityList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string").map((item) => item.trim().toLowerCase()).filter(Boolean);
+}
+
+/**
+ * The modalities a catalog entry declares, or null when it declares none.
+ * OpenRouter writes them as `input_modalities` / `output_modalities` and repeats them compactly
+ * as a "text+image->embeddings" string; both are accepted. A catalog that says nothing at all
+ * returns null, because then nothing is known about the model and nothing can be ruled out.
+ */
+function catalogModalities(entry: CatalogEntry): { inputs: string[]; outputs: string[] } | null {
+  const inputs = modalityList(entry.architecture?.input_modalities);
+  const outputs = modalityList(entry.architecture?.output_modalities);
+  if (inputs.length || outputs.length) return { inputs, outputs };
+  if (typeof entry.architecture?.modality === "string") {
+    const [left, right] = entry.architecture.modality.split("->");
+    if (!left && !right) return null;
+    return { inputs: modalityList(left?.split("+")), outputs: modalityList(right?.split("+")) };
+  }
+  return null;
+}
+
+/**
+ * Whether a Kairema turn can use this model. A turn sends text messages and needs text back, so
+ * the model has to accept text and produce text. This is what keeps embedding, rerank, TTS and
+ * other specialized endpoints out of the chat picker, and it is decided from the catalog's own
+ * capability metadata rather than from anything in the model's name.
+ */
+function isChatCapableModel(entry: CatalogEntry): boolean {
+  const modalities = catalogModalities(entry);
+  if (!modalities) return true;
+  return modalities.inputs.includes("text") && modalities.outputs.includes("text");
+}
+
+function catalogPrice(entry: CatalogEntry, field: "prompt" | "completion"): number | null {
+  const value = entry.pricing?.[field];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+/**
+ * Free means free by the catalog's own numbers: input and output both priced at zero. A
+ * provider that reports no pricing falls back to the official `:free` variant id, which is the
+ * only free marker OpenRouter itself uses in an id.
+ */
+function isFreeCatalogModel(entry: CatalogEntry, id: string): boolean {
+  const prompt = catalogPrice(entry, "prompt");
+  const completion = catalogPrice(entry, "completion");
+  if (prompt !== null && completion !== null) return prompt === 0 && completion === 0;
+  return /:free$/i.test(id);
+}
+
+/**
+ * The picker shows a model by its own name, without the author prefix and without the free
+ * marker: OpenRouter names a model "Author: Model (free)", the author is chosen separately in
+ * the provider picker, and free models already have their own section. The provider's raw name
+ * and the id both stay available as fallbacks.
+ */
+function catalogDisplayName(name: string, id: string): string {
+  const withoutFreeMarker = name.replace(/\s*\(free\)\s*$/i, "").trim();
+  const withoutAuthor = withoutFreeMarker.replace(/^[^:]{1,60}:\s*/, "").trim();
+  return (withoutAuthor || withoutFreeMarker || id).slice(0, 120);
+}
 
 /**
  * Reads the provider's live catalog. Nothing is hardcoded: the list a user picks from is
- * whatever the provider returns right now. Non-text models are dropped because the chat
- * screen only sends text, and the result is bounded so one response cannot flood the client.
+ * whatever the provider returns right now, and every decision below comes from that response.
+ * Models a Kairema chat turn cannot use are dropped from their own declared modalities, and the
+ * result is bounded so one response cannot flood the client. The cap is applied after the
+ * filter, so a catalog full of specialized entries can never push the usable ones out.
  */
 export async function listUserProviderModels(selector: UserProviderSelector, apiKey: string): Promise<UserProviderModel[]> {
   const target = toTarget(selector);
@@ -281,13 +382,21 @@ export async function listUserProviderModels(selector: UserProviderSelector, api
   const models: UserProviderModel[] = [];
   for (const entry of entries) {
     if (typeof entry?.id !== "string" || !entry.id.trim()) continue;
-    const modality = entry.architecture?.modality?.input;
-    if (typeof modality === "string" && !modality.split(",").some((value) => value.trim() === "text")) continue;
     if (seen.has(entry.id)) continue;
+    if (!isChatCapableModel(entry)) continue;
     seen.add(entry.id);
     // An OpenAI-compatible catalog entry may carry no display name, so the id stands in for it.
     const name = typeof entry.name === "string" && entry.name.trim() ? entry.name : entry.id;
-    models.push({ id: entry.id, name: name.slice(0, 120) });
+    const modalities = catalogModalities(entry);
+    const contextLength = typeof entry.context_length === "number" && entry.context_length > 0 ? entry.context_length : null;
+    models.push({
+      id: entry.id,
+      name: name.slice(0, 120),
+      displayName: catalogDisplayName(name, entry.id),
+      isFree: isFreeCatalogModel(entry, entry.id),
+      acceptsImage: modalities?.inputs.includes("image") ?? false,
+      contextLength,
+    });
     if (models.length >= MAX_CATALOG_MODELS) break;
   }
   return models;
