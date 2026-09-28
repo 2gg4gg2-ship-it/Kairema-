@@ -388,9 +388,13 @@ describe("Home integration flows", () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     render(<Home />);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Markdown" })).toHaveProperty("disabled", false));
-    await user.click(screen.getByRole("button", { name: "Markdown" }));
-    await user.click(screen.getByRole("button", { name: "PDF" }));
+    // One compact export button in the mode row; the two formats are chosen from its panel.
+    const trigger = screen.getByRole("button", { name: "Экспорт" });
+    await waitFor(() => expect(trigger).toHaveProperty("disabled", false));
+    await user.click(trigger);
+    await user.click(await screen.findByRole("menuitem", { name: /Markdown/ }));
+    await user.click(screen.getByRole("button", { name: "Экспорт" }));
+    await user.click(await screen.findByRole("menuitem", { name: /PDF/ }));
 
     await waitFor(() => expect(fixtures.createExport).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, format: "markdown" }));
     expect(fixtures.createExport).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, format: "pdf" });

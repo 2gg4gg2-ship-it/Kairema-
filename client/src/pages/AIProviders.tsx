@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, CheckCircle2, Eye, EyeOff, KeyRound, Plug, Plus, Power, RefreshCw, TriangleAlert, XCircle } from "lucide-react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { ModelMenu, MODEL_MENU_LABELS } from "@/components/ModelMenu";
 
 type ProviderView =
   | { id: string; displayName: string; available: true; keyUrl: string; keyEndpoint: string; modelsEndpoint: string; chatEndpoint: string }
@@ -125,27 +126,28 @@ function KeyField({ label, fieldLabel, value, visible, onVisibleChange, onChange
  * A refresh button sits next to the select because the catalog depends on the key: it cannot be
  * fetched up front, and re-typing a key must not re-send it on every keystroke.
  */
-function ModelField({ label, fieldLabel, value, fallback, models, pending, error, empty, errorText: failureText, onChange, onReload, canReload, placeholder }: { label: string; fieldLabel: string; value: string; fallback?: string; models: Array<{ id: string; name: string }>; pending: boolean; error: boolean; empty: boolean; errorText?: string; onChange: (value: string) => void; onReload: () => void; canReload: boolean; placeholder: string }) {
+function ModelField({ label, fieldLabel, value, fallback, models, pending, error, empty, errorText: failureText, onChange, onReload, canReload, placeholder }: { label: string; fieldLabel: string; value: string; fallback?: string; models: Array<{ id: string; name: string; displayName?: string | null; isFree?: boolean }>; pending: boolean; error: boolean; empty: boolean; errorText?: string; onChange: (value: string) => void; onReload: () => void; canReload: boolean; placeholder: string }) {
+  // A model that is already stored stays listed until the catalog arrives, so reopening a
+  // connected provider never shows an empty picker.
+  const options = fallback && !models.some((model) => model.id === fallback)
+    ? [{ id: fallback, name: fallback, displayName: fallback }, ...models]
+    : models;
   return (
     <label className="grid gap-1">
       <span className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
       <span className="flex items-center gap-2">
-        <select
-          className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-400"
+        {/* The same picker the chat header uses, so the model list looks and behaves identically
+            in both places instead of being a plain browser select here. */}
+        <ModelMenu
           value={value}
-          onChange={(event) => onChange(event.target.value)}
+          models={options}
           disabled={pending}
-          aria-label={fieldLabel}
-        >
-          {pending && <option value="">Загружаем модели…</option>}
-          {!pending && !models.length && !fallback && <option value="">{placeholder}</option>}
-          {/* A model that is already stored stays visible until the catalog arrives, so reopening
-              a connected provider never shows an empty picker. */}
-          {fallback && !models.some((model) => model.id === fallback) && <option value={fallback}>{fallback}</option>}
-          {models.map((model) => (
-            <option key={model.id} value={model.id}>{model.name} · {model.id}</option>
-          ))}
-        </select>
+          ariaLabel={fieldLabel}
+          labels={MODEL_MENU_LABELS.ru}
+          placeholder={pending ? MODEL_MENU_LABELS.ru.loading : placeholder}
+          onSelect={onChange}
+          triggerClassName="kairema-settings-model-trigger"
+          triggerTextClassName="kairema-settings-model-trigger-text" />
         <button
           type="button"
           className="shrink-0 rounded-lg border border-slate-700 p-2 text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40"

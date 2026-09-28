@@ -9,7 +9,7 @@ vi.mock("./capacity-controller", async (importOriginal) => ({
   ...capacity,
 }));
 
-import { chatWithUserProviderStream, customUserProviderTarget, listUserProviderModels, publicUserProviderError, readyUserProvider, UserProviderError, UserProviderGuestNotAllowedError, UserProviderNotImplementedError, verifyUserProviderKey } from "./user-providers";
+import { chatWithUserProviderStream, customUserProviderTarget, listUserProviderModels, publicUserProviderError, readyUserProvider, sanitizeStreamDelta, UserProviderError, UserProviderGuestNotAllowedError, UserProviderNotImplementedError, verifyUserProviderKey } from "./user-providers";
 import { UserProviderNotConfiguredError } from "./user-providers";
 
 const KEY = "sk-or-v1-user-secret-1234";
@@ -250,6 +250,82 @@ describe("user provider streaming", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  // A provider streams tokens, not words: the space between two words usually arrives as the
+  // first character of the next delta. Trimming each delta on its own published "Helloworldhowareyou?",
+  // which is why the user's own model looked like it had lost its spacing.
+  async function streamChunks(chunks: string[]) {
+    const frames = [...chunks.map((chunk) => `data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n\n`), "data: [DONE]\n\n"];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sse(frames)));
+    const deltas: string[] = [];
+    const result = await chatWithUserProviderStream({ provider: "openrouter", model: MODEL, modelLabel: "L", apiKey: KEY, history: [{ role: "user", content: "hi" }], roleId: "fast", onDelta: (delta) => deltas.push(delta), actor });
+    return { content: result.content, deltas };
+  }
+
+  it("keeps the spaces the provider sent between word deltas", async () => {
+    const { content, deltas } = await streamChunks(["Hello", " world", " how", " are", " you?"]);
+    expect(content).toBe("Hello world how are you?");
+    // The browser receives the same spacing, so the answer is identical live and after reload.
+    expect(deltas.join("")).toBe("Hello world how are you?");
+  });
+
+  it("keeps punctuation attached to the word it follows", async () => {
+    const { content } = await streamChunks(["Hello", " world", "!"]);
+    expect(content).toBe("Hello world!");
+  });
+
+  it("does not invent a space the provider never sent", async () => {
+    // The raw stream really is two glued fragments. Adding a separator here would fabricate text,
+    // so the answer stays exactly what the provider produced.
+    const { content } = await streamChunks(["Hello", "world"]);
+    expect(content).toBe("Helloworld");
+  });
+
+  it("preserves newlines a streamed answer is broken by", async () => {
+    expect((await streamChunks(["one\ntwo", "\nthree"])).content).toBe("one\ntwo\nthree");
+    expect((await streamChunks(["a\n", "b\n", "c"])).content).toBe("a\nb\nc");
+  });
+
+  it("keeps indentation inside a fenced block", async () => {
+    const { content } = await streamChunks(["```\n", "  const a = 1;", "\n", "```"]);
+    expect(content).toContain("  const a = 1;");
+  });
+
+  it("sends the Kairema context, the whole conversation and the user's own settings", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(sse([`data: ${JSON.stringify({ choices: [{ delta: { content: "ok" } }] })}\n\n`, "data: [DONE]\n\n"]));
+    vi.stubGlobal("fetch", fetchMock);
+    await chatWithUserProviderStream({
+      provider: "openrouter", model: MODEL, modelLabel: "Моя модель", apiKey: KEY,
+      history: [{ role: "user", content: "первый" }, { role: "assistant", content: "ответ" }, { role: "user", content: "второй" }],
+      settings: { style: "professional", responseLength: "detailed", effort: "high", thinking: true, askClarifyingQuestions: true } as never,
+      roleId: "fast", onDelta: () => undefined, actor,
+    });
+    const body = JSON.parse(String(fetchMock.mock.calls[0]![1]!.body)) as { messages: Array<{ role: string; content: unknown }> };
+    // The system prompt comes first, then the conversation in order with its real roles, so the
+    // user's own model sees the same dialogue the user sees.
+    expect(body.messages.map((message) => message.role)).toEqual(["system", "user", "assistant", "user"]);
+    expect(body.messages.slice(1).map((message) => message.content)).toEqual(["первый", "ответ", "второй"]);
+    const system = body.messages[0]!.content as string;
+    expect(system).toContain("Моя модель");
+    // The settings the user picked in the interface reach their model; ignoring them is what made
+    // a detailed or professional request look like it had been dropped.
+    expect(system).toContain("Сохраняй профессиональный, ясный тон.");
+    expect(system).toContain("Дай подробный, хорошо структурированный ответ.");
+    expect(system).toContain("задай один уточняющий вопрос");
+    // Nothing tells the model it is user-provided: it is only told who it is and how to answer.
+    expect(system.toLowerCase()).not.toContain("пользовательск");
+    expect(system.toLowerCase()).not.toContain("byok");
+  });
+
+  it("keeps the Kairema system prompt usable when no settings were changed", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(sse([`data: ${JSON.stringify({ choices: [{ delta: { content: "ok" } }] })}\n\n`, "data: [DONE]\n\n"]));
+    vi.stubGlobal("fetch", fetchMock);
+    await chatWithUserProviderStream({ provider: "openrouter", model: MODEL, modelLabel: "L", apiKey: KEY, history: [{ role: "user", content: "hi" }], roleId: "fast", onDelta: () => undefined, actor });
+    const body = JSON.parse(String(fetchMock.mock.calls[0]![1]!.body)) as { messages: Array<{ content: unknown }> };
+    const system = body.messages[0]!.content as string;
+    expect(system.startsWith("Ты Kairema")).toBe(true);
+    expect(system).toContain("Сохраняй сбалансированную длину ответа.");
+  });
+
   it("sends exactly one request for one user turn and performs no retry", async () => {
     const fetchMock = vi.fn().mockResolvedValue(sse([`data: ${JSON.stringify({ choices: [{ delta: { content: "ok" } }] })}\n\n`, "data: [DONE]\n\n"]));
     vi.stubGlobal("fetch", fetchMock);
@@ -413,5 +489,28 @@ describe("answer label for a user-defined provider", () => {
     expect(result.label).toBe("Мой провайдер · vendor/model-b");
     expect(result.modelUsed).toBe("vendor/model-b");
     expect(result.fallbackUsed).toBe(false);
+  });
+});
+
+describe("streamed delta sanitizing keeps the provider's spacing", () => {
+  it("passes a delta whose whitespace is the separator through untouched", () => {
+    expect(sanitizeStreamDelta(" world")).toBe(" world");
+    expect(sanitizeStreamDelta(" how")).toBe(" how");
+    expect(sanitizeStreamDelta(" ")).toBe(" ");
+    expect(sanitizeStreamDelta("\n")).toBe("\n");
+  });
+
+  it("never inserts a space of its own", () => {
+    expect(sanitizeStreamDelta("Hello")).toBe("Hello");
+    expect(sanitizeStreamDelta("world")).toBe("world");
+    expect(sanitizeStreamDelta("")).toBe("");
+  });
+
+  it("still strips the citation markers the sanitizer exists for", () => {
+    // The reference is removed; the space that separated it from the word before it is the
+    // chunk's own trailing whitespace, so it is the provider's to have sent and is kept.
+    expect(sanitizeStreamDelta("text [source](https://example.com)")).toBe("text");
+    expect(sanitizeStreamDelta(" [1]")).toBe(" [1]");
+    expect(sanitizeStreamDelta("https://example.com/a")).toBe("");
   });
 });

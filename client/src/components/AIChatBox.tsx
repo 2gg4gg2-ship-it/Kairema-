@@ -7,6 +7,8 @@ import { MAX_COMPOSER_IMAGES, optimizeImageForUpload } from "@/lib/image-attachm
 import { Copy, Download, FileImage, FileText, ChevronDown, ChevronRight, ChevronUp, ExternalLink, Link2, Loader2, LogIn, Paperclip, Send, Square, Trash2, Sparkles, X } from "lucide-react";
 import { Drawer as DrawerPrimitive } from "vaul";
 import React, { useCallback, useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useAnchoredMenu } from "@/components/ModelMenu";
 
 export type ChatAttachment = { id: string; fileName: string; mimeType: string; sizeBytes: number; kind: "image" | "document"; previewUrl?: string };
 export type SourceEvidence = { title: string; url: string; publishedAt?: string };
@@ -209,6 +211,45 @@ export function redactLegacyAssistantReferences(value: string) {
     .trim();
 }
 
+/**
+ * The compact export control for the chat header.
+ *
+ * It replaces a `<details>` disclosure that lived inside the mode row. That markup opened, but
+ * its panel was absolutely positioned inside `.kairema-panel-collapse { overflow: clip }`, so the
+ * list was cut off by the row that contained it and neither Markdown nor PDF could actually be
+ * clicked — a control that looked present and did nothing. The panel is now portaled to the body
+ * with measured coordinates, and it closes on Escape or an outside click like every other menu.
+ * The action itself is unchanged: it calls the same `exportCurrentChat` the page already had.
+ */
+function ExportControl({ language, label, markdownLabel, pdfLabel, preparingLabel, canExport, exportBusy, onExportMarkdown, onExportPdf }: { language: Language; label: string; markdownLabel: string; pdfLabel: string; preparingLabel: string; canExport: boolean; exportBusy: string | null; onExportMarkdown?: () => void; onExportPdf?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const placement = useAnchoredMenu(open, triggerRef, panelRef, setOpen);
+  const busy = Boolean(exportBusy);
+  return <>
+    <button
+      ref={triggerRef}
+      type="button"
+      className="kairema-export-trigger"
+      aria-label={label}
+      title={label}
+      aria-haspopup="menu"
+      aria-expanded={open}
+      disabled={busy}
+      onClick={() => setOpen((value) => !value)}>
+      {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+    </button>
+    {open && typeof document !== "undefined" && createPortal(
+      <div ref={panelRef} className="kairema-export-menu-popover" style={placement ? { top: `${placement.top}px`, left: `${placement.left}px`, width: `${placement.width}px` } : undefined} role="menu" aria-label={label}>
+        <button type="button" role="menuitem" onClick={() => { setOpen(false); onExportMarkdown?.(); }} disabled={!canExport || busy}><FileText className="size-3.5" />{exportBusy === "markdown" ? preparingLabel : markdownLabel}</button>
+        <button type="button" role="menuitem" onClick={() => { setOpen(false); onExportPdf?.(); }} disabled={!canExport || busy}><Download className="size-3.5" />{exportBusy === "pdf" ? preparingLabel : pdfLabel}</button>
+        {!canExport && <p className="kairema-export-menu-note">{language === "ru" ? "Экспортировать можно диалог, который уже сохранён." : "Only a saved conversation can be exported."}</p>}
+      </div>,
+      document.body)}
+  </>;
+}
+
 export function AIChatBox({
   messages, onSendMessage, onUploadFiles, isLoading = false, placeholder, className, height, emptyStateMessage,
   guestLoginAction, aboveMessages,
@@ -230,7 +271,6 @@ export function AIChatBox({
   // One state drives the whole controls panel: History, Export and Chat / My API.
   const [controlsOpen, setControlsOpen] = useState(true);
   // The Export menu is a single disclosure for the existing Markdown and PDF actions.
-  const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const attachmentMenuRef = useRef<HTMLDetailsElement | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const preserveHistoryScrollRef = useRef<{ height: number; top: number } | null>(null);
@@ -450,7 +490,7 @@ export function AIChatBox({
         <div className="kairema-chat-sticky">
           <div className="kairema-chat-controls" data-controls-open={controlsOpen}>
           <div className="kairema-mode-bar">
-          <div className="kairema-panel-collapse">{aboveMessages}{(onExportMarkdown || onExportPdf) && <div className="kairema-chat-tools"><details className="kairema-export-menu" open={exportMenuOpen} onToggle={(event) => setExportMenuOpen(event.currentTarget.open)}><summary className="kairema-header-button" aria-label={t.exportMenu} title={t.exportMenu}><Download className="size-3.5" /><span>{t.exportMenu}</span><ChevronDown className="kairema-export-caret" /></summary><div className="kairema-export-menu-popover"><button type="button" onClick={() => { setExportMenuOpen(false); onExportMarkdown?.(); }} disabled={!canExport || Boolean(exportBusy)}><FileText className="size-3.5" />{exportBusy === "markdown" ? t.preparing : t.markdown}</button><button type="button" onClick={() => { setExportMenuOpen(false); onExportPdf?.(); }} disabled={!canExport || Boolean(exportBusy)}><Download className="size-3.5" />{exportBusy === "pdf" ? t.preparing : t.pdf}</button></div></details></div>}</div>
+          <div className="kairema-panel-collapse">{aboveMessages}{(onExportMarkdown || onExportPdf) && <div className="kairema-chat-tools"><ExportControl language={language} label={t.exportMenu} markdownLabel={t.markdown} pdfLabel={t.pdf} preparingLabel={t.preparing} canExport={canExport} exportBusy={exportBusy} onExportMarkdown={onExportMarkdown} onExportPdf={onExportPdf} /></div>}</div>
           <button type="button" className="kairema-chat-tools-toggle" aria-expanded={controlsOpen} aria-label={controlsOpen ? (language === "ru" ? "Свернуть панель инструментов" : "Collapse the controls panel") : (language === "ru" ? "Развернуть панель инструментов" : "Expand the controls panel")} title={controlsOpen ? (language === "ru" ? "Свернуть панель инструментов" : "Collapse the controls panel") : (language === "ru" ? "Развернуть панель инструментов" : "Expand the controls panel")} onClick={() => setControlsOpen((open) => !open)}>{controlsOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}</button>
           </div>
           </div>

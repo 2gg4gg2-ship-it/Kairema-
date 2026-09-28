@@ -61,8 +61,12 @@ describe("AIChatBox user flows", () => {
     const onExportPdf = vi.fn();
     render(<AIChatBox messages={[{ role: "user", content: "Только выбранная история" }]} onSendMessage={vi.fn()} canExport onExportMarkdown={onExportMarkdown} onExportPdf={onExportPdf} />);
 
-    await user.click(screen.getByRole("button", { name: "Markdown" }));
-    await user.click(screen.getByRole("button", { name: "PDF" }));
+    // The control is one compact button that reveals the two formats, so each is chosen from its
+    // panel rather than sitting in the row permanently.
+    await user.click(screen.getByRole("button", { name: "Экспорт" }));
+    await user.click(await screen.findByRole("menuitem", { name: /Markdown/ }));
+    await user.click(screen.getByRole("button", { name: "Экспорт" }));
+    await user.click(await screen.findByRole("menuitem", { name: /PDF/ }));
 
     expect(onExportMarkdown).toHaveBeenCalledOnce();
     expect(onExportPdf).toHaveBeenCalledOnce();

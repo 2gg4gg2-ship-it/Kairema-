@@ -1,5 +1,5 @@
 import { beginCapacityGeneration, settleCapacityReservation, type CapacityActor, type CapacityGenerationLease } from "./capacity-controller";
-import { KAIREMA_SYSTEM_PROMPT, dataFromSseBlock, openRouterStreamDelta, sanitizeAssistantContent, type ChatMessage, type ChatSettings, type ModelStatus, type Provider, type StatusCategory } from "./providers";
+import { KAIREMA_SYSTEM_PROMPT, createReasoningStreamFilter, dataFromSseBlock, openRouterStreamDelta, sanitizeAssistantContent, userPreferenceRules, type ChatMessage, type ChatSettings, type ModelStatus, type Provider, type StatusCategory } from "./providers";
 import { createRequestBudget } from "./providers";
 import { UserProviderKeyConfigurationError, UserProviderKeyDecryptionError } from "./user-provider-secrets";
 import { MAX_PROVIDER_NAME_LENGTH, UserProviderEndpointError, buildUserProviderChatEndpoint, buildUserProviderModelsEndpoint, normalizeUserProviderDisplayName } from "./user-provider-endpoints";
@@ -408,10 +408,35 @@ type ApiChatMessage = { role: "system" | "user" | "assistant"; content: string |
  * The same Kairema system prompt the platform roles use, with the user's own model named in
  * place of the role label. Role capability text is deliberately absent: the user selected a
  * raw model, so promising "Flash" or "Apex" behaviour would misrepresent what was chosen.
+ *
+ * The user's own interface settings are not role-specific, so they are applied exactly as they
+ * are on the platform path. Without this a user who asked for a detailed, professional answer
+ * got a bare prompt instead and the model looked like it had ignored the request. Nothing is
+ * added about the model being user-provided: it is simply told who it is and how to answer.
  */
-function buildUserProviderMessages(modelLabel: string, history: ChatMessage[]): ApiChatMessage[] {
-  const system = KAIREMA_SYSTEM_PROMPT.replace("{модель}", modelLabel);
+function buildUserProviderMessages(modelLabel: string, history: ChatMessage[], settings?: ChatSettings): ApiChatMessage[] {
+  const system = `${KAIREMA_SYSTEM_PROMPT.replace("{модель}", modelLabel)} ${userPreferenceRules(settings)}`.trim();
   return [{ role: "system", content: system }, ...history.map((message) => ({ role: message.role, content: message.content }))];
+}
+
+/**
+ * Applies the assistant sanitizer to one streaming delta without eating the whitespace that
+ * separates it from its neighbours.
+ *
+ * `sanitizeAssistantContent` trims its input because it is also used on a finished answer, where
+ * leading and trailing whitespace are noise. On a delta they are not noise at all: they are the
+ * spaces between two words, and dropping them is what made a user's own model look broken. The
+ * chunk's own leading and trailing whitespace is therefore lifted off, the remainder is sanitized,
+ * and the whitespace is put back unchanged. A chunk that the provider sent as "Hello" then
+ * "world" still reads "Helloworld", because that is what the provider actually sent.
+ */
+export function sanitizeStreamDelta(delta: string): string {
+  if (!delta) return "";
+  const leading = /^[\s\uFEFF]*/.exec(delta)?.[0] ?? "";
+  const trailing = leading.length === delta.length ? "" : (/[\s\uFEFF]*$/.exec(delta)?.[0] ?? "");
+  const inner = delta.slice(leading.length, delta.length - trailing.length);
+  if (!inner) return delta;
+  return `${leading}${sanitizeAssistantContent(inner)}${trailing}`;
 }
 
 export type UserProviderStreamResult = {
@@ -470,7 +495,7 @@ export async function chatWithUserProviderStream(options: {
       response = await fetch(target.chatEndpoint, {
         method: "POST",
         headers: { ...userProviderHeaders(options.apiKey), Accept: "text/event-stream" },
-        body: JSON.stringify({ model: options.model, messages: buildUserProviderMessages(options.modelLabel, options.history), stream: true }),
+        body: JSON.stringify({ model: options.model, messages: buildUserProviderMessages(options.modelLabel, options.history, options.settings), stream: true }),
         signal: timeoutSignal(options.signal, USER_PROVIDER_TIMEOUT_MS),
       });
     } catch (error) {
@@ -489,12 +514,21 @@ export async function chatWithUserProviderStream(options: {
     const decoder = new TextDecoder();
     const parts: string[] = [];
     let buffer = "";
+    // Sanitizing a delta on its own used to trim it, so a chunk like " world" was published as
+    // "world" and the answer arrived as "Helloworldhowareyou?": the model is not at fault, the
+    // space was never sent. The sanitizer still runs — it is what strips source links and citation
+    // markers — but only over the chunk's inner text, so the exact whitespace the provider sent
+    // around it is preserved and reproduced verbatim. Nothing is ever inserted between chunks.
+    const reasoningFilter = createReasoningStreamFilter();
+    const emit = (raw: string, final = false) => {
+      const visible = sanitizeStreamDelta(reasoningFilter(raw, final));
+      if (visible) { parts.push(visible); options.onDelta(visible); }
+    };
     const consume = (block: string) => {
       const raw = dataFromSseBlock(block);
       if (!raw || raw === "[DONE]") return;
       try {
-        const delta = sanitizeAssistantContent(openRouterStreamDelta(JSON.parse(raw)));
-        if (delta) { parts.push(delta); options.onDelta(delta); }
+        emit(openRouterStreamDelta(JSON.parse(raw)));
       } catch {
         // Upstream keep-alive comments and non-delta frames are ignorable.
       }
@@ -510,7 +544,11 @@ export async function chatWithUserProviderStream(options: {
       }
       buffer += decoder.decode();
       if (buffer.trim()) consume(buffer);
+      // Flushes whatever the line filter is still holding, so a tail without a trailing newline
+      // is delivered instead of silently dropped.
+      emit("", true);
     } finally {
+      emit("", true);
       reader.releaseLock();
     }
     const content = sanitizeAssistantContent(parts.join(""));
