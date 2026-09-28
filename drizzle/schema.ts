@@ -271,6 +271,22 @@ export const chatStreamRateWindows = mysqlTable("chat_stream_rate_windows", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+/**
+ * Per-user fixed-minute quota state for My API (BYOK) ingress.
+ *
+ * It is a table of its own rather than another counter on `chatStreamRateWindows` because that
+ * table already counts every chat-stream request from the same user: sharing the row would make a
+ * single My API turn increment the ordinary-chat counter too, so the two budgets would cancel each
+ * other out and neither limit would hold. Separate rows keep the two budgets independent while both
+ * stay in the database the project already depends on — no new service, no new dependency.
+ */
+export const myApiRateWindows = mysqlTable("my_api_rate_windows", {
+  userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  windowStarted: timestamp("windowStarted").defaultNow().notNull(),
+  requestCount: int("requestCount").notNull().default(0),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 /** Metadata-only audit trail: never stores request prompts, response bodies, headers, IPs, or credentials. */
 export const devApiAuditRecords = mysqlTable("dev_api_audit_records", {
   id: varchar("id", { length: 36 }).primaryKey(),

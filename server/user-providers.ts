@@ -509,8 +509,6 @@ export async function chatWithUserProviderStream(options: {
       logByok("byok.invoke_error", { requestId: budget.requestId, provider: target.id, model: options.model, httpStatus: response.status, errorCategory: failure.category });
       throw new UserProviderError(failure.category, failure.message, response.status);
     }
-    const reader = response.body?.getReader();
-    if (!reader) throw new UserProviderError("UNKNOWN", "Провайдер не открыл поток ответа.", response.status);
     const decoder = new TextDecoder();
     const parts: string[] = [];
     let buffer = "";
@@ -533,23 +531,63 @@ export async function chatWithUserProviderStream(options: {
         // Upstream keep-alive comments and non-delta frames are ignorable.
       }
     };
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const blocks = buffer.split(/\r?\n\r?\n/);
-        buffer = blocks.pop() ?? "";
-        for (const block of blocks) consume(block);
+    // One reader over the response body: SSE is consumed frame by frame, a single JSON document is
+    // consumed whole. Both go through the same emitter, so a non-stream answer keeps the same
+    // filtering, sanitizing and attribution a streamed one gets.
+    const consumeEventStream = async (whole?: string) => {
+      if (whole !== undefined) {
+        // A body that arrived already buffered is a single document, not a stream of frames.
+        const raw = whole.trim();
+        if (!raw || raw === "[DONE]") return;
+        try { emit(openRouterStreamDelta(JSON.parse(raw))); } catch { /* not a JSON answer */ }
+        return;
       }
-      buffer += decoder.decode();
-      if (buffer.trim()) consume(buffer);
-      // Flushes whatever the line filter is still holding, so a tail without a trailing newline
-      // is delivered instead of silently dropped.
+      const reader = response.body?.getReader();
+      if (!reader) return;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const blocks = buffer.split(/\r?\n\r?\n/);
+          buffer = blocks.pop() ?? "";
+          for (const block of blocks) consume(block);
+        }
+        buffer += decoder.decode();
+        // Flushes whatever the line filter is still holding, so a tail without a trailing newline
+        // is delivered instead of silently dropped.
+        if (buffer.trim()) consume(buffer);
+      } finally {
+        reader.releaseLock();
+      }
+    };
+    // A provider that ignores "stream": true answers with one JSON document, and a document that
+    // happens to be pretty-printed spans several lines: feeding it to the frame reader split it
+    // mid-object and every line failed to parse, producing "the provider returned an empty answer"
+    // for a reply the user had already paid for. The content type tells the two cases apart, and
+    // the body is only read as a whole when it is not an event stream.
+    const contentType = typeof response.headers?.get === "function" ? (response.headers.get("content-type") ?? "") : "";
+    try {
+      if (contentType.toLowerCase().includes("text/event-stream")) {
+        await consumeEventStream();
+      } else {
+        const before = parts.length;
+        const whole = typeof response.text === "function" ? await response.text() : "";
+        try {
+          await consumeEventStream(whole);
+        } catch {
+          // Not JSON at all.
+        }
+        // A body that yielded no text and was not consumed as a document is a stream after all:
+        // the content type was missing or wrong. Reading it as frames is the last resort, not a
+        // second interpretation of a body that was already understood.
+        if (parts.length === before) await consumeEventStream();
+      }
       emit("", true);
     } finally {
+      // The filter holds back a possible partial tag; the final flush is what releases it, and it
+      // is safe to repeat because the filter is empty once flushed.
       emit("", true);
-      reader.releaseLock();
     }
     const content = sanitizeAssistantContent(parts.join(""));
     if (!content) throw new UserProviderError("UNKNOWN", "Провайдер вернул пустой ответ. Повторите попытку.", response.status);

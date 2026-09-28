@@ -1833,3 +1833,213 @@ describe("Profile", () => {
     expect(document.body.textContent ?? "").not.toContain("Kazea");
   });
 });
+
+describe("a question that got no answer", () => {
+  const encoder = new TextEncoder();
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    resetFixtures();
+  });
+
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  /** The stream the server sends when a turn fails: one `error` event and nothing else. */
+  const failingStream = (message: string) => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ message })}\n\n`));
+      controller.close();
+    },
+  }));
+
+  const succeedingStream = (text: string) => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`event: delta\ndata: ${JSON.stringify({ content: text })}\n\n`));
+      controller.enqueue(encoder.encode(`event: done\ndata: ${JSON.stringify({ content: text, modelUsed: "google/gemma-4-26b-a4b-it:free", label: "Kairema Ultra (Gemma 4)" })}\n\n`));
+      controller.close();
+    },
+  }));
+
+  /**
+   * Answers the chat-stream route with the given responses in order and leaves every other request
+   * alone, so a stream is never consumed by an unrelated fetch that happened to run first.
+   */
+  const stubChatStream = (...responses: Response[]) => {
+    let index = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) !== "/api/chat/stream") return new Response("{}", { status: 200 });
+      return responses[Math.min(index++, responses.length - 1)]!;
+    }));
+  };
+
+  /** Persists whatever the test says was answered, so a successful turn stays on screen. */
+  const persistAnswer = (question: string, answer: string) => {
+    fixtures.invalidateMessages.mockImplementation(async () => {
+      fixtures.messages = [...fixtures.messages,
+        { id: 900, role: "user", content: question, modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:02:00.000Z") },
+        { id: 901, role: "assistant", content: answer, modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:03:00.000Z") }];
+      return { messages: fixtures.messages, nextCursor: null };
+    });
+    fixtures.historyPageFetch.mockImplementation(async () => {
+      fixtures.messages = [...fixtures.messages.filter((message) => message.id !== 900 && message.id !== 901),
+        { id: 900, role: "user", content: question, modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:02:00.000Z") },
+        { id: 901, role: "assistant", content: answer, modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:03:00.000Z") }];
+      return { messages: fixtures.messages, nextCursor: null };
+    });
+  };
+
+  const askSomething = async (user: ReturnType<typeof userEvent.setup>, text: string) => {
+    const composer = await screen.findByPlaceholderText("Напишите сообщение…");
+    await user.type(composer, text);
+    await user.keyboard("{Enter}");
+  };
+
+  const notice = () => screen.queryByTestId("failed-turn-notice");
+
+  it("keeps the question on screen with a notice instead of dropping it or leaving it for good", async () => {
+    const user = userEvent.setup();
+    stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+    render(<Home />);
+
+    await askSomething(user, "Вопрос без ответа");
+    await waitFor(() => expect(notice()).toBeTruthy());
+    expect(screen.getByText("Вопрос без ответа")).toBeTruthy();
+    expect(screen.getByText("Провайдер не вернул ответ.")).toBeTruthy();
+    expect(screen.getByText(/Сообщение будет удалено через 10 секунд/)).toBeTruthy();
+  });
+
+  it("leaves the question selectable and copyable while the notice is shown", async () => {
+    const user = userEvent.setup();
+    stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+    render(<Home />);
+
+    await askSomething(user, "Текст для копирования");
+    await waitFor(() => expect(notice()).toBeTruthy());
+
+    // The question is ordinary selectable text, not a disabled field or an image.
+    const question = screen.getByText("Текст для копирования");
+    expect(question.closest(".kairema-message")).toBeTruthy();
+    const range = document.createRange();
+    range.selectNodeContents(question);
+    expect(range.toString()).toBe("Текст для копирования");
+  });
+
+  it("calls a rate limit out separately, because the user's next action is to wait", async () => {
+    const user = userEvent.setup();
+    stubChatStream(failingStream("Лимит My API: 15 запросов в минуту. Подождите немного и попробуйте снова."));
+    render(<Home />);
+
+    await askSomething(user, "Вопрос сверх лимита");
+    await waitFor(() => expect(notice()).toBeTruthy());
+    expect(screen.getByText(/Достигнут лимит запросов/)).toBeTruthy();
+    expect(screen.queryByText("Провайдер не вернул ответ.")).toBeNull();
+  });
+
+  it("removes only the failed question after the grace period", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+      render(<Home />);
+
+      await askSomething(user, "Вопрос без ответа");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      // Still there just before the deadline.
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(screen.getByText("Вопрос без ответа")).toBeTruthy();
+      expect(notice()).toBeTruthy();
+
+      await vi.advanceTimersByTimeAsync(1_500);
+      await waitFor(() => expect(screen.queryByText("Вопрос без ответа")).toBeNull());
+      await waitFor(() => expect(notice()).toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves the conversation that came before the failed turn untouched", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+      render(<Home />);
+
+      await screen.findByText("Старое сообщение пользователя");
+      await askSomething(user, "Вопрос без ответа");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      await vi.advanceTimersByTimeAsync(11_000);
+      await waitFor(() => expect(screen.queryByText("Вопрос без ответа")).toBeNull());
+
+      expect(screen.getByText("Старое сообщение пользователя")).toBeTruthy();
+      expect(screen.getByText("Старый ответ Kairema")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refreshes the stored history after a failure, so the orphaned question can be gone", async () => {
+    const user = userEvent.setup();
+    stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+    render(<Home />);
+
+    await askSomething(user, "Вопрос без ответа");
+    await waitFor(() => expect(notice()).toBeTruthy());
+    // The stored transcript is re-read after the failure; the server has rolled the failed
+    // question back, so the next load shows the conversation without it.
+    await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 }));
+  });
+
+  it("keeps a later successful question working after a failure", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      persistAnswer("Второй вопрос", "Рабочий ответ");
+      stubChatStream(
+        failingStream("Провайдер временно недоступен. Повторите попытку позже."),
+        succeedingStream("Рабочий ответ"),
+      );
+      render(<Home />);
+
+      await askSomething(user, "Первый вопрос");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      await vi.advanceTimersByTimeAsync(11_000);
+      await waitFor(() => expect(screen.queryByText("Первый вопрос")).toBeNull());
+
+      await askSomething(user, "Второй вопрос");
+      await waitFor(() => expect(screen.getByText("Рабочий ответ")).toBeTruthy());
+      expect(screen.getByText("Второй вопрос")).toBeTruthy();
+      await waitFor(() => expect(notice()).toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not show a notice for a turn that produced an answer", async () => {
+    const user = userEvent.setup();
+    persistAnswer("Обычный вопрос", "Готовый ответ");
+    stubChatStream(succeedingStream("Готовый ответ"));
+    render(<Home />);
+
+    await askSomething(user, "Обычный вопрос");
+    await waitFor(() => expect(screen.getByText("Готовый ответ")).toBeTruthy());
+    expect(notice()).toBeNull();
+  });
+
+  it("clears a pending removal when the user leaves the conversation", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+      render(<Home />);
+
+      await askSomething(user, "Вопрос без ответа");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      // Switching conversations must not leave a timer that later edits the new message list.
+      await user.click((await screen.findAllByText("Активная история"))[0]!);
+      await vi.advanceTimersByTimeAsync(11_000);
+      expect(screen.getByText("Старое сообщение пользователя")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

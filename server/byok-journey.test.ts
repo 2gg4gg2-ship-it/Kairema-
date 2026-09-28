@@ -16,6 +16,8 @@ const store = vi.hoisted(() => ({
   configs: new Map<string, Record<string, unknown>>(),
   settings: { myApiProvider: null as string | null },
   chatQuota: vi.fn(),
+  myApiQuota: vi.fn(),
+  deleteMessage: vi.fn(),
 }));
 
 /**
@@ -89,6 +91,8 @@ vi.mock("./db", async (importOriginal) => ({
     };
   }),
   consumeChatStreamRequestQuota: store.chatQuota,
+  consumeMyApiRequestQuota: store.myApiQuota,
+  deleteOwnedSessionUserMessage: store.deleteMessage,
 }));
 
 import { createChatStreamHandler, resetChatStreamRateLimits } from "./chat-stream";
@@ -193,6 +197,8 @@ beforeEach(() => {
   store.configs.clear();
   store.settings.myApiProvider = null;
   store.chatQuota.mockReset().mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
+  store.myApiQuota.mockReset().mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
+  store.deleteMessage.mockReset().mockResolvedValue(true);
   resetChatStreamRateLimits();
   stubUpstream();
   vi.spyOn(console, "info").mockImplementation(() => undefined);

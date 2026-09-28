@@ -724,7 +724,62 @@ export function getZenmuxHeartbeatTrackingForTests() {
 }
 
 export function dataFromSseBlock(block: string) { return block.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n"); }
-export function openRouterStreamDelta(payload: unknown) { const content = (payload as { choices?: Array<{ delta?: { content?: unknown } }> })?.choices?.[0]?.delta?.content; return typeof content === "string" ? content : ""; }
+/**
+ * Pulls the visible text out of one provider frame.
+ *
+ * The shape is not fixed across providers or across the stream/non-stream split, so a single
+ * `delta.content` read loses real answers: OpenAI-style frames nest text under `choices[0].delta`,
+ * Anthropic-style frames use `delta.text`, several gateways send `content` as an array of parts
+ * (`{ type: "text", text }`) instead of a string, a non-stream reply carries the whole answer under
+ * `message.content`, and some OpenAI-compatible endpoints use the legacy `choices[0].text`. Each of
+ * those used to reach the user as "the provider returned an empty answer", because a value that was
+ * present but not a string was discarded.
+ *
+ * Reasoning channels are never returned: a frame may carry a visible `content` and a separate
+ * `reasoning`/`reasoning_content`, and only the visible part belongs in the transcript. Whitespace
+ * is returned exactly as received — trimming here is what used to weld chunks together into
+ * "Helloworldhowareyou?".
+ */
+export function openRouterStreamDelta(payload: unknown) {
+  if (typeof payload === "string") return payload;
+  if (!payload || typeof payload !== "object") return "";
+  const frame = payload as Record<string, unknown>;
+  const choice = Array.isArray(frame.choices) ? (frame.choices[0] as Record<string, unknown> | undefined) : undefined;
+  const candidates: unknown[] = [
+    (frame.delta as Record<string, unknown> | undefined)?.content,
+    (frame.delta as Record<string, unknown> | undefined)?.text,
+    (frame.message as Record<string, unknown> | undefined)?.content,
+    (frame.message as Record<string, unknown> | undefined)?.text,
+    (choice?.message as Record<string, unknown> | undefined)?.content,
+    (choice?.message as Record<string, unknown> | undefined)?.text,
+    (choice?.output as Record<string, unknown> | undefined)?.content,
+    choice?.delta ? (choice.delta as Record<string, unknown>).content : undefined,
+    choice?.delta ? (choice.delta as Record<string, unknown>).text : undefined,
+    choice?.text,
+    frame.content,
+  ];
+  for (const candidate of candidates) {
+    const text = providerAnswerText(candidate);
+    if (text) return text;
+  }
+  return "";
+}
+
+/** Normalizes a `content` value — a string, or the array of content parts gateways emit. */
+function providerAnswerText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  let text = "";
+  for (const part of value) {
+    if (typeof part === "string") { text += part; continue; }
+    if (!part || typeof part !== "object") continue;
+    const record = part as Record<string, unknown>;
+    // Reasoning parts are deliberately skipped; only "text"-shaped parts are visible output.
+    if (record.type !== undefined && record.type !== "text") continue;
+    if (typeof record.text === "string") text += record.text;
+  }
+  return text;
+}
 export function createReasoningStreamFilter() {
   let pending = ""; let hidden: string | null = null;
   return (chunk: string, final = false) => {

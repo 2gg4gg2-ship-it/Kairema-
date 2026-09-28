@@ -5,7 +5,15 @@ type Language = "ru" | "en";
 
 type SortMode = "asc" | "desc" | null;
 
-function InteractiveGfmTable({ children, language, ...props }: React.ComponentPropsWithoutRef<"table"> & { language: Language }) {
+/**
+ * Streamdown hands every component a `node` prop holding the raw hast element. It is a parser
+ * detail, not a DOM attribute, so spreading it through reaches the real `<table>` and React renders
+ * `node="[object Object]"` into the document. The prop is destructured away here — naming it
+ * `_node` keeps it out of the rest object — so only genuine table attributes reach the DOM.
+ */
+type GfmTableProps = Omit<React.ComponentPropsWithoutRef<"table">, "ref"> & { node?: unknown };
+
+function InteractiveGfmTable({ children, language, node: _parserNode, ...props }: GfmTableProps & { language: Language }) {
   const tableRef = useRef<HTMLTableElement>(null);
   const [sortMode, setSortMode] = useState<SortMode>(null);
   const labels = language === "ru"
@@ -59,7 +67,7 @@ export function InlineMarkdown({ text, language = "ru" }: { text: string; langua
       parseIncompleteMarkdown
       skipHtml
       components={{
-        table: ({ children, ...props }) => <InteractiveGfmTable language={language} {...props}>{children}</InteractiveGfmTable>,
+        table: ({ children, ...props }: GfmTableProps) => <InteractiveGfmTable language={language} {...props}>{children}</InteractiveGfmTable>,
       }}
     >
       {text}

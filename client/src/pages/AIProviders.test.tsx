@@ -2,6 +2,9 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { ModelMenu, MODEL_MENU_LABELS, type ModelMenuOption } from "@/components/ModelMenu";
 
 /** Both provider cards render a Connect button, so each test addresses its own card. */
 function cardByTitle(title: string) {
@@ -549,5 +552,335 @@ describe("the settings model menu behaves like the one in chat", () => {
     // The panel is portaled to the body, so the settings card's own overflow can never cut it.
     const listbox = screen.getByRole("listbox", { name: "Model (OpenRouter)" });
     expect(listbox.closest("form") ?? document.body).toBe(document.body);
+  });
+});
+
+const CATALOG: ModelMenuOption[] = [
+  { id: "vendor/alpha-free", name: "Alpha Free", isFree: true },
+  { id: "vendor/beta-free", name: "Beta Free", isFree: true },
+  { id: "vendor/gamma-pro", name: "Gamma Pro" },
+  { id: "vendor/delta-very-long-model-name-that-cannot-possibly-fit-in-the-panel", name: "Delta Ultra Long Display Name That Cannot Fit" },
+];
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+/**
+ * The model picker as Settings renders it. Driving the shared component directly keeps these tests
+ * about the behaviour a user sees, and the page-level wiring is covered by the AIProviders suite.
+ */
+function renderMenu(value = "vendor/gamma-pro", models: readonly ModelMenuOption[] = CATALOG) {
+  const onSelect = vi.fn();
+  render(<ModelMenu
+    value={value}
+    models={models}
+    disabled={false}
+    ariaLabel="Модель"
+    labels={MODEL_MENU_LABELS.ru}
+    onSelect={onSelect}
+    triggerClassName="kairema-settings-model-trigger"
+  />);
+  return { onSelect, trigger: screen.getByRole("button", { name: "Модель" }) };
+}
+
+const openMenu = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.click(screen.getByRole("button", { name: "Модель" }));
+  return screen.findByRole("listbox", { name: "Модель" });
+};
+
+const panel = () => document.querySelector<HTMLElement>(".kairema-model-menu")!;
+const searchField = () => within(panel()).getByRole("searchbox", { name: "Поиск моделей" });
+
+/**
+ * jsdom does not apply the project's stylesheet, so a rule that only exists in CSS cannot be seen
+ * through getComputedStyle. The stylesheet is read directly instead: a rule that is removed or
+ * recoloured fails here rather than silently going unstyled.
+ */
+const ruleFor = (selector: string) => readFileSync(resolve(process.cwd(), "client/src/index.css"), "utf8")
+  .split("\n")
+  .find((line) => line.startsWith(selector)) ?? "";
+
+describe("the model menu in Settings", () => {
+  it("opens a listbox with a search field and the provider's own models", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    const listbox = await openMenu(user);
+    expect(searchField()).toBeTruthy();
+    expect(within(listbox).getAllByRole("option").length).toBe(CATALOG.length);
+  });
+
+  it("groups the catalog into Free and Paid", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    const listbox = await openMenu(user);
+    const free = within(listbox).getByRole("group", { name: "Free" });
+    const paid = within(listbox).getByRole("group", { name: "Paid" });
+    expect(within(free).getAllByRole("option").map((option) => option.textContent)).toHaveLength(2);
+    expect(within(paid).getAllByRole("option").length).toBe(2);
+  });
+
+  it("marks free models with a badge", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    const listbox = await openMenu(user);
+    const alpha = within(listbox).getByRole("option", { name: /Alpha Free/ });
+    expect(within(alpha).getByText("Free")).toBeTruthy();
+  });
+
+  it("shows a readable name above the id it will actually request", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    const listbox = await openMenu(user);
+    const option = within(listbox).getByRole("option", { name: /Alpha Free/ });
+    const title = option.querySelector(".kairema-model-menu-item-title")!;
+    const id = option.querySelector(".kairema-model-menu-item-id")!;
+    expect(title.textContent).toBe("Alpha Free");
+    expect(id.textContent).toBe("vendor/alpha-free");
+    // The id is what the request carries, so it is on the element for a hover or a copy.
+    expect(option.getAttribute("title")).toBe("vendor/alpha-free");
+  });
+
+  it("truncates a long name and its id instead of widening the panel", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    const listbox = await openMenu(user);
+    const option = within(listbox).getByRole("option", { name: /Delta Ultra/ });
+    const title = option.querySelector<HTMLElement>(".kairema-model-menu-item-title")!;
+    const id = option.querySelector<HTMLElement>(".kairema-model-menu-item-id")!;
+    // The text is intact for a screen reader and for copying, but visually clipped.
+    expect(title.textContent).toBe("Delta Ultra Long Display Name That Cannot Fit");
+    expect(id.textContent).toBe("vendor/delta-very-long-model-name-that-cannot-possibly-fit-in-the-panel");
+    expect(ruleFor(".kairema-model-menu-item-title {")).toContain("text-overflow:ellipsis");
+    expect(ruleFor(".kairema-model-menu-item-title {")).toContain("white-space:nowrap");
+    expect(ruleFor(".kairema-model-menu-item-id {")).toContain("text-overflow:ellipsis");
+    expect(title).toBeTruthy();
+    expect(id).toBeTruthy();
+  });
+
+  it("searches by the readable name", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    const listbox = await openMenu(user);
+    await user.type(searchField(), "gamma");
+    await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(1));
+    expect(within(listbox).getByRole("option", { name: /Gamma Pro/ })).toBeTruthy();
+  });
+
+  it("searches by the raw id as well", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    const listbox = await openMenu(user);
+    await user.type(searchField(), "delta-very");
+    await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(1));
+    expect(within(listbox).getByRole("option", { name: /Delta Ultra/ })).toBeTruthy();
+  });
+
+  it("says so when a search matches nothing instead of showing an empty panel", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    const listbox = await openMenu(user);
+    await user.type(searchField(), "нет-такой-модели");
+    await waitFor(() => expect(within(listbox).getByText("Ничего не найдено")).toBeTruthy());
+    expect(within(listbox).queryAllByRole("option")).toHaveLength(0);
+  });
+
+  it("marks the stored model as the active one", async () => {
+    const user = userEvent.setup();
+    renderMenu("vendor/beta-free");
+    const listbox = await openMenu(user);
+    const active = within(listbox).getAllByRole("option").filter((option) => option.getAttribute("aria-selected") === "true");
+    expect(active).toHaveLength(1);
+    expect(active[0]!.textContent).toContain("Beta Free");
+  });
+
+  it("shows the stored model's name on the trigger", () => {
+    renderMenu("vendor/beta-free");
+    expect(screen.getByRole("button", { name: "Модель" }).textContent).toContain("Beta Free");
+  });
+
+  it("keeps a stored model listed while the provider's catalog does not offer it yet", async () => {
+    const user = userEvent.setup();
+    renderMenu("vendor/saved-but-gone", [{ id: "vendor/other", name: "Other" }]);
+    const listbox = await openMenu(user);
+    const ids = within(listbox).getAllByRole("option").map((option) => option.getAttribute("title"));
+    expect(ids).toContain("vendor/saved-but-gone");
+    expect(ids).toContain("vendor/other");
+  });
+
+  it("does not invent a model the catalog never offered while the user searches", async () => {
+    const user = userEvent.setup();
+    renderMenu("vendor/saved-but-gone", [{ id: "vendor/other", name: "Other" }]);
+    const listbox = await openMenu(user);
+    await user.type(searchField(), "other");
+    await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(1));
+    expect(within(listbox).queryByRole("option", { name: /saved-but-gone/ })).toBeNull();
+  });
+
+  it("reports the chosen model and closes", async () => {
+    const user = userEvent.setup();
+    const { onSelect } = renderMenu();
+    const listbox = await openMenu(user);
+    await user.click(within(listbox).getByRole("option", { name: /Alpha Free/ }));
+    expect(onSelect).toHaveBeenCalledWith("vendor/alpha-free");
+    await waitFor(() => expect(screen.queryByRole("listbox", { name: "Модель" })).toBeNull());
+  });
+
+  it("keeps the new choice on the trigger", async () => {
+    const user = userEvent.setup();
+    function Wrapper() {
+      const [value, setValue] = useState("vendor/gamma-pro");
+      return <ModelMenu value={value} models={CATALOG} disabled={false} ariaLabel="Модель" labels={MODEL_MENU_LABELS.ru} onSelect={setValue} triggerClassName="kairema-settings-model-trigger" />;
+    }
+    render(<Wrapper />);
+    const listbox = await openMenu(user);
+    await user.click(within(listbox).getByRole("option", { name: /Alpha Free/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Модель" }).textContent).toContain("Alpha Free"));
+  });
+
+  it("closes on Escape and returns focus to the trigger", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    const listbox = await openMenu(user);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("listbox", { name: "Модель" })).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Модель" }));
+    expect(listbox).toBeTruthy();
+  });
+
+  it("closes on a click outside", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    await openMenu(user);
+    await user.click(document.body);
+    await waitFor(() => expect(screen.queryByRole("listbox", { name: "Модель" })).toBeNull());
+  });
+
+  it("stays open when the click lands inside the menu", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    const listbox = await openMenu(user);
+    await user.click(searchField());
+    expect(screen.queryByRole("listbox", { name: "Модель" })).toBeTruthy();
+  });
+
+  it("clears the previous search when it is reopened", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    let listbox = await openMenu(user);
+    await user.type(searchField(), "gamma");
+    await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(1));
+    await user.keyboard("{Escape}");
+    listbox = await openMenu(user);
+    await waitFor(() => expect(within(listbox).getAllByRole("option")).toHaveLength(CATALOG.length));
+  });
+});
+
+describe("where the model menu is placed", () => {
+  const anchorRect = (top: number) => ({
+    top, bottom: top + 24, left: 40, right: 240, width: 200, height: 24, x: 40, y: top, toJSON: () => ({}),
+  });
+
+  /** jsdom reports every box as a zero-sized rectangle at the origin, so the anchor is given a
+   * real position: a trigger near the top and one near the bottom of the window. */
+  const withAnchor = (top: number, run: () => Promise<void>) => {
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function patched() { return anchorRect(top) as DOMRect; };
+    return run().finally(() => { Element.prototype.getBoundingClientRect = original; });
+  };
+
+  const placed = () => {
+    const node = panel();
+    return { top: parseFloat(node.style.top), left: parseFloat(node.style.left), width: parseFloat(node.style.width), maxHeight: parseFloat(node.style.maxHeight) };
+  };
+
+  const settled = () => waitFor(() => expect(panel().style.maxHeight).not.toBe(""));
+
+  it("opens below a trigger that has room beneath it", async () => {
+    const user = userEvent.setup();
+    await withAnchor(40, async () => {
+      renderMenu();
+      await openMenu(user);
+      await settled();
+      const { top, maxHeight } = placed();
+      // Placed under the trigger: the panel starts below its bottom edge and fits in what is left.
+      expect(top).toBeGreaterThan(40 + 24);
+      expect(top + maxHeight).toBeLessThanOrEqual(window.innerHeight + 1);
+    });
+  });
+
+  it("opens above a trigger near the bottom, so it never runs off the window", async () => {
+    const user = userEvent.setup();
+    const bottomTriggerTop = window.innerHeight - 20;
+    await withAnchor(bottomTriggerTop, async () => {
+      renderMenu();
+      await openMenu(user);
+      await settled();
+      const { top, maxHeight } = placed();
+      // Placed over the trigger rather than under it, and wholly inside the window.
+      expect(top).toBeLessThan(bottomTriggerTop);
+      expect(top + maxHeight).toBeLessThanOrEqual(window.innerHeight + 1);
+      expect(top).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  it("keeps the whole panel inside the window horizontally", async () => {
+    const user = userEvent.setup();
+    await withAnchor(40, async () => {
+      renderMenu();
+      await openMenu(user);
+      await settled();
+      const { left, width } = placed();
+      expect(left).toBeGreaterThanOrEqual(0);
+      expect(left + width).toBeLessThanOrEqual(window.innerWidth + 1);
+    });
+  });
+
+  it("never grows wider than the window can show", async () => {
+    const user = userEvent.setup();
+    await withAnchor(40, async () => {
+      renderMenu();
+      await openMenu(user);
+      await settled();
+      expect(placed().width).toBeLessThanOrEqual(window.innerWidth);
+    });
+  });
+
+  it("is portaled to the body, so no Settings container can clip it", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    await openMenu(user);
+    expect(panel().parentElement).toBe(document.body);
+    expect(panel().closest(".kairema-settings-model-trigger")).toBeNull();
+  });
+});
+
+describe("the model menu's colours", () => {
+  it("is a black panel with neutral borders", () => {
+    const rule = ruleFor(".kairema-model-menu {");
+    expect(rule).toContain("background:#0a0a0c");
+    expect(rule).toContain("border:1px solid rgba(255,255,255,.14)");
+  });
+
+  it("marks the active model with neutral contrast instead of a coloured accent", () => {
+    const rule = ruleFor(".kairema-model-menu-item-active {");
+    expect(rule).toContain("rgba(255,255,255");
+    expect(rule).not.toMatch(/255,\s*134,\s*255|#9386ff|147,\s*134,\s*255/i);
+  });
+
+  it("keeps the free badge monochrome", () => {
+    const rule = ruleFor(".kairema-model-menu-badge {");
+    expect(rule).toMatch(/rgba\(255,255,255/);
+    expect(rule).not.toMatch(/147,\s*134,\s*255|#c7bfff/i);
+  });
+
+  it("leaves no violet anywhere in the menu's own rules", () => {
+    const text = readFileSync(resolve(process.cwd(), "client/src/index.css"), "utf8");
+    const menuRules = text.split("\n").filter((line) => /kairema-(model|provider)-menu/.test(line));
+    expect(menuRules.length).toBeGreaterThan(0);
+    for (const rule of menuRules) {
+      expect(rule, `violet accent left in: ${rule.slice(0, 80)}`).not.toMatch(/147,\s*134,\s*255|#9386ff|#b9b1ff|#c7bfff/i);
+    }
   });
 });

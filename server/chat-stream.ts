@@ -1,6 +1,6 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
-import { appendChatMessage, consumeChatStreamRequestQuota, enqueueMemoryExtractionJob, getActiveUserProviderBinding, getOwnedChatSession, getOwnedSessionMessage, getStoredAssistantForClientMessage, listSessionTranscriptWindow, updateChatTitle } from "./db";
+import { appendChatMessage, consumeChatStreamRequestQuota, consumeMyApiRequestQuota, deleteOwnedSessionUserMessage, enqueueMemoryExtractionJob, getActiveUserProviderBinding, getOwnedChatSession, getOwnedSessionMessage, getStoredAssistantForClientMessage, listSessionTranscriptWindow, updateChatTitle } from "./db";
 import { resolveRequestUser } from "./_core/context";
 import { MODEL_IDS, chatWithRoleStream, publicChatError, type ChatMessage, type ChatSettings, type Provider, type RoleId } from "./providers";
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
@@ -13,13 +13,23 @@ export const CHAT_STREAM_RATE_LIMIT = 60;
 export const CHAT_STREAM_MAX_ACTIVE_PER_INSTANCE = 12;
 export const CHAT_STREAM_MAX_ACTIVE_PER_USER = 2;
 const CHAT_STREAM_RATE_WINDOW_MS = 60_000;
+
+/**
+ * My API (BYOK) turns are capped much lower than ordinary chat: each one spends the user's own
+ * provider key and money, so a runaway client or a script must not be able to drain an account
+ * through this endpoint. The two budgets are metered separately and neither consumes the other.
+ */
+export const MY_API_RATE_LIMIT = 15;
+export const MY_API_RATE_WINDOW_MS = 60_000;
+/** The single sentence a user sees once their own-key budget for this minute is spent. */
+export const MY_API_RATE_LIMIT_MESSAGE = "Лимит My API: 15 запросов в минуту. Подождите немного и попробуйте снова.";
 const CHAT_STREAM_REPLAY_TTL_MS = 5 * 60_000;
 type StreamResult = Awaited<ReturnType<typeof chatWithRoleStream>>;
 type StoredReplay = Pick<StreamResult, "content" | "modelUsed" | "label" | "searchStatus" | "sources" | "webGrounding">;
 type PendingReplay = { promise: Promise<StreamResult | null>; resolve: (result: StreamResult | null) => void };
 
 type ChatStreamAuditRecord = {
-  event: "chat_stream.completed" | "chat_stream.rate_limited";
+  event: "chat_stream.completed" | "chat_stream.rate_limited" | "chat_stream.my_api_rate_limited";
   userId: number;
   roleId?: RoleId;
   provider?: Provider;
@@ -324,6 +334,8 @@ type StreamDependencies = {
   getOwnedChatSession: typeof getOwnedChatSession;
   getStoredAssistantForClientMessage: typeof getStoredAssistantForClientMessage;
   consumeChatStreamRequestQuota: typeof consumeChatStreamRequestQuota;
+  consumeMyApiRequestQuota: typeof consumeMyApiRequestQuota;
+  deleteOwnedSessionUserMessage: typeof deleteOwnedSessionUserMessage;
   appendChatMessage: typeof appendChatMessage;
   updateChatTitle: typeof updateChatTitle;
   getOwnedSessionMessage: typeof getOwnedSessionMessage;
@@ -354,6 +366,8 @@ const defaultDependencies: StreamDependencies = {
   getOwnedChatSession,
   getStoredAssistantForClientMessage,
   consumeChatStreamRequestQuota,
+  consumeMyApiRequestQuota,
+  deleteOwnedSessionUserMessage,
   appendChatMessage,
   updateChatTitle,
   getOwnedSessionMessage,
@@ -446,6 +460,28 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
         void Promise.resolve(dependencies.auditChatStream({ event: "chat_stream.rate_limited", userId: user.id, timestamp: new Date().toISOString(), retryAfterSeconds: rateLimit.retryAfterSeconds })).catch(() => undefined);
         res.set("Retry-After", String(rateLimit.retryAfterSeconds)).status(429).json({ error: "Слишком много запросов. Подождите минуту." });
         return;
+      }
+      // My API turns spend the caller's own provider key, so they carry their own budget. This runs
+      // only for `myApi` requests — ordinary Kairema Chat keeps the budget above and is untouched —
+      // and it runs before the turn is persisted, so a refused request never becomes a half-written
+      // turn the user has to clean up.
+      if (input.myApi) {
+        let myApiQuota: { allowed: boolean; retryAfterSeconds: number };
+        try {
+          myApiQuota = await dependencies.consumeMyApiRequestQuota(user.id, MY_API_RATE_LIMIT, MY_API_RATE_WINDOW_MS);
+        } catch {
+          // A quota that cannot be read cannot be enforced, and an unenforced quota is a way to
+          // spend the user's own key without limit. Refuse rather than let the request through.
+          chatStreamRuntimeGauges.quotaUnavailable += 1;
+          res.status(503).json({ error: "Проверка лимита My API временно недоступна. Повторите попытку позже." });
+          return;
+        }
+        if (!myApiQuota.allowed) {
+          chatStreamRuntimeGauges.rateLimited += 1;
+          void Promise.resolve(dependencies.auditChatStream({ event: "chat_stream.my_api_rate_limited", userId: user.id, timestamp: new Date().toISOString(), retryAfterSeconds: myApiQuota.retryAfterSeconds })).catch(() => undefined);
+          res.set("Retry-After", String(myApiQuota.retryAfterSeconds)).status(429).json({ error: MY_API_RATE_LIMIT_MESSAGE, myApiRateLimited: true });
+          return;
+        }
       }
       const activeStream = reserveActiveChatStream(user.id);
       if (!activeStream.allowed) {
@@ -611,6 +647,13 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
           chatStreamRuntimeGauges.failed += 1;
         }
         if (!closed) {
+          // A turn that produced no answer must not leave its question behind in the transcript.
+          // The user message is written before the provider is called so the answer can attach to
+          // it; on failure that question is rolled back, and only it — the history that preceded
+          // this turn is what the user still has.
+          if (savedUserMessageId) {
+            await dependencies.deleteOwnedSessionUserMessage(user.id, input.sessionId, savedUserMessageId).catch(() => undefined);
+          }
           // Each mode reports only its own sanitised text; a provider body never crosses the SSE boundary.
           writeEvent(res, "error", { message: input.myApi ? publicUserProviderError(error) : publicChatError(input.modelId, error) });
           finished = true;
