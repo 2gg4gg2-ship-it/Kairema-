@@ -40,8 +40,8 @@ const fixtures = vi.hoisted(() => ({
     activeProvider: null as string | null,
     storageReady: true,
   },
-  models: { data: [] as Array<{ id: string; name: string }>, isPending: false, isError: false, isSuccess: false },
-  customModels: { data: [] as Array<{ id: string; name: string }>, isPending: false, isError: false, isSuccess: false },
+  models: { data: [] as Array<{ id: string; name: string }>, isPending: false, isError: false, isSuccess: false, error: null as { message: string } | null },
+  customModels: { data: [] as Array<{ id: string; name: string }>, isPending: false, isError: false, isSuccess: false, error: null as { message: string } | null },
   customModelsInput: [] as unknown[],
   modelsLoaded: 0,
   customModelsLoaded: 0,
@@ -79,6 +79,9 @@ const modelsInstances = [0, 1].map((slot) => ({
   },
   get isError() {
     return slot === 0 ? fixtures.models.isError : fixtures.customModels.isError;
+  },
+  get error() {
+    return slot === 0 ? fixtures.models.error : fixtures.customModels.error;
   },
   get isSuccess() {
     return slot === 0 ? fixtures.models.isSuccess : fixtures.customModels.isSuccess;
@@ -135,8 +138,8 @@ beforeEach(() => {
   fixtures.list.activeProvider = null;
   fixtures.list.storageReady = true;
   hookPosition.value = 0;
-  fixtures.models = { data: [], isPending: false, isError: false, isSuccess: false };
-  fixtures.customModels = { data: [], isPending: false, isError: false, isSuccess: false };
+  fixtures.models = { data: [], isPending: false, isError: false, isSuccess: false, error: null };
+  fixtures.customModels = { data: [], isPending: false, isError: false, isSuccess: false, error: null };
   fixtures.customModelsInput.length = 0;
   fixtures.customModelsLoaded = 0;
   fixtures.navigate.mockReset();
@@ -165,8 +168,10 @@ describe("AI Providers screen", () => {
 
   it("keeps unimplemented providers as one compact coming-soon line with no controls", async () => {
     renderProviders();
-    expect(await screen.findByText("Другие провайдеры — скоро.")).toBeTruthy();
-    // They are not offered as cards, so there is nothing to click for them.
+    // One line, no cards, and the working alternative is named instead of a promise of support.
+    const line = await screen.findByText(/Другие провайдеры — скоро\./);
+    expect(line.tagName).toBe("P");
+    expect(line.textContent ?? "").toContain("Custom provider");
     for (const name of ["OpenAI", "Anthropic", "Google AI Studio"]) {
       expect(screen.queryByText(name, { selector: "span" })).toBeNull();
     }
@@ -196,7 +201,7 @@ describe("AI Providers screen", () => {
   });
 
   it("does not fetch a catalog until the user asks for it, and never on keystrokes", async () => {
-    fixtures.models = { data: [{ id: "live/from-api", name: "Live From API" }], isPending: false, isError: false, isSuccess: true };
+    fixtures.models = { data: [{ id: "live/from-api", name: "Live From API" }], isPending: false, isError: false, isSuccess: true, error: null };
     renderProviders();
     await userEvent.click(within(openrouterCard()).getByRole("button", { name: /^(Connect|Настроить)$/ }));
     expect(fixtures.modelsLoaded).toBe(0);
@@ -209,7 +214,7 @@ describe("AI Providers screen", () => {
   });
 
   it("preselects the first catalog model and enables Connect once a key is typed", async () => {
-    fixtures.models = { data: [{ id: "live/from-api", name: "Live From API" }], isPending: false, isError: false, isSuccess: true };
+    fixtures.models = { data: [{ id: "live/from-api", name: "Live From API" }], isPending: false, isError: false, isSuccess: true, error: null };
     renderProviders();
     await userEvent.click(within(openrouterCard()).getByRole("button", { name: /^(Connect|Настроить)$/ }));
     await userEvent.type(screen.getByLabelText("API key (OpenRouter)"), "sk-or-v1-typed-value");
@@ -221,12 +226,25 @@ describe("AI Providers screen", () => {
   });
 
   it("keeps Connect disabled when the catalog comes back empty", async () => {
-    fixtures.models = { data: [], isPending: false, isError: false, isSuccess: true };
+    fixtures.models = { data: [], isPending: false, isError: false, isSuccess: true, error: null };
     renderProviders();
     await userEvent.click(within(openrouterCard()).getByRole("button", { name: /^(Connect|Настроить)$/ }));
     await userEvent.type(screen.getByLabelText("API key (OpenRouter)"), "sk-or-v1-typed-value");
     await userEvent.click(within(openrouterCard()).getByRole("button", { name: "Обновить список моделей (Model (OpenRouter))" }));
     expect((within(openrouterCard()).getByRole("button", { name: "Connect" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("states why a connected provider's catalog could not be read", async () => {
+    // A stored key that no longer opens, a rejected key and an unreachable host are different
+    // problems, so the screen shows the server's own reason instead of one generic sentence.
+    fixtures.list.configs = [BUILTIN_ROW];
+    fixtures.models = { data: [], isPending: false, isError: true, isSuccess: false, error: { message: "Сохранённый API-ключ не удалось расшифровать. Укажите ключ заново." } };
+    renderProviders();
+    await userEvent.click(within(openrouterCard()).getByRole("button", { name: "Настроить" }));
+
+    expect(await screen.findByText("Сохранённый API-ключ не удалось расшифровать. Укажите ключ заново.")).toBeTruthy();
+    // Nothing internal is added to the server's wording.
+    expect(document.body.textContent ?? "").not.toContain("kbyok1.");
   });
 
   it("reopens an already connected provider on the model it already uses", async () => {
@@ -277,7 +295,7 @@ describe("custom provider form", () => {
     await userEvent.type(fields.name, "Мой провайдер");
     await userEvent.type(fields.url, "https://api.example.com/v1");
     await userEvent.type(fields.key, "sk-custom-secret-9999");
-    fixtures.customModels = { data: [{ id: "vendor/model-b", name: "Model B" }, { id: "vendor/model-c", name: "Model C" }], isPending: false, isError: false, isSuccess: true };
+    fixtures.customModels = { data: [{ id: "vendor/model-b", name: "Model B" }, { id: "vendor/model-c", name: "Model C" }], isPending: false, isError: false, isSuccess: true, error: null };
     await userEvent.click(screen.getByRole("button", { name: "Обновить список моделей (Model (Custom provider))" }));
     const select = screen.getByLabelText("Model (Custom provider)") as HTMLSelectElement;
     await screen.findByRole("option", { name: /Model B/ });
@@ -291,13 +309,13 @@ describe("custom provider form", () => {
     await userEvent.type(fields.name, "Мой провайдер");
     await userEvent.type(fields.url, "https://api.example.com/v1");
     await userEvent.type(fields.key, "sk-custom-secret-9999");
-    fixtures.customModels = { data: [], isPending: false, isError: false, isSuccess: true };
+    fixtures.customModels = { data: [], isPending: false, isError: false, isSuccess: true, error: null };
     await userEvent.click(screen.getByRole("button", { name: "Обновить список моделей (Model (Custom provider))" }));
     expect((within(customCard()).getByRole("button", { name: "Connect" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("never mixes a custom catalog into the built-in provider's list", async () => {
-    fixtures.models = { data: [{ id: "vendor/model-a", name: "Model A" }], isPending: false, isError: false, isSuccess: true };
+    fixtures.models = { data: [{ id: "vendor/model-a", name: "Model A" }], isPending: false, isError: false, isSuccess: true, error: null };
     renderProviders();
     await userEvent.click(within(openrouterCard()).getByRole("button", { name: "Connect" }));
     await userEvent.type(screen.getByLabelText("API key (OpenRouter)"), "sk-or-v1-typed-value");
@@ -308,7 +326,7 @@ describe("custom provider form", () => {
     await userEvent.type(fields.name, "Мой провайдер");
     await userEvent.type(fields.url, "https://api.example.com/v1");
     await userEvent.type(fields.key, "sk-custom-secret-9999");
-    fixtures.customModels = { data: [{ id: "vendor/model-b", name: "Model B" }], isPending: false, isError: false, isSuccess: true };
+    fixtures.customModels = { data: [{ id: "vendor/model-b", name: "Model B" }], isPending: false, isError: false, isSuccess: true, error: null };
     await userEvent.click(screen.getByRole("button", { name: "Обновить список моделей (Model (Custom provider))" }));
     await screen.findByRole("option", { name: /Model B/ });
 
@@ -421,7 +439,7 @@ describe("custom provider form", () => {
     renderProviders();
     await userEvent.click((await screen.findAllByText("Настроить"))[0]!);
     await userEvent.type(screen.getByLabelText("API key (Custom provider)"), "sk-custom-secret-9999");
-    fixtures.customModels = { data: [{ id: "vendor/model-b", name: "Model B" }], isPending: false, isError: false, isSuccess: true };
+    fixtures.customModels = { data: [{ id: "vendor/model-b", name: "Model B" }], isPending: false, isError: false, isSuccess: true, error: null };
     await userEvent.click(screen.getByRole("button", { name: "Обновить список моделей (Model (Custom provider))" }));
     await screen.findByRole("option", { name: /Model B/ });
     await userEvent.click(within(customCard()).getByRole("button", { name: "Save" }));

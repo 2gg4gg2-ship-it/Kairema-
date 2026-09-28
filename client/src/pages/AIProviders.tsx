@@ -125,7 +125,7 @@ function KeyField({ label, fieldLabel, value, visible, onVisibleChange, onChange
  * A refresh button sits next to the select because the catalog depends on the key: it cannot be
  * fetched up front, and re-typing a key must not re-send it on every keystroke.
  */
-function ModelField({ label, fieldLabel, value, fallback, models, pending, error, empty, onChange, onReload, canReload, placeholder }: { label: string; fieldLabel: string; value: string; fallback?: string; models: Array<{ id: string; name: string }>; pending: boolean; error: boolean; empty: boolean; onChange: (value: string) => void; onReload: () => void; canReload: boolean; placeholder: string }) {
+function ModelField({ label, fieldLabel, value, fallback, models, pending, error, empty, errorText: failureText, onChange, onReload, canReload, placeholder }: { label: string; fieldLabel: string; value: string; fallback?: string; models: Array<{ id: string; name: string }>; pending: boolean; error: boolean; empty: boolean; errorText?: string; onChange: (value: string) => void; onReload: () => void; canReload: boolean; placeholder: string }) {
   return (
     <label className="grid gap-1">
       <span className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
@@ -157,7 +157,9 @@ function ModelField({ label, fieldLabel, value, fallback, models, pending, error
           <RefreshCw className={`size-4 ${pending ? "animate-spin" : ""}`} />
         </button>
       </span>
-      {error && <span className="text-xs text-rose-300">Не удалось загрузить модели. Проверьте ключ и адрес.</span>}
+      {/* The server's own sanitised reason separates an unreachable provider from a stored key
+          that no longer opens, which a single generic sentence would hide. */}
+      {error && <span className="text-xs text-rose-300">{failureText || "Не удалось загрузить модели. Проверьте ключ и адрес."}</span>}
       {empty && <span className="text-xs text-slate-500">Провайдер не вернул список моделей для этого ключа.</span>}
     </label>
   );
@@ -459,6 +461,7 @@ export default function AIProviders() {
                 models={models}
                 pending={modelsMutation.isPending}
                 error={modelsMutation.isError}
+                errorText={errorText(modelsMutation.error, "")}
                 empty={modelsMutation.isSuccess && !models.length}
                 onChange={setModelId}
                 onReload={() => void loadModels()}
@@ -570,6 +573,7 @@ export default function AIProviders() {
                   models={customModels}
                   pending={customModelsMutation.isPending}
                   error={customModelsMutation.isError}
+                  errorText={errorText(customModelsMutation.error, "")}
                   empty={customModelsMutation.isSuccess && !customModels.length}
                   onChange={(value) => patchCustomDraft({ modelId: value })}
                   onReload={() => void loadCustomModels()}
@@ -602,7 +606,11 @@ export default function AIProviders() {
         </div>
 
         {unavailable.length > 0 && (
-          <p className="mt-3 text-center text-xs text-slate-500">Другие провайдеры — скоро.</p>
+          // The unimplemented providers are not pretended into existence, and the alternative that
+          // already works today is named instead: anything that speaks the OpenAI API shape.
+          <p className="mt-3 text-center text-xs text-slate-500">
+            Другие провайдеры — скоро. Любой совместимый API (например, OpenAI, Groq, Together) подключается через «Custom provider».
+          </p>
         )}
       </div>
     </main>
