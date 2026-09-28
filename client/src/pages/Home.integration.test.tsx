@@ -1203,11 +1203,13 @@ describe("My API mode hides the Kairema role selector", () => {
       expect(Array.from(pill.querySelectorAll("option")).map((option) => option.textContent ?? "")).not.toContain(role);
     }
     expect(pill.textContent).toContain("Мой провайдер");
-    // The model comes from the active provider's own catalog, not from a system role.
-    const picker = pill.querySelector("select") as HTMLSelectElement;
+    // The model comes from the active provider's own catalog, not from a system role: the role
+    // <select> is gone and the binding's own picker shows the saved model instead.
+    expect(pill.querySelector("select")).toBeNull();
+    const picker = pill.querySelector(".kairema-binding-select") as HTMLButtonElement;
     expect(picker).not.toBeNull();
-    expect(picker.value).toBe("vendor/model-b");
-    expect(Array.from(picker.options).map((option) => option.value)).toEqual(["vendor/model-b"]);
+    expect(picker.textContent).toBe("vendor/model-b");
+    expect(picker.getAttribute("aria-haspopup")).toBe("listbox");
   });
 
   it("BUG-1: the four Kairema roles still work in ordinary Chat mode", async () => {
@@ -1259,10 +1261,12 @@ describe("My API model picker", () => {
     render(<Home />);
     await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
 
-    const picker = (await screen.findByLabelText("Модель «Мой API»")) as HTMLSelectElement;
-    expect(Array.from(picker.options).map((option) => option.value)).toEqual(["vendor/model-b", "vendor/model-c"]);
+    const picker = await screen.findByLabelText("Модель «Мой API»");
+    await user.click(picker);
+    const options = await screen.findAllByRole("option");
+    expect(options.map((option) => option.getAttribute("title"))).toEqual(["vendor/model-b", "vendor/model-c"]);
     for (const role of ["Kairema Flash", "Kairema Think", "Kairema Context", "Kairema Apex"]) {
-      expect(Array.from(picker.options).map((option) => option.textContent ?? "")).not.toContain(role);
+      expect(options.map((option) => option.textContent ?? "")).not.toContain(role);
     }
   });
 
@@ -1273,8 +1277,9 @@ describe("My API model picker", () => {
     const user = userEvent.setup();
     render(<Home />);
     await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
-    const picker = (await screen.findByLabelText("Модель «Мой API»")) as HTMLSelectElement;
-    await user.selectOptions(picker, "vendor/model-c");
+    const picker = await screen.findByLabelText("Модель «Мой API»");
+    await user.click(picker);
+    await user.click(await screen.findByRole("option", { name: /vendor\/model-c/ }));
     expect(fixtures.switchedModel).toEqual({ provider: "custom-abc", activeModel: "vendor/model-c" });
   });
 
@@ -1349,8 +1354,9 @@ describe("My API model picker", () => {
     const user = userEvent.setup();
     render(<Home />);
     await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
-    const picker = (await screen.findByLabelText("Модель «Мой API»")) as HTMLSelectElement;
-    await user.selectOptions(picker, "vendor/model-c");
+    const picker = await screen.findByLabelText("Модель «Мой API»");
+    await user.click(picker);
+    await user.click(await screen.findByRole("option", { name: /vendor\/model-c/ }));
 
     await screen.findByText(/отсутствует в каталоге провайдера/);
     // The switch never reached the server, so the binding is unchanged.
@@ -1464,6 +1470,139 @@ describe("My API model picker", () => {
     // Narrow viewports get their own caps so the bar still truncates on a phone.
     expect(css).toContain("@media (max-width:767px)");
     expect(css).toContain("@media (max-width:430px)");
+  });
+
+  it("splits the live catalog into Free and Paid from the :free suffix, never a hardcoded list", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [
+      { id: "vendor/free-flash:free", name: "Vendor Free Flash" },
+      { id: "vendor/model-b", name: "Model B" },
+      { id: "vendor/paid-ultra:extended", name: "Vendor Paid Ultra" },
+    ];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await user.click(await screen.findByLabelText("Модель «Мой API»"));
+
+    const groups = within(await screen.findByRole("listbox")).getAllByRole("group");
+    // The grouping follows the catalog Kairema fetched, so a model the app has never seen still
+    // lands in the right section on its own.
+    expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual(["Free", "Paid"]);
+    expect(within(groups[0]!).getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["vendor/free-flash:free"]);
+    expect(within(groups[1]!).getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["vendor/model-b", "vendor/paid-ultra:extended"]);
+    // Only the free model carries the marker, so the two sections are distinguishable per item
+    // and not just by the section heading.
+    const badges = (group: HTMLElement) => Array.from(group.querySelectorAll(".kairema-model-menu-badge")).map((badge) => badge.textContent);
+    expect(badges(groups[0]!)).toEqual(["Free"]);
+    expect(badges(groups[1]!)).toEqual([]);
+  });
+
+  it("filters both sections at once while typing, by name and by id", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [
+      { id: "vendor/free-flash:free", name: "Vendor Free Flash" },
+      { id: "vendor/model-b", name: "Model B" },
+      { id: "vendor/paid-ultra:extended", name: "Vendor Paid Ultra" },
+    ];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await user.click(await screen.findByLabelText("Модель «Мой API»"));
+    const search = await screen.findByLabelText("Поиск моделей");
+
+    await user.type(search, "flash");
+    // One match, and it is the free one: the search spans both sections, it is not section-scoped.
+    expect(screen.getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["vendor/free-flash:free"]);
+
+    // The id itself is searchable too, not only the display name.
+    await user.clear(search);
+    await user.type(search, "paid-ultra");
+    expect(screen.getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["vendor/paid-ultra:extended"]);
+    // A name that lives in the other section still matches across the whole catalog.
+    await user.clear(search);
+    await user.type(search, "model b");
+    expect(screen.getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["vendor/model-b"]);
+  });
+
+  it("says so cleanly when the search matches nothing", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [{ id: "vendor/model-b", name: "Model B" }];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await user.click(await screen.findByLabelText("Модель «Мой API»"));
+    await user.type(await screen.findByLabelText("Поиск моделей"), "нет-такой-модели");
+
+    await screen.findByText("Ничего не найдено");
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+    // An empty result is not a failure state, so no retry is offered.
+    expect(screen.queryByRole("button", { name: "Повторить" })).toBeNull();
+  });
+
+  it("marks the saved model active and keeps it selected across close and reopen", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [{ id: "vendor/model-b", name: "Model B" }, { id: "vendor/model-c", name: "Model C" }];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    const picker = await screen.findByLabelText("Модель «Мой API»");
+    expect(picker.textContent).toBe("Model B");
+
+    await user.click(picker);
+    const active = (await screen.findAllByRole("option")).find((option) => option.getAttribute("aria-selected") === "true");
+    expect(active?.getAttribute("title")).toBe("vendor/model-b");
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryAllByRole("option")).toHaveLength(0));
+    // Reopening starts from the server's saved binding, not from whatever was last clicked.
+    await user.click(picker);
+    const reopened = (await screen.findAllByRole("option")).find((option) => option.getAttribute("aria-selected") === "true");
+    expect(reopened?.getAttribute("title")).toBe("vendor/model-b");
+  });
+
+  it("closes on a pick and sends the picked id to the server", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [{ id: "vendor/model-b", name: "Model B" }, { id: "vendor/model-c", name: "Model C" }];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await user.click(await screen.findByLabelText("Модель «Мой API»"));
+    await user.click(await screen.findByRole("option", { name: /vendor\/model-c/ }));
+
+    await waitFor(() => expect(screen.queryAllByRole("option")).toHaveLength(0));
+    expect(fixtures.switchedModel).toEqual({ provider: "custom-abc", activeModel: "vendor/model-c" });
+    // The search text does not survive a reopen, so the user lands on the full list again.
+    await user.click(await screen.findByLabelText("Модель «Мой API»"));
+    expect((await screen.findByLabelText("Поиск моделей")) as HTMLInputElement).toHaveProperty("value", "");
+  });
+
+  it("keeps the menu inside a bounded, self-scrolling black panel that cannot widen the page", () => {
+    const css = readFileSync(path.join(import.meta.dirname, "../index.css"), "utf8");
+    const panel = css.slice(css.indexOf(".kairema-model-menu {"));
+    // A fixed, body-level panel with its own height and scroll: the catalog length can neither
+    // stretch the chat page nor add a horizontal scrollbar.
+    expect(panel.slice(0, 400)).toContain("position:fixed");
+    expect(panel.slice(0, 400)).toContain("max-height");
+    expect(panel.slice(0, 400)).toContain("overflow:hidden");
+    expect(panel.slice(0, 400)).toContain("#0a0a0c");
+    const list = css.slice(css.indexOf(".kairema-model-menu-list {"));
+    expect(list.slice(0, 300)).toContain("overflow-y:auto");
+    expect(list.slice(0, 300)).toContain("min-height:0");
+    // A long model id truncates inside the item instead of stretching the panel.
+    const item = css.slice(css.indexOf(".kairema-model-menu-item-title {"));
+    expect(item.slice(0, 300)).toContain("text-overflow:ellipsis");
+    expect(item.slice(0, 300)).toContain("min-width:0");
+    // Phone widths get their own smaller type, so the same panel still fits a narrow screen.
+    expect(css).toContain("@media (max-width:430px)");
+    // The arrow sits inside the same wrapper as the trigger, so the open state has to reach it
+    // with a descendant rule: a sibling combinator never matches and the chevron stays still.
+    const chevron = css.slice(css.indexOf('.kairema-select-wrap:has(.kairema-binding-trigger[aria-expanded="true"])'));
+    expect(chevron.slice(0, 200)).toContain(" .kairema-model-chevron { transform:rotate(180deg); }");
   });
 });
 
