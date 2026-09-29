@@ -1,5 +1,6 @@
 // @ts-nocheck — экран содержит динамические tRPC-данные, уточняемые интеграционными тестами.
 import { AIChatBox, type ChatAttachment, type Message } from "@/components/AIChatBox";
+import { menuPanelStyle, ModelMenu, MODEL_MENU_LABELS, modelMenuTitle, useAnchoredMenu } from "@/components/ModelMenu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -9,11 +10,16 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { startLogin } from "@/const";
 import { memorySearchMatches } from "@/lib/memory-search";
 import { runtimeAuthHeaders } from "@/lib/runtime-auth";
-import { consumeChatStream } from "@/lib/chat-stream";
+import { consumeChatStream, type StreamLiveValue } from "@/lib/chat-stream";
+import { ProviderUnavailableNotice } from "@/components/ProviderUnavailableNotice";
+import { clearDirectKey } from "@/lib/direct-key-store";
+import { buildCandidateChain, ProviderUnavailableError, runMyApiTurn, type TurnCandidate } from "@/lib/my-api-turn";
+import { resolveExecution } from "@shared/provider-capabilities";
 import { trpc } from "@/lib/trpc";
-import { Archive, Bot, CircleCheck, CircleDot, Clock3, Copy, FileImage, Gauge, Globe2, Languages, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Moon, PanelLeftClose, PanelLeftOpen, Search, Settings2, SlidersHorizontal, Sparkles, Sun, Trash2, TriangleAlert, X } from "lucide-react";
+import { Archive, Bot, Check, ChevronDown, CircleDot, Clock3, Copy, FileImage, Gauge, Globe2, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Repeat, Search, Settings2, SlidersHorizontal, Sparkles, Trash2, TriangleAlert, UserIcon, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
+import { createPortal } from "react-dom";
 
 type ModelId = "fast" | "smart" | "context" | "flagship";
 type Language = "ru" | "en";
@@ -24,16 +30,67 @@ type PublicRuntime = { state: "ready" | "backup" | "unavailable"; provider: stri
 type PublicRoleLimits = { candidate: "primary" | "backup" | "unavailable"; provider: string | null; quota: "ready" | "limited" | "unavailable"; nextFallback: string | null; lastFallback: boolean };
 type PublicModel = StaticModel & { status?: PublicStatus; runtime?: PublicRuntime | null; limits?: PublicRoleLimits };
 type SearchItem = { type: "chat" | "message"; id: string; sessionId?: string; title: string; snippet: string; createdAt: Date | string };
-type SearchStatus = { state: "found" | "empty" | "degraded" | "error"; verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable"; sourcesCount: number; freshnessBlocked?: boolean; staleRagOnly?: boolean; sourceDateMin?: string; sourceDateMax?: string };
+type SearchStatus = { state: "found" | "empty" | "degraded" | "error"; verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable"; sourcesCount: number; freshnessBlocked?: boolean; staleRagOnly?: boolean; sourceDateMin?: string; sourceDateMax?: string; liveValue?: StreamLiveValue };
 type SourceEvidence = { title: string; url: string; publishedAt?: string };
 type WebGrounding = { intent: "PREFERRED" | "REQUIRED"; state: "verified" | "disabled" | "empty" | "degraded" | "unavailable" | "admission_denied"; sourcesCount: number; citations: SourceEvidence[]; freshnessBlocked?: boolean };
 
+const ACTIVE_CHAT_STORAGE_KEY = "active-chat-id";
+/** How long a question whose turn produced no answer stays readable and copyable. */
+const FAILED_TURN_GRACE_MS = 10_000;
+
+/** A failed question waiting out its grace period, and what is needed to delete it for good. */
+type FailedTurnTimer = { timer: ReturnType<typeof setTimeout>; sessionId: string; turnId: string };
+
+/**
+ * The two sentences shown under a question that got no answer. A rate limit is called out
+ * separately from every other failure because the user's next action differs: one is "wait", the
+ * other is "try again", and a single generic sentence would give the user neither.
+ */
+function failedTurnNotice(errorMessage: string, language: "ru" | "en") {
+  const rateLimited = /\b429\b|rate.?limit|too many|лимит|частот/i.test(errorMessage);
+  if (language === "en") {
+    return {
+      reason: rateLimited ? "Rate limit reached. The request was not sent to the provider." : "No answer came back from the provider.",
+      detail: `This question will be removed in ${FAILED_TURN_GRACE_MS / 1000} seconds. Copy the text now if you want to keep it.`,
+    };
+  }
+  return {
+    reason: rateLimited ? "Достигнут лимит запросов. Провайдер не был вызван." : "Провайдер не вернул ответ.",
+    detail: `Сообщение будет удалено через ${FAILED_TURN_GRACE_MS / 1000} секунд. Скопируйте текст, если хотите его сохранить.`,
+  };
+}
+
+function readStoredActiveChatId(): string {
+  try { return window.localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY) ?? ""; } catch { return ""; }
+}
+
+function writeStoredActiveChatId(id: string): void {
+  try { window.localStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, id); } catch { /* private mode or storage unavailable */ }
+}
+
+function clearStoredActiveChatId(): void {
+  try { window.localStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY); } catch { /* private mode or storage unavailable */ }
+}
+
 function safeSearchStatus(value: unknown): SearchStatus | undefined {
   if (!value || typeof value !== "object") return undefined;
-  const status = value as { state?: unknown; verificationStatus?: unknown; sourcesCount?: unknown; freshnessBlocked?: unknown; staleRagOnly?: unknown; sourceDateMin?: unknown; sourceDateMax?: unknown };
+  const status = value as { state?: unknown; verificationStatus?: unknown; sourcesCount?: unknown; freshnessBlocked?: unknown; staleRagOnly?: unknown; sourceDateMin?: unknown; sourceDateMax?: unknown; liveValue?: unknown };
   if (!(status.state === "found" || status.state === "empty" || status.state === "degraded" || status.state === "error") || typeof status.sourcesCount !== "number") return undefined;
   const iso = (date: unknown) => typeof date === "string" && !Number.isNaN(new Date(date).getTime()) ? new Date(date).toISOString() : undefined;
-  return { state: status.state, ...(status.verificationStatus === "verified" || status.verificationStatus === "no_results" || status.verificationStatus === "degraded" || status.verificationStatus === "unavailable" ? { verificationStatus: status.verificationStatus } : {}), ...(status.freshnessBlocked === true ? { freshnessBlocked: true } : {}), ...(status.staleRagOnly === true ? { staleRagOnly: true } : {}), ...(iso(status.sourceDateMin) ? { sourceDateMin: iso(status.sourceDateMin) } : {}), ...(iso(status.sourceDateMax) ? { sourceDateMax: iso(status.sourceDateMax) } : {}), sourcesCount: status.sourcesCount };
+  return { state: status.state, ...(status.verificationStatus === "verified" || status.verificationStatus === "no_results" || status.verificationStatus === "degraded" || status.verificationStatus === "unavailable" ? { verificationStatus: status.verificationStatus } : {}), ...(status.freshnessBlocked === true ? { freshnessBlocked: true } : {}), ...(status.staleRagOnly === true ? { staleRagOnly: true } : {}), ...(safeLiveValue(status.liveValue) ? { liveValue: safeLiveValue(status.liveValue) } : {}), ...(iso(status.sourceDateMin) ? { sourceDateMin: iso(status.sourceDateMin) } : {}), ...(iso(status.sourceDateMax) ? { sourceDateMax: iso(status.sourceDateMax) } : {}), sourcesCount: status.sourcesCount };
+}
+
+/**
+ * The live-value verdict is re-validated independently of the server, exactly like every
+ * other field of this boundary: only the known kind and status pair is accepted, so a
+ * malformed payload cannot put arbitrary content into the chat UI.
+ */
+function safeLiveValue(value: unknown): StreamLiveValue | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const live = value as { kind?: unknown; status?: unknown };
+  const kind = ["temperature", "conditions", "clock", "rate"].find((candidate) => candidate === live.kind);
+  const status = ["confirmed", "unconfirmed", "not_found"].find((candidate) => candidate === live.status);
+  return kind && status ? { kind: kind as StreamLiveValue["kind"], status: status as StreamLiveValue["status"] } : undefined;
 }
 
 function safeSourceEvidence(value: unknown): SourceEvidence[] {
@@ -85,7 +142,59 @@ function AppDropdown({ value, onValueChange, options, ariaLabel }: { value: stri
   const current = options.find((option) => option.value === value);
   return <Select value={value} onValueChange={onValueChange}><SelectTrigger role="combobox" aria-label={ariaLabel} className="w-full"><SelectValue>{current?.label ?? value}</SelectValue></SelectTrigger><SelectContent>{options.map((option) => <SelectItem key={option.value} value={option.value} className="py-2"><span className="flex min-w-0 flex-col gap-0.5 text-left"><span className="break-words font-medium leading-5">{option.label}</span>{option.description && <span className="whitespace-normal break-words text-xs leading-5 text-muted-foreground">{option.description}</span>}</span></SelectItem>)}</SelectContent></Select>;
 }
-const AppSelect = AppDropdown;
+
+type MyApiProviderOption = { id: string; name: string; activeModel: string };
+
+/** The provider menu: only the providers this user really has. Each entry is a stored,
+    server-validated credential, so an entry that would fail can never be offered here, and a
+    model name never appears in it. */
+function MyApiProviderMenu({ value, providers, disabled, ariaLabel, labels, onSelect }: { value: string; providers: readonly MyApiProviderOption[]; disabled: boolean; ariaLabel: string; labels: { connected: string; empty: string }; onSelect: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const placement = useAnchoredMenu(open, triggerRef, panelRef, setOpen);
+  const current = providers.find((provider) => provider.id === value) ?? null;
+
+  return <>
+    <button
+      ref={triggerRef}
+      type="button"
+      className="kairema-provider-trigger"
+      aria-label={ariaLabel}
+      aria-haspopup="listbox"
+      aria-expanded={open}
+      disabled={disabled}
+      onClick={() => setOpen((value) => !value)}>
+      {/* Provider only. The model has its own picker, so this never reads "provider · model". */}
+      <span className="kairema-provider-trigger-text">{current?.name ?? value}</span>
+      <ChevronDown className="kairema-provider-trigger-chevron" aria-hidden="true" />
+    </button>
+    {open && typeof document !== "undefined" && createPortal(
+      <div ref={panelRef} className="kairema-model-menu kairema-provider-menu" style={menuPanelStyle(placement)}>
+        <div className="kairema-model-menu-list kairema-provider-menu-list" role="listbox" aria-label={ariaLabel}>
+          {providers.length === 0 && <p className="kairema-model-menu-empty">{labels.empty}</p>}
+          {providers.map((provider) => {
+            const isActive = provider.id === value;
+            return <button
+              key={provider.id}
+              type="button"
+              role="option"
+              aria-selected={isActive}
+              className={`kairema-provider-menu-item ${isActive ? "kairema-model-menu-item-active" : ""}`}
+              onClick={() => { setOpen(false); onSelect(provider.id); }}>
+              <span className="kairema-provider-menu-check" aria-hidden="true">{isActive ? <Check /> : null}</span>
+              <span className="kairema-provider-menu-name">{provider.name}</span>
+              <span className="kairema-provider-menu-status">{labels.connected}</span>
+            </button>;
+          })}
+        </div>
+      </div>,
+      document.body)}
+  </>;
+}
+
+/** The sidebar is a static column from this width up, so it starts open and needs no topbar toggle. */
+const SIDEBAR_DESKTOP_BREAKPOINT = 768;
 
 const MODELS: readonly StaticModel[] = [
   { key: "fast", modelId: "fast", label: { ru: "Kairema Flash", en: "Kairema Flash" }, role: { ru: "Короткие повседневные ответы без ожидания.", en: "Fast answers for everyday questions." } },
@@ -95,8 +204,8 @@ const MODELS: readonly StaticModel[] = [
 ];
 
 const copy = {
-  ru: { newChat: "Новый чат", models: "Роли", modelLimits: "Модели и лимиты", healthRefresh: "Обновление здоровья", history: "История", search: "Поиск", memory: "Память", settings: "Настройки", noHistory: "История пока пуста.", loginHistory: "Войти для истории", newConversation: "Новый разговор", loginChat: "Войдите, чтобы начать чат с Kairema", start: "Начните разговор с", secure: "Модели и ключи — только на сервере", light: "Светлая тема", dark: "Тёмная тема", language: "Язык", theme: "Тема", profile: "Профиль памяти", facts: "Факты памяти", addFact: "Добавить факт", clear: "Очистить память", autoMemory: "Автоматически извлекать новые факты", memoryEnabled: "Использовать память в ответах", response: "Ответ", style: "Стиль", length: "Длина", effort: "Усилия", thinking: "Дополнительное рассуждение", defaultRole: "Роль по умолчанию", web: "Web-поиск", webStatus: "Статус web-поиска", searchResults: "Результаты поиска", chats: "Чаты", messages: "Сообщения", save: "Изменения сохраняются автоматически", openSettings: "Открыть настройки", delete: "Удалить", unsupportedSearch: "Поиск недоступен", uploadFailed: "Не удалось загрузить вложение.", noSearch: "Ничего не найдено." },
-  en: { newChat: "New chat", models: "Roles", modelLimits: "Models & limits", healthRefresh: "Health refresh", history: "History", search: "Search", memory: "Memory", settings: "Settings", noHistory: "No chat history yet.", loginHistory: "Sign in for history", newConversation: "New conversation", loginChat: "Sign in to start chatting with Kairema", start: "Start a conversation with", secure: "Models and keys stay on the server", light: "Light theme", dark: "Dark theme", language: "Language", theme: "Theme", profile: "Memory profile", facts: "Memory facts", addFact: "Add a fact", clear: "Clear memory", autoMemory: "Automatically extract new facts", memoryEnabled: "Use memory in replies", response: "Response", style: "Style", length: "Length", effort: "Effort", thinking: "Extra reasoning", defaultRole: "Default role", web: "Web search", webStatus: "Web search status", searchResults: "Search results", chats: "Chats", messages: "Messages", save: "Changes save automatically", openSettings: "Open settings", delete: "Delete", unsupportedSearch: "Search unavailable", uploadFailed: "Could not upload the attachment.", noSearch: "No results found." },
+  ru: { newChat: "Новый чат", models: "Роли", modelLimits: "Модели и лимиты", healthRefresh: "Обновление здоровья", history: "История", search: "Поиск", memory: "Память", settings: "Настройки", noHistory: "История пока пуста.", loginHistory: "Войти для истории", newConversation: "Новый разговор", loginChat: "Войдите, чтобы начать чат с Kairema", start: "Начните разговор с", secure: "Модели и ключи — только на сервере", light: "Светлая тема", dark: "Тёмная тема", language: "Язык", theme: "Тема", profile: "Профиль памяти", facts: "Факты памяти", addFact: "Добавить факт", clear: "Очистить память", autoMemory: "Автоматически извлекать новые факты", memoryEnabled: "Использовать память в ответах", response: "Ответ", style: "Стиль", length: "Длина", effort: "Усилия", thinking: "Дополнительное рассуждение", defaultRole: "Роль по умолчанию", web: "Web-поиск", webStatus: "Статус web-поиска", searchResults: "Результаты поиска", chats: "Чаты", messages: "Сообщения", save: "Изменения сохраняются автоматически", openSettings: "Открыть настройки", modeChat: "Чат", modeMyApi: "Мой API", modeSwitch: "Режим чата", activeUserBinding: "Активная связка «Мой API»", myApiNotConfigured: "Мой API не настроен", myApiModelPicker: "Модель «Мой API»", configureProvider: "Настроить провайдера →", myApiLoadingModels: "загружаем модели", myApiModelsRetry: "Повторить", myApiNoModels: "провайдер не вернул список моделей", myApiSwitchFailed: "Не удалось сменить модель", myApiSwitchProviderFailed: "Не удалось сменить провайдера", myApiProviderPicker: "Провайдер «Мой API»", myApiProviderEmpty: "Настройте провайдера в разделе «AI-провайдеры»", myApiProviderConnected: "подключён", myApiModelSearch: "Поиск моделей", myApiModelFreeGroup: "Free", myApiModelPaidGroup: "Paid", myApiModelNoResults: "Ничего не найдено", myApiModelFreeBadge: "Free", delete: "Удалить", unsupportedSearch: "Поиск недоступен", uploadFailed: "Не удалось загрузить вложение.", noSearch: "Ничего не найдено.", profileTitle: "Профиль", openProfile: "Открыть профиль", fullName: "Полное имя", nameFieldLabel: "Как к вам обращаться?", namePlaceholder: "Имя", updateProfile: "Обновить профиль", profileUpdated: "Профиль обновлён", personalPreferences: "Персональные предпочтения", preferencesPrompt: "Какие личные предпочтения Kairema должен учитывать в ответах?", preferencesScope: "Ваши предпочтения применяются ко всем разговорам.", askClarifying: "Задавать уточняющие вопросы перед развёрнутым ответом", savePreferences: "Сохранить предпочтения", preferencesSaved: "Предпочтения сохранены" },
+  en: { newChat: "New chat", models: "Roles", modelLimits: "Models & limits", healthRefresh: "Health refresh", history: "History", search: "Search", memory: "Memory", settings: "Settings", noHistory: "No chat history yet.", loginHistory: "Sign in for history", newConversation: "New conversation", loginChat: "Sign in to start chatting with Kairema", start: "Start a conversation with", secure: "Models and keys stay on the server", light: "Light theme", dark: "Dark theme", language: "Language", theme: "Theme", profile: "Memory profile", facts: "Memory facts", addFact: "Add a fact", clear: "Clear memory", autoMemory: "Automatically extract new facts", memoryEnabled: "Use memory in replies", response: "Response", style: "Style", length: "Length", effort: "Effort", thinking: "Extra reasoning", defaultRole: "Default role", web: "Web search", webStatus: "Web search status", searchResults: "Search results", chats: "Chats", messages: "Messages", save: "Changes save automatically", openSettings: "Open settings", modeChat: "Chat", modeMyApi: "My API", modeSwitch: "Chat mode", activeUserBinding: "Active My API binding", myApiNotConfigured: "My API is not configured", myApiModelPicker: "My API model", configureProvider: "Set up a provider →", myApiLoadingModels: "loading models", myApiModelsRetry: "Retry", myApiNoModels: "the provider returned no models", myApiSwitchFailed: "Could not switch the model", myApiSwitchProviderFailed: "Could not switch the provider", myApiProviderPicker: "My API provider", myApiProviderEmpty: "Set a provider up in AI providers", myApiProviderConnected: "connected", myApiModelSearch: "Search models", myApiModelFreeGroup: "Free", myApiModelPaidGroup: "Paid", myApiModelNoResults: "No models found", myApiModelFreeBadge: "Free", delete: "Delete", unsupportedSearch: "Search unavailable", uploadFailed: "Could not upload the attachment.", noSearch: "No results found.", profileTitle: "Profile", openProfile: "Open profile", fullName: "Full name", nameFieldLabel: "What should we call you?", namePlaceholder: "Name", updateProfile: "Update Profile", profileUpdated: "Profile updated", personalPreferences: "Personal preferences", preferencesPrompt: "What personal preferences should Kairema consider in responses?", preferencesScope: "Your preferences will apply to all conversations.", askClarifying: "Ask clarifying questions before giving detailed answers", savePreferences: "Save Preferences", preferencesSaved: "Preferences saved" },
 } as const;
 
 const styles: Record<ResponseStyle, Record<Language, string>> = { default: { ru: "По умолчанию", en: "Default" }, professional: { ru: "Профессиональный", en: "Professional" }, friendly: { ru: "Дружелюбный", en: "Friendly" }, concise: { ru: "Кратко", en: "Concise" }, steps: { ru: "По шагам", en: "Step by step" } };
@@ -129,7 +238,7 @@ function PromptTemplatesDialog({ open, onOpenChange, onInsert, onCopy }: { open:
 }
 
 function statusClass(status?: PublicStatus) { return status?.state === "ready" || status?.state === "fallback" ? "status-ready" : status?.category === "RATE_LIMIT" || status?.category === "QUOTA" ? "status-quota" : status?.state === "not_configured" ? "status-muted" : status?.state === "unavailable" ? "status-unavailable" : status?.state === "loading" ? "status-loading" : "status-auth"; }
-function StatusIndicator({ status }: { status?: PublicStatus }) { const label = status?.badge ?? "…"; const Icon = status?.state === "ready" ? CircleCheck : status?.category === "RATE_LIMIT" || status?.category === "QUOTA" ? Gauge : status?.state === "loading" || !status ? LoaderCircle : TriangleAlert; return <span className={`kairema-status ${statusClass(status)}`} title={status?.confirmed ?? label}><Icon className={`size-3 ${status?.state === "loading" || !status ? "animate-spin" : ""}`} /><span>{label}</span></span>; }
+function StatusIndicator({ status }: { status?: PublicStatus }) { const label = status?.badge ?? "…"; const Icon = status?.state === "ready" ? null : status?.category === "RATE_LIMIT" || status?.category === "QUOTA" ? Gauge : status?.state === "loading" || !status ? LoaderCircle : TriangleAlert; return <span className={`kairema-status ${statusClass(status)}`} title={status?.confirmed ?? label}>{Icon && <Icon className={`size-3 ${status?.state === "loading" || !status ? "animate-spin" : ""}`} />}<span>{label}</span></span>; }
 function bytes(value: number) { return value < 1_000_000 ? `${Math.max(1, Math.round(value / 1024))} KB` : `${(value / 1_000_000).toFixed(1)} MB`; }
 function metadataSearchStatus(metadata: unknown): SearchStatus | undefined { try { const parsed = typeof metadata === "string" ? JSON.parse(metadata) : metadata; return safeSearchStatus(parsed?.searchStatus); } catch { return undefined; } }
 function metadataWebGrounding(metadata: unknown): WebGrounding | undefined { try { const parsed = typeof metadata === "string" ? JSON.parse(metadata) : metadata; return safeWebGrounding(parsed?.webGrounding); } catch { return undefined; } }
@@ -182,34 +291,200 @@ async function streamStartErrorMessage(response: Response, fallback: string): Pr
 }
 
 export default function Home() {
-  const { isAuthenticated, loading: authLoading } = useAuth();
+  const { isAuthenticated, loading: authLoading, user, logout } = useAuth();
+  // The address always comes from the authenticated server context, never from
+  // localStorage or anything the visitor typed.
+  const accountEmail = typeof user?.email === "string" ? user.email.trim() : "";
+  // auth.me returns the guest row too, so isAuthenticated alone would expose Profile to guests.
+  const isGuestUser = user?.isGuest === 1;
+  // Display name is profile data only; it is never sent to the model prompt.
+  const serverName = typeof user?.name === "string" ? user.name : "";
+  const [profileName, setProfileName] = useState(serverName);
+  useEffect(() => { setProfileName(serverName); }, [serverName]);
   const [, navigate] = useLocation();
   const { theme, toggleTheme, setHighContrast } = useTheme();
-  const [activeId, setActiveId] = useState(""); const [newConversation, setNewConversation] = useState(false); const [modelId, setModelId] = useState<ModelId>("fast"); const [search, setSearch] = useState(""); const [uploadStatus, setUploadStatus] = useState<{ sessionId: string; message: string } | null>(null); const [sidebarOpen, setSidebarOpen] = useState(false); const [settingsOpen, setSettingsOpen] = useState(false); const [memoryOpen, setMemoryOpen] = useState(false); const [exportHistoryOpen, setExportHistoryOpen] = useState(false); const [templatesOpen, setTemplatesOpen] = useState(false); const [pendingChatDeletionId, setPendingChatDeletionId] = useState<string | null>(null); const [isChatDeletionConfirming, setIsChatDeletionConfirming] = useState(false); const [pendingHistoryClear, setPendingHistoryClear] = useState(false); const [isHistoryClearConfirming, setIsHistoryClearConfirming] = useState(false); const [composerDraft, setComposerDraft] = useState(""); const [draftHydratedSessionId, setDraftHydratedSessionId] = useState(""); const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]); const [sentAttachmentFallbacks, setSentAttachmentFallbacks] = useState<ChatAttachment[]>([]); const [isStreaming, setIsStreaming] = useState(false); const [isExporting, setIsExporting] = useState<"markdown" | "pdf" | null>(null); const [notice, setNotice] = useState(""); const [settingsOverride, setSettingsOverride] = useState<Record<string, unknown>>({});
-  const streamAbortRef = useRef<AbortController | null>(null); const activeSessionRef = useRef(""); const pagedHistorySessionRef = useRef(""); const deleteConfirmationInFlightRef = useRef(false); const historyClearInFlightRef = useRef(false); const defaultRoleApplied = useRef(false); const themeApplied = useRef(false); const persistedDraftRef = useRef("");
+  const [activeId, setActiveId] = useState(""); const [newConversation, setNewConversation] = useState(false); const [modelId, setModelId] = useState<ModelId>("fast"); const [chatMode, setChatMode] = useState<"chat" | "myApi">("chat"); const [search, setSearch] = useState(""); const [uploadStatus, setUploadStatus] = useState<{ sessionId: string; message: string } | null>(null);   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === "undefined" ? true : window.innerWidth >= SIDEBAR_DESKTOP_BREAKPOINT); const [settingsOpen, setSettingsOpen] = useState(false); const [profileOpen, setProfileOpen] = useState(false); const [memoryOpen, setMemoryOpen] = useState(false); const [exportHistoryOpen, setExportHistoryOpen] = useState(false); const [templatesOpen, setTemplatesOpen] = useState(false); const [pendingChatDeletionId, setPendingChatDeletionId] = useState<string | null>(null); const [isChatDeletionConfirming, setIsChatDeletionConfirming] = useState(false); const [pendingHistoryClear, setPendingHistoryClear] = useState(false); const [isHistoryClearConfirming, setIsHistoryClearConfirming] = useState(false); const [composerDraft, setComposerDraft] = useState(""); const [draftHydratedSessionId, setDraftHydratedSessionId] = useState(""); const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]); const [sentAttachmentFallbacks, setSentAttachmentFallbacks] = useState<ChatAttachment[]>([]); const [isStreaming, setIsStreaming] = useState(false); const [isExporting, setIsExporting] = useState<"markdown" | "pdf" | null>(null); const [notice, setNotice] = useState(""); const [settingsOverride, setSettingsOverride] = useState<Record<string, unknown>>({});
+  const streamAbortRef = useRef<AbortController | null>(null); const failedTurnTimersRef = useRef(new Map<string, FailedTurnTimer>()); const activeSessionRef = useRef(""); const pagedHistorySessionRef = useRef(""); const deleteConfirmationInFlightRef = useRef(false); const historyClearInFlightRef = useRef(false); const defaultRoleApplied = useRef(false); const themeApplied = useRef(false); const persistedDraftRef = useRef(""); const activeChatHydrated = useRef(false);
+  // Why sending is blocked, or null when it is not. Set only when every connected provider has
+  // been spent for a turn, and cleared by any action that could make a provider usable again.
+  // It is separate from `notice`, which reports things that already happened to a sent turn.
+  const [providerBlocked, setProviderBlocked] = useState<{ reason: string; switching: boolean } | null>(null);
   const [olderHistoryMessages, setOlderHistoryMessages] = useState<any[]>([]); const [olderHistoryCursor, setOlderHistoryCursor] = useState<string | null | undefined>(undefined); const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
   const modelsQuery = trpc.models.list.useQuery(undefined, { refetchInterval: 60_000, refetchOnWindowFocus: true }); const settingsQuery = trpc.settings.get.useQuery(undefined, { enabled: isAuthenticated }); const healthRefreshSeconds = Number(settingsQuery.data?.healthRefreshSeconds ?? 30); const memoryQuery = trpc.memory.get.useQuery(undefined, { enabled: isAuthenticated }); const webStatusQuery = trpc.webSearch.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const knowledgeStatusQuery = trpc.knowledge.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const providerDashboardQuery = trpc.providers.dashboard.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: healthRefreshSeconds > 0 ? healthRefreshSeconds * 1_000 : false, refetchOnWindowFocus: true }); const knowledgeAuditQuery = trpc.knowledge.audit.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const sessionsQuery = trpc.chats.list.useQuery(undefined, { enabled: isAuthenticated, refetchOnWindowFocus: true }); const messagesQuery = trpc.chats.historyPage.useQuery({ sessionId: activeId, limit: 60 }, { enabled: isAuthenticated && Boolean(activeId) }); const attachmentsQuery = trpc.attachments.list.useQuery({ sessionId: activeId }, { enabled: isAuthenticated && Boolean(activeId) }); const draftQuery = trpc.chats.draft.useQuery({ sessionId: activeId }, { enabled: isAuthenticated && Boolean(activeId), refetchOnWindowFocus: false }); const exportsQuery = trpc.exports.list.useQuery(undefined, { enabled: isAuthenticated && exportHistoryOpen }); const searchQuery = trpc.search.query.useQuery({ query: search }, { enabled: isAuthenticated && search.trim().length >= 2 }); const ownerQuery = trpc.owner.isOwner.useQuery(undefined, { enabled: isAuthenticated, staleTime: 300_000 });
-  const createMutation = trpc.chats.create.useMutation(); const deleteChatMutation = trpc.chats.delete.useMutation(); const clearHistoryMutation = trpc.chats.clearAll.useMutation(); const draftSaveMutation = trpc.chats.saveDraft.useMutation(); const draftClearMutation = trpc.chats.clearDraft.useMutation(); const settingMutation = trpc.settings.update.useMutation(); const memoryUpdateMutation = trpc.memory.update.useMutation(); const memoryAddMutation = trpc.memory.addFact.useMutation(); const memoryDeleteMutation = trpc.memory.deleteEntry.useMutation(); const memoryClearMutation = trpc.memory.clear.useMutation(); const attachmentDeleteMutation = trpc.attachments.delete.useMutation(); const exportCreateMutation = trpc.exports.create.useMutation(); const exportDeleteMutation = trpc.exports.delete.useMutation(); const knowledgeRefreshMutation = trpc.knowledge.refresh.useMutation(); const utils = trpc.useUtils();
-  const settings = { ...(settingsQuery.data ?? { language: "ru" as Language, theme: "dark" as const, responseStyle: "default" as ResponseStyle, responseLength: "balanced" as const, effort: "standard" as const, thinking: 0, defaultRole: "fast" as ModelId, webSearch: 0, healthRefreshSeconds: 30, highContrast: 0 }), ...settingsOverride } as { language: Language; theme: "dark" | "light"; responseStyle: ResponseStyle; responseLength: "balanced" | "brief" | "detailed"; effort: "low" | "standard" | "high"; thinking: boolean | number; defaultRole: ModelId; webSearch: boolean | number; healthRefreshSeconds: 0 | 15 | 30 | 60; highContrast: boolean | number };
+  const createMutation = trpc.chats.create.useMutation(); const deleteChatMutation = trpc.chats.delete.useMutation(); const clearHistoryMutation = trpc.chats.clearAll.useMutation(); const draftSaveMutation = trpc.chats.saveDraft.useMutation(); const draftClearMutation = trpc.chats.clearDraft.useMutation(); const discardFailedTurn = trpc.chats.discardFailedTurn.useMutation(); const settingMutation = trpc.settings.update.useMutation(); const updateNameMutation = trpc.auth.updateName.useMutation(); const memoryUpdateMutation = trpc.memory.update.useMutation(); const memoryAddMutation = trpc.memory.addFact.useMutation(); const memoryDeleteMutation = trpc.memory.deleteEntry.useMutation(); const memoryClearMutation = trpc.memory.clear.useMutation(); const attachmentDeleteMutation = trpc.attachments.delete.useMutation(); const exportCreateMutation = trpc.exports.create.useMutation(); const exportDeleteMutation = trpc.exports.delete.useMutation(); const knowledgeRefreshMutation = trpc.knowledge.refresh.useMutation(); const utils = trpc.useUtils();
+  const setActiveModelMutation = trpc.userProviders.setActiveModel.useMutation();
+  // The provider menu binds the credential; the model menu binds the model. Two independent moves.
+  const setActiveProviderMutation = trpc.userProviders.setActive.useMutation();
+  // Only fetched while "My API" is on screen, and it returns masked keys only.
+  const userProvidersQuery = trpc.userProviders.list.useQuery(undefined, { enabled: isAuthenticated && chatMode === "myApi", staleTime: 30_000 });
+  // The My API picker is fed by the active provider's own live catalog, never by the Kairema roles.
+  const myApiCatalogProvider = userProvidersQuery.data?.activeProvider ?? null;
+  const myApiCatalogMutation = trpc.userProviders.models.useMutation();
+  const myApiModels = myApiCatalogMutation.data?.models ?? [];
+  const [myApiSwitchError, setMyApiSwitchError] = useState("");
+  const myApiCatalogLoadedFor = useRef<string | null>(null);
+
+  // Entering My API reads the active provider's catalog with the caller's own stored key, so the
+  // picker offers exactly the models that provider can actually serve. The request carries no key.
+  const loadMyApiCatalog = async (options: { force?: boolean } = {}) => {
+    if (!myApiCatalogProvider) return;
+    // A provider catalog is a large document, so it is read once per provider instead of on every
+    // switch into My API. A forced call is the retry the status line offers after a failure.
+    if (!options.force && myApiCatalogLoadedFor.current === myApiCatalogProvider && myApiModels.length) return;
+    setMyApiSwitchError("");
+    myApiCatalogMutation.reset();
+    try {
+      await myApiCatalogMutation.mutateAsync({ provider: myApiCatalogProvider });
+      myApiCatalogLoadedFor.current = myApiCatalogProvider;
+    } catch {
+      myApiCatalogLoadedFor.current = null;
+      // The status line under the mode switch states the failure and offers a retry, so a
+      // provider that is temporarily unreachable is never mistaken for "no models".
+    }
+  };
+  useEffect(() => {
+    if (chatMode !== "myApi" || !myApiCatalogProvider) { myApiCatalogMutation.reset(); return; }
+    void loadMyApiCatalog();
+  }, [chatMode, myApiCatalogProvider]);
+
+  // Only providers the user really has: every entry is a stored, server-validated credential, so
+  // nothing that would fail can be offered, and a built-in catalog needs no label of its own.
+  const myApiProviderOptions = useMemo(() => (userProvidersQuery.data?.configs ?? []).map((config) => ({ id: config.provider, name: config.displayName || config.provider, activeModel: config.activeModel })), [userProvidersQuery.data]);
+
+  // Switching providers changes the credential and nothing else: the new provider keeps the model
+  // it was saved with, so the two pickers never fight over the same value.
+  const selectMyApiProvider = async (provider: string) => {
+    if (provider === myApiCatalogProvider) return;
+    setMyApiSwitchError("");
+    // A provider the user did not choose must not be signed with the previous one's key, so the
+    // direct key is dropped on every switch. The server-routed path is unaffected: that credential
+    // lives encrypted against its own provider row.
+    clearDirectKey(myApiCatalogProvider ?? "");
+    try {
+      await setActiveProviderMutation.mutateAsync({ provider });
+      await utils.userProviders.list.invalidate();
+      setProviderBlocked(null);
+    } catch (error) {
+      // The server rejected the switch, so the previous provider and its model stay exactly as
+      // they were and the reason is shown instead of a menu that silently reverts.
+      setMyApiSwitchError(error instanceof Error && error.message ? error.message : t.myApiSwitchProviderFailed);
+    }
+  };
+
+  const selectMyApiModel = async (activeModel: string) => {
+    if (!myApiCatalogProvider || activeModel === myApiActiveConfig?.activeModel) return;
+    setMyApiSwitchError("");
+    try {
+      await setActiveModelMutation.mutateAsync({ provider: myApiCatalogProvider, activeModel });
+      await utils.userProviders.list.invalidate();
+      setProviderBlocked(null);
+    } catch (error) {
+      // The provider is asked to validate the model, so a refusal has to be visible; otherwise
+      // the picker would silently snap back to the previous model.
+      setMyApiSwitchError(error instanceof Error && error.message ? error.message : t.myApiSwitchFailed);
+    }
+  };
+  const myApiActiveConfig = (userProvidersQuery.data?.activeProvider ? userProvidersQuery.data.configs.find((config) => config.provider === userProvidersQuery.data.activeProvider) : null) ?? null;
+  const myApiModelAdoptedFor = useRef<string | null>(null);
+  useEffect(() => {
+    const config = myApiActiveConfig;
+    if (chatMode !== "myApi" || !myApiCatalogProvider || !config || !myApiModels.length || myApiCatalogMutation.isPending) return;
+    // A provider whose saved model its live catalog no longer offers would otherwise send a model
+    // the provider rejects, so the first model it does offer is adopted once, not on every render.
+    if (myApiModels.some((model) => model.id === config.activeModel)) { myApiModelAdoptedFor.current = myApiCatalogProvider; return; }
+    if (myApiModelAdoptedFor.current === myApiCatalogProvider) return;
+    myApiModelAdoptedFor.current = myApiCatalogProvider;
+    void selectMyApiModel(myApiModels[0]!.id);
+  }, [chatMode, myApiCatalogProvider, myApiModels, myApiActiveConfig, myApiCatalogMutation.isPending]);
+  const settings = { ...(settingsQuery.data ?? { language: "ru" as Language, theme: "dark" as const, responseStyle: "default" as ResponseStyle, responseLength: "balanced" as const, effort: "standard" as const, thinking: 0, defaultRole: "fast" as ModelId, webSearch: 0, healthRefreshSeconds: 30, highContrast: 0, askClarifyingQuestions: 0 }), ...settingsOverride } as { language: Language; theme: "dark" | "light"; responseStyle: ResponseStyle; responseLength: "balanced" | "brief" | "detailed"; effort: "low" | "standard" | "high"; thinking: boolean | number; defaultRole: ModelId; webSearch: boolean | number; healthRefreshSeconds: 0 | 15 | 30 | 60; highContrast: boolean | number; askClarifyingQuestions: boolean | number };
   const language = settings.language as Language; const t = copy[language]; const sessions = sessionsQuery.data ?? []; const selectedModel = MODELS.find((item) => item.modelId === modelId) ?? MODELS[0]; const activeSession = sessions.find((session) => session.id === activeId); const attachments = attachmentsQuery.data ?? [];
   const modelViews = useMemo<PublicModel[]>(() => { const byId = new Map((modelsQuery.data as PublicModel[] | undefined)?.map((model) => [model.modelId, model]) ?? []); return MODELS.map((model) => ({ ...model, status: byId.get(model.modelId)?.status, runtime: byId.get(model.modelId)?.runtime ?? null, limits: byId.get(model.modelId)?.limits })); }, [modelsQuery.data]); const modelById = useMemo(() => new Map(modelViews.map((model) => [model.modelId, model])), [modelViews]);
   const attachmentsById = new Map([...sentAttachmentFallbacks, ...attachments.map((attachment) => ({ id: attachment.id, fileName: attachment.fileName, mimeType: attachment.contentType, sizeBytes: attachment.byteSize, kind: attachment.kind, previewUrl: attachment.previewUrl } satisfies ChatAttachment))].map((attachment) => [attachment.id, attachment]));
   const historyRows = [...olderHistoryMessages, ...(messagesQuery.data?.messages ?? [])]; const uniqueHistoryRows = [...new Map(historyRows.map((message) => [String(message.id), message])).values()].sort((left: any, right: any) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime() || String(left.id).localeCompare(String(right.id)));
-  const dbMessages = uniqueHistoryRows.map((message): Message => { const attachmentIds = message.role === "user" ? metadataAttachmentIds((message as { metadata?: unknown }).metadata) : []; const messageAttachments = attachmentIds.map((attachmentId) => attachmentsById.get(attachmentId)).filter((attachment): attachment is ChatAttachment => Boolean(attachment)); const metadata = (message as { metadata?: unknown }).metadata; return { id: String(message.id), role: message.role, content: message.content, providerLabel: message.role === "assistant" ? modelById.get(message.modelId as ModelId)?.label[language] ?? "Kairema" : undefined, model: message.role === "assistant" ? message.modelId ?? "" : undefined, status: message.role === "assistant" ? (language === "ru" ? "полный ответ" : "complete") : undefined, createdAt: message.createdAt, ...(message.role === "assistant" ? { searchStatus: metadataSearchStatus(metadata), sources: metadataSourceEvidence(metadata), webGrounding: metadataWebGrounding(metadata) } : {}), ...(messageAttachments.length ? { attachments: messageAttachments } : {}) }; }); const visibleMessages = [...dbMessages, ...optimisticMessages];
+  const dbMessages = uniqueHistoryRows.map((message): Message => { const attachmentIds = message.role === "user" ? metadataAttachmentIds((message as { metadata?: unknown }).metadata) : []; const messageAttachments = attachmentIds.map((attachmentId) => attachmentsById.get(attachmentId)).filter((attachment): attachment is ChatAttachment => Boolean(attachment)); const metadata = (message as { metadata?: unknown }).metadata; return { id: String(message.id), role: message.role, content: message.content, createdAt: message.createdAt, ...(message.role === "assistant" ? { searchStatus: metadataSearchStatus(metadata), sources: metadataSourceEvidence(metadata), webGrounding: metadataWebGrounding(metadata) } : {}), ...(messageAttachments.length ? { attachments: messageAttachments } : {}) }; }); const visibleMessages = [...dbMessages, ...optimisticMessages];
   const results = (searchQuery.data ?? []) as SearchItem[]; const sessionMatches = search.trim().length >= 2 ? [] : sessions.filter((session) => session.title.toLocaleLowerCase(language === "ru" ? "ru-RU" : "en-US").includes(search.toLocaleLowerCase()));
 
   useEffect(() => {
-    if (sessions.length && !activeId && !newConversation) {
+    if (!isAuthenticated) {
+      // A new sign-in must be able to hydrate again; the previous identity's chat never leaves the tab.
+      activeChatHydrated.current = false;
+      activeSessionRef.current = "";
+      setActiveId(""); setNewConversation(false);
+      return;
+    }
+    // A settled list is required: an empty `data` can still be a stale placeholder
+    // while a refetch is in flight, and that must never look like "chat deleted".
+    if (sessionsQuery.isLoading || sessionsQuery.isFetching || sessionsQuery.data === undefined) return;
+    if (activeId || newConversation || activeChatHydrated.current) return;
+    const storedId = readStoredActiveChatId();
+    if (storedId) {
+      const restored = sessions.find((session) => session.id === storedId);
+      // The list is settled and does not contain the stored chat: it is really gone.
+      if (!restored) { clearStoredActiveChatId(); activeSessionRef.current = ""; setNewConversation(true); activeChatHydrated.current = true; return; }
+      activeSessionRef.current = restored.id; setActiveId(restored.id); setNewConversation(false);
+      setModelId(modelById.has(restored.modelId as ModelId) ? restored.modelId as ModelId : settings.defaultRole as ModelId);
+      activeChatHydrated.current = true;
+      return;
+    }
+    if (sessions.length) {
       const initial = sessions[0]!;
+      activeSessionRef.current = initial.id;
       setActiveId(initial.id);
       setNewConversation(false);
       setModelId(modelById.has(initial.modelId as ModelId) ? initial.modelId as ModelId : settings.defaultRole as ModelId);
+      activeChatHydrated.current = true;
     }
-  }, [activeId, modelById, newConversation, sessions, settings.defaultRole]);
+  }, [activeId, isAuthenticated, modelById, newConversation, sessions, sessionsQuery.data, sessionsQuery.isFetching, sessionsQuery.isLoading, settings.defaultRole]);
+  useEffect(() => { if (!isAuthenticated || !activeChatHydrated.current) return; if (activeId) writeStoredActiveChatId(activeId); else clearStoredActiveChatId(); }, [activeId, isAuthenticated]);
+
+  // Single navigation signal for surfaces that live outside the composer (sidebar, settings,
+  // memory, exports, templates, chat selection). It is derived from real navigation state and
+  // deliberately does not change on mount, so a freshly mounted composer is never reset.
+  const [navigationCloseSignal, setNavigationCloseSignal] = useState(0);
+  const navigationSnapshotRef = useRef<string | null>(null);
+  useEffect(() => {
+    const snapshot = [sidebarOpen, settingsOpen, memoryOpen, exportHistoryOpen, templatesOpen, pendingHistoryClear, pendingChatDeletionId, activeId].join("|");
+    if (navigationSnapshotRef.current === null) { navigationSnapshotRef.current = snapshot; return; }
+    if (navigationSnapshotRef.current === snapshot) return;
+    navigationSnapshotRef.current = snapshot;
+    setNavigationCloseSignal((value) => value + 1);
+  }, [activeId, exportHistoryOpen, memoryOpen, pendingChatDeletionId, pendingHistoryClear, settingsOpen, sidebarOpen, templatesOpen]);
   useEffect(() => { if (!activeId && settingsQuery.data?.defaultRole && !defaultRoleApplied.current) { setModelId(settingsQuery.data.defaultRole as ModelId); defaultRoleApplied.current = true; } }, [activeId, settingsQuery.data?.defaultRole]);
   useEffect(() => { if (!themeApplied.current && settingsQuery.data?.theme) { if (settingsQuery.data.theme !== theme) toggleTheme?.(); themeApplied.current = true; } }, [settingsQuery.data?.theme, theme, toggleTheme]);
   useEffect(() => { if (settingsQuery.data?.highContrast !== undefined) setHighContrast?.(Boolean(settingsQuery.data.highContrast)); }, [settingsQuery.data?.highContrast, setHighContrast]);
-  useEffect(() => { pagedHistorySessionRef.current = activeId; setOlderHistoryMessages([]); setOlderHistoryCursor(undefined); setIsLoadingOlderHistory(false); setOptimisticMessages([]); setSentAttachmentFallbacks([]); setComposerDraft(""); setDraftHydratedSessionId(""); }, [activeId]); useEffect(() => () => streamAbortRef.current?.abort(), []);
+  useEffect(() => { pagedHistorySessionRef.current = activeId; setOlderHistoryMessages([]); setOlderHistoryCursor(undefined); setIsLoadingOlderHistory(false); setOptimisticMessages([]); setSentAttachmentFallbacks([]); setComposerDraft(""); setDraftHydratedSessionId(""); }, [activeId]);   useEffect(() => () => streamAbortRef.current?.abort(), []);
+  // A pending removal must not fire after the user has left the conversation or the page: the
+  // timer would then edit a message list that no longer holds the question it was scheduled for.
+  useEffect(() => () => {
+    for (const [messageId, pending] of failedTurnTimersRef.current) {
+      clearTimeout(pending.timer);
+      // Leaving the page must not leave an orphaned question in the stored transcript: the removal
+      // is finished immediately rather than waiting for a timer that will never fire.
+      void discardFailedTurn.mutateAsync({ sessionId: pending.sessionId, clientMessageId: pending.turnId }).catch(() => undefined);
+      failedTurnTimersRef.current.delete(messageId);
+    }
+  }, []);
+  // Switching conversations detaches a pending failed question from the screen, but its removal is
+  // not abandoned: the timer is left to run and still deletes the stored turn, so the question does
+  // not reappear in this session or in any other one ten seconds after it failed. Only the local
+  // list is reset here, which the effect on activeId below already does.
+  useEffect(() => {
+    setOptimisticMessages([]);
+  }, [activeId]);
+  // The topbar has no sidebar toggle, so crossing the breakpoint is the only moment the sidebar
+  // state can be reconciled: desktop keeps its column open, mobile falls back to a closed drawer.
+  // This keeps the sidebar reachable in both layouts without reintroducing a topbar button.
+  useEffect(() => {
+    let desktop = window.innerWidth >= SIDEBAR_DESKTOP_BREAKPOINT;
+    const sync = () => {
+      const next = window.innerWidth >= SIDEBAR_DESKTOP_BREAKPOINT;
+      if (next === desktop) return;
+      desktop = next;
+      setSidebarOpen(next);
+    };
+    window.addEventListener("resize", sync);
+    return () => window.removeEventListener("resize", sync);
+  }, []);
   useEffect(() => {
     if (!activeId || !isAuthenticated || draftQuery.isLoading || draftHydratedSessionId === activeId) return;
     const restored = typeof draftQuery.data?.content === "string" ? draftQuery.data.content : "";
@@ -228,11 +503,13 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [activeId, composerDraft, draftClearMutation, draftHydratedSessionId, draftSaveMutation, isAuthenticated, language]);
   const persistSettings = async (patch: Record<string, unknown>) => { if (typeof patch.highContrast === "boolean") setHighContrast?.(patch.highContrast); setSettingsOverride((current) => ({ ...current, ...patch })); try { await settingMutation.mutateAsync(patch as never); await utils.settings.get.invalidate(); } catch (error) { if ((patch.theme === "dark" || patch.theme === "light") && patch.theme !== theme) toggleTheme?.(); if (typeof patch.highContrast === "boolean") setHighContrast?.(Boolean(settingsQuery.data?.highContrast)); setSettingsOverride({}); setNotice(publicErrorMessage(error, language === "ru" ? "Не удалось сохранить настройку." : "Could not save the setting.")); } };
-  const toolAccessEnabled = Boolean((settings as { toolAccess?: boolean | number }).toolAccess ?? true);
   useEffect(() => {
-    const host = document.querySelector<HTMLElement>(".kairema-select-wrap");
+    // Scoped to the marked Kairema role select: in My API the first .kairema-select-wrap is the
+    // user's own model picker, and hijacking it would both hide it and put a role button there.
+    if (chatMode !== "chat") return;
+    const host = document.querySelector<HTMLElement>('.kairema-select-wrap[data-kairema-role-select="true"]');
     const native = host?.querySelector<HTMLSelectElement>("select");
-    if (!host || !native || host.querySelector("[data-kairema-role-menu]")) return;
+    if (!host || !native || host.querySelector(".kairema-role-menu-trigger")) return;
     native.style.display = "none";
     const trigger = document.createElement("button");
     trigger.type = "button";
@@ -245,8 +522,42 @@ export default function Home() {
     menu.dataset.kairemaRoleMenu = "true";
     menu.setAttribute("role", "menu");
     menu.hidden = true;
-    const close = () => { menu.hidden = true; trigger.setAttribute("aria-expanded", "false"); };
-    trigger.addEventListener("click", () => { const open = menu.hidden; menu.hidden = !open; trigger.setAttribute("aria-expanded", String(open)); });
+    // The panel fades out before it leaves the document, so closing reads the same way as
+    // opening. `hidden` and the removal are deferred by the same 160ms the CSS uses, and
+    // a reduced-motion preference skips the wait entirely.
+    const reducedMotion = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let closeTimer = 0;
+    const dispose = () => { window.clearTimeout(closeTimer); menu.hidden = true; menu.remove(); };
+    const close = () => {
+      trigger.setAttribute("aria-expanded", "false");
+      if (reducedMotion) { dispose(); return; }
+      menu.classList.remove("kairema-role-menu-open");
+      menu.classList.add("kairema-role-menu-closing");
+      window.clearTimeout(closeTimer);
+      closeTimer = window.setTimeout(dispose, 160);
+    };
+    // The panel lives in document.body and is placed from the trigger's viewport rect, so the open
+    // menu never depends on the page scroll position and can never be clipped by a chat container.
+    const place = () => {
+      if (menu.hidden || !menu.isConnected) return;
+      const rect = trigger.getBoundingClientRect();
+      const edge = 8;
+      menu.style.left = "0px";
+      menu.style.top = "0px";
+      const width = menu.offsetWidth;
+      const height = menu.offsetHeight;
+      const left = Math.min(Math.max(edge, rect.right - width), Math.max(edge, window.innerWidth - width - edge));
+      const below = rect.bottom + edge;
+      const above = rect.top - edge - height;
+      const fitsBelow = below + height <= window.innerHeight - edge;
+      const top = fitsBelow ? below : above >= edge ? above : Math.max(edge, Math.min(below, window.innerHeight - height - edge));
+      menu.style.left = `${Math.round(left)}px`;
+      menu.style.top = `${Math.round(top)}px`;
+    };
+    // The panel starts transparent, so the reveal runs on the next frame instead of
+    // painting an already-finished frame.
+    const open = () => { document.body.append(menu); menu.hidden = false; menu.classList.remove("kairema-role-menu-closing"); trigger.setAttribute("aria-expanded", "true"); place(); window.requestAnimationFrame(() => menu.classList.add("kairema-role-menu-open")); };
+    trigger.addEventListener("click", () => { if (menu.hidden) open(); else close(); });
     for (const model of modelViews) {
       const item = document.createElement("button");
       item.type = "button";
@@ -263,13 +574,15 @@ export default function Home() {
       menu.append(item);
     }
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
-    const onPointerDown = (event: PointerEvent) => { if (!host.contains(event.target as Node)) close(); };
+    const onPointerDown = (event: PointerEvent) => { if (!host.contains(event.target as Node) && !menu.contains(event.target as Node)) close(); };
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
     if (settingsOpen || memoryOpen || sidebarOpen) close();
-    host.append(trigger, menu);
-    return () => { document.removeEventListener("keydown", onKeyDown); document.removeEventListener("pointerdown", onPointerDown); trigger.remove(); menu.remove(); native.style.display = ""; };
-  }, [language, memoryOpen, modelId, modelViews, settingsOpen, sidebarOpen]);
+    host.append(trigger);
+    return () => { window.clearTimeout(closeTimer); document.removeEventListener("keydown", onKeyDown); document.removeEventListener("pointerdown", onPointerDown); window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); trigger.remove(); menu.remove(); native.style.display = ""; };
+  }, [chatMode, language, memoryOpen, modelId, modelViews, settingsOpen, sidebarOpen]);
   const loadOlderHistory = async () => {
     const cursor = olderHistoryCursor === undefined ? messagesQuery.data?.nextCursor : olderHistoryCursor;
     if (!activeId || !cursor || isLoadingOlderHistory) return;
@@ -306,34 +619,119 @@ export default function Home() {
       return undefined;
     }
   };
+  // The connected providers for a My API turn, each carrying only its own provider, model and
+  // whether the server holds a credential for it. The direct key is not part of this shape: it is
+  // read from the in-memory store at the moment that provider is actually called, so it can never
+  // be picked up by another candidate in the chain.
+  const myApiTurnCandidates = (): TurnCandidate[] => {
+    const configs = userProvidersQuery.data?.configs ?? [];
+    const active = userProvidersQuery.data?.activeProvider ?? myApiCatalogProvider;
+    if (!active) return [];
+    return buildCandidateChain(configs, active);
+  };
+  // Writes a finished direct turn into the caller's own transcript. Only the answer text crosses
+  // the wire; the key that produced it never does.
+  const persistDirectTurnMutation = trpc.chats.persistDirectTurn.useMutation();
+  const persistDirectTurn = (input: { sessionId: string; content: string; modelId: string; clientMessageId: string; answer: string }) =>
+    persistDirectTurnMutation.mutateAsync(input);
   const selectSession = (id: string, sessionModel?: string) => { activeSessionRef.current = id; setActiveId(id); setUploadStatus(null); setNewConversation(false); if (sessionModel && modelById.has(sessionModel as ModelId)) setModelId(sessionModel as ModelId); setSidebarOpen(false); };
   const send = async (content: string, options?: { attachmentIds?: string[]; attachments?: ChatAttachment[]; clientMessageId?: string }): Promise<boolean> => {
     if (!isAuthenticated) { startLogin(); return false; }
+    // A blocked turn creates no message, issues no request and starts no failed-turn timer: there
+    // is nothing to clean up because nothing was sent. The typed text stays in the composer.
+    if (providerBlocked) { setProviderBlocked((current) => (current ? { ...current } : current)); return false; }
     const sessionId = activeId || await createChat();
     if (!sessionId) return false;
+    setComposerDraft(""); persistedDraftRef.current = `${sessionId}\u0000`;
     const selectedId = modelId;
     const assistantId = `stream-${Date.now()}`;
-    const label = selectedModel.label[language];
     if (options?.attachments?.length) setSentAttachmentFallbacks((current) => [...current.filter((attachment) => !options.attachments!.some((item) => item.id === attachment.id)), ...options.attachments!]);
-    setOptimisticMessages([{ id: `user-${Date.now()}`, role: "user", content, attachments: options?.attachments }, { id: assistantId, role: "assistant", content: "", providerLabel: label, model: selectedId, status: language === "ru" ? "печатает" : "typing" }]);
+    const userId = `user-${Date.now()}`;
+    // A browser-generated id for this exact question. The server stores it, and it is what lets a
+    // failed turn be deleted later without touching any other message: an id, not a position.
+    const turnId = options?.clientMessageId ?? crypto.randomUUID();
+    setOptimisticMessages([{ id: userId, role: "user", content, attachments: options?.attachments }, { id: assistantId, role: "assistant", content: "" }]);
     setIsStreaming(true);
     const controller = new AbortController();
     streamAbortRef.current = controller;
     try {
-      const response = await fetch("/api/chat/stream", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...runtimeAuthHeaders() }, signal: controller.signal, body: JSON.stringify({ sessionId, modelId: selectedId, content, settings: { style: settings.responseStyle, responseLength: settings.responseLength, effort: settings.effort, thinking: Boolean(settings.thinking), toolAccess: toolAccessEnabled }, attachmentIds: options?.attachmentIds, clientMessageId: options?.clientMessageId }) });
+      // A My API turn whose selected provider the registry says may run in the page is executed
+      // there, from the key in this tab's memory. The decision is the registry's, not a provider
+      // id compared here, so a provider whose CORS is only conditionally allowed can never be
+      // routed into a browser call by accident.
+      const myApiCandidates = myApiTurnCandidates();
+      const directFirst = chatMode === "myApi" && myApiCandidates.length > 0 && resolveExecution(myApiCandidates[0].provider, { preferDirect: true }).mode === "direct";
+      if (directFirst) {
+        const result = await runMyApiTurn({
+          sessionId, content, modelId: selectedId,
+          clientMessageId: turnId,
+          settings: { style: settings.responseStyle, responseLength: settings.responseLength, effort: settings.effort, thinking: Boolean(settings.thinking) },
+          attachmentIds: options?.attachmentIds,
+          primary: myApiCandidates[0],
+          others: myApiCandidates.slice(1),
+          preferDirect: true,
+          signal: controller.signal,
+          onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)),
+          onProviderSwitch: ({ from, to }) => setProviderBlocked({ reason: `${from.displayName} недоступен, переключаемся на ${to.displayName}.`, switching: true }),
+        });
+        // A direct answer is not stored by the server, so the pair is persisted here before the
+        // optimistic copy is dropped; without it the turn would vanish on the next history load.
+        setProviderBlocked(null);
+        setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: result.content, model: result.model, providerLabel: result.label, modelLabel: result.label } : message));
+        try { await persistDirectTurn({ sessionId, content, modelId: result.model, clientMessageId: turnId, answer: result.content }); await utils.chats.historyPage.fetch({ sessionId, limit: 60 }); setOptimisticMessages([]); } catch { /* keep the streamed answer visible */ }
+        return true;
+      }
+      const response = await fetch("/api/chat/stream", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...runtimeAuthHeaders() }, signal: controller.signal, body: JSON.stringify({ sessionId, modelId: selectedId, content, ...(chatMode === "myApi" ? { myApi: true } : {}), settings: { style: settings.responseStyle, responseLength: settings.responseLength, effort: settings.effort, thinking: Boolean(settings.thinking) }, attachmentIds: options?.attachmentIds, clientMessageId: turnId }) });
       if (!response.ok || !response.body) throw new Error(await streamStartErrorMessage(response, language === "ru" ? "Не удалось начать потоковый ответ." : "Could not start the stream."));
-      await consumeChatStream(response, { onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)), onDone: (data) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: typeof data.content === "string" ? data.content : message.content, model: typeof data.modelUsed === "string" ? data.modelUsed : message.model, providerLabel: typeof data.label === "string" ? data.label : message.providerLabel, status: language === "ru" ? "полный ответ" : "complete", searchStatus: safeSearchStatus(data.searchStatus), sources: safeSourceEvidence(data.sources), webGrounding: safeWebGrounding(data.webGrounding) } : message)) });
-      await Promise.all([utils.chats.historyPage.invalidate({ sessionId, limit: 60 }), utils.chats.list.invalidate(), utils.attachments.list.invalidate({ sessionId }), utils.models.list.invalidate(), utils.knowledge.status.invalidate()]);
-      setOptimisticMessages([]);
+      await consumeChatStream(response, { onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)), onDone: (data) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: typeof data.content === "string" ? data.content : message.content, model: typeof data.modelUsed === "string" ? data.modelUsed : message.model, providerLabel: typeof data.label === "string" ? data.label : message.providerLabel, modelLabel: typeof data.label === "string" ? data.label : message.modelLabel, searchStatus: safeSearchStatus(data.searchStatus), sources: safeSourceEvidence(data.sources), webGrounding: safeWebGrounding(data.webGrounding) } : message)) });
+      try {
+        await utils.chats.historyPage.fetch({ sessionId, limit: 60 });
+        setOptimisticMessages([]);
+      } catch {
+        // historyPage refetch failed: keep the just-received optimistic messages visible.
+      }
+      await Promise.all([utils.chats.list.invalidate(), utils.attachments.list.invalidate({ sessionId }), utils.models.list.invalidate(), utils.knowledge.status.invalidate()]);
       setComposerDraft("");
       try { await draftClearMutation.mutateAsync({ sessionId }); persistedDraftRef.current = `${sessionId}\u0000`; } catch { setNotice(language === "ru" ? "Ответ отправлен; очистка черновика будет повторена автоматически." : "The reply was sent; clearing the draft will retry automatically."); }
       return true;
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") { setOptimisticMessages([]); await Promise.all([utils.chats.historyPage.invalidate({ sessionId, limit: 60 }), utils.attachments.list.invalidate({ sessionId })]); return false; }
+      if (error instanceof DOMException && error.name === "AbortError") { setOptimisticMessages([]); await Promise.all([utils.chats.historyPage.invalidate({ sessionId, limit: 60 }), utils.attachments.list.invalidate({ sessionId })]); return true; }
+      // Every connected provider was spent for this turn. The question is removed immediately and
+      // no failed-turn timer is started: the ten-second grace period exists for a message that was
+      // actually sent and then failed, and this turn was never sent, so there is nothing stored to
+      // delete and no reason to leave a question in the conversation that will never be answered.
+      if (error instanceof ProviderUnavailableError) {
+        setOptimisticMessages([]);
+        setProviderBlocked({ reason: error.failure.message, switching: false });
+        try { await discardFailedTurn.mutateAsync({ sessionId, clientMessageId: turnId }); } catch { setNotice(language === "ru" ? "Не удалось удалить вопрос из истории. Обновите историю вручную." : "Could not remove the question from history. Refresh it manually."); }
+        await Promise.all([utils.chats.historyPage.invalidate({ sessionId, limit: 60 }), utils.attachments.list.invalidate({ sessionId })]);
+        return false;
+      }
       const errorMessage = error instanceof Error ? error.message : "Stream error";
-      setOptimisticMessages((items) => [...items.filter((item) => item.id !== assistantId), { id: `stream-error-${Date.now()}`, role: "assistant", content: errorMessage, providerLabel: "Kairema", model: selectedId, status: language === "ru" ? "ошибка" : "error", isError: true }]);
+      // The question is kept for a grace period instead of vanishing or staying forever: long
+      // enough to read and copy, short enough that a dead turn does not silently become part of
+      // the conversation the next request is built on. Only this turn's own question is removed.
+      const notice_ = failedTurnNotice(errorMessage, language);
+      setOptimisticMessages((items) => [
+        ...items.filter((item) => item.id !== assistantId && item.id !== userId),
+        { id: userId, role: "user", content, attachments: options?.attachments, failedTurn: { ...notice_, removedAt: Date.now() + FAILED_TURN_GRACE_MS } },
+        { id: `stream-error-${Date.now()}`, role: "assistant", content: errorMessage, providerLabel: "Kairema", model: selectedId, status: language === "ru" ? "ошибка" : "error", isError: true },
+      ]);
+      // The deadline is anchored to when the notice was shown, not to when the timer object was
+      // created, and it is a single timer that fires exactly once at FAILED_TURN_GRACE_MS. Nothing
+      // else removes the question earlier: the stored turn is deleted at the same moment, so what
+      // the user saw for these ten seconds is what actually left the conversation.
+      const deadline = Date.now() + FAILED_TURN_GRACE_MS;
+      const timer = setTimeout(() => {
+        failedTurnTimersRef.current.delete(userId);
+        setOptimisticMessages((items) => items.filter((item) => item.id !== userId));
+        void discardFailedTurn.mutateAsync({ sessionId, clientMessageId: turnId })
+          .then(() => utils.chats.historyPage.invalidate({ sessionId, limit: 60 }))
+          .catch(() => setNotice(language === "ru" ? "Не удалось удалить неудачный вопрос из истории. Обновите историю вручную." : "Could not remove the failed question from history. Refresh it manually."));
+      }, Math.max(0, deadline - Date.now()));
+      failedTurnTimersRef.current.set(userId, { timer, sessionId, turnId });
       await Promise.all([utils.chats.historyPage.invalidate({ sessionId, limit: 60 }), utils.attachments.list.invalidate({ sessionId })]);
-      return false;
+      return true;
     } finally { streamAbortRef.current = null; setIsStreaming(false); }
   };
   const uploadFiles = async (files: File[]) => { if (!isAuthenticated) { startLogin(); return { attachments: [], sessionId: activeSessionRef.current }; } const sessionId = activeId || await createChat(); if (!sessionId) return { attachments: [], sessionId: activeSessionRef.current }; const setScopedUploadStatus = (message: string) => { if (activeSessionRef.current === sessionId) setUploadStatus({ sessionId, message }); }; const accepted = files.filter((file) => contentType(file) && file.size > 0 && file.size <= 8 * 1024 * 1024); if (accepted.length !== files.length) setNotice(language === "ru" ? "Можно загрузить только PNG, JPG, WEBP, PDF, TXT или MD размером до 8 МБ." : "Only PNG, JPG, WEBP, PDF, TXT or MD files up to 8 MB can be uploaded."); const uploaded: ChatAttachment[] = []; for (const [index, file] of accepted.entries()) { try { const mimeType = contentType(file); if (!mimeType) continue; setScopedUploadStatus(language === "ru" ? `Загрузка ${index + 1} из ${accepted.length}: ${file.name}` : `Uploading ${index + 1} of ${accepted.length}: ${file.name}`); const item = await uploadFileBytes(sessionId, file, mimeType); uploaded.push({ id: item.id, fileName: item.fileName, mimeType: item.contentType, sizeBytes: item.byteSize, kind: item.kind, previewUrl: item.previewUrl }); } catch (error) { setNotice(publicErrorMessage(error, t.uploadFailed)); } } if (uploaded.length) await utils.attachments.list.invalidate({ sessionId }); setScopedUploadStatus(uploaded.length === accepted.length ? (language === "ru" ? `Загрузка завершена: ${uploaded.length} файл(а).` : `Upload complete: ${uploaded.length} file(s).`) : (language === "ru" ? `Загружено файлов: ${uploaded.length} из ${accepted.length}.` : `Uploaded ${uploaded.length} of ${accepted.length} file(s).`)); return { attachments: uploaded, sessionId }; };
@@ -381,8 +779,8 @@ export default function Home() {
     };
     const providerButton = document.createElement("button"); providerButton.type = "button"; providerButton.className = "kairema-footer-link"; providerButton.textContent = labels.providers; providerButton.addEventListener("click", () => open("providers"));
     const ragButton = document.createElement("button"); ragButton.type = "button"; ragButton.className = "kairema-footer-link"; ragButton.textContent = labels.rag; ragButton.addEventListener("click", () => open("rag"));
-    footer.prepend(ragButton); footer.prepend(providerButton); const topbar = document.querySelector<HTMLElement>(".kairema-topbar"); const entries = providerDashboardQuery.data ?? []; const searchLimited = webStatusQuery.data ? !webStatusQuery.data.available : false; const limited = entries.some((entry) => entry.state !== "ready") || searchLimited; const healthWidget = document.createElement("button"); healthWidget.type = "button"; healthWidget.className = "kairema-health-widget"; healthWidget.title = limited ? labels.degraded : labels.healthy; healthWidget.setAttribute("aria-label", healthWidget.title); const dot = document.createElement("span"); dot.className = `kairema-health-dot ${limited ? "kairema-health-dot-limited" : ""}`; const text = document.createElement("span"); text.className = "kairema-health-widget-count"; text.textContent = `${entries.filter((entry) => entry.state === "ready").length}/${entries.length || "—"}`; healthWidget.append(dot, text); healthWidget.addEventListener("click", () => open("providers")); topbar?.querySelector(".kairema-topbar-controls")?.append(healthWidget); document.body.append(overlay);
-    return () => { providerButton.remove(); ragButton.remove(); healthWidget.remove(); overlay.remove(); };
+    footer.prepend(ragButton); footer.prepend(providerButton); document.body.append(overlay);
+    return () => { providerButton.remove(); ragButton.remove(); overlay.remove(); };
   }, [isAuthenticated, language, providerDashboardQuery.data, knowledgeAuditQuery.data, webStatusQuery.data]);
 
   return (
@@ -390,8 +788,20 @@ export default function Home() {
       <aside className={`kairema-sidebar ${sidebarOpen ? "kairema-sidebar-open" : "kairema-sidebar-collapsed"}`} aria-label={language === "ru" ? "Боковая навигация" : "Sidebar navigation"} inert={!sidebarOpen}>
         <div className="kairema-brand-row"><span className="kairema-logo"><Sparkles className="size-4" /></span><span>Kairema</span><button className="kairema-icon-btn md:hidden" onClick={() => setSidebarOpen(false)} aria-label="Close"><X className="size-4" /></button></div>
         <button onClick={() => void createChat()} className="kairema-new-chat" disabled={authLoading || createMutation.isPending}><MessageSquarePlus className="size-4" />{t.newChat}</button>
+        {/* The four Kairema roles belong to the platform path. In My API the turn runs on the
+            caller's own provider, so offering them here would suggest a choice that has no
+            effect on where the answer comes from. */}
+        {chatMode === "chat" ? (<>
         <div className="kairema-sidebar-label"><CircleDot className="size-3" />{t.models}</div>
         <div className="kairema-providers">{modelViews.map((model) => <button key={model.modelId} onClick={() => { setModelId(model.modelId); setSidebarOpen(false); }} title={model.role[language]} className={`kairema-provider ${modelId === model.modelId ? "kairema-provider-selected" : ""}`}><span className="kairema-provider-icon"><Bot className="size-4" /></span><span className="kairema-provider-copy"><span className="kairema-provider-title">{model.label[language]}</span><span className="kairema-provider-role">{model.role[language]}</span><StatusIndicator status={model.status} /><RuntimeMeta runtime={model.runtime} language={language} /></span></button>)}</div>
+        </>) : (<>
+        <div className="kairema-sidebar-label"><CircleDot className="size-3" />{t.modeMyApi}</div>
+        {myApiActiveConfig ? (
+          <div className="kairema-providers"><div className="kairema-provider kairema-provider-selected"><span className="kairema-provider-icon"><Sparkles className="size-4" /></span><span className="kairema-provider-copy"><span className="kairema-provider-title">{myApiActiveConfig.displayName || myApiActiveConfig.provider}</span><span className="kairema-provider-role">{myApiActiveConfig.activeModel}</span></span></div></div>
+        ) : (
+          <Link href="/settings/providers" className="kairema-footer-link">{t.configureProvider}</Link>
+        )}
+        </>)}
         <div className="kairema-history-head"><span>{t.history}</span><div className="flex items-center gap-1"><button type="button" onClick={() => setPendingHistoryClear(true)} className="kairema-icon-btn" aria-label={language === "ru" ? "Очистить всю историю" : "Clear all history"} title={language === "ru" ? "Очистить всю историю" : "Clear all history"} disabled={!isAuthenticated || !sessions.length || clearHistoryMutation.isPending}><Trash2 className="size-3.5" /></button><button onClick={() => void createChat()} className="kairema-icon-btn" aria-label={t.newChat}><MessageSquarePlus className="size-4" /></button></div></div>
         <label className="kairema-search"><Search className="size-4" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t.search} aria-label={t.search} /></label>
         <div className="kairema-history-list">{!isAuthenticated && <button className="kairema-history-item text-left" onClick={startLogin}><LogIn className="mr-2 inline size-3" />{t.loginHistory}</button>}{search.trim().length >= 2 ? <SearchResults results={results} labels={t} onSelect={(item) => item.sessionId && selectSession(item.sessionId)} /> : sessionMatches.map((session) => <div key={session.id} className={`kairema-history-row ${session.id === activeId ? "kairema-history-active" : ""}`}><button onClick={() => selectSession(session.id, session.modelId)} className="kairema-history-item">{session.title}</button><button type="button" onClick={() => setPendingChatDeletionId(session.id)} className="kairema-history-delete" title={t.delete} aria-label={`${t.delete}: ${session.title}`} disabled={deleteChatMutation.isPending}><Trash2 className="size-3.5" /></button></div>)}{isAuthenticated && !sessionsQuery.isLoading && !search.trim() && !sessions.length && <p className="kairema-empty">{t.noHistory}</p>}</div>
@@ -400,12 +810,21 @@ export default function Home() {
       {sidebarOpen && <button className="kairema-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Close" />}
       <section className="kairema-main">
         <header className="kairema-topbar">
-          <div className="kairema-topbar-left"><button className="kairema-icon-btn md:hidden" onClick={() => setSidebarOpen(true)} aria-label="Menu"><Menu className="size-5" /></button><button className="kairema-icon-btn hidden md:grid" onClick={() => setSidebarOpen((value) => !value)} aria-label={sidebarOpen ? (language === "ru" ? "Скрыть боковую панель" : "Hide sidebar") : (language === "ru" ? "Показать боковую панель" : "Show sidebar")} aria-expanded={sidebarOpen}>{sidebarOpen ? <PanelLeftClose className="size-4" /> : <PanelLeftOpen className="size-4" />}</button><span className="kairema-topbar-title">{activeSession?.title ?? t.newConversation}</span></div>
-          <div className="kairema-topbar-controls">{!isAuthenticated && <button type="button" className="kairema-guest-login" onClick={() => startLogin()}><LogIn className="size-4" /><span>{t.loginHistory}</span></button>}<button className="kairema-icon-btn" onClick={() => { toggleTheme?.(); void persistSettings({ theme: theme === "dark" ? "light" : "dark" }); }} title={theme === "dark" ? t.light : t.dark}>{theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}</button><button className="kairema-icon-btn" onClick={() => void persistSettings({ language: language === "ru" ? "en" : "ru" })} title={t.language}><Languages className="size-4" /></button><div className="kairema-select-wrap"><select value={modelId} onChange={(event) => setModelId(event.target.value as ModelId)} aria-label={t.models}>{modelViews.map((model) => <option key={model.modelId} value={model.modelId}>{model.label[language]}</option>)}</select></div><button className="kairema-icon-btn" onClick={() => setSettingsOpen(true)} title={t.openSettings}><Settings2 className="size-4" /></button></div>
+          <div className="kairema-topbar-left"><button className="kairema-icon-btn md:hidden" onClick={() => setSidebarOpen(true)} aria-label="Menu"><Menu className="size-5" /></button><span className="kairema-topbar-title sr-only">{activeSession?.title ?? t.newConversation}</span>{chatMode === "chat" ? (<div className="kairema-model-pill"><Sparkles className="kairema-model-sparkle" aria-hidden="true" /><div className="kairema-select-wrap" data-kairema-role-select="true"><select value={modelId} onChange={(event) => setModelId(event.target.value as ModelId)} aria-label={t.models}>{modelViews.map((model) => <option key={model.modelId} value={model.modelId}>{model.label[language]}</option>)}</select></div><ChevronDown className="kairema-model-chevron" aria-hidden="true" /></div>) : (<div className="kairema-model-pill" role="group" aria-label={t.activeUserBinding}><Sparkles className="kairema-model-sparkle" aria-hidden="true" />{myApiActiveConfig ? <ModelMenu value={myApiActiveConfig.activeModel} models={myApiModels} disabled={myApiCatalogMutation.isPending || setActiveModelMutation.isPending || !myApiModels.length} ariaLabel={t.myApiModelPicker} labels={MODEL_MENU_LABELS[language]} onSelect={(modelId) => void selectMyApiModel(modelId)} /> : <span className="kairema-binding-name">{t.myApiNotConfigured}</span>}</div>)}{!isAuthenticated && <button type="button" className="kairema-guest-login" onClick={() => startLogin()}><LogIn className="size-4" /><span>{t.loginHistory}</span></button>}</div>
+          <div className="kairema-topbar-controls"><span className="kairema-topbar-chip"><button type="button" className="kairema-header-button" onClick={() => setSettingsOpen(true)} title={t.openSettings} aria-label={t.openSettings}><Settings2 className="size-3.5" /><span>{t.settings}</span></button></span>{!isGuestUser && <span className="kairema-topbar-chip"><button type="button" className="kairema-header-button" onClick={() => setProfileOpen(true)} title={t.openProfile} aria-label={t.openProfile}><UserIcon className="size-3.5" /><span>{t.profileTitle}</span></button></span>}</div>
         </header>
-        <AIChatBox messages={visibleMessages} onSendMessage={send} onUploadFiles={uploadFiles} onRemoveAttachment={removeTemporaryAttachment} isLoading={isStreaming} onExportMarkdown={() => void exportCurrentChat("markdown")} onExportPdf={() => void exportCurrentChat("pdf")} canExport={Boolean(activeSession && dbMessages.length)} exportBusy={isExporting} exportError={notice} onCopyAssistant={(message) => void copyMessage(message)} onCopyUser={(message) => void copyMessage(message)} onCancelStream={cancelStream} composerValue={composerDraft} onComposerValueChange={setComposerDraft} onOpenTemplates={() => setTemplatesOpen(true)} composerSessionId={activeId || "new-composer"} uploadStatus={uploadStatus?.sessionId === activeId ? uploadStatus.message : ""} language={language} emptyStateMessage={isAuthenticated ? `${t.start} ${selectedModel.label[language]}` : t.loginChat} guestLoginAction={!isAuthenticated ? { label: t.loginHistory, onClick: () => startLogin() } : undefined} hasOlderHistory={Boolean(olderHistoryCursor === undefined ? messagesQuery.data?.nextCursor : olderHistoryCursor)} isLoadingOlderHistory={isLoadingOlderHistory} onLoadOlderHistory={() => void loadOlderHistory()} />
+        {/* Non-blocking: the page stays usable while a fallback runs or after the turn has stopped. */}
+        {providerBlocked && <ProviderUnavailableNotice switching={providerBlocked.switching} reason={providerBlocked.reason} />}
+        <AIChatBox aboveMessages={<div className="kairema-mode-switch" role="group" aria-label={t.modeSwitch}><button type="button" className="kairema-mode-option" aria-pressed={chatMode === "chat"} onClick={() => setChatMode("chat")}><MessageSquare className="size-4" /><span>{t.modeChat}</span></button><button type="button" className="kairema-mode-option" aria-pressed={chatMode === "myApi"} onClick={() => setChatMode("myApi")}><Repeat className="size-4" /><span>{t.modeMyApi}</span></button>{chatMode === "myApi" && <span className="kairema-mode-hint" role="status">{myApiActiveConfig ? (<>
+        <MyApiProviderMenu value={myApiCatalogProvider ?? myApiActiveConfig.provider} providers={myApiProviderOptions} disabled={setActiveProviderMutation.isPending || !myApiProviderOptions.length} ariaLabel={t.myApiProviderPicker} labels={{ connected: t.myApiProviderConnected, empty: t.myApiProviderEmpty }} onSelect={(provider) => void selectMyApiProvider(provider)} />
+        {myApiCatalogMutation.isPending ? <span className="kairema-mode-hint-state"> · {t.myApiLoadingModels}…</span> : null}
+        {myApiCatalogMutation.isError ? <span className="kairema-mode-hint-state"> · {myApiCatalogMutation.error?.message ?? t.myApiNoModels} <button type="button" className="kairema-mode-hint-link" onClick={() => void loadMyApiCatalog({ force: true })}>{t.myApiModelsRetry}</button></span> : null}
+        {myApiCatalogMutation.isSuccess && !myApiModels.length ? <span className="kairema-mode-hint-state"> · {t.myApiNoModels}</span> : null}
+        {myApiSwitchError ? <span className="kairema-mode-hint-state"> · {myApiSwitchError}</span> : null}
+      </>) : (<>{t.myApiNotConfigured}{" "}<Link href="/settings/providers" className="kairema-mode-hint-link">{t.configureProvider}</Link></>)}</span>}</div>} messages={visibleMessages} onSendMessage={send} onUploadFiles={uploadFiles} onRemoveAttachment={removeTemporaryAttachment} isLoading={isStreaming} onExportMarkdown={() => void exportCurrentChat("markdown")} onExportPdf={() => void exportCurrentChat("pdf")} canExport={Boolean(activeSession && dbMessages.length)} exportBusy={isExporting} exportError={notice} onCopyAssistant={(message) => void copyMessage(message)} onCopyUser={(message) => void copyMessage(message)} onCancelStream={cancelStream} composerValue={composerDraft} onComposerValueChange={setComposerDraft} onOpenTemplates={() => setTemplatesOpen(true)} composerSessionId={activeId || "new-composer"} uploadStatus={uploadStatus?.sessionId === activeId ? uploadStatus.message : ""} language={language} emptyStateMessage={isAuthenticated ? (chatMode === "myApi" ? (myApiActiveConfig ? `${t.start} ${myApiActiveConfig.displayName || myApiActiveConfig.provider} · ${myApiActiveConfig.activeModel}` : t.myApiNotConfigured) : `${t.start} ${selectedModel.label[language]}`) : t.loginChat} guestLoginAction={!isAuthenticated ? { label: t.loginHistory, onClick: () => startLogin() } : undefined} hasOlderHistory={Boolean(olderHistoryCursor === undefined ? messagesQuery.data?.nextCursor : olderHistoryCursor)} isLoadingOlderHistory={isLoadingOlderHistory} onLoadOlderHistory={() => void loadOlderHistory()} navigationCloseSignal={navigationCloseSignal} sendDisabled={Boolean(providerBlocked) && !isStreaming} onBlockedSendAttempt={() => setProviderBlocked((current) => (current ? { ...current } : current))} />
       </section>
-      <CleanSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} models={modelViews} settings={settings} language={language} labels={t} onUpdate={persistSettings} onRestoreSafeSettings={async () => { if (theme !== "dark") toggleTheme?.(); await persistSettings({ theme: "dark", highContrast: true }); }} />
+      <CleanSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} models={modelViews} settings={settings} language={language} labels={t} onUpdate={persistSettings} accountEmail={accountEmail} onLogout={logout} theme={theme} onToggleTheme={() => toggleTheme?.()} onOpenAiProviders={() => { setSettingsOpen(false); navigate("/settings/providers"); }} />
+      <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} language={language} labels={t} name={profileName} onNameChange={setProfileName} onSaveName={() => { void updateNameMutation.mutateAsync({ name: profileName.trim() }).then(() => utils.auth.me.invalidate()).catch((error) => setNotice(publicErrorMessage(error, language === "ru" ? "Не удалось обновить профиль." : "Could not update the profile."))); }} namePending={updateNameMutation.isPending} askClarifyingQuestions={Boolean(settings.askClarifyingQuestions)} onAskClarifyingChange={(value) => void persistSettings({ askClarifyingQuestions: value })} preferencesPending={settingMutation.isPending} onSavePreferences={() => void persistSettings({ askClarifyingQuestions: Boolean(settings.askClarifyingQuestions) })} onToast={setNotice} />
       <UnifiedMemoryDialog open={memoryOpen} onOpenChange={setMemoryOpen} data={memoryQuery.data} language={language} labels={t} onToast={setNotice} onUpdate={async (input) => { await memoryUpdateMutation.mutateAsync(input); await utils.memory.get.invalidate(); }} onAdd={async (fact) => { await memoryAddMutation.mutateAsync({ fact }); await utils.memory.get.invalidate(); }} onDelete={async (entryId) => { await memoryDeleteMutation.mutateAsync({ entryId }); await utils.memory.get.invalidate(); }} onClear={async () => { await memoryClearMutation.mutateAsync(); await utils.memory.get.invalidate(); }} />
       <ExportHistoryDialog open={exportHistoryOpen} onOpenChange={setExportHistoryOpen} records={exportsQuery.data ?? []} loading={exportsQuery.isLoading} language={language} busyId={exportDeleteMutation.isPending ? exportDeleteMutation.variables?.exportId : undefined} onDownload={(record) => { void downloadPersistentExport(record.id, record.fileName).catch((error) => setNotice(publicErrorMessage(error, language === "ru" ? "Не удалось открыть экспорт." : "Could not open export."))); }} onDelete={(exportId) => { void deletePersistentExport(exportId); }} />
       <PromptTemplatesDialog open={templatesOpen} onOpenChange={setTemplatesOpen} onInsert={(template) => { setComposerDraft(template.text); setTemplatesOpen(false); setNotice(language === "ru" ? `Шаблон «${template.title}» добавлен в запрос.` : `Template “${template.title}” was added to the prompt.`); }} onCopy={(template) => { void navigator.clipboard.writeText(template.text).then(() => setNotice(language === "ru" ? `Шаблон «${template.title}» скопирован.` : `Template “${template.title}” copied.`)).catch(() => setNotice(language === "ru" ? "Не удалось скопировать шаблон." : "Could not copy the template.")); }} />
@@ -463,10 +882,9 @@ function SettingsDialog({ open, onOpenChange, models, settings, language, labels
   return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="kairema-dialog kairema-dialog-wide"><DialogHeader><DialogTitle>{labels.settings}</DialogTitle></DialogHeader><p className="kairema-dialog-note">{labels.save}</p><div className="kairema-settings-grid"><section><h3>{labels.response}</h3><label><span>{labels.style}</span><select value={String(settings.responseStyle)} onChange={(event) => void select(event, "responseStyle")}>{(Object.keys(styles) as ResponseStyle[]).map((style) => <option key={style} value={style}>{styles[style][language]}</option>)}</select><small className="kairema-setting-help">{hint("Определяет подачу ответа; содержание вопроса не меняется.", "Sets the response presentation without changing the question.")}</small></label><label><span>{labels.length}</span><select value={String(settings.responseLength)} onChange={(event) => void select(event, "responseLength")}>{Object.entries(lengths).map(([value, text]) => <option key={value} value={value}>{text[language]}</option>)}</select><small className="kairema-setting-help">{hint("Задаёт обычный объём следующего ответа; подробность можно уточнить в сообщении.", "Sets the usual next-answer length; you can still ask for detail in a message.")}</small></label><label><span>{labels.effort}</span><select value={String(settings.effort)} onChange={(event) => void select(event, "effort")}>{Object.entries(efforts).map(([value, text]) => <option key={value} value={value}>{text[language]}</option>)}</select><small className="kairema-setting-help">{hint("Балансирует скорость и глубину рассуждения для новых ответов.", "Balances speed and reasoning depth for new answers.")}</small></label><label><span>{labels.defaultRole}</span><select value={String(settings.defaultRole)} onChange={(event) => void select(event, "defaultRole")}>{models.map((model) => <option key={model.modelId} value={model.modelId}>{model.label[language]}</option>)}</select><small className="kairema-setting-help">{hint("Выбирает роль для новых чатов; в текущем чате её можно сменить сверху.", "Chooses the role for new chats; it can be changed in the current chat header.")}</small></label><label><span>{labels.healthRefresh}</span><select aria-label={labels.healthRefresh} value={String(settings.healthRefreshSeconds ?? 30)} onChange={(event) => void onUpdate({ healthRefreshSeconds: Number(event.target.value) })}><option value="0">{language === "ru" ? "Вручную" : "Manual"}</option><option value="15">15 s</option><option value="30">30 s</option><option value="60">60 s</option></select><small className="kairema-setting-help">{hint("Обновляет только публичный виджет доступности; ответы и история не передаются.", "Refreshes only the public availability widget; messages and history are not sent.")}</small></label></section><section><h3>{labels.web}</h3><SettingSwitch label={language === "ru" ? "Разрешить инструменты" : "Allow tools"} help={hint("Включает безопасную работу с вложениями в пределах разрешений аккаунта.", "Enables safe attachment work within your account permissions.")} checked={Boolean(settings.toolAccess ?? true)} onChange={(value) => void onUpdate({ toolAccess: value })} /><SettingSwitch label={labels.thinking} help={hint("Добавляет более развёрнутое объяснение, если его поддерживает выбранная роль.", "Requests a more explicit explanation when the selected role supports it.")} checked={Boolean(settings.thinking)} onChange={(value) => void onUpdate({ thinking: value })} /><p className="kairema-inline-status"><Globe2 className="size-3.5" />{webStatus}</p><p className="kairema-inline-status-meta">{probes}{checkedAt ? ` · ${language === "ru" ? "Проверено" : "Checked"}: ${checkedAt}` : ""}</p><h3 className="mt-6">RAG</h3><p className="kairema-inline-status"><Archive className="size-3.5" />{language === "ru" ? `Проверяемая база: ${knowledge?.documents ?? 0} фрагм.` : `Verifiable base: ${knowledge?.documents ?? 0} excerpts.`}</p><p className="kairema-inline-status-meta">{knowledge?.sources?.map((source) => `${source.name}: ${source.indexedCount} · ${fmt(source.lastSuccessAt)}`).join(" · ") || (language === "ru" ? "Источники ещё не обновлялись." : "Sources have not been refreshed yet.")}</p>{knowledge?.lastRun?.message && <p className="kairema-inline-status-meta">{knowledge.lastRun.message}</p>}<button type="button" className="kairema-rag-refresh" onClick={onRefreshKnowledge} disabled={knowledgeBusy}>{knowledgeBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Archive className="size-3.5" />}{language === "ru" ? "Обновить официальные источники" : "Refresh official sources"}</button><h3 className="mt-6">{labels.models}</h3>{models.map((model) => <div className="kairema-settings-provider" key={model.modelId}><span><b>{model.label[language]}</b><small>{model.role[language]}</small><RuntimeMeta runtime={model.runtime} language={language} /></span><StatusIndicator status={model.status} /></div>)}<section className="kairema-model-limits" aria-labelledby="model-limits-title"><h3 id="model-limits-title">{labels.modelLimits}</h3>{models.map((model) => { const info = model.limits; const quota = limitQuota(info?.quota); return <article className="kairema-limit-card" key={`limits-${model.modelId}`}><div><b>{model.label[language]}</b><small>{limitCandidate(info?.candidate)} · {info?.provider ?? "—"}</small><small>{language === "ru" ? "Квота" : "Quota"}: {quota}{info?.nextFallback ? ` · ${language === "ru" ? "Следующий резерв" : "Next backup"}: ${info.nextFallback}` : ""}</small></div><span className={`kairema-status ${info?.quota === "limited" ? "kairema-status-fallback" : info?.quota === "unavailable" ? "kairema-status-error" : "kairema-status-ready"}`}>{quota}</span></article>; })}</section></section></div></DialogContent></Dialog>;
 }
 
-function CleanSettingsDialog({ open, onOpenChange, models, settings, language, labels, onUpdate, onRestoreSafeSettings }: { open: boolean; onOpenChange: (open: boolean) => void; models: PublicModel[]; settings: Record<string, unknown>; language: Language; labels: typeof copy.ru | typeof copy.en; onUpdate: (patch: Record<string, unknown>) => Promise<void>; onRestoreSafeSettings: () => Promise<void> }) {
+function CleanSettingsDialog({ open, onOpenChange, models, settings, language, labels, onUpdate, accountEmail, onLogout, theme, onToggleTheme, onOpenAiProviders }: { open: boolean; onOpenChange: (open: boolean) => void; models: PublicModel[]; settings: Record<string, unknown>; language: Language; labels: typeof copy.ru | typeof copy.en; onUpdate: (patch: Record<string, unknown>) => Promise<void>; accountEmail: string; onLogout: () => Promise<void>; theme?: string; onToggleTheme?: () => void; onOpenAiProviders: () => void }) {
   const select = async (value: string, field: string) => onUpdate({ [field]: value });
   const hint = (ru: string, en: string) => language === "ru" ? ru : en;
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [linkEmail, setLinkEmail] = useState("");
   const [linkNotice, setLinkNotice] = useState("");
   const beginLinkMutation = trpc.auth.beginLink.useMutation();
@@ -489,22 +907,25 @@ function CleanSettingsDialog({ open, onOpenChange, models, settings, language, l
         <p className="kairema-dialog-note">{labels.save}</p>
         <div className="kairema-settings-grid">
           <section>
+            <h3>{language === "ru" ? "Интерфейс" : "Interface"}</h3>
+            <label><span>{labels.theme}</span><button type="button" className="kairema-setting-chip kairema-theme-toggle" title={theme === "dark" ? labels.light : labels.dark} aria-label={labels.theme} onClick={() => { onToggleTheme?.(); void onUpdate({ theme: theme === "dark" ? "light" : "dark" }); }}>{theme === "dark" ? hint("Тёмная тема", "Dark theme") : hint("Светлая тема", "Light theme")}</button><small className="kairema-setting-help">{hint("Светлое или тёмное оформление.", "Light or dark appearance.")}</small></label>
+            <label><span>{labels.language}</span><AppDropdown value={language} onValueChange={(value) => { if (language === value) return; void onUpdate({ language: value }); }} options={[{ value: "ru", label: "Русский" }, { value: "en", label: "English" }]} ariaLabel={labels.language} /><small className="kairema-setting-help">{hint("Язык интерфейса и ответов.", "Interface and reply language.")}</small></label>
+          </section>
+          <section>
             <h3>{labels.response}</h3>
             <label><span>{labels.style}</span><AppDropdown value={String(settings.responseStyle)} onValueChange={(value) => void select(value, "responseStyle")} options={(Object.keys(styles) as ResponseStyle[]).map((value) => ({ value, label: styles[value][language], description: hint("Стиль подачи без изменения смысла вопроса.", "Presentation style without changing the question.") }))} ariaLabel={labels.style} /><small className="kairema-setting-help">{hint("Выбирает подачу ответа; содержание вопроса не меняется.", "Sets response presentation without changing your question.")}</small></label>
             <label><span>{labels.length}</span><AppDropdown value={String(settings.responseLength)} onValueChange={(value) => void select(value, "responseLength")} options={Object.entries(lengths).map(([value, text]) => ({ value, label: text[language], description: value === "brief" ? hint("Коротко и по существу.", "Short and to the point.") : value === "detailed" ? hint("Подробно и структурно.", "Detailed and structured.") : hint("Сбалансированный объём.", "Balanced detail.") }))} ariaLabel={labels.length} /><small className="kairema-setting-help">{hint("Задаёт обычный объём следующего ответа.", "Sets the usual length of the next response.")}</small></label>
             <label><span>{labels.effort}</span><AppDropdown value={String(settings.effort)} onValueChange={(value) => void select(value, "effort")} options={Object.entries(efforts).map(([value, text]) => ({ value, label: text[language], description: value === "low" ? hint("Быстрый ответ для простых задач.", "Fast response for simple work.") : value === "high" ? hint("Больше времени на анализ.", "More time for analysis.") : hint("Обычный баланс скорости и глубины.", "Usual balance of speed and depth.") }))} ariaLabel={labels.effort} /><small className="kairema-setting-help">{hint("Балансирует скорость и глубину рассуждения.", "Balances response speed and reasoning depth.")}</small></label>
             <label><span>{labels.defaultRole}</span><AppDropdown value={String(settings.defaultRole)} onValueChange={(value) => void select(value, "defaultRole")} options={models.map((model) => ({ value: model.modelId, label: model.label[language], description: model.role[language] }))} ariaLabel={labels.defaultRole} /><small className="kairema-setting-help">{hint("Выбирает роль для новых разговоров.", "Chooses the role for new conversations.")}</small></label>
+            <label><span>{language === "ru" ? "AI-провайдер" : "AI provider"}</span><button type="button" className="kairema-setting-chip" onClick={onOpenAiProviders}>{language === "ru" ? "AI Providers →" : "AI Providers →"}</button><small className="kairema-setting-help">{hint("Свой API-ключ, провайдер и модель для режима «Мой API».", "Your own API key, provider and model for the “My API” mode.")}</small></label>
           </section>
           <section>
             <h3>{language === "ru" ? "Работа с сообщениями" : "Message handling"}</h3>
-            <SettingSwitch label={language === "ru" ? "Разрешить инструменты" : "Allow tools"} help={hint("Включает безопасную работу с вложениями в пределах разрешений аккаунта.", "Enables safe attachment work within account permissions.")} checked={Boolean(settings.toolAccess ?? true)} onChange={(value) => void onUpdate({ toolAccess: value })} />
             <SettingSwitch label={labels.thinking} help={hint("Добавляет более развёрнутое объяснение, если его поддерживает выбранная роль.", "Requests a more explicit explanation when the selected role supports it.")} checked={Boolean(settings.thinking)} onChange={(value) => void onUpdate({ thinking: value })} />
-            <SettingSwitch label={language === "ru" ? "Высокая контрастность" : "High contrast"} help={hint("Усиливает различимость текста, границ и фокуса; настройка сохраняется только для вашего аккаунта.", "Strengthens text, borders, and focus visibility; this setting is saved only for your account.")} checked={Boolean(settings.highContrast)} onChange={(value) => void onUpdate({ highContrast: value })} />
-            <SettingSwitch label={language === "ru" ? "Email-уведомления" : "Email notifications"} help={hint("Сохраняет ваше согласие на будущие сервисные уведомления. Сообщения, контакты и ключи в письмо не передаются; отправка пока не подключена.", "Stores your consent for future service notifications. Messages, contacts, and keys are not sent by email; delivery is not enabled yet.")} checked={Boolean(settings.emailNotifications)} onChange={(value) => void onUpdate({ emailNotifications: value })} />
             <SettingSwitch label={language === "ru" ? "Веб-поиск" : "Web search"} help={hint("Добавляет только проверяемые свежие источники, когда они доступны; при сбое чат продолжает работу с честным статусом.", "Adds verifiable fresh sources when available; if it fails, chat continues with an honest status.")} checked={Boolean(settings.webSearch)} onChange={(value) => void onUpdate({ webSearch: value })} />
-            <label><span>{labels.healthRefresh}</span><AppSelect ariaLabel={labels.healthRefresh} value={String(settings.healthRefreshSeconds ?? 30)} onValueChange={(value) => void onUpdate({ healthRefreshSeconds: Number(value) })} options={[{ value: "0", label: language === "ru" ? "Вручную" : "Manual" }, { value: "15", label: "15 s" }, { value: "30", label: "30 s" }, { value: "60", label: "60 s" }]} /><small className="kairema-setting-help">{hint("Обновляет только публичный индикатор доступности.", "Refreshes only the public availability indicator.")}</small></label>
-            <section className="kairema-settings-diagnostics" aria-live="polite"><h3>{language === "ru" ? "Самодиагностика" : "Settings check"}</h3><p className="kairema-setting-help">{hint("Показывает только сохранённые пользовательские параметры, без сообщений, ключей и служебных маршрутов.", "Shows only saved user preferences, never messages, keys, or internal routing.")}</p><button type="button" className="kairema-rag-refresh" onClick={() => setDiagnosticsOpen((value) => !value)}>{language === "ru" ? "Проверить настройки" : "Check settings"}</button>{diagnosticsOpen && <div className="kairema-settings-diagnostics-result"><p>{language === "ru" ? "Тема" : "Theme"}: <b>{settings.theme === "dark" ? (language === "ru" ? "тёмная" : "dark") : (language === "ru" ? "светлая" : "light")}</b></p><p>{language === "ru" ? "Высокая контрастность" : "High contrast"}: <b>{Boolean(settings.highContrast) ? (language === "ru" ? "включена" : "on") : (language === "ru" ? "выключена" : "off")}</b></p><button type="button" className="kairema-danger-button" onClick={() => void onRestoreSafeSettings()}>{language === "ru" ? "Восстановить безопасный режим" : "Restore safe mode"}</button></div>}</section>
-            <section className="kairema-settings-diagnostics" aria-live="polite"><h3>{language === "ru" ? "Привязать email-вход" : "Link email sign-in"}</h3><p className="kairema-setting-help">{hint("По желанию привяжите отдельный Stytch email-вход. Совпадение адреса никогда не объединяет аккаунты автоматически. Kairema не хранит пароль, письма, токены или ссылки сброса.", "Optionally link a separate Stytch email sign-in. Matching email addresses never merge accounts automatically. Kairema does not store passwords, email tokens, or reset links.")}</p><label className="kairema-field-label"><span>{language === "ru" ? "Email для подтверждения" : "Email to confirm"}</span><input type="email" autoComplete="email" value={linkEmail} onChange={(event) => setLinkEmail(event.target.value)} placeholder="name@example.com" /></label><button type="button" className="kairema-rag-refresh" disabled={beginLinkMutation.isPending || !linkEmail.trim()} onClick={() => void requestLink()}>{beginLinkMutation.isPending ? (language === "ru" ? "Запрашиваем…" : "Requesting…") : (language === "ru" ? "Отправить подтверждение" : "Send confirmation")}</button>{linkNotice ? <p className="kairema-setting-help">{linkNotice}</p> : null}</section>
+            {accountEmail
+              ? <section className="kairema-settings-diagnostics" aria-live="polite"><h3>{language === "ru" ? "Аккаунт" : "Account"}</h3><p className="kairema-setting-help">{hint("Вы вошли в Kairema с этим адресом. История чатов и настройки привязаны к нему.", "You are signed in to Kairema with this address. Your chat history and settings belong to it.")}</p><label className="kairema-field-label"><span>{language === "ru" ? "Email аккаунта" : "Account email"}</span><input type="email" readOnly aria-label={language === "ru" ? "Email аккаунта" : "Account email"} value={accountEmail} /></label><button type="button" className="kairema-danger-button" onClick={() => void onLogout()}>{language === "ru" ? "Выйти" : "Sign out"}</button></section>
+              : <section className="kairema-settings-diagnostics" aria-live="polite"><h3>{language === "ru" ? "Привязать email-вход" : "Link email sign-in"}</h3><p className="kairema-setting-help">{hint("Добавьте email-вход к этому аккаунту. Это не объединяет аккаунты автоматически — привязка выполняется только после подтверждения. Kairema не хранит пароль, письма, токены или ссылки сброса.", "Add an email sign-in to this account. This never merges accounts automatically — the link is applied only after confirmation. Kairema does not store passwords, email tokens, or reset links.")}</p><label className="kairema-field-label"><span>{language === "ru" ? "Email для подтверждения" : "Email to confirm"}</span><input type="email" autoComplete="email" aria-label={language === "ru" ? "Email для подтверждения" : "Email to confirm"} value={linkEmail} onChange={(event) => setLinkEmail(event.target.value)} placeholder="name@example.com" /></label><button type="button" className="kairema-rag-refresh" disabled={beginLinkMutation.isPending || !linkEmail.trim()} onClick={() => void requestLink()}>{beginLinkMutation.isPending ? (language === "ru" ? "Запрашиваем…" : "Requesting…") : (language === "ru" ? "Отправить подтверждение" : "Send confirmation")}</button>{linkNotice ? <p className="kairema-setting-help">{linkNotice}</p> : null}</section>}
           </section>
         </div>
       </DialogContent>
@@ -513,6 +934,24 @@ function CleanSettingsDialog({ open, onOpenChange, models, settings, language, l
 }
 
 export function SettingSwitch({ label, help, checked, disabled, onChange }: { label: string; help?: string; checked: boolean; disabled?: boolean; onChange: (value: boolean) => void }) { return <div className="kairema-switch-row"><span className="kairema-switch-copy"><b>{label}</b>{help && <small>{help}</small>}</span><Switch className="kairema-switch-control" aria-label={label} checked={checked} disabled={disabled} onCheckedChange={onChange} /></div>; }
+
+/** Profile is a separate dialog from Settings: display name plus personal preferences. */
+function ProfileDialog({ open, onOpenChange, language, labels, name, onNameChange, onSaveName, namePending, askClarifyingQuestions, onAskClarifyingChange, preferencesPending, onSavePreferences, onToast }: { open: boolean; onOpenChange: (open: boolean) => void; language: Language; labels: typeof copy.ru | typeof copy.en; name: string; onNameChange: (value: string) => void; onSaveName: () => void; namePending: boolean; askClarifyingQuestions: boolean; onAskClarifyingChange: (value: boolean) => void; preferencesPending: boolean; onSavePreferences: () => void; onToast: (message: string) => void }) {
+  const [nameNotice, setNameNotice] = useState("");
+  const [preferencesNotice, setPreferencesNotice] = useState("");
+  const [nameDirty, setNameDirty] = useState(false);
+  // Reset only when the dialog opens; keying this on `name` would clear the dirty
+  // flag on every keystroke and keep "Update Profile" permanently disabled.
+  useEffect(() => { if (open) { setNameNotice(""); setPreferencesNotice(""); setNameDirty(false); } }, [open]);
+  const saveName = () => { if (namePending) return; onSaveName(); setNameNotice(labels.profileUpdated); onToast(labels.profileUpdated); };
+  const savePreferences = () => { if (preferencesPending) return; onSavePreferences(); setPreferencesNotice(labels.preferencesSaved); onToast(labels.preferencesSaved); };
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="kairema-dialog kairema-dialog-narrow"><DialogHeader><DialogTitle>{labels.profileTitle}</DialogTitle></DialogHeader>
+    <div className="kairema-profile-grid">
+    <section><h3>{labels.fullName}</h3><label className="kairema-field-label"><span>{labels.nameFieldLabel}</span><input value={name} maxLength={120} autoComplete="name" aria-label={labels.nameFieldLabel} placeholder={labels.namePlaceholder} onChange={(event) => { onNameChange(event.target.value); setNameDirty(true); setNameNotice(""); }} /></label><button type="button" className="kairema-dialog-action" disabled={namePending || !nameDirty} onClick={saveName}>{namePending ? <LoaderCircle className="size-3.5 animate-spin" /> : <UserIcon className="size-3.5" />}{labels.updateProfile}</button>{nameNotice ? <p className="kairema-setting-help" role="status">{nameNotice}</p> : null}</section>
+    <section><h3>{labels.personalPreferences}</h3><p className="kairema-dialog-note">{labels.preferencesPrompt}</p><p className="kairema-dialog-note">{labels.preferencesScope}</p><SettingSwitch label={labels.askClarifying} checked={askClarifyingQuestions} onChange={onAskClarifyingChange} /><button type="button" className="kairema-dialog-action" disabled={preferencesPending} onClick={savePreferences}>{preferencesPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}{labels.savePreferences}</button>{preferencesNotice ? <p className="kairema-setting-help" role="status">{preferencesNotice}</p> : null}</section>
+    </div>
+  </DialogContent></Dialog>;
+}
 
 function UnifiedMemoryDialog({ open, onOpenChange, data, language, labels, onUpdate, onAdd, onDelete, onClear, onToast }: { open: boolean; onOpenChange: (open: boolean) => void; data?: { settings?: { enabled?: number; autoExtract?: number }; profile?: { profile?: string | null; summary?: string | null }; facts?: Array<{ id: string; value: string }>; topics?: Array<{ id: string; value: string; role?: string | null }>; }; language: Language; labels: typeof copy.ru | typeof copy.en; onUpdate: (input: { enabled?: boolean; autoExtract?: boolean; profile?: string }) => Promise<void>; onAdd: (fact: string) => Promise<void>; onDelete: (id: string) => Promise<void>; onClear: () => Promise<void>; onToast: (message: string) => void }) {
   const ru = language === "ru";

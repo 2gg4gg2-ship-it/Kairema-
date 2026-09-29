@@ -7,10 +7,15 @@ export const users = mysqlTable("users", {
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  isGuest: int("isGuest").notNull().default(0),
+  expiresAt: timestamp("expiresAt"),
+  lastActivityAt: timestamp("lastActivityAt").defaultNow().notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
-});
+}, (table) => [
+  index("users_guest_expires_idx").on(table.isGuest, table.expiresAt),
+]);
 
 /**
  * Provider subject → canonical Kairema user mapping.
@@ -175,6 +180,12 @@ export const searchQualityMetrics = mysqlTable("search_quality_metrics", {
 	attemptedLayerCount: int("attemptedLayerCount").notNull(),
 	staleBlocked: int("staleBlocked").notNull().default(0),
 	latencyMs: int("latencyMs").notNull(),
+	/** Which task kind produced this sample; null for rows written before live-value telemetry. */
+	taskKind: varchar("taskKind", { length: 16 }),
+	/** 1 confirmed, 0 unconfirmed, null for samples of a task kind that has no value to prove. */
+	valueConfirmed: int("valueConfirmed"),
+	/** 1 when the sample comes from the value-shaped second pass. */
+	targetedPass: int("targetedPass"),
 	createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => [index("search_quality_metrics_created_idx").on(table.createdAt)]);
 
@@ -260,6 +271,22 @@ export const chatStreamRateWindows = mysqlTable("chat_stream_rate_windows", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+/**
+ * Per-user fixed-minute quota state for My API (BYOK) ingress.
+ *
+ * It is a table of its own rather than another counter on `chatStreamRateWindows` because that
+ * table already counts every chat-stream request from the same user: sharing the row would make a
+ * single My API turn increment the ordinary-chat counter too, so the two budgets would cancel each
+ * other out and neither limit would hold. Separate rows keep the two budgets independent while both
+ * stay in the database the project already depends on — no new service, no new dependency.
+ */
+export const myApiRateWindows = mysqlTable("my_api_rate_windows", {
+  userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  windowStarted: timestamp("windowStarted").defaultNow().notNull(),
+  requestCount: int("requestCount").notNull().default(0),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 /** Metadata-only audit trail: never stores request prompts, response bodies, headers, IPs, or credentials. */
 export const devApiAuditRecords = mysqlTable("dev_api_audit_records", {
   id: varchar("id", { length: 36 }).primaryKey(),
@@ -284,9 +311,42 @@ export const userSettings = mysqlTable("user_settings", {
   healthRefreshSeconds: int("healthRefreshSeconds").notNull().default(30),
   highContrast: int("highContrast").notNull().default(0),
   emailNotifications: int("emailNotifications").notNull().default(0),
+  askClarifyingQuestions: int("askClarifyingQuestions").notNull().default(0),
+  /**
+   * Which of the caller's own user_provider_configs rows backs "My API". It stores a
+   * preference only, never a secret, and is the single source of truth for the active
+   * provider so the settings row can never disagree with the credential rows.
+   */
+  myApiProvider: varchar("myApiProvider", { length: 32 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
+
+/**
+ * One row per (user, provider). The API key is only ever stored as an AES-256-GCM
+ * envelope; `keyHint` is a masked suffix so the UI can recognise a saved key without
+ * ever receiving the plaintext. The unique (userId, provider) key makes a repeated save
+ * an update instead of a duplicate row.
+ */
+export const userProviderConfigs = mysqlTable("user_provider_configs", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  provider: varchar("provider", { length: 32 }).notNull(),
+  activeModel: varchar("activeModel", { length: 191 }).notNull(),
+  encryptedApiKey: text("encryptedApiKey").notNull(),
+  keyHint: varchar("keyHint", { length: 16 }).notNull(),
+  /** Present only for a provider the user defined: its label, never a system name. */
+  displayName: varchar("displayName", { length: 64 }),
+  /** Validated https base URL of an OpenAI-compatible API; null for built-in providers. */
+  baseUrl: varchar("baseUrl", { length: 300 }),
+  /** Optional explicit catalog route when the standard /models sibling is wrong. */
+  modelsEndpoint: varchar("modelsEndpoint", { length: 300 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [
+  uniqueIndex("user_provider_configs_user_provider_unique").on(table.userId, table.provider),
+  index("user_provider_configs_user_idx").on(table.userId),
+]);
 
 export const memoryProfiles = mysqlTable("memory_profiles", {
   userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
@@ -487,6 +547,7 @@ export type KnowledgeDocument = typeof knowledgeDocuments.$inferSelect;
 export type KnowledgeIngestionRun = typeof knowledgeIngestionRuns.$inferSelect;
 export type DevApiAuditRecord = typeof devApiAuditRecords.$inferSelect;
 export type UserSettings = typeof userSettings.$inferSelect;
+export type UserProviderConfig = typeof userProviderConfigs.$inferSelect;
 export type MemoryProfile = typeof memoryProfiles.$inferSelect;
 export type MemorySettings = typeof memorySettings.$inferSelect;
 export type MemoryEntry = typeof memoryEntries.$inferSelect;

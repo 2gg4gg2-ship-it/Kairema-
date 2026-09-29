@@ -21,8 +21,8 @@ import { appRouter } from "./routers";
 
 function callerFor(openId: string, id = 42) {
   return appRouter.createCaller({
-    user: { id, openId, email: "user@example.com", name: "User", loginMethod: "manus", role: "user", createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() },
-    req: {} as TrpcContext["req"],
+    user: { id, openId, email: "user@example.com", name: "User", loginMethod: "manus", role: "user", createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date(), isGuest: 0 },
+    req: { headers: {} } as TrpcContext["req"],
     res: {} as TrpcContext["res"],
   });
 }
@@ -30,7 +30,7 @@ function callerFor(openId: string, id = 42) {
 function guestCaller() {
   return appRouter.createCaller({
     user: null,
-    req: {} as TrpcContext["req"],
+    req: { headers: {} } as TrpcContext["req"],
     res: {} as TrpcContext["res"],
   });
 }

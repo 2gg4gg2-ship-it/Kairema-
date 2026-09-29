@@ -28,8 +28,9 @@ function callerFor(userId = 42) {
       createdAt: new Date(),
       updatedAt: new Date(),
       lastSignedIn: new Date(),
+      isGuest: 0,
     },
-    req: {} as TrpcContext["req"],
+    req: { headers: {} } as TrpcContext["req"],
     res: {} as TrpcContext["res"],
   });
 }

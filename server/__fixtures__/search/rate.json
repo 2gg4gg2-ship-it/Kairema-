@@ -1,0 +1,49 @@
+{
+  "cases": [
+    {
+      "name": "rate-now-marker",
+      "query": "Какой сейчас курс доллара к гривне?",
+      "now": "2026-09-26T09:34:00.000Z",
+      "entries": [
+        { "title": "Курс USD/UAH", "url": "https://example.com/rate/usduah", "publishedAt": null, "text": "USD/UAH: 41,2530, обновлено сейчас." }
+      ],
+      "expected": { "status": "confirmed", "reason": "confirmed_now_marker", "asOf": null, "value": "41,2530" }
+    },
+    {
+      "name": "rate-recent-page",
+      "query": "Какой сейчас курс доллара к гривне?",
+      "now": "2026-09-26T09:34:00.000Z",
+      "entries": [
+        { "title": "Курс доллара к гривне", "url": "https://example.com/rate/usduah", "publishedAt": "2026-09-26T09:19:00.000Z", "text": "USD/UAH 41,2530" }
+      ],
+      "expected": { "status": "confirmed", "reason": "confirmed_recent_page", "asOf": null, "value": "41,2530" }
+    },
+    {
+      "name": "rate-number-without-a-currency",
+      "query": "Какой сейчас курс доллара к гривне?",
+      "now": "2026-09-26T09:34:00.000Z",
+      "entries": [
+        { "title": "Курсы валют", "url": "https://example.com/rate/table", "publishedAt": "2026-09-26T09:25:00.000Z", "text": "Курсы: 41,2530 и 40,1000, обновлено 5 минут назад." }
+      ],
+      "expected": { "status": "unconfirmed", "reason": "missing_kind", "asOf": null }
+    },
+    {
+      "name": "rate-stale-page",
+      "query": "Какой сейчас курс доллара к гривне?",
+      "now": "2026-09-26T09:34:00.000Z",
+      "entries": [
+        { "title": "Курс доллара к гривне", "url": "https://example.com/rate/usduah", "publishedAt": "2026-09-25T09:00:00.000Z", "text": "USD/UAH 41,2530" }
+      ],
+      "expected": { "status": "unconfirmed", "reason": "stale_page", "asOf": null }
+    },
+    {
+      "name": "rate-malformed-snippet-null",
+      "query": "Какой сейчас курс доллара к гривне?",
+      "now": "2026-09-26T09:34:00.000Z",
+      "entries": [
+        { "title": "Курс доллара к гривне", "url": "https://example.com/rate/usduah", "publishedAt": null, "text": null }
+      ],
+      "expected": { "status": "unconfirmed", "reason": "missing_kind", "asOf": null }
+    }
+  ]
+}

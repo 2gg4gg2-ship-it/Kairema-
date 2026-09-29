@@ -1,10 +1,24 @@
 /* @vitest-environment jsdom */
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fixtures = vi.hoisted(() => ({
+  userProviders: { providers: [{ id: "openrouter", displayName: "OpenRouter", available: true }], configs: [], activeProvider: null, storageReady: true } as Record<string, unknown>,
   modelId: "fast",
+  myApiModels: [] as Array<{ id: string; name: string; displayName?: string | null; isFree?: boolean }>,
+  myApiModelsLoaded: false,
+  myApiCatalogError: "" as string | null,
+  myApiCatalogPending: false,
+  switchModelError: "" as string | null,
+  myApiCatalogInputs: [] as unknown[],
+  switchedModel: null as unknown,
+  switchedProvider: null as unknown,
+  switchProviderError: "" as string | null,
+  updatedSettings: [] as Array<Record<string, unknown>>,
+
   sessionId: "11111111-1111-4111-8111-111111111111",
   sessions: [] as Array<{ id: string; modelId: string; title: string }>,
   messages: [] as Array<{ id: number; role: "user" | "assistant"; content: string; modelId: string | null; createdAt: Date; metadata?: string }>,
@@ -15,11 +29,14 @@ const fixtures = vi.hoisted(() => ({
   downloadPrepared: vi.fn(),
   invalidateMessages: vi.fn(),
   historyPageFetch: vi.fn(),
+  discardFailedTurn: vi.fn(),
+  persistDirectTurn: vi.fn(),
   invalidateSessions: vi.fn(),
+  invalidateUserProviders: () => {},
   createChat: vi.fn(),
   deleteChat: vi.fn(),
   clearHistory: vi.fn(),
-  updateSettings: vi.fn(),
+  updateSettings: vi.fn(async (input?: Record<string, unknown>) => { if (input) fixtures.updatedSettings.push(input); return {}; }),
   draft: null as { content: string; updatedAt: Date } | null,
   draftQueryInput: null as { sessionId: string } | null,
   saveDraft: vi.fn(),
@@ -36,9 +53,15 @@ const fixtures = vi.hoisted(() => ({
   exports: [] as Array<{ id: string; fileName: string; format: "markdown" | "pdf"; byteSize: number; createdAt: Date }>,
   uploadAttachment: vi.fn(),
   beginStytchLink: vi.fn(),
+  updateName: vi.fn(async () => ({ name: "Тест" })),
   startLogin: vi.fn(),
   isAuthenticated: true,
   authLoading: false,
+  language: "ru" as "ru" | "en",
+  authUser: { id: 42, name: "Тест", email: "", loginMethod: "stytch-password", isGuest: 0 } as { id: number; name: string | null; email: string | null; loginMethod: string | null; isGuest: number },
+  logout: vi.fn(async () => undefined),
+  sessionsLoading: false,
+  sessionsRefetching: false,
   isOwner: false,
   navigate: vi.fn(),
   releaseSecondDelta: null as (() => void) | null,
@@ -52,7 +75,7 @@ Object.defineProperties(HTMLElement.prototype, {
   scrollIntoView: { configurable: true, value: () => undefined },
 });
 
-vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ isAuthenticated: fixtures.isAuthenticated, loading: fixtures.authLoading }) }));
+vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ isAuthenticated: fixtures.isAuthenticated, loading: fixtures.authLoading, user: fixtures.isAuthenticated ? fixtures.authUser : null, logout: fixtures.logout }) }));
 vi.mock("@/const", () => ({ startLogin: fixtures.startLogin }));
 vi.mock("@/lib/runtime-auth", () => ({ runtimeAuthHeaders: () => ({ Authorization: "Bearer test-session" }) }));
 vi.mock("@/contexts/ThemeContext", () => ({ useTheme: () => ({ theme: "dark", toggleTheme: fixtures.toggleTheme, highContrast: false, setHighContrast: vi.fn() }) }));
@@ -61,17 +84,25 @@ vi.mock("@/lib/chat-export", () => ({
   prepareChatPdf: fixtures.preparePdf,
   downloadPreparedChatExport: fixtures.downloadPrepared,
 }));
-vi.mock("wouter", () => ({ useLocation: () => ["/", fixtures.navigate] }));
-vi.mock("@/lib/trpc", () => ({
+vi.mock("wouter", () => ({
+  useLocation: () => ["/", fixtures.navigate],
+  // Mirrors the real module: a client-side link to the provider settings route.
+  Link: ({ href, children, ...rest }: { href: string; children?: unknown }) => (
+    <a href={href} {...rest}>{children as never}</a>
+  ),
+}));
+vi.mock("@/lib/trpc", async () => {
+  const react = await import("react");
+  return ({
   trpc: {
-    auth: { beginLink: { useMutation: () => ({ mutateAsync: fixtures.beginStytchLink, isPending: false }) } },
+    auth: { beginLink: { useMutation: () => ({ mutateAsync: fixtures.beginStytchLink, isPending: false }) }, updateName: { useMutation: () => ({ mutateAsync: fixtures.updateName, isPending: false }) } },
     models: { list: { useQuery: () => ({ data: [
       { key: "fast", modelId: "fast", label: "Kairema Flash", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, runtime: { state: "ready", provider: "OpenRouter", modelUsed: "Fast", checkedAt: "2026-08-19T00:00:00.000Z" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
       { key: "smart", modelId: "smart", label: "Kairema Think", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
       { key: "context", modelId: "context", label: "Kairema Context", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
       { key: "flagship", modelId: "flagship", label: "Kairema Apex", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
     ] }) } },
-    settings: { get: { useQuery: () => ({ data: { language: "ru", theme: "dark", responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, defaultRole: "fast", webSearch: 0, healthRefreshSeconds: 30, highContrast: 0 } }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateSettings }) } },
+    settings: { get: { useQuery: () => ({ data: { language: fixtures.language, theme: "dark", responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, defaultRole: "fast", webSearch: 0, healthRefreshSeconds: 30, highContrast: 0, askClarifyingQuestions: 0 } }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateSettings }) } },
     memory: { get: { useQuery: () => ({ data: fixtures.memoryData }) }, update: { useMutation: () => ({ mutateAsync: fixtures.updateMemory }) }, addFact: { useMutation: () => ({ mutateAsync: fixtures.addMemoryFact }) }, deleteEntry: { useMutation: () => ({ mutateAsync: fixtures.deleteMemoryEntry }) }, clear: { useMutation: () => ({ mutateAsync: fixtures.clearMemory }) } },
     webSearch: { status: { useQuery: () => ({ data: { available: false, reason: "Поиск сейчас недоступен", checkedAt: "2026-08-19T00:00:00.000Z", layers: [{ id: "google", state: "limited", retryAt: null }, { id: "tavily", state: "ready", retryAt: null }, { id: "openrouter", state: "ready", retryAt: null }] } }) } },
     knowledge: { status: { useQuery: () => ({ data: { documents: 0, sources: [], lastRun: null } }) }, audit: { useQuery: () => ({ data: { sources: [{ name: "OpenAI News", domain: "openai.com", ...(fixtures.isOwner ? { url: "https://openai.com/news/rss.xml" } : {}), indexedCount: 12, lastSuccessAt: "2026-08-19T00:00:00.000Z" }], latestRun: { state: "completed", startedAt: "2026-08-19T00:00:00.000Z", finishedAt: "2026-08-19T00:01:00.000Z" } } }) }, refresh: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) } },
@@ -81,7 +112,7 @@ vi.mock("@/lib/trpc", () => ({
     attachments: { list: { useQuery: () => ({ data: fixtures.attachments }) }, upload: { useMutation: () => ({ mutateAsync: fixtures.uploadAttachment }) }, delete: { useMutation: () => ({ mutateAsync: vi.fn() }) } },
     exports: { list: { useQuery: () => ({ data: fixtures.exports, isLoading: false }) }, create: { useMutation: () => ({ mutateAsync: fixtures.createExport, isPending: false }) }, delete: { useMutation: () => ({ mutateAsync: fixtures.deleteExport, isPending: false, variables: undefined }) } },
     chats: {
-      list: { useQuery: () => ({ data: fixtures.sessions, isLoading: false }) },
+      list: { useQuery: () => ({ data: fixtures.sessionsLoading ? undefined : fixtures.sessions, isLoading: fixtures.sessionsLoading, isFetching: fixtures.sessionsLoading || fixtures.sessionsRefetching }) },
       messages: { useQuery: () => ({ data: fixtures.messages }) },
       historyPage: { useQuery: () => ({ data: { messages: fixtures.messages, nextCursor: fixtures.historyNextCursor }, isLoading: false }) },
       draft: { useQuery: (input: { sessionId: string }) => { fixtures.draftQueryInput = input; return { data: fixtures.draft, isLoading: false }; } },
@@ -90,10 +121,47 @@ vi.mock("@/lib/trpc", () => ({
       clearAll: { useMutation: () => ({ mutateAsync: fixtures.clearHistory, isPending: false }) },
       saveDraft: { useMutation: () => ({ mutateAsync: fixtures.saveDraft, isPending: false }) },
       clearDraft: { useMutation: () => ({ mutateAsync: fixtures.clearDraft, isPending: false }) },
+      discardFailedTurn: { useMutation: () => ({ mutateAsync: fixtures.discardFailedTurn, isPending: false }) },
+      persistDirectTurn: { useMutation: () => ({ mutateAsync: fixtures.persistDirectTurn, isPending: false }) },
     },
-    useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: fixtures.downloadExport } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, historyPage: { invalidate: fixtures.invalidateMessages, fetch: fixtures.historyPageFetch }, list: { invalidate: fixtures.invalidateSessions } } }),
+    userProviders: {
+      // The list is a live read, and an invalidate re-renders it: that is what a provider switch
+      // looks like in production, so no test can pass on a snapshot taken before the switch.
+      list: { useQuery: () => {
+        const [, bump] = react.useState(0);
+        react.useEffect(() => { fixtures.invalidateUserProviders = () => bump((value) => value + 1); return () => { fixtures.invalidateUserProviders = () => {}; }; }, []);
+        return { data: fixtures.userProviders };
+      } },
+      // The My API picker reuses the caller's stored key: no key is sent with the request.
+      models: {
+        useMutation: () => ({
+          mutateAsync: async (input: unknown) => {
+            fixtures.myApiCatalogInputs.push(input);
+            // A failing catalog must be observable by the screen, not swallowed.
+            if (fixtures.myApiCatalogError) throw new Error(fixtures.myApiCatalogError);
+            return { models: fixtures.myApiModels };
+          },
+          // The mock is fixture-driven: a test decides whether an attempt failed, and a retry is
+          // observed by the request it issues rather than by internal cache state.
+          reset: () => {},
+          data: fixtures.myApiModelsLoaded ? { models: fixtures.myApiModels } : undefined,
+          isPending: fixtures.myApiCatalogPending,
+          isError: Boolean(fixtures.myApiCatalogError),
+          error: fixtures.myApiCatalogError ? { message: fixtures.myApiCatalogError } : null,
+          isSuccess: fixtures.myApiModelsLoaded && !fixtures.myApiCatalogError,
+        }),
+      },
+      setActiveModel: { useMutation: () => ({ mutateAsync: async (input: unknown) => { if (fixtures.switchModelError) throw new Error(fixtures.switchModelError); fixtures.switchedModel = input; // The server persists the choice, so the next read of the list must show it.
+        const { provider, activeModel } = input as { provider: string; activeModel: string };
+        fixtures.userProviders = { ...fixtures.userProviders, configs: (fixtures.userProviders.configs as Array<Record<string, unknown>>).map((config) => config.provider === provider ? { ...config, activeModel } : config) }; return {}; }, isPending: false, error: null }) },
+      // A provider switch changes only the credential; the model each provider was saved with is
+      // the server's business, which is why the mock reads the fixture list live after the write.
+      setActive: { useMutation: () => ({ mutateAsync: async (input: unknown) => { if (fixtures.switchProviderError) throw new Error(fixtures.switchProviderError); fixtures.switchedProvider = input; fixtures.userProviders = { ...fixtures.userProviders, activeProvider: (input as { provider: string }).provider }; return {}; }, isPending: false, error: null }) },
+    },
+    useUtils: () => ({ models: { list: { invalidate: vi.fn() } }, auth: { me: { invalidate: vi.fn() } }, settings: { get: { invalidate: vi.fn() } }, memory: { get: { invalidate: vi.fn() } }, knowledge: { status: { invalidate: vi.fn() } }, attachments: { list: { invalidate: vi.fn() } }, exports: { list: { invalidate: fixtures.invalidateExports }, download: { fetch: fixtures.downloadExport } }, chats: { messages: { invalidate: fixtures.invalidateMessages }, historyPage: { invalidate: fixtures.invalidateMessages, fetch: fixtures.historyPageFetch }, list: { invalidate: fixtures.invalidateSessions } }, userProviders: { list: { invalidate: () => fixtures.invalidateUserProviders() } } }),
   },
-}));
+  });
+});
 vi.mock("@/components/ui/dialog", () => ({
   useDialogComposition: () => ({ isComposing: () => false, setComposing: () => {}, justEndedComposing: () => false, markCompositionEnd: () => {} }),
   Dialog: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -107,9 +175,29 @@ import Home, { SettingSwitch } from "./Home";
 
 const encoder = new TextEncoder();
 
+/** The chat header's model pill, which carries the role selector or the My API binding. */
+function headerPill(container: HTMLElement) {
+  return container.querySelector(".kairema-model-pill") as HTMLElement;
+}
+
 function resetFixtures() {
+  fixtures.userProviders = { providers: [{ id: "openrouter", displayName: "OpenRouter", available: true }], configs: [], activeProvider: null, storageReady: true };
+  fixtures.myApiModels = [];
+  fixtures.myApiModelsLoaded = false;
+  fixtures.myApiCatalogInputs = [];
+  fixtures.myApiCatalogError = null;
+  fixtures.myApiCatalogPending = false;
+  fixtures.switchModelError = null;
+  fixtures.switchedModel = null;
+  fixtures.switchedProvider = null;
+  fixtures.switchProviderError = null;
+  fixtures.updatedSettings = [];
   fixtures.isAuthenticated = true;
   fixtures.authLoading = false;
+  fixtures.language = "ru";
+  fixtures.authUser = { id: 42, name: "Тест", email: "", loginMethod: "stytch-password", isGuest: 0 };
+  fixtures.logout.mockClear();
+  fixtures.sessionsLoading = false;
   fixtures.startLogin.mockReset();
   fixtures.sessions = [{ id: fixtures.sessionId, modelId: fixtures.modelId, title: "Активная история" }];
   fixtures.messages = [
@@ -137,24 +225,28 @@ function resetFixtures() {
   fixtures.deleteChat.mockReset().mockResolvedValue({ success: true });
   fixtures.clearHistory.mockReset().mockResolvedValue({ success: true, deletedCount: 1 });
   fixtures.historyPageFetch.mockReset().mockResolvedValue({ messages: [], nextCursor: null });
-  fixtures.updateSettings.mockReset().mockResolvedValue(undefined);
+  fixtures.updateSettings.mockReset().mockImplementation(async (input?: Record<string, unknown>) => { if (input) fixtures.updatedSettings.push(input); return {}; });
   fixtures.draft = null;
   fixtures.draftQueryInput = null;
   fixtures.saveDraft.mockReset().mockResolvedValue({ content: "", updatedAt: new Date() });
   fixtures.clearDraft.mockReset().mockResolvedValue({ cleared: true });
-  fixtures.invalidateMessages.mockReset().mockImplementation(async () => {
+  const persistStreamedAnswer = async () => {
     fixtures.messages = [
       ...fixtures.messages,
       { id: 3, role: "user", content: "Новый вопрос", modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:02:00.000Z") },
       { id: 4, role: "assistant", content: "Первый фрагмент ответа", modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:03:00.000Z") },
     ];
-  });
+    return { messages: fixtures.messages, nextCursor: null };
+  };
+  fixtures.invalidateMessages.mockReset().mockImplementation(persistStreamedAnswer);
+  fixtures.historyPageFetch.mockReset().mockImplementation(persistStreamedAnswer);
+  fixtures.discardFailedTurn.mockReset().mockResolvedValue({ removed: true });
   fixtures.releaseSecondDelta = null;
   fixtures.memoryData = { settings: { enabled: 1, autoExtract: 1 }, profile: { profile: "", summary: "Автоматически извлечённый нейтральный факт" }, facts: [{ id: "11111111-1111-4111-8111-111111111112", value: "Предпочитает русский язык" }], topics: [{ id: "11111111-1111-4111-8111-111111111113", value: "2026-08-21 Flash: настройка профиля", role: "fast" }] };
 }
 
 describe("Home integration flows", () => {
-  beforeEach(() => resetFixtures());
+  beforeEach(() => { window.localStorage.clear(); resetFixtures(); });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
   it("always renders exactly four public role cards and never renders the removed Code role", () => {
@@ -176,20 +268,22 @@ describe("Home integration flows", () => {
     ]);
   });
 
-  it("collapses and reopens the desktop sidebar with an accessible stateful control", async () => {
-    const user = userEvent.setup();
+  it("opens the desktop sidebar by default and no longer needs a topbar toggle", async () => {
     render(<Home />);
 
     const sidebar = document.querySelector(".kairema-sidebar");
-    expect(sidebar?.classList.contains("kairema-sidebar-collapsed")).toBe(true);
-    expect(sidebar?.hasAttribute("inert")).toBe(true);
-
-    await user.click(screen.getByRole("button", { name: "Показать боковую панель" }));
+    // On desktop the sidebar is a static column: open, focusable, reachable without any control.
+    expect(sidebar?.classList.contains("kairema-sidebar-collapsed")).toBe(false);
     expect(sidebar?.classList.contains("kairema-sidebar-open")).toBe(true);
     expect(sidebar?.hasAttribute("inert")).toBe(false);
-
-    await user.click(screen.getByRole("button", { name: "Скрыть боковую панель" }));
-    expect(sidebar?.classList.contains("kairema-sidebar-collapsed")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Показать боковую панель" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Скрыть боковую панель" })).toBeNull();
+    // Its own controls stay reachable: new chat, memory, exports, settings and the role list.
+    expect(sidebar?.querySelector(".kairema-new-chat")).not.toBeNull();
+    expect(sidebar?.querySelector(".kairema-providers")).not.toBeNull();
+    expect(sidebar?.querySelector(".kairema-sidebar-footer")).not.toBeNull();
+    // The small-screen drawer opener is untouched.
+    expect(document.querySelector(".kairema-topbar-left .kairema-icon-btn")).not.toBeNull();
   });
 
   it("always exposes a persistent guest login control in the topbar", async () => {
@@ -299,9 +393,13 @@ describe("Home integration flows", () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     render(<Home />);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Markdown" })).toHaveProperty("disabled", false));
-    await user.click(screen.getByRole("button", { name: "Markdown" }));
-    await user.click(screen.getByRole("button", { name: "PDF" }));
+    // One compact export button in the mode row; the two formats are chosen from its panel.
+    const trigger = screen.getByRole("button", { name: "Экспорт" });
+    await waitFor(() => expect(trigger).toHaveProperty("disabled", false));
+    await user.click(trigger);
+    await user.click(await screen.findByRole("menuitem", { name: /Markdown/ }));
+    await user.click(screen.getByRole("button", { name: "Экспорт" }));
+    await user.click(await screen.findByRole("menuitem", { name: /PDF/ }));
 
     await waitFor(() => expect(fixtures.createExport).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, format: "markdown" }));
     expect(fixtures.createExport).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, format: "pdf" });
@@ -334,7 +432,7 @@ describe("Home integration flows", () => {
     await user.click(screen.getByRole("button", { name: "Отправить подтверждение" }));
 
     await waitFor(() => expect(fixtures.beginStytchLink).toHaveBeenCalledWith({ email: "linked@example.test" }));
-    expect(screen.getByText(/Совпадение адреса никогда не объединяет аккаунты автоматически/)).toBeTruthy();
+    expect(screen.getByText(/не объединяет аккаунты автоматически/)).toBeTruthy();
   });
 
   it("routes an owner to the dedicated analytics page instead of rendering inline metrics", async () => {
@@ -456,7 +554,7 @@ describe("Home integration flows", () => {
     expect(screen.queryByText("Первый фрагмент ответа")).toBeNull();
     fixtures.releaseSecondDelta?.();
 
-    await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 }));
+    await waitFor(() => expect(fixtures.historyPageFetch).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 }));
     await waitFor(() => expect(screen.getByText("Первый фрагмент ответа")).toBeTruthy());
     await waitFor(() => expect(fixtures.clearDraft).toHaveBeenCalledWith({ sessionId: fixtures.sessionId }));
     expect((composer as HTMLTextAreaElement).value).toBe("");
@@ -493,18 +591,19 @@ describe("Home integration flows", () => {
     await waitFor(() => expect(screen.getByText(/Не удалось начать потоковый ответ|Service Unavailable/)).toBeTruthy());
     expect(screen.getAllByRole("button", { name: "Открыть предпросмотр: vision.png" }).length).toBeGreaterThanOrEqual(1);
     await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 }));
-    expect((screen.getByPlaceholderText("Напишите сообщение…") as HTMLTextAreaElement).value).toBe("Проверь вложение");
+    expect((screen.getByPlaceholderText("Напишите сообщение…") as HTMLTextAreaElement).value).toBe("");
     expect(fixtures.clearDraft).not.toHaveBeenCalled();
   });
 
   it("keeps a sent-image preview while persisted message hydration leads the attachment query", async () => {
     const user = userEvent.setup();
-    fixtures.invalidateMessages.mockImplementation(async () => {
+    fixtures.historyPageFetch.mockImplementation(async () => {
       fixtures.messages = [...fixtures.messages,
         { id: 3, role: "user", content: "Проверь вложение", modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:02:00.000Z"), metadata: JSON.stringify({ attachmentIds: ["55555555-5555-4555-8555-555555555555"] }) },
         { id: 4, role: "assistant", content: "Готово", modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:03:00.000Z") },
       ];
       fixtures.attachments = [];
+      return { messages: fixtures.messages, nextCursor: null };
     });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/attachments/upload"
       ? new Response(JSON.stringify({ id: "55555555-5555-4555-8555-555555555555", fileName: "vision.png", contentType: "image/png", byteSize: 7, kind: "image", previewUrl: "https://files.example/vision.png" }), { status: 201, headers: { "content-type": "application/json" } })
@@ -522,7 +621,7 @@ describe("Home integration flows", () => {
     await user.type(screen.getByPlaceholderText("Напишите сообщение…"), "Проверь вложение");
     await user.keyboard("{Enter}");
 
-    await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 }));
+    await waitFor(() => expect(fixtures.historyPageFetch).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 }));
     expect(screen.getByRole("button", { name: "Открыть предпросмотр: vision.png" })).toBeTruthy();
   });
 
@@ -539,7 +638,7 @@ describe("Home integration flows", () => {
     expect(screen.queryByRole("button", { name: "Ещё вариант" })).toBeNull();
   });
 
-  it("aborts an active stream, refreshes persisted history and retains the draft", async () => {
+  it("aborts an active stream, refreshes persisted history and keeps the stored server draft", async () => {
     const user = userEvent.setup();
     const fetchSpy = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
@@ -555,7 +654,7 @@ describe("Home integration flows", () => {
 
     await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Отменить генерацию" })).toBeNull());
-    expect((composer as HTMLTextAreaElement).value).toBe("Отменяемый запрос");
+    expect((composer as HTMLTextAreaElement).value).toBe("");
     expect(fixtures.clearDraft).not.toHaveBeenCalled();
   });
 
@@ -573,12 +672,416 @@ describe("Home integration flows", () => {
     expect(fixtures.updateSettings).toHaveBeenCalledWith({ thinking: true });
   });
 
+  it("keeps only the reasoning and web-search switches and persists each one to the account", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Открыть настройки" }));
+
+    expect(screen.getByRole("switch", { name: /Дополнительное рассуждение/ })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "Веб-поиск" })).toBeTruthy();
+    expect(screen.queryByRole("switch", { name: /Разрешить инструменты/ })).toBeNull();
+    expect(screen.queryByRole("switch", { name: /Высокая контрастность/ })).toBeNull();
+    expect(screen.queryByRole("switch", { name: /Email-уведомления/ })).toBeNull();
+    expect(screen.queryByText("Обновление здоровья")).toBeNull();
+    expect(screen.queryByText("30 s")).toBeNull();
+    expect(screen.queryByText("Обновляет только публичный индикатор доступности.")).toBeNull();
+    expect(screen.queryByText("Самодиагностика")).toBeNull();
+    expect(screen.queryByText("Проверить настройки")).toBeNull();
+    expect(screen.queryByText("Показывает только сохранённые пользовательские параметры, без сообщений, ключей и служебных маршрутов.")).toBeNull();
+
+    await user.click(screen.getByRole("switch", { name: "Веб-поиск" }));
+
+    expect(fixtures.updateSettings).toHaveBeenCalledWith({ webSearch: true });
+  });
+
+  it("opens Profile from the topbar, prefills the stored name and persists both Profile fields", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Открыть профиль" }));
+
+    const nameField = screen.getByRole("textbox", { name: /Как к вам обращаться/ });
+    expect((nameField as HTMLInputElement).value).toBe("Тест");
+    expect(screen.getByText("Ваши предпочтения применяются ко всем разговорам.")).toBeTruthy();
+
+    const clarify = screen.getByRole("switch", { name: "Задавать уточняющие вопросы перед развёрнутым ответом" });
+    expect((clarify as HTMLButtonElement).getAttribute("aria-checked")).toBe("false");
+    await user.click(clarify);
+    expect(fixtures.updateSettings).toHaveBeenCalledWith({ askClarifyingQuestions: true });
+
+    await user.click(screen.getByRole("button", { name: "Обновить профиль" }));
+    expect(fixtures.updateName).not.toHaveBeenCalled();
+    await user.clear(nameField);
+    await user.type(nameField, "Ada");
+    await user.click(screen.getByRole("button", { name: "Обновить профиль" }));
+    expect(fixtures.updateName).toHaveBeenCalledWith({ name: "Ada" });
+  });
+
+  it("keeps both control rows in one sticky header inside the single message scrollport", () => {
+    const { container } = render(<Home />);
+    const root = container;
+
+    const modeSwitch = screen.getByRole("group", { name: "Режим чата" });
+    const sticky = modeSwitch.closest(".kairema-chat-sticky");
+    const viewport = sticky?.closest(".kairema-chat-scroll");
+    expect(sticky).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    // Both rows live in the same sticky wrapper...
+    expect(sticky!.querySelector(".kairema-mode-bar")).not.toBeNull();
+    expect(sticky!.querySelector(".kairema-chat-tools")).not.toBeNull();
+    // ...inside the one scroller that scrolls the messages, with no second scroller.
+    expect(viewport!.querySelector(".kairema-chat-sticky")).not.toBeNull();
+    expect(viewport!.querySelectorAll(".kairema-chat-scroll")).toHaveLength(0);
+    expect(root.querySelectorAll(".kairema-chat-tools-scroll")).toHaveLength(0);
+  });
+
+  it("still opens the existing model menu from the topbar", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Home />);
+
+    await waitFor(() => expect(container.querySelector(".kairema-role-menu-trigger")).not.toBeNull());
+    await user.click(container.querySelector(".kairema-role-menu-trigger") as HTMLElement);
+
+    await waitFor(() => expect(document.querySelector(".kairema-role-menu")).not.toBeNull());
+    expect(document.querySelectorAll(".kairema-role-menu-item").length).toBe(4);
+  });
+
+  it("hides Profile entirely for a guest account", () => {
+    fixtures.authUser = { id: 43, name: null, email: "", loginMethod: "guest", isGuest: 1 };
+    render(<Home />);
+
+    expect(screen.queryByRole("button", { name: "Открыть профиль" })).toBeNull();
+    // Settings stays available for guests.
+    expect(screen.getByRole("button", { name: "Открыть настройки" })).toBeTruthy();
+  });
+
+  it("opens the stored chat after a reload instead of always the newest one", async () => {
+    const olderSessionId = "33333333-3333-4333-8333-333333333333";
+    fixtures.sessions = [
+      { id: fixtures.sessionId, modelId: fixtures.modelId, title: "Самый новый чат" },
+      { id: olderSessionId, modelId: fixtures.modelId, title: "Чат из истории" },
+    ];
+    window.localStorage.setItem("active-chat-id", olderSessionId);
+    render(<Home />);
+
+    await waitFor(() => expect(document.querySelector(".kairema-topbar-title")?.textContent).toBe("Чат из истории"));
+    expect(fixtures.draftQueryInput).toEqual({ sessionId: olderSessionId });
+    expect(window.localStorage.getItem("active-chat-id")).toBe(olderSessionId);
+  });
+
+  it("keeps the stored chat id in sync when the user switches to another chat", async () => {
+    const user = userEvent.setup();
+    const olderSessionId = "33333333-3333-4333-8333-333333333333";
+    fixtures.sessions = [
+      { id: fixtures.sessionId, modelId: fixtures.modelId, title: "Самый новый чат" },
+      { id: olderSessionId, modelId: fixtures.modelId, title: "Чат из истории" },
+    ];
+    render(<Home />);
+
+    await waitFor(() => expect(window.localStorage.getItem("active-chat-id")).toBe(fixtures.sessionId));
+    await user.click(screen.getByRole("button", { name: "Чат из истории" }));
+
+    await waitFor(() => expect(window.localStorage.getItem("active-chat-id")).toBe(olderSessionId));
+    expect(document.querySelector(".kairema-topbar-title")?.textContent).toBe("Чат из истории");
+  });
+
+  it("drops a stored chat id whose chat was deleted and stays in the empty new-conversation state", async () => {
+    window.localStorage.setItem("active-chat-id", "99999999-9999-4999-8999-999999999999");
+    render(<Home />);
+
+    await waitFor(() => expect(window.localStorage.getItem("active-chat-id")).toBeNull());
+    expect(document.querySelector(".kairema-topbar-title")?.textContent).toBe("Новый разговор");
+    expect(document.querySelector(".kairema-history-active")).toBeNull();
+    expect(fixtures.historyPageFetch).not.toHaveBeenCalled();
+  });
+
+  it("waits for the chat list to load before hydrating the stored chat id", async () => {
+    const olderSessionId = "33333333-3333-4333-8333-333333333333";
+    fixtures.sessions = [
+      { id: fixtures.sessionId, modelId: fixtures.modelId, title: "Самый новый чат" },
+      { id: olderSessionId, modelId: fixtures.modelId, title: "Чат из истории" },
+    ];
+    fixtures.sessionsLoading = true;
+    window.localStorage.setItem("active-chat-id", olderSessionId);
+    const { rerender } = render(<Home />);
+
+    await waitFor(() => expect(screen.getByPlaceholderText("Напишите сообщение…")).toBeTruthy());
+    expect(document.querySelector(".kairema-topbar-title")?.textContent).not.toBe("Чат из истории");
+    expect(fixtures.draftQueryInput).not.toEqual({ sessionId: olderSessionId });
+    expect(window.localStorage.getItem("active-chat-id")).toBe(olderSessionId);
+
+  fixtures.sessionsLoading = false;
+  fixtures.sessionsRefetching = false;
+    rerender(<Home />);
+
+    await waitFor(() => expect(document.querySelector(".kairema-topbar-title")?.textContent).toBe("Чат из истории"));
+    expect(fixtures.draftQueryInput).toEqual({ sessionId: olderSessionId });
+    expect(window.localStorage.getItem("active-chat-id")).toBe(olderSessionId);
+  });
+
+  it("keeps the stored chat id while the chat list is still being refetched", async () => {
+    const olderSessionId = "33333333-3333-4333-8333-333333333333";
+    const realSessions = [
+      { id: fixtures.sessionId, modelId: fixtures.modelId, title: "Самый новый чат" },
+      { id: olderSessionId, modelId: fixtures.modelId, title: "Чат из истории" },
+    ];
+    // The list is not settled yet: the cached value is momentarily empty.
+    fixtures.sessions = [];
+    fixtures.sessionsRefetching = true;
+    window.localStorage.setItem("active-chat-id", olderSessionId);
+    const { rerender } = render(<Home />);
+
+    await waitFor(() => expect(screen.getByPlaceholderText("Напишите сообщение…")).toBeTruthy());
+    expect(window.localStorage.getItem("active-chat-id")).toBe(olderSessionId);
+    expect(fixtures.draftQueryInput).not.toEqual({ sessionId: olderSessionId });
+
+    fixtures.sessions = realSessions;
+    fixtures.sessionsRefetching = false;
+    rerender(<Home />);
+
+    await waitFor(() => expect(document.querySelector(".kairema-topbar-title")?.textContent).toBe("Чат из истории"));
+    expect(fixtures.draftQueryInput).toEqual({ sessionId: olderSessionId });
+    expect(window.localStorage.getItem("active-chat-id")).toBe(olderSessionId);
+  });
+
+  it("drops the previous identity's chat on logout and hydrates the next sign-in instead", async () => {
+    const firstUserChatId = "11111111-1111-4111-8111-111111111111";
+    const secondUserChatId = "22222222-2222-4222-8222-222222222222";
+    fixtures.sessions = [{ id: firstUserChatId, modelId: fixtures.modelId, title: "Чат первого пользователя" }];
+    const { rerender } = render(<Home />);
+
+    await waitFor(() => expect(window.localStorage.getItem("active-chat-id")).toBe(firstUserChatId));
+    expect(fixtures.draftQueryInput).toEqual({ sessionId: firstUserChatId });
+
+    fixtures.isAuthenticated = false;
+    rerender(<Home />);
+
+    await waitFor(() => expect(fixtures.draftQueryInput).toEqual({ sessionId: "" }));
+    expect(fixtures.historyPageFetch).not.toHaveBeenCalledWith({ sessionId: firstUserChatId, limit: 60 });
+    expect(document.querySelector(".kairema-topbar-title")?.textContent).not.toBe("Чат первого пользователя");
+
+    fixtures.isAuthenticated = true;
+    fixtures.sessions = [{ id: secondUserChatId, modelId: fixtures.modelId, title: "Чат второго пользователя" }];
+    rerender(<Home />);
+
+    // The stored id belonged to the previous identity, so it is dropped instead of
+    // silently opening a chat that is not this user's.
+    await waitFor(() => expect(document.querySelector(".kairema-topbar-title")?.textContent).toBe("Новый разговор"));
+    expect(document.querySelector(".kairema-topbar-title")?.textContent).not.toBe("Чат первого пользователя");
+    expect(fixtures.draftQueryInput).not.toEqual({ sessionId: firstUserChatId });
+    expect(fixtures.draftQueryInput).toEqual({ sessionId: "" });
+    await waitFor(() => expect(window.localStorage.getItem("active-chat-id")).toBeNull());
+  });
+
+  it("shows the signed-in email account and a logout control instead of the linking form", async () => {
+    const user = userEvent.setup();
+    fixtures.authUser = { id: 42, name: "Тест", email: "owner@example.com", loginMethod: "stytch-password", isGuest: 0 };
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Открыть настройки" }));
+
+    expect(screen.getByLabelText("Email аккаунта")).toBeTruthy();
+    expect((screen.getByLabelText("Email аккаунта") as HTMLInputElement).value).toBe("owner@example.com");
+    expect(screen.getByRole("button", { name: "Выйти" })).toBeTruthy();
+    expect(screen.queryByPlaceholderText("name@example.com")).toBeNull();
+    expect(screen.queryByText("Привязать email-вход")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Отправить подтверждение" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Выйти" }));
+
+    expect(fixtures.logout).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the email linking form for an account without a verified address", async () => {
+    const user = userEvent.setup();
+    fixtures.authUser = { id: 42, name: "Тест", email: null, loginMethod: "stytch-password", isGuest: 0 };
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Открыть настройки" }));
+
+    expect(screen.getByText("Привязать email-вход")).toBeTruthy();
+    const field = screen.getByLabelText("Email для подтверждения") as HTMLInputElement;
+    expect(field.value).toBe("");
+    await user.type(field, "second@example.com");
+    expect(field.value).toBe("second@example.com");
+    expect(screen.getByRole("button", { name: "Отправить подтверждение" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Выйти" })).toBeNull();
+    expect(screen.getByText(/Это не объединяет аккаунты автоматически/)).toBeTruthy();
+  });
+
+  it("clears the authenticated session on logout without deleting the chat data", async () => {
+    const user = userEvent.setup();
+    const sessionId = "44444444-4444-4444-8444-444444444444";
+    fixtures.authUser = { id: 42, name: "Тест", email: "owner@example.com", loginMethod: "stytch-password", isGuest: 0 };
+    fixtures.sessions = [{ id: sessionId, modelId: fixtures.modelId, title: "Чат до выхода" }];
+    fixtures.logout.mockImplementationOnce(async () => {
+      fixtures.isAuthenticated = false;
+      fixtures.authUser = { id: 42, name: "Тест", email: null, loginMethod: "stytch-password", isGuest: 0 };
+    });
+    render(<Home />);
+
+    await waitFor(() => expect(window.localStorage.getItem("active-chat-id")).toBe(sessionId));
+    await user.click(screen.getByRole("button", { name: "Открыть настройки" }));
+    await user.click(screen.getByRole("button", { name: "Выйти" }));
+
+    expect(fixtures.logout).toHaveBeenCalledTimes(1);
+    // The server call owns the session teardown; the client must not delete user data itself.
+    expect(fixtures.deleteChat).not.toHaveBeenCalled();
+    expect(fixtures.clearHistory).not.toHaveBeenCalled();
+    expect(fixtures.clearDraft).not.toHaveBeenCalled();
+    expect(fixtures.createChat).not.toHaveBeenCalled();
+  });
+
+  it("restores the email account after signing in again", async () => {
+    const user = userEvent.setup();
+    fixtures.authUser = { id: 42, name: null, email: null, loginMethod: "stytch-password", isGuest: 0 };
+    const { rerender } = render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Открыть настройки" }));
+    expect(screen.getByText("Привязать email-вход")).toBeTruthy();
+    await user.keyboard("{Escape}");
+
+    fixtures.authUser = { id: 42, name: "Тест", email: "owner@example.com", loginMethod: "stytch-password", isGuest: 0 };
+    rerender(<Home />);
+    await user.click(screen.getByRole("button", { name: "Открыть настройки" }));
+
+    expect((screen.getByLabelText("Email аккаунта") as HTMLInputElement).value).toBe("owner@example.com");
+    expect(screen.queryByText("Привязать email-вход")).toBeNull();
+  });
+
+  it("closes the attachment menu when the user opens settings from the sidebar", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Home />);
+    const menu = container.querySelector("details.kairema-attachment-menu") as HTMLDetailsElement | null;
+    const trigger = menu?.querySelector("summary") as HTMLElement | null;
+    if (!menu || !trigger) throw new Error("Attachment menu is missing");
+
+    await user.click(trigger);
+    expect(menu.open).toBe(true);
+    expect(screen.getByRole("button", { name: "Выбрать фото" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Настройки" }));
+
+    await waitFor(() => expect(menu.open).toBe(false));
+    expect(screen.getByText("Изменения сохраняются автоматически")).toBeTruthy();
+  });
+
+  it("closes the attachment menu when the user opens chat history and picks another chat", async () => {
+    const user = userEvent.setup();
+    const olderSessionId = "33333333-3333-4333-8333-333333333333";
+    fixtures.sessions = [
+      { id: fixtures.sessionId, modelId: fixtures.modelId, title: "Самый новый чат" },
+      { id: olderSessionId, modelId: fixtures.modelId, title: "Чат из истории" },
+    ];
+    const { container } = render(<Home />);
+    const menu = container.querySelector("details.kairema-attachment-menu") as HTMLDetailsElement | null;
+    const trigger = menu?.querySelector("summary") as HTMLElement | null;
+    if (!menu || !trigger) throw new Error("Attachment menu is missing");
+
+    await user.click(trigger);
+    expect(menu.open).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "Чат из истории" }));
+
+    await waitFor(() => expect(menu.open).toBe(false));
+    expect(document.querySelector(".kairema-topbar-title")?.textContent).toBe("Чат из истории");
+  });
+
+  it("closes the attachment menu when the sidebar itself is opened again", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Home />);
+    const menu = container.querySelector("details.kairema-attachment-menu") as HTMLDetailsElement | null;
+    const trigger = menu?.querySelector("summary") as HTMLElement | null;
+    if (!menu || !trigger) throw new Error("Attachment menu is missing");
+
+    await user.click(trigger);
+    expect(menu.open).toBe(true);
+
+    // Picking a role in the sidebar closes the sidebar, which drives the same navigation
+    // signal the removed desktop toggle used to send.
+    await user.click(container.querySelector(".kairema-providers .kairema-provider") as HTMLElement);
+
+    await waitFor(() => expect(menu.open).toBe(false));
+  });
+
+  it("closes the attachment menu when settings are opened with the keyboard", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Home />);
+    const menu = container.querySelector("details.kairema-attachment-menu") as HTMLDetailsElement | null;
+    const trigger = menu?.querySelector("summary") as HTMLElement | null;
+    if (!menu || !trigger) throw new Error("Attachment menu is missing");
+
+    await user.click(trigger);
+    expect(menu.open).toBe(true);
+
+    screen.getByRole("button", { name: "Настройки" }).focus();
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(menu.open).toBe(false));
+    expect(screen.getByText("Изменения сохраняются автоматически")).toBeTruthy();
+  });
+
+  it("clears the composer as soon as the send is accepted, before the model answers", async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    }));
+    vi.stubGlobal("fetch", fetchSpy);
+    render(<Home />);
+
+    const composer = await screen.findByPlaceholderText("Напишите сообщение…");
+    await user.type(composer, "Привет");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    expect((composer as HTMLTextAreaElement).value).toBe("");
+    expect(screen.getByText("Привет")).toBeTruthy();
+    await user.type(composer, "Следующий вопрос");
+    await waitFor(() => expect((composer as HTMLTextAreaElement).value).toBe("Следующий вопрос"));
+
+    await user.click(screen.getByRole("button", { name: "Отменить генерацию" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Отменить генерацию" })).toBeNull());
+    expect((composer as HTMLTextAreaElement).value).toBe("Следующий вопрос");
+  });
+
+  it("keeps the typed text when sign-in is required before the send starts", async () => {
+    const user = userEvent.setup();
+    fixtures.isAuthenticated = false;
+    fixtures.sessions = [];
+    render(<Home />);
+
+    const composer = (await screen.findByPlaceholderText("Напишите сообщение…")) as HTMLTextAreaElement;
+    await user.type(composer, "Привет");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(fixtures.startLogin).toHaveBeenCalled());
+    await waitFor(() => expect(composer.value).toBe("Привет"));
+  });
+
+  it("keeps the typed text when the new chat cannot be created", async () => {
+    const user = userEvent.setup();
+    fixtures.sessions = [];
+    fixtures.messages = [];
+    fixtures.createChat.mockRejectedValueOnce(new Error("storage unavailable"));
+    render(<Home />);
+
+    const composer = (await screen.findByPlaceholderText("Напишите сообщение…")) as HTMLTextAreaElement;
+    await user.type(composer, "Привет");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(fixtures.createChat).toHaveBeenCalled());
+    await waitFor(() => expect(composer.value).toBe("Привет"));
+  });
+
   it("restores the local theme when its setting save fails", async () => {
     const user = userEvent.setup();
     fixtures.updateSettings.mockRejectedValueOnce(new Error("offline"));
     render(<Home />);
 
-    await user.click(screen.getByTitle("Светлая тема"));
+    // The theme control now lives in Settings rather than in the chat topbar.
+    await user.click(screen.getByTitle("Открыть настройки"));
+    await user.click(await screen.findByTitle("Светлая тема"));
 
     await waitFor(() => expect(fixtures.updateSettings).toHaveBeenCalledWith({ theme: "light" }));
     await waitFor(() => expect(fixtures.toggleTheme).toHaveBeenCalledTimes(2));
@@ -695,5 +1198,1025 @@ describe("Home integration flows", () => {
     await user.click(screen.getByRole("button", { name: "Аудит RAG" }));
     expect((await screen.findByRole("dialog")).textContent).toContain("OpenAI News");
     expect(screen.getByRole("dialog").textContent).toContain("Фрагментов");
+  });
+});
+
+describe("My API mode hides the Kairema role selector", () => {
+  beforeEach(() => { window.localStorage.clear(); resetFixtures(); });
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  const customConfig = { provider: "custom-abc", displayName: "Мой провайдер", baseUrl: "https://api.example.com/v1", modelsEndpoint: null, activeModel: "vendor/model-b", keyHint: "••••4321", updatedAt: new Date(0).toISOString() };
+
+  // The sidebar keeps its own list of Kairema roles, so the assertions below are scoped to the
+  // header pill that used to be the system model selector.
+
+  async function enterMyApi() {
+    const user = userEvent.setup();
+    const view = render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    return { user, view };
+  }
+
+  it("BUG-1: replaces the Kairema role dropdown with the saved user binding", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+
+    // The header offers only this provider's own models: no system role is selectable, and none
+    // of the four Kairema roles appears anywhere in it.
+    const pill = headerPill(container);
+    for (const role of ["Kairema Flash", "Kairema Think", "Kairema Context", "Kairema Apex"]) {
+      expect(pill.textContent ?? "").not.toContain(role);
+      expect(Array.from(pill.querySelectorAll("option")).map((option) => option.textContent ?? "")).not.toContain(role);
+    }
+    // Provider and model are two controls: the pill names the model alone, and the provider is
+    // chosen in the mode row, so neither has to be read out of the other.
+    expect(pill.textContent ?? "").not.toContain("Мой провайдер");
+    expect(screen.getByLabelText("Провайдер «Мой API»").textContent ?? "").toContain("Мой провайдер");
+    // The model comes from the active provider's own catalog, not from a system role: the role
+    // <select> is gone and the binding's own picker shows the saved model instead.
+    expect(pill.querySelector("select")).toBeNull();
+    const picker = pill.querySelector(".kairema-binding-select") as HTMLButtonElement;
+    expect(picker).not.toBeNull();
+    expect(picker.textContent).toBe("vendor/model-b");
+    expect(picker.getAttribute("aria-haspopup")).toBe("listbox");
+  });
+
+  it("BUG-1: the four Kairema roles still work in ordinary Chat mode", async () => {
+    const { container } = render(<Home />);
+    const select = (await screen.findByLabelText("Роли")) as HTMLSelectElement;
+    const options = Array.from(select.options).map((option) => option.textContent);
+    expect(options).toEqual(["Kairema Flash", "Kairema Think", "Kairema Context", "Kairema Apex"]);
+    expect(container.querySelector(".kairema-model-pill select")).not.toBeNull();
+  });
+
+  it("BUG-2: never names a Kairema role in the My API empty state", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    // The empty state is only reachable with an empty transcript.
+    fixtures.messages = [];
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await waitFor(() => expect(container.textContent).toContain("Начните разговор с Мой провайдер · vendor/model-b"));
+    expect(container.textContent ?? "").not.toContain("Начните разговор с Kairema");
+  });
+
+  it("BUG-2: shows a real link to /settings/providers when nothing is configured", async () => {
+    fixtures.userProviders = { providers: [], configs: [], activeProvider: null, storageReady: true };
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+
+    // The header pill and the mode hint both state that nothing is configured yet.
+    await waitFor(() => expect(screen.getAllByText("Мой API не настроен").length).toBeGreaterThan(0));
+    expect(headerPill(container).textContent).toBe("Мой API не настроен");
+    const links = screen.getAllByRole("link", { name: "Настроить провайдера →" });
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) expect(link.getAttribute("href")).toBe("/settings/providers");
+    expect(container.textContent).not.toContain("Начните разговор с Kairema");
+  });
+});
+
+describe("My API provider and model are two independent controls", () => {
+  beforeEach(() => { window.localStorage.clear(); resetFixtures(); });
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  const configA = { provider: "custom-abc", displayName: "Aria Cloud", baseUrl: "https://api.example.com/v1", modelsEndpoint: null, activeModel: "aria/fast-1", keyHint: "••••4321", updatedAt: new Date(0).toISOString() };
+  const configB = { provider: "custom-xyz", displayName: "Мой провайдер", baseUrl: "https://api.groq.com/openai/v1", modelsEndpoint: null, activeModel: "vendor/model-b", keyHint: "••••1111", updatedAt: new Date(0).toISOString() };
+  const twoProviders = { providers: [], configs: [configA, configB], activeProvider: "custom-abc", storageReady: true };
+
+  async function enterMyApi(user: ReturnType<typeof userEvent.setup>) {
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    return screen.findByLabelText("Модель «Мой API»");
+  }
+
+  it("names the model in the header pill and the provider in the mode row, never both in one", async () => {
+    fixtures.userProviders = twoProviders;
+    fixtures.myApiModels = [{ id: "aria/fast-1", name: "Groq 4 Fast", displayName: "Groq 4 Fast", isFree: false }];
+    fixtures.myApiModelsLoaded = true;
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await screen.findByLabelText("Модель «Мой API»");
+
+    // The pill carries the model and nothing else.
+    expect(headerPill(container).textContent ?? "").toContain("Groq 4 Fast");
+    expect(headerPill(container).textContent ?? "").not.toContain("Aria Cloud");
+    // The provider has its own control below the mode switch, with no model in it.
+    const providerMenu = screen.getByLabelText("Провайдер «Мой API»");
+    expect(providerMenu.textContent ?? "").toContain("Aria Cloud");
+    expect(providerMenu.textContent ?? "").not.toContain("model");
+  });
+
+  it("lists only providers the user really has, and no model name in any of them", async () => {
+    fixtures.userProviders = twoProviders;
+    fixtures.myApiModels = [{ id: "aria/fast-1", name: "Groq 4 Fast", displayName: "Groq 4 Fast", isFree: false }];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    await enterMyApi(user);
+    await user.click(screen.getByLabelText("Провайдер «Мой API»"));
+    const options = await screen.findAllByRole("option");
+    expect(options.map((option) => option.textContent ?? "").map((text) => text.replace(/подключён/g, "").trim())).toEqual(["Aria Cloud", "Мой провайдер"]);
+    // A provider the user never configured is not offered, and no entry leaks a model id.
+    for (const option of options) expect(option.textContent ?? "").not.toContain("/");
+  });
+
+  it("switches the provider on the server and shows the model that provider was saved with", async () => {
+    fixtures.userProviders = twoProviders;
+    fixtures.myApiModels = [{ id: "vendor/model-b", name: "Model B", displayName: "Model B", isFree: false }];
+    fixtures.myApiModelsLoaded = true;
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await screen.findByLabelText("Модель «Мой API»");
+    await user.click(screen.getByLabelText("Провайдер «Мой API»"));
+    await user.click(await screen.findByRole("option", { name: /Мой провайдер/ }));
+
+    expect(fixtures.switchedProvider).toEqual({ provider: "custom-xyz" });
+    // The new provider is bound; its own saved model is what the pill now shows.
+    await waitFor(() => expect((screen.getByLabelText("Провайдер «Мой API»").textContent ?? "")).toContain("Мой провайдер"));
+    expect(headerPill(container).textContent ?? "").not.toContain("Groq 4 Fast");
+    // The catalog that matters is the new provider's, read with the new stored credential.
+    await waitFor(() => expect(fixtures.myApiCatalogInputs.at(-1)).toEqual({ provider: "custom-xyz" }));
+  });
+
+  it("keeps the previous provider when the server refuses the switch", async () => {
+    fixtures.userProviders = twoProviders;
+    fixtures.myApiModels = [{ id: "aria/fast-1", name: "Groq 4 Fast", displayName: "Groq 4 Fast", isFree: false }];
+    fixtures.myApiModelsLoaded = true;
+    fixtures.switchProviderError = "Этот провайдер недоступен.";
+    const user = userEvent.setup();
+    await enterMyApi(user);
+    await user.click(screen.getByLabelText("Провайдер «Мой API»"));
+    await user.click(await screen.findByRole("option", { name: /Мой провайдер/ }));
+
+    await screen.findByText(/Этот провайдер недоступен/);
+    // Nothing moved: the binding and its model are exactly what they were.
+    expect(screen.getByLabelText("Провайдер «Мой API»").textContent ?? "").toContain("Aria Cloud");
+    expect(fixtures.myApiCatalogInputs.at(-1)).toEqual({ provider: "custom-abc" });
+  });
+
+  it("shows a model's own name while the request keeps the provider's real id", async () => {
+    fixtures.userProviders = { ...twoProviders, configs: [{ ...configA, activeModel: "nvidia/nemotron-3-ultra" }] };
+    fixtures.myApiModels = [
+      { id: "nvidia/nemotron-3-ultra", name: "NVIDIA: Nemotron 3 Ultra", displayName: "Nemotron 3 Ultra", isFree: false },
+      { id: "inclusionai/ling-sante:free", name: "inclusionAI: Ling (free)", displayName: "Ling", isFree: true },
+    ];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    await enterMyApi(user);
+    await user.click(screen.getByLabelText("Модель «Мой API»"));
+    const options = await screen.findAllByRole("option");
+    // The catalog's own pricing puts the free model in its own section first, and every entry
+    // keeps the id the request needs even though the label drops the author prefix.
+    expect(options.map((option) => option.getAttribute("title"))).toEqual(["inclusionai/ling-sante:free", "nvidia/nemotron-3-ultra"]);
+    expect(options[1]!.textContent ?? "").not.toContain("NVIDIA");
+    expect(within(options[0]!.parentElement as HTMLElement).getAllByText("Free").length).toBeGreaterThan(0);
+    const trigger = screen.getByRole("button", { name: "Модель «Мой API»" });
+    expect(trigger.textContent ?? "").toContain("Nemotron 3 Ultra");
+    // The pill never shows the raw id: the request path is the only place the id is needed.
+    expect(trigger.textContent ?? "").not.toContain("nvidia/");
+
+    await user.click(options[0]!);
+    expect(fixtures.switchedModel).toEqual({ provider: "custom-abc", activeModel: "inclusionai/ling-sante:free" });
+  });
+
+  it("searches the model list by both the visible name and the real id", async () => {
+    fixtures.userProviders = twoProviders;
+    fixtures.myApiModels = [
+      { id: "vendor/model-b", name: "Model B", displayName: "Model B", isFree: false },
+      { id: "vendor/model-c", name: "Model C", displayName: "Model C", isFree: false },
+    ];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    await enterMyApi(user);
+    await user.click(screen.getByLabelText("Модель «Мой API»"));
+    await user.type(screen.getByLabelText("Поиск моделей"), "model-c");
+    await waitFor(() => expect(screen.getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["vendor/model-c"]));
+    await user.clear(screen.getByLabelText("Поиск моделей"));
+    await user.type(screen.getByLabelText("Поиск моделей"), "zzz");
+    expect(await screen.findByText("Ничего не найдено")).toBeTruthy();
+  });
+});
+
+describe("My API model picker", () => {
+  beforeEach(() => { window.localStorage.clear(); resetFixtures(); });
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  const customConfig = { provider: "custom-abc", displayName: "Мой провайдер", baseUrl: "https://api.example.com/v1", modelsEndpoint: null, activeModel: "vendor/model-b", keyHint: "••••4321", updatedAt: new Date(0).toISOString() };
+
+  it("offers the active provider's own live models, never a Kairema role", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [{ id: "vendor/model-b", name: "Model B" }, { id: "vendor/model-c", name: "Model C" }];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+
+    const picker = await screen.findByLabelText("Модель «Мой API»");
+    await user.click(picker);
+    const options = await screen.findAllByRole("option");
+    expect(options.map((option) => option.getAttribute("title"))).toEqual(["vendor/model-b", "vendor/model-c"]);
+    for (const role of ["Kairema Flash", "Kairema Think", "Kairema Context", "Kairema Apex"]) {
+      expect(options.map((option) => option.textContent ?? "")).not.toContain(role);
+    }
+  });
+
+  it("switches the active model on the server instead of guessing locally", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [{ id: "vendor/model-b", name: "Model B" }, { id: "vendor/model-c", name: "Model C" }];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    const picker = await screen.findByLabelText("Модель «Мой API»");
+    await user.click(picker);
+    await user.click(await screen.findByRole("option", { name: /vendor\/model-c/ }));
+    expect(fixtures.switchedModel).toEqual({ provider: "custom-abc", activeModel: "vendor/model-c" });
+  });
+
+  it("loads the catalog without ever sending a key from the browser", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    // The picker reads the server's own stored credential, so no key travels in this request.
+    expect(fixtures.myApiCatalogInputs.at(-1)).toEqual({ provider: "custom-abc" });
+  });
+
+  it("states a failed catalog read and offers a retry instead of looking like an empty list", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiCatalogError = "Что произошло: Провайдер ИИ ответил ошибкой (AUTH) | Что делать: Проверьте настройки в Настройках → AI Providers.";
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+
+    await screen.findByText(/Провайдер ИИ ответил ошибкой \(AUTH\)/);
+    // The provider is reachable but its catalog could not be read: that is not "no models".
+    expect(container.textContent ?? "").not.toContain("провайдер не вернул список моделей");
+
+    const attemptsBefore = fixtures.myApiCatalogInputs.length;
+    await user.click(screen.getByRole("button", { name: "Повторить" }));
+    expect(fixtures.myApiCatalogInputs.length).toBeGreaterThan(attemptsBefore);
+  });
+
+  it("reads the catalog once per provider instead of on every switch into My API", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [{ id: "vendor/model-b", name: "Model B" }];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    render(<Home />);
+    const myApi = (await screen.findAllByRole("button", { name: "Мой API" }))[0]!;
+    const chat = screen.getAllByRole("button", { name: "Чат" })[0]!;
+    await user.click(myApi);
+    await screen.findByLabelText("Модель «Мой API»");
+    const afterFirstEntry = fixtures.myApiCatalogInputs.length;
+
+    await user.click(chat);
+    await user.click(myApi);
+    await screen.findByLabelText("Модель «Мой API»");
+    expect(fixtures.myApiCatalogInputs.length).toBe(afterFirstEntry);
+
+    // A different provider, or an explicit retry, still reads it.
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-xyz", storageReady: true };
+    await user.click(chat);
+    await user.click(myApi);
+    await waitFor(() => expect(fixtures.myApiCatalogInputs.at(-1)).toEqual({ provider: "custom-xyz" }));
+  });
+
+  it("shows an empty catalog as empty, not as a failure", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [];
+    fixtures.myApiModelsLoaded = true;
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+
+    await screen.findByText(/провайдер не вернул список моделей/);
+    expect(screen.queryByRole("button", { name: "Повторить" })).toBeNull();
+    // The saved model stays visible, so the user still knows which binding is configured.
+    expect(container.textContent ?? "").toContain("vendor/model-b");
+  });
+
+  it("reports a refused model switch instead of silently reverting the picker", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [{ id: "vendor/model-b", name: "Model B" }, { id: "vendor/model-c", name: "Model C" }];
+    fixtures.myApiModelsLoaded = true;
+    fixtures.switchModelError = "Выбранная модель отсутствует в каталоге провайдера. Обновите список моделей.";
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    const picker = await screen.findByLabelText("Модель «Мой API»");
+    await user.click(picker);
+    await user.click(await screen.findByRole("option", { name: /vendor\/model-c/ }));
+
+    await screen.findByText(/отсутствует в каталоге провайдера/);
+    // The switch never reached the server, so the binding is unchanged.
+    expect(fixtures.switchedModel).toBeNull();
+  });
+
+  it("never shows the stored key in the chat screen", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await screen.findByLabelText("Модель «Мой API»");
+    expect(container.textContent ?? "").not.toContain("••••");
+  });
+
+  it("hides the four Kairema roles while My API is selected and shows the binding instead", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    const sidebar = () => container.querySelector(".kairema-sidebar") as HTMLElement;
+    expect(sidebar().textContent ?? "").toContain("Kairema Flash");
+
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await screen.findByLabelText("Модель «Мой API»");
+    for (const role of ["Kairema Flash", "Kairema Think", "Kairema Context", "Kairema Apex"]) {
+      expect(sidebar().textContent ?? "").not.toContain(role);
+      expect(headerPill(container).textContent ?? "").not.toContain(role);
+    }
+    // The sidebar names the provider the turn will actually reach.
+    expect(sidebar().textContent ?? "").toContain("vendor/model-b");
+  });
+
+  it("points an unconfigured My API at provider settings from the sidebar too", async () => {
+    fixtures.userProviders = { providers: [], configs: [], activeProvider: null, storageReady: true };
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+
+    await waitFor(() => expect((container.querySelector(".kairema-sidebar") as HTMLElement).textContent ?? "").not.toContain("Kairema Flash"));
+    const links = screen.getAllByRole("link", { name: "Настроить провайдера →" });
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) expect(link.getAttribute("href")).toBe("/settings/providers");
+  });
+
+  it("sends My API turns flagged for the user's own provider and never a key", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [{ id: "vendor/model-b", name: "Model B" }];
+    fixtures.myApiModelsLoaded = true;
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: done\ndata: {"content":"Ответ провайдера","modelUsed":"vendor/model-b","label":"Мой провайдер · vendor/model-b"}\n\n'));
+        controller.close();
+      },
+    })));
+    vi.stubGlobal("fetch", fetchSpy);
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await user.type(await screen.findByPlaceholderText("Напишите сообщение…"), "Вопрос к своему провайдеру");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    const body = JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body));
+    // The server, not the browser, decides where the turn goes: the flag tells it to use the
+    // active binding, and no credential is ever part of this request.
+    expect(body.myApi).toBe(true);
+    expect(JSON.stringify(body)).not.toContain("apiKey");
+    expect(JSON.stringify(body)).not.toContain("encryptedApiKey");
+    await waitFor(() => expect(fixtures.historyPageFetch).toHaveBeenCalled());
+  });
+
+  it("leaves an ordinary Chat turn unmarked so the platform path is unchanged", async () => {
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: done\ndata: {"content":"Обычный ответ","modelUsed":"fast","label":"Kairema Flash"}\n\n'));
+        controller.close();
+      },
+    })));
+    vi.stubGlobal("fetch", fetchSpy);
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.type(await screen.findByPlaceholderText("Напишите сообщение…"), "Обычный вопрос");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    const body = JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body));
+    expect(body.myApi).toBeUndefined();
+    expect(body.modelId).toBe(fixtures.modelId);
+  });
+
+  it("keeps long provider and model names inside the header without widening it", async () => {
+    fixtures.userProviders = { providers: [], configs: [{ ...customConfig, displayName: "Очень длинное имя провайдера для проверки переноса строки", activeModel: "organisation/very-long-model-identifier-for-overflow-check-2026" }], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [{ id: "organisation/very-long-model-identifier-for-overflow-check-2026", name: "Very Long Model" }];
+    fixtures.myApiModelsLoaded = true;
+    const { container } = render(<Home />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await screen.findByLabelText("Модель «Мой API»");
+
+    // jsdom neither lays out nor loads the stylesheet, so the contract is asserted on the
+    // markup plus the rules that make a long value truncate instead of widening the bar.
+    expect(container.querySelector(".kairema-binding-trigger")).not.toBeNull();
+    expect(container.querySelector(".kairema-binding-select")).not.toBeNull();
+    // The provider control truncates on its own, so a long provider name cannot widen the bar.
+    expect(container.querySelector(".kairema-provider-trigger-text")).not.toBeNull();
+    const css = readFileSync(path.join(import.meta.dirname, "../index.css"), "utf8");
+    const rule = css.slice(css.indexOf(".kairema-binding-trigger-text"));
+    expect(rule.slice(0, 200)).toContain("text-overflow:ellipsis");
+    expect(rule.slice(0, 200)).toContain("min-width:0");
+    const providerRule = css.slice(css.indexOf(".kairema-provider-trigger"));
+    expect(providerRule.slice(0, 400)).toContain("text-overflow:ellipsis");
+    expect(providerRule.slice(0, 400)).toContain("min-width:0");
+    const pillRule = css.slice(css.indexOf(".kairema-model-pill { max-width:100%"));
+    expect(pillRule.slice(0, 200)).toContain("max-width:100%");
+    expect(pillRule.slice(0, 200)).toContain("overflow:hidden");
+    // Narrow viewports get their own caps so the bar still truncates on a phone.
+    expect(css).toContain("@media (max-width:767px)");
+    expect(css).toContain("@media (max-width:430px)");
+  });
+
+  it("splits the live catalog into Free and Paid from the server's pricing verdict, never a hardcoded list", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [
+      // The provider priced the first at zero, so it is Free although its id says ":extended"; the
+      // third carries ":free" in its id but is billed, which the client must not second-guess.
+      { id: "vendor/zero-priced:extended", name: "Vendor Free Flash", displayName: "Vendor Free Flash", isFree: true },
+      { id: "vendor/model-b", name: "Model B", displayName: "Model B", isFree: false },
+      { id: "vendor/free-flash:free", name: "Vendor Paid Ultra", displayName: "Vendor Paid Ultra", isFree: false },
+    ];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await user.click(await screen.findByLabelText("Модель «Мой API»"));
+
+    const groups = within(await screen.findByRole("listbox")).getAllByRole("group");
+    // The grouping follows the catalog Kairema fetched, so a model the app has never seen still
+    // lands in the right section on its own.
+    expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual(["Free", "Paid"]);
+    expect(within(groups[0]!).getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["vendor/zero-priced:extended"]);
+    expect(within(groups[1]!).getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["vendor/model-b", "vendor/free-flash:free"]);
+    // Only the free model carries the marker, so the two sections are distinguishable per item
+    // and not just by the section heading.
+    const badges = (group: HTMLElement) => Array.from(group.querySelectorAll(".kairema-model-menu-badge")).map((badge) => badge.textContent);
+    expect(badges(groups[0]!)).toEqual(["Free"]);
+    expect(badges(groups[1]!)).toEqual([]);
+  });
+
+  it("filters both sections at once while typing, by name and by id", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [
+      { id: "vendor/free-flash:free", name: "Vendor Free Flash", displayName: "Vendor Free Flash", isFree: true },
+      { id: "vendor/model-b", name: "Model B", displayName: "Model B", isFree: false },
+      { id: "vendor/paid-ultra:extended", name: "Vendor Paid Ultra", displayName: "Vendor Paid Ultra", isFree: false },
+    ];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await user.click(await screen.findByLabelText("Модель «Мой API»"));
+    const search = await screen.findByLabelText("Поиск моделей");
+
+    await user.type(search, "flash");
+    // One match, and it is the free one: the search spans both sections, it is not section-scoped.
+    expect(screen.getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["vendor/free-flash:free"]);
+
+    // The id itself is searchable too, not only the display name.
+    await user.clear(search);
+    await user.type(search, "paid-ultra");
+    expect(screen.getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["vendor/paid-ultra:extended"]);
+    // A name that lives in the other section still matches across the whole catalog.
+    await user.clear(search);
+    await user.type(search, "model b");
+    expect(screen.getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["vendor/model-b"]);
+  });
+
+  it("says so cleanly when the search matches nothing", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [{ id: "vendor/model-b", name: "Model B" }];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await user.click(await screen.findByLabelText("Модель «Мой API»"));
+    await user.type(await screen.findByLabelText("Поиск моделей"), "нет-такой-модели");
+
+    await screen.findByText("Ничего не найдено");
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+    // An empty result is not a failure state, so no retry is offered.
+    expect(screen.queryByRole("button", { name: "Повторить" })).toBeNull();
+  });
+
+  it("marks the saved model active and keeps it selected across close and reopen", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [{ id: "vendor/model-b", name: "Model B" }, { id: "vendor/model-c", name: "Model C" }];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    const picker = await screen.findByLabelText("Модель «Мой API»");
+    expect(picker.textContent).toBe("Model B");
+
+    await user.click(picker);
+    const active = (await screen.findAllByRole("option")).find((option) => option.getAttribute("aria-selected") === "true");
+    expect(active?.getAttribute("title")).toBe("vendor/model-b");
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryAllByRole("option")).toHaveLength(0));
+    // Reopening starts from the server's saved binding, not from whatever was last clicked.
+    await user.click(picker);
+    const reopened = (await screen.findAllByRole("option")).find((option) => option.getAttribute("aria-selected") === "true");
+    expect(reopened?.getAttribute("title")).toBe("vendor/model-b");
+  });
+
+  it("closes on a pick and sends the picked id to the server", async () => {
+    fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
+    fixtures.myApiModels = [{ id: "vendor/model-b", name: "Model B" }, { id: "vendor/model-c", name: "Model C" }];
+    fixtures.myApiModelsLoaded = true;
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await user.click(await screen.findByLabelText("Модель «Мой API»"));
+    await user.click(await screen.findByRole("option", { name: /vendor\/model-c/ }));
+
+    await waitFor(() => expect(screen.queryAllByRole("option")).toHaveLength(0));
+    expect(fixtures.switchedModel).toEqual({ provider: "custom-abc", activeModel: "vendor/model-c" });
+    // The search text does not survive a reopen, so the user lands on the full list again.
+    await user.click(await screen.findByLabelText("Модель «Мой API»"));
+    expect((await screen.findByLabelText("Поиск моделей")) as HTMLInputElement).toHaveProperty("value", "");
+  });
+
+  it("keeps the menu inside a bounded, self-scrolling black panel that cannot widen the page", () => {
+    const css = readFileSync(path.join(import.meta.dirname, "../index.css"), "utf8");
+    const panel = css.slice(css.indexOf(".kairema-model-menu {"));
+    // A fixed, body-level panel with its own height and scroll: the catalog length can neither
+    // stretch the chat page nor add a horizontal scrollbar.
+    expect(panel.slice(0, 400)).toContain("position:fixed");
+    expect(panel.slice(0, 400)).toContain("max-height");
+    expect(panel.slice(0, 400)).toContain("overflow:hidden");
+    // The panel takes its colour from the theme tokens, so the shared menu follows the app's
+    // light/dark setting instead of being pinned to a near-black literal.
+    expect(panel.slice(0, 400)).toContain("var(--k-panel)");
+    const list = css.slice(css.indexOf(".kairema-model-menu-list {"));
+    expect(list.slice(0, 300)).toContain("overflow-y:auto");
+    expect(list.slice(0, 300)).toContain("min-height:0");
+    // A long model id truncates inside the item instead of stretching the panel.
+    const item = css.slice(css.indexOf(".kairema-model-menu-item-title {"));
+    expect(item.slice(0, 300)).toContain("text-overflow:ellipsis");
+    expect(item.slice(0, 300)).toContain("min-width:0");
+    // Phone widths get their own smaller type, so the same panel still fits a narrow screen.
+    expect(css).toContain("@media (max-width:430px)");
+    // The arrow sits inside the same wrapper as the trigger, so the open state has to reach it
+    // with a descendant rule: a sibling combinator never matches and the chevron stays still.
+    const chevron = css.slice(css.indexOf('.kairema-select-wrap:has(.kairema-binding-trigger[aria-expanded="true"])'));
+    expect(chevron.slice(0, 200)).toContain(" .kairema-model-chevron { transform:rotate(180deg); }");
+  });
+});
+
+describe("Profile", () => {
+  // The dialog primitive is mocked to plain fragments here, so the profile content is queried
+  // by its unique labels rather than by a dialog role.
+  async function openProfile() {
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.click(await screen.findByRole("button", { name: fixtures.language === "en" ? "Open profile" : "Открыть профиль" }));
+    await screen.findByRole("textbox", { name: /Как к вам обращаться|What should we call you/ });
+    return user;
+  }
+
+  beforeEach(() => { window.localStorage.clear(); resetFixtures(); });
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  it("offers a compact name field and clarifying-question preference, defaulting to off", async () => {
+    await openProfile();
+
+    expect(screen.getByText("Полное имя")).not.toBeNull();
+    expect(screen.getByText("Персональные предпочтения")).not.toBeNull();
+    expect(screen.getByText("Ваши предпочтения применяются ко всем разговорам.")).not.toBeNull();
+    const nameField = screen.getByRole("textbox", { name: /Как к вам обращаться/ }) as HTMLInputElement;
+    expect(nameField.maxLength).toBe(120);
+    expect(nameField.getAttribute("autocomplete")).toBe("name");
+    // Default preference is OFF on a fresh account.
+    const toggle = screen.getByRole("switch", { name: /Задавать уточняющие вопросы/ });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("reads as a plain English profile form in the English interface", async () => {
+    fixtures.language = "en";
+    await openProfile();
+
+    expect(screen.getByText("Full name")).not.toBeNull();
+    expect(screen.getByRole("textbox", { name: "What should we call you?" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: /Update Profile/ })).not.toBeNull();
+    expect(screen.getByText("Personal preferences")).not.toBeNull();
+    expect(screen.getByText("What personal preferences should Kairema consider in responses?")).not.toBeNull();
+    expect(screen.getByText("Your preferences will apply to all conversations.")).not.toBeNull();
+    expect(screen.getByRole("switch", { name: /Ask clarifying questions before giving detailed answers/ })).not.toBeNull();
+    expect(screen.getByRole("button", { name: /Save Preferences/ })).not.toBeNull();
+    // No internal wording leaks into the profile screen.
+    expect(document.body.textContent ?? "").not.toMatch(/userId|encrypted|myApiProvider|SSRF/i);
+  });
+
+  it("saves the display name and the clarifying-questions preference independently", async () => {
+    const user = await openProfile();
+
+    await user.click(screen.getByRole("switch", { name: /Задавать уточняющие вопросы/ }));
+    await user.click(screen.getByRole("button", { name: /Сохранить предпочтения/ }));
+    expect(fixtures.updatedSettings.at(-1)).toEqual({ askClarifyingQuestions: true });
+
+    const nameInput = screen.getByRole("textbox", { name: /Как к вам обращаться/ });
+    await user.clear(nameInput);
+    await user.type(nameInput, "Kazea");
+    await user.click(screen.getByRole("button", { name: /Обновить профиль/ }));
+    expect(fixtures.updateName).toHaveBeenCalledWith({ name: "Kazea" });
+    // The name is not a response preference, so it must not leak into settings updates.
+    expect(fixtures.updatedSettings.at(-1)).toEqual({ askClarifyingQuestions: true });
+  });
+
+  it("never writes the display name into any chat request", async () => {
+    const user = await openProfile();
+    const nameInput = screen.getByRole("textbox", { name: /Как к вам обращаться/ });
+    await user.clear(nameInput);
+    await user.type(nameInput, "Kazea");
+    await user.click(screen.getByRole("button", { name: /Обновить профиль/ }));
+    await user.keyboard("{Escape}");
+
+    expect(document.body.textContent ?? "").not.toContain("Kazea");
+  });
+});
+
+describe("a question that got no answer", () => {
+  const encoder = new TextEncoder();
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    resetFixtures();
+  });
+
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  /** The stream the server sends when a turn fails: one `error` event and nothing else. */
+  const failingStream = (message: string) => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ message })}\n\n`));
+      controller.close();
+    },
+  }));
+
+  const succeedingStream = (text: string) => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`event: delta\ndata: ${JSON.stringify({ content: text })}\n\n`));
+      controller.enqueue(encoder.encode(`event: done\ndata: ${JSON.stringify({ content: text, modelUsed: "google/gemma-4-26b-a4b-it:free", label: "Kairema Ultra (Gemma 4)" })}\n\n`));
+      controller.close();
+    },
+  }));
+
+  /**
+   * Answers the chat-stream route with the given responses in order and leaves every other request
+   * alone, so a stream is never consumed by an unrelated fetch that happened to run first.
+   */
+  const stubChatStream = (...responses: Response[]) => {
+    let index = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) !== "/api/chat/stream") return new Response("{}", { status: 200 });
+      return responses[Math.min(index++, responses.length - 1)]!;
+    }));
+  };
+
+  /** Persists whatever the test says was answered, so a successful turn stays on screen. */
+  const persistAnswer = (question: string, answer: string) => {
+    fixtures.invalidateMessages.mockImplementation(async () => {
+      fixtures.messages = [...fixtures.messages,
+        { id: 900, role: "user", content: question, modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:02:00.000Z") },
+        { id: 901, role: "assistant", content: answer, modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:03:00.000Z") }];
+      return { messages: fixtures.messages, nextCursor: null };
+    });
+    fixtures.historyPageFetch.mockImplementation(async () => {
+      fixtures.messages = [...fixtures.messages.filter((message) => message.id !== 900 && message.id !== 901),
+        { id: 900, role: "user", content: question, modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:02:00.000Z") },
+        { id: 901, role: "assistant", content: answer, modelId: fixtures.modelId, createdAt: new Date("2026-08-19T00:03:00.000Z") }];
+      return { messages: fixtures.messages, nextCursor: null };
+    });
+  };
+
+  const askSomething = async (user: ReturnType<typeof userEvent.setup>, text: string) => {
+    const composer = await screen.findByPlaceholderText("Напишите сообщение…");
+    await user.type(composer, text);
+    await user.keyboard("{Enter}");
+  };
+
+  const notice = () => screen.queryByTestId("failed-turn-notice");
+
+  it("keeps the question on screen with a notice instead of dropping it or leaving it for good", async () => {
+    const user = userEvent.setup();
+    stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+    render(<Home />);
+
+    await askSomething(user, "Вопрос без ответа");
+    await waitFor(() => expect(notice()).toBeTruthy());
+    expect(screen.getByText("Вопрос без ответа")).toBeTruthy();
+    expect(screen.getByText("Провайдер не вернул ответ.")).toBeTruthy();
+    expect(screen.getByText(/Сообщение будет удалено через 10 секунд/)).toBeTruthy();
+  });
+
+  it("leaves the question selectable and copyable while the notice is shown", async () => {
+    const user = userEvent.setup();
+    stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+    render(<Home />);
+
+    await askSomething(user, "Текст для копирования");
+    await waitFor(() => expect(notice()).toBeTruthy());
+
+    // The question is ordinary selectable text, not a disabled field or an image.
+    const question = screen.getByText("Текст для копирования");
+    expect(question.closest(".kairema-message")).toBeTruthy();
+    const range = document.createRange();
+    range.selectNodeContents(question);
+    expect(range.toString()).toBe("Текст для копирования");
+  });
+
+  it("calls a rate limit out separately, because the user's next action is to wait", async () => {
+    const user = userEvent.setup();
+    stubChatStream(failingStream("Лимит My API: 15 запросов в минуту. Подождите немного и попробуйте снова."));
+    render(<Home />);
+
+    await askSomething(user, "Вопрос сверх лимита");
+    await waitFor(() => expect(notice()).toBeTruthy());
+    expect(screen.getByText(/Достигнут лимит запросов/)).toBeTruthy();
+    expect(screen.queryByText("Провайдер не вернул ответ.")).toBeNull();
+  });
+
+  it("removes only the failed question after the grace period", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+      render(<Home />);
+
+      await askSomething(user, "Вопрос без ответа");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      // Still there just before the deadline.
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(screen.getByText("Вопрос без ответа")).toBeTruthy();
+      expect(notice()).toBeTruthy();
+
+      await vi.advanceTimersByTimeAsync(1_500);
+      await waitFor(() => expect(screen.queryByText("Вопрос без ответа")).toBeNull());
+      await waitFor(() => expect(notice()).toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves the conversation that came before the failed turn untouched", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+      render(<Home />);
+
+      await screen.findByText("Старое сообщение пользователя");
+      await askSomething(user, "Вопрос без ответа");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      await vi.advanceTimersByTimeAsync(11_000);
+      await waitFor(() => expect(screen.queryByText("Вопрос без ответа")).toBeNull());
+
+      expect(screen.getByText("Старое сообщение пользователя")).toBeTruthy();
+      expect(screen.getByText("Старый ответ Kairema")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refreshes the stored history after a failure, so the orphaned question can be gone", async () => {
+    const user = userEvent.setup();
+    stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+    render(<Home />);
+
+    await askSomething(user, "Вопрос без ответа");
+    await waitFor(() => expect(notice()).toBeTruthy());
+    // The stored transcript is re-read after the failure; the server has rolled the failed
+    // question back, so the next load shows the conversation without it.
+    await waitFor(() => expect(fixtures.invalidateMessages).toHaveBeenCalledWith({ sessionId: fixtures.sessionId, limit: 60 }));
+  });
+
+  it("keeps a later successful question working after a failure", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      persistAnswer("Второй вопрос", "Рабочий ответ");
+      stubChatStream(
+        failingStream("Провайдер временно недоступен. Повторите попытку позже."),
+        succeedingStream("Рабочий ответ"),
+      );
+      render(<Home />);
+
+      await askSomething(user, "Первый вопрос");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      await vi.advanceTimersByTimeAsync(11_000);
+      await waitFor(() => expect(screen.queryByText("Первый вопрос")).toBeNull());
+
+      await askSomething(user, "Второй вопрос");
+      await waitFor(() => expect(screen.getByText("Рабочий ответ")).toBeTruthy());
+      expect(screen.getByText("Второй вопрос")).toBeTruthy();
+      await waitFor(() => expect(notice()).toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not show a notice for a turn that produced an answer", async () => {
+    const user = userEvent.setup();
+    persistAnswer("Обычный вопрос", "Готовый ответ");
+    stubChatStream(succeedingStream("Готовый ответ"));
+    render(<Home />);
+
+    await askSomething(user, "Обычный вопрос");
+    await waitFor(() => expect(screen.getByText("Готовый ответ")).toBeTruthy());
+    expect(notice()).toBeNull();
+  });
+
+  it("clears a pending removal when the user leaves the conversation", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+      render(<Home />);
+
+      await askSomething(user, "Вопрос без ответа");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      // Switching conversations must not leave a timer that later edits the new message list.
+      await user.click((await screen.findAllByText("Активная история"))[0]!);
+      await vi.advanceTimersByTimeAsync(11_000);
+      expect(screen.getByText("Старое сообщение пользователя")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("a failed turn is removed for good, not just on screen", () => {
+  const encoder = new TextEncoder();
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    resetFixtures();
+  });
+
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  const failingStream = (message: string) => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ message })}\n\n`));
+      controller.close();
+    },
+  }));
+
+  const stubChatStream = (response: Response) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) !== "/api/chat/stream") return new Response("{}", { status: 200 });
+      return response;
+    }));
+  };
+
+  const ask = async (user: ReturnType<typeof userEvent.setup>, text: string) => {
+    const composer = await screen.findByPlaceholderText("Напишите сообщение…");
+    await user.type(composer, text);
+    await user.keyboard("{Enter}");
+  };
+
+  const notice = () => screen.queryByTestId("failed-turn-notice");
+
+  it("keeps the question for the whole ten seconds and removes it exactly at the deadline", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+      render(<Home />);
+
+      await ask(user, "Точный вопрос");
+      await waitFor(() => expect(notice()).toBeTruthy());
+
+      // 9.9s in, the question is still there. This is the boundary that matters: a removal at five
+      // seconds, or any other early one, fails here.
+      await vi.advanceTimersByTimeAsync(9_900);
+      expect(screen.queryByText("Точный вопрос"), "removed before 10s").toBeTruthy();
+      expect(notice(), "notice removed before 10s").toBeTruthy();
+      expect(fixtures.discardFailedTurn, "deleted before 10s").not.toHaveBeenCalled();
+
+      // 9.999s: still not gone.
+      await vi.advanceTimersByTimeAsync(99);
+      expect(screen.queryByText("Точный вопрос"), "removed before 10s").toBeTruthy();
+
+      // One more millisecond reaches the deadline, and it goes.
+      await vi.advanceTimersByTimeAsync(1);
+      await waitFor(() => expect(screen.queryByText("Точный вопрос")).toBeNull());
+      await waitFor(() => expect(notice()).toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("deletes the question from the stored transcript at the deadline", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+      render(<Home />);
+
+      await ask(user, "Вопрос для удаления");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      // Nothing is deleted while the question is still on screen and copyable.
+      expect(fixtures.discardFailedTurn).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await waitFor(() => expect(fixtures.discardFailedTurn).toHaveBeenCalledTimes(1));
+      const input = fixtures.discardFailedTurn.mock.calls[0]![0] as { sessionId: string; clientMessageId: string };
+      expect(input.sessionId).toBe(fixtures.sessionId);
+      expect(input.clientMessageId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sends the id the server was given, so the right question is the one removed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) !== "/api/chat/stream") return new Response("{}", { status: 200 });
+        void init;
+        return failingStream("Провайдер временно недоступен. Повторите попытку позже.");
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+      render(<Home />);
+
+      await ask(user, "Вопрос с известным id");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      const sent = JSON.parse(String((fetchSpy.mock.calls.find(([url]) => String(url) === "/api/chat/stream")?.[1] as RequestInit).body));
+      await vi.advanceTimersByTimeAsync(10_000);
+      await waitFor(() => expect(fixtures.discardFailedTurn).toHaveBeenCalledTimes(1));
+      // The delete names exactly the turn the request created, not a position or a range.
+      expect((fixtures.discardFailedTurn.mock.calls[0]![0] as { clientMessageId: string }).clientMessageId).toBe(sent.clientMessageId);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still deletes the stored turn when the user leaves the conversation first", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+      render(<Home />);
+
+      await ask(user, "Вопрос перед переключением");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      await user.click((await screen.findAllByText("Активная история"))[0]!);
+      // The question leaves the screen because the conversation changed, but the pending removal
+      // is not abandoned: the stored turn is still deleted at its deadline.
+      await vi.advanceTimersByTimeAsync(10_000);
+      await waitFor(() => expect(fixtures.discardFailedTurn).toHaveBeenCalledTimes(1));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports a failed deletion instead of pretending the question is gone", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fixtures.discardFailedTurn.mockRejectedValue(new Error("offline"));
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+      render(<Home />);
+
+      await ask(user, "Вопрос, который не удалится");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      await vi.advanceTimersByTimeAsync(10_000);
+      await waitFor(() => expect(fixtures.discardFailedTurn).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(screen.getByText(/Не удалось удалить неудачный вопрос из истории/)).toBeTruthy());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves the rest of the conversation alone", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+      render(<Home />);
+
+      await screen.findByText("Старое сообщение пользователя");
+      await ask(user, "Единственный неудачный вопрос");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      await vi.advanceTimersByTimeAsync(10_000);
+      await waitFor(() => expect(screen.queryByText("Единственный неудачный вопрос")).toBeNull());
+
+      expect(screen.getByText("Старое сообщение пользователя")).toBeTruthy();
+      expect(screen.getByText("Старый ответ Kairema")).toBeTruthy();
+      // Only this one question is removed; the session is not deleted and neither is any reply.
+      expect(fixtures.discardFailedTurn).toHaveBeenCalledTimes(1);
+      expect(fixtures.deleteChat).not.toHaveBeenCalled();
+      expect(fixtures.clearHistory).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

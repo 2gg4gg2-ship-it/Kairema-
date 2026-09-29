@@ -78,7 +78,7 @@ Synthetic shared-domain result показывает требуемый безо�
 
 # FALLBACK RESULT
 
-**IMPLEMENTED / TESTED / SIMULATED.** Fallback не получает бесплатный обход admission: для каждой фактической candidate attempt требуется новая reservation. Focused controller test подтвердил, что policy-disabled candidate не создаёт reservation, а допустимый fallback проходит повторную admission. Отдельный synthetic lifecycle trace подтвердил, что attempt 1 после failure release имеет отдельный ключ от attempt 2, повторный release не изменяет состояние, итоговый inflight WCU равен нулю, а histogram не превышает четыре attempt.
+**IMPLEMENTED / TESTED / SIMULATED.** Fallback не получает бесплатный обход admission: для каждой фактической candidate attempt требуется новая reservation на provider/model scopes, тогда как per-user WCU окно списывается один раз за логический запрос независимо от числа attempts. Focused controller test подтвердил, что policy-disabled candidate не создаёт reservation, а допустимый fallback проходит повторную admission. Отдельный synthetic lifecycle trace подтвердил, что attempt 1 после failure release имеет отдельный ключ от attempt 2, повторный release не изменяет состояние, итоговый inflight WCU равен нулю, а histogram не превышает четыре attempt.
 
 | Проверка | Результат |
 |---|---|

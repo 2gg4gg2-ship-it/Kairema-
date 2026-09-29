@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { COOKIE_NAME } from "../shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { clearGuestCookie } from "./_core/guest-session";
 import { consumeStytchLinkIntent, getUserByProviderIdentity, linkProviderIdentityToUser, resolveOrCreateProviderUser } from "./db";
 import { sdk } from "./_core/sdk";
 import {
@@ -88,18 +89,27 @@ export function registerStytchAuthRoutes(app: Express) {
         return;
       }
 
-      await resolveOrCreateProviderUser({
-        provider: STYTCH_PROVIDER,
-        providerSubject: result.user.user_id,
-        canonicalOpenId: stytchCanonicalOpenId(result.user.user_id),
-        verifiedEmail,
-        displayName: result.user.name?.first_name ?? null,
-        loginMethod: "stytch-password",
-      });
+      try {
+        await resolveOrCreateProviderUser({
+          provider: STYTCH_PROVIDER,
+          providerSubject: result.user.user_id,
+          canonicalOpenId: stytchCanonicalOpenId(result.user.user_id),
+          verifiedEmail,
+          displayName: result.user.name?.first_name ?? null,
+          loginMethod: "stytch-password",
+        });
+        console.log("[CANONICAL_USER_OK]");
+      } catch (error) {
+        console.log(`[CANONICAL_USER_ERROR] stage=resolve_provider error_name=${error?.constructor?.name ?? "Error"}`);
+        throw error;
+      }
       setStytchSessionCookie(res, req, result.session_token);
       // Choosing a verified provider session is an explicit account switch.
       // Existing Manus OAuth remains supported but is not left ambiguous.
       clearManusSessionCookie(res, req);
+      // A pre-login guest cookie must not outlive this login: while it is present
+      // the guest row shadows the canonical Stytch user on every later request.
+      clearGuestCookie(res, req);
       res.redirect(303, "/?auth=verified");
     } catch {
       linkIntent ? redirectLinkFailure(res, req) : (clearStytchSessionCookie(res, req), res.redirect(303, "/?auth=failed"));

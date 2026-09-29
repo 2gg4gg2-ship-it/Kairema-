@@ -1,24 +1,40 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
-import { appendChatMessage, consumeChatStreamRequestQuota, enqueueMemoryExtractionJob, getOwnedChatSession, getOwnedSessionMessage, getStoredAssistantForClientMessage, listSessionTranscriptWindow, updateChatTitle } from "./db";
-import { sdk } from "./_core/sdk";
-import { MODEL_IDS, chatWithRoleStream, publicChatError, type Provider, type RoleId } from "./providers";
+import { appendChatMessage, consumeChatStreamRequestQuota, consumeMyApiRequestQuota, deleteOwnedSessionUserMessage, listUserProviderConfigs, enqueueMemoryExtractionJob, getActiveUserProviderBinding, getOwnedChatSession, getOwnedSessionMessage, getStoredAssistantForClientMessage, listSessionTranscriptWindow, updateChatTitle } from "./db";
+import { resolveRequestUser } from "./_core/context";
+import { MODEL_IDS, chatWithRoleStream, publicChatError, type ChatMessage, type ChatSettings, type Provider, type RoleId } from "./providers";
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
+import { getOrCreateGuestUser } from "./_core/guest-session";
+import type { CapacityActor } from "./capacity-controller";
+import { chatWithUserProviderStream, customUserProviderTarget, isSupportedUserProvider, publicUserProviderError, UserProviderGuestNotAllowedError, UserProviderNotConfiguredError, UserProviderSkipRequestedError } from "./user-providers";
+import { decryptUserProviderSecret } from "./user-provider-secrets";
 
 export const CHAT_STREAM_RATE_LIMIT = 60;
 export const CHAT_STREAM_MAX_ACTIVE_PER_INSTANCE = 12;
 export const CHAT_STREAM_MAX_ACTIVE_PER_USER = 2;
 const CHAT_STREAM_RATE_WINDOW_MS = 60_000;
+
+/**
+ * My API (BYOK) turns are capped much lower than ordinary chat: each one spends the user's own
+ * provider key and money, so a runaway client or a script must not be able to drain an account
+ * through this endpoint. The two budgets are metered separately and neither consumes the other.
+ */
+export const MY_API_RATE_LIMIT = 15;
+export const MY_API_RATE_WINDOW_MS = 60_000;
+/** The single sentence a user sees once their own-key budget for this minute is spent. */
+export const MY_API_RATE_LIMIT_MESSAGE = "Лимит My API: 15 запросов в минуту. Подождите немного и попробуйте снова.";
 const CHAT_STREAM_REPLAY_TTL_MS = 5 * 60_000;
 type StreamResult = Awaited<ReturnType<typeof chatWithRoleStream>>;
 type StoredReplay = Pick<StreamResult, "content" | "modelUsed" | "label" | "searchStatus" | "sources" | "webGrounding">;
 type PendingReplay = { promise: Promise<StreamResult | null>; resolve: (result: StreamResult | null) => void };
 
 type ChatStreamAuditRecord = {
-  event: "chat_stream.completed" | "chat_stream.rate_limited";
+  event: "chat_stream.completed" | "chat_stream.rate_limited" | "chat_stream.my_api_rate_limited";
   userId: number;
   roleId?: RoleId;
   provider?: Provider;
+  /** Marks a generation that ran on the caller's own provider, so platform metrics stay separable. */
+  executionMode?: "platform" | "my_api";
   searchAttached?: boolean;
   respondedLayer?: "you" | "serper" | "exa" | "tavily" | "rag" | "none";
   sourcesCount?: number;
@@ -131,6 +147,99 @@ function reserveActiveChatStream(userId: number): { allowed: true; release: () =
 }
 
 function replayKey(userId: number, sessionId: string, clientMessageId: string) { return `${userId}:${sessionId}:${clientMessageId}`; }
+
+/**
+ * The "My API" execution path, kept separate from the platform path above.
+ *
+ * A guest is refused before any lookup, and the binding is resolved from the caller's own id
+ * alone. The decrypted key exists only as a local variable for the duration of the upstream
+ * fetch: it is never returned, logged, attached to the audit record or written into the
+ * persisted transcript. There is no fallback branch here by design — if the chosen provider
+ * fails, the user is told so instead of silently receiving an answer billed to someone else.
+ */
+async function generateWithUserProvider(options: {
+  dependencies: StreamDependencies;
+  userId: number;
+  isGuest: boolean;
+  roleId: RoleId;
+  history: ChatMessage[];
+  settings: ChatSettings | undefined;
+  onDelta: (delta: string) => void;
+  signal: AbortSignal;
+  actor: CapacityActor;
+  /** Providers the page already tried for this turn; see `skipProviders` in the input schema. */
+  skipProviders?: readonly string[];
+}): Promise<StreamResult> {
+  if (options.isGuest) throw new UserProviderGuestNotAllowedError();
+  const binding = await options.dependencies.getActiveUserProviderBinding(options.userId);
+  if (!binding) throw new UserProviderNotConfiguredError();
+  // Every provider the page already tried is dropped, the active one included. A Kairema provider
+  // is still never substituted for it: the turn fails visibly rather than being answered from a
+  // provider the user did not choose and is not paying for.
+  if (options.skipProviders?.includes(binding.provider)) throw new UserProviderSkipRequestedError();
+  // A custom provider is served from the configuration that was validated when it was saved;
+  // the endpoint is re-checked here rather than taken from the request being answered.
+  const target = binding.baseUrl
+    ? customUserProviderTarget({ id: binding.provider, displayName: binding.displayName ?? "Мой провайдер", baseUrl: binding.baseUrl, modelsEndpoint: binding.modelsEndpoint })
+    : binding.provider;
+  const apiKey = options.dependencies.decryptUserProviderSecret(binding.encryptedApiKey);
+
+  // The user's own other connected providers, used only if this one is rate-limited. Every entry
+  // comes from this user's own saved configurations; a Kairema provider is never added here, so a
+  // failed BYOK turn can never be answered by the platform on the user's behalf.
+  const fallbacks = await loadUserProviderFallbacks(options.dependencies, options.userId, binding.provider, binding.model, options.skipProviders ?? []);
+  return await options.dependencies.chatWithUserProviderStream({
+    provider: target,
+    model: binding.model,
+    modelLabel: binding.model,
+    apiKey,
+    fallbacks,
+    history: options.history,
+    settings: options.settings,
+    roleId: options.roleId,
+    onDelta: options.onDelta,
+    signal: options.signal,
+    actor: options.actor,
+  });
+}
+
+/**
+ * The user's other connected providers, in the order they saved them, each with its own key.
+ *
+ * A provider whose key cannot be decrypted right now is skipped rather than allowed to fail the
+ * whole request, and a provider the client does not know how to serve is left out entirely.
+ */
+async function loadUserProviderFallbacks(
+  dependencies: StreamDependencies,
+  userId: number,
+  activeProvider: string,
+  activeModel: string,
+  skipProviders: readonly string[],
+): Promise<Array<{ provider: string; model: string; apiKey: string; modelLabel?: string }>> {
+  let configs: Awaited<ReturnType<StreamDependencies["listUserProviderConfigs"]>>;
+  try {
+    configs = await dependencies.listUserProviderConfigs(userId);
+  } catch {
+    return [];
+  }
+  const fallbacks: Array<{ provider: string; model: string; apiKey: string; modelLabel?: string }> = [];
+  for (const config of configs) {
+    if (config.provider === activeProvider || config.baseUrl) continue;
+    // A provider the page already tried for this turn is not offered again, so a handover does not
+    // repeat the failure the user was just shown.
+    if (skipProviders.includes(config.provider)) continue;
+    if (!isSupportedUserProvider(config.provider)) continue;
+    let apiKey: string;
+    try {
+      apiKey = dependencies.decryptUserProviderSecret(config.encryptedApiKey);
+    } catch {
+      continue;
+    }
+    fallbacks.push({ provider: config.provider, model: config.activeModel || activeModel, apiKey, modelLabel: config.activeModel });
+  }
+  return fallbacks;
+}
+
 function getCompletedReplay(key: string, now = Date.now()): StreamResult | undefined {
   const item = completedChatStreamReplays.get(key);
   if (!item) return undefined;
@@ -173,6 +282,18 @@ const streamInputSchema = z.object({
     thinking: z.boolean().optional(),
   }).optional(),
   attachmentIds: z.array(z.string().uuid()).max(4).optional(),
+  /** Routes this request to the caller's own provider instead of the Kairema roles. */
+  myApi: z.boolean().optional(),
+  /**
+   * Providers the client has already tried for this turn and does not want tried again.
+   *
+   * A browser-direct turn runs in the page, so the server learns about its failures only when the
+   * client hands the turn over. Without this, a turn that already spent two attempts on OpenRouter
+   * directly would be handed to a server that starts again from the same provider, and the user
+   * would see the same failure twice for one question. Only the caller's own provider ids are
+   * accepted, and they only ever remove candidates — they can never add one.
+   */
+  skipProviders: z.array(z.string().min(1).max(64)).max(16).optional(),
 });
 
 export function writeEvent(res: Response, event: string, payload: unknown) {
@@ -193,6 +314,20 @@ function normalizedDate(value: unknown): string | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
+const LIVE_VALUE_KINDS = ["temperature", "conditions", "clock", "rate"] as const;
+const LIVE_VALUE_STATUSES = ["confirmed", "unconfirmed", "not_found"] as const;
+/**
+ * The live-value verdict crosses the boundary as an enum pair only. The value itself, the
+ * snippet that proved it and the page it came from stay in the model context — an ordinary
+ * user is told whether a value was confirmed, never handed raw provider output.
+ */
+function publicLiveValue(liveValue: NonNullable<StreamResult["searchStatus"]>["liveValue"]) {
+  if (!liveValue) return undefined;
+  const kind = LIVE_VALUE_KINDS.find((candidate) => candidate === liveValue.kind);
+  const status = LIVE_VALUE_STATUSES.find((candidate) => candidate === liveValue.status);
+  return kind && status ? { kind, status } : undefined;
+}
+
 /** The ordinary-user SSE boundary exposes only safe freshness metadata. */
 function publicSearchStatus(status: StreamResult["searchStatus"]) {
   if (!status) return undefined;
@@ -204,6 +339,7 @@ function publicSearchStatus(status: StreamResult["searchStatus"]) {
     sourcesCount: Math.max(0, Math.floor(status.sourcesCount)),
     ...(status.freshnessBlocked ? { freshnessBlocked: true } : {}),
     ...(status.staleRagOnly ? { staleRagOnly: true } : {}),
+    ...(publicLiveValue(status.liveValue) ? { liveValue: publicLiveValue(status.liveValue) } : {}),
     ...(sourceDateMin ? { sourceDateMin } : {}),
     ...(sourceDateMax ? { sourceDateMax } : {}),
   };
@@ -254,14 +390,21 @@ function publicStreamResult(result: Pick<StreamResult, "content" | "modelUsed" |
 
 type StreamDependencies = {
   authenticateRequest: (request: Request) => Promise<{ id: number } | null>;
+  getOrCreateGuestUser: (request: Request, response: Response) => Promise<{ id: number; isGuest: boolean } | null>;
   getOwnedChatSession: typeof getOwnedChatSession;
   getStoredAssistantForClientMessage: typeof getStoredAssistantForClientMessage;
   consumeChatStreamRequestQuota: typeof consumeChatStreamRequestQuota;
+  consumeMyApiRequestQuota: typeof consumeMyApiRequestQuota;
+  deleteOwnedSessionUserMessage: typeof deleteOwnedSessionUserMessage;
   appendChatMessage: typeof appendChatMessage;
   updateChatTitle: typeof updateChatTitle;
   getOwnedSessionMessage: typeof getOwnedSessionMessage;
   listSessionTranscriptWindow: typeof listSessionTranscriptWindow;
   chatWithRoleStream: typeof chatWithRoleStream;
+  chatWithUserProviderStream: typeof chatWithUserProviderStream;
+  getActiveUserProviderBinding: typeof getActiveUserProviderBinding;
+  listUserProviderConfigs: typeof listUserProviderConfigs;
+  decryptUserProviderSecret: typeof decryptUserProviderSecret;
   buildChatContext: typeof buildChatContext;
   enqueueMemoryExtractionJob: typeof enqueueMemoryExtractionJob;
   processMemoryExtractionJob: typeof processMemoryExtractionJob;
@@ -269,15 +412,32 @@ type StreamDependencies = {
 };
 
 const defaultDependencies: StreamDependencies = {
-  authenticateRequest: async (request) => sdk.authenticateRequest(request) as Promise<{ id: number }>,
+  // Same permanent-first resolver as tRPC createContext, so /api/chat/stream and
+  // auth.me always agree on userId for one browser session. A guest cookie no
+  // longer shadows a verified Stytch/email session here either.
+  authenticateRequest: async (request) => resolveRequestUser({ req: request }) as Promise<{ id: number } | null>,
+  getOrCreateGuestUser: async (request, response) => {
+    try {
+      const guest = await getOrCreateGuestUser(request, response);
+      return { id: guest.userId, isGuest: guest.isNew || true };
+    } catch {
+      return null;
+    }
+  },
   getOwnedChatSession,
   getStoredAssistantForClientMessage,
   consumeChatStreamRequestQuota,
+  consumeMyApiRequestQuota,
+  deleteOwnedSessionUserMessage,
   appendChatMessage,
   updateChatTitle,
   getOwnedSessionMessage,
   listSessionTranscriptWindow,
   chatWithRoleStream,
+  chatWithUserProviderStream,
+  getActiveUserProviderBinding,
+  listUserProviderConfigs,
+  decryptUserProviderSecret,
   buildChatContext,
   enqueueMemoryExtractionJob,
   processMemoryExtractionJob,
@@ -287,7 +447,18 @@ const defaultDependencies: StreamDependencies = {
 export function createChatStreamHandler(overrides: Partial<StreamDependencies> = {}): RequestHandler {
   const dependencies = { ...defaultDependencies, ...overrides };
   return async (req: Request, res: Response) => {
-    const user = await dependencies.authenticateRequest(req).catch(() => null);
+    let user = await dependencies.authenticateRequest(req).catch(() => null);
+    let isGuest = false;
+
+    // If no regular auth, try to get or create guest session
+    if (!user) {
+      const guest = await dependencies.getOrCreateGuestUser(req, res).catch(() => null);
+      if (guest) {
+        user = { id: guest.id } as { id: number };
+        isGuest = true;
+      }
+    }
+
     if (!user) {
       res.status(401).json({ error: "Войдите, чтобы продолжить разговор." });
       return;
@@ -338,9 +509,14 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
         res.end();
         return;
       }
-      let rateLimit: { allowed: boolean; retryAfterSeconds: number };
+      // The two budgets are metered on separate tables and each is charged only for its own mode.
+      // A My API turn runs on the caller's own provider key and spends the caller's own money, so
+      // charging it against the ordinary chat ingress budget would let BYOK usage exhaust Chat (and
+      // vice versa): a user could lose access to the mode they were not even using. Each mode is
+      // therefore limited by exactly one counter, and neither can spend the other's.
+      let rateLimit: { allowed: boolean; retryAfterSeconds: number } = { allowed: true, retryAfterSeconds: 0 };
       try {
-        rateLimit = await dependencies.consumeChatStreamRequestQuota(user.id, CHAT_STREAM_RATE_LIMIT, CHAT_STREAM_RATE_WINDOW_MS);
+        if (!input.myApi) rateLimit = await dependencies.consumeChatStreamRequestQuota(user.id, CHAT_STREAM_RATE_LIMIT, CHAT_STREAM_RATE_WINDOW_MS);
       } catch {
         chatStreamRuntimeGauges.quotaUnavailable += 1;
         res.status(503).json({ error: "Проверка лимита временно недоступна. Повторите попытку позже." });
@@ -351,6 +527,28 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
         void Promise.resolve(dependencies.auditChatStream({ event: "chat_stream.rate_limited", userId: user.id, timestamp: new Date().toISOString(), retryAfterSeconds: rateLimit.retryAfterSeconds })).catch(() => undefined);
         res.set("Retry-After", String(rateLimit.retryAfterSeconds)).status(429).json({ error: "Слишком много запросов. Подождите минуту." });
         return;
+      }
+      // My API turns spend the caller's own provider key, so they carry their own budget. This runs
+      // only for `myApi` requests — ordinary Kairema Chat keeps the budget above and is untouched —
+      // and it runs before the turn is persisted, so a refused request never becomes a half-written
+      // turn the user has to clean up.
+      if (input.myApi) {
+        let myApiQuota: { allowed: boolean; retryAfterSeconds: number };
+        try {
+          myApiQuota = await dependencies.consumeMyApiRequestQuota(user.id, MY_API_RATE_LIMIT, MY_API_RATE_WINDOW_MS);
+        } catch {
+          // A quota that cannot be read cannot be enforced, and an unenforced quota is a way to
+          // spend the user's own key without limit. Refuse rather than let the request through.
+          chatStreamRuntimeGauges.quotaUnavailable += 1;
+          res.status(503).json({ error: "Проверка лимита My API временно недоступна. Повторите попытку позже." });
+          return;
+        }
+        if (!myApiQuota.allowed) {
+          chatStreamRuntimeGauges.rateLimited += 1;
+          void Promise.resolve(dependencies.auditChatStream({ event: "chat_stream.my_api_rate_limited", userId: user.id, timestamp: new Date().toISOString(), retryAfterSeconds: myApiQuota.retryAfterSeconds })).catch(() => undefined);
+          res.set("Retry-After", String(myApiQuota.retryAfterSeconds)).status(429).json({ error: MY_API_RATE_LIMIT_MESSAGE, myApiRateLimited: true });
+          return;
+        }
       }
       const activeStream = reserveActiveChatStream(user.id);
       if (!activeStream.allowed) {
@@ -424,16 +622,21 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
       addGaugeSample(chatStreamRuntimeGauges.startLatencyMs, streamStartedAt - handlerStartedAt);
 
       try {
-        const result = await dependencies.chatWithRoleStream(
-          input.modelId,
-          (transcript?.messages ?? []).map((message) => ({ role: message.role, content: message.content })),
-          effectiveSettings,
-          (delta: string) => {
-            if (!closed) writeEvent(res, "delta", { content: delta });
-          },
-          controller.signal,
-          { userId: user.id, requestKey: `stream:${user.id}:${input.clientMessageId ?? savedUserMessageId ?? input.regenerateMessageId ?? "generation"}` },
-        );
+        const history = (transcript?.messages ?? []).map((message) => ({ role: message.role, content: message.content }));
+        const onDelta = (delta: string) => { if (!closed) writeEvent(res, "delta", { content: delta }); };
+        const actor = { userId: user.id, requestKey: `stream:${user.id}:${input.clientMessageId ?? savedUserMessageId ?? input.regenerateMessageId ?? "generation"}` };
+        // The two modes differ only here: myApi runs the caller's own provider, the default
+        // keeps the existing Kairema role chain untouched.
+        const result = input.myApi
+          ? await generateWithUserProvider({ dependencies, userId: user.id, isGuest, roleId: input.modelId, history, settings: effectiveSettings, onDelta, signal: controller.signal, actor, skipProviders: input.skipProviders })
+          : await dependencies.chatWithRoleStream(
+            input.modelId,
+            history,
+            effectiveSettings,
+            onDelta,
+            controller.signal,
+            actor,
+          );
         if (!closed) {
           const allSources = [...(result.sources ?? []), ...(result.ragSources ?? [])];
           const sourceDates = allSources.map((source) => normalizedDate(source.publishedAt) ?? ("retrievedAt" in source ? normalizedDate(source.retrievedAt) : null)).filter((value): value is string => Boolean(value)).sort();
@@ -464,6 +667,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
             userId: user.id,
             roleId: input.modelId,
             provider: result.provider,
+            executionMode: input.myApi ? "my_api" : "platform",
             searchAttached: Boolean(result.searchStatus) || Boolean(result.sources?.length),
             respondedLayer: result.searchStatus?.cascadeUsed ?? (result.ragSources?.length ? "rag" : "none"),
             sourcesCount,
@@ -510,7 +714,15 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
           chatStreamRuntimeGauges.failed += 1;
         }
         if (!closed) {
-          writeEvent(res, "error", { message: publicChatError(input.modelId, error) });
+          // A turn that produced no answer must not leave its question behind in the transcript.
+          // The user message is written before the provider is called so the answer can attach to
+          // it; on failure that question is rolled back, and only it — the history that preceded
+          // this turn is what the user still has.
+          if (savedUserMessageId) {
+            await dependencies.deleteOwnedSessionUserMessage(user.id, input.sessionId, savedUserMessageId).catch(() => undefined);
+          }
+          // Each mode reports only its own sanitised text; a provider body never crosses the SSE boundary.
+          writeEvent(res, "error", { message: input.myApi ? publicUserProviderError(error) : publicChatError(input.modelId, error) });
           finished = true;
           res.end();
         }
@@ -522,6 +734,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
         streamOutcome = "failed";
         chatStreamRuntimeGauges.failed += 1;
       }
+      console.error("[CHAT_STREAM_OUTER_ERROR]", error?.constructor?.name ?? "Error", error instanceof Error ? error.message : String(error), error instanceof Error ? error.stack : "");
       res.status(400).json({ error: historyError(error) });
     } finally {
       if (streamStartedAt !== undefined) addGaugeSample(chatStreamRuntimeGauges.activeDurationMs, performance.now() - streamStartedAt);

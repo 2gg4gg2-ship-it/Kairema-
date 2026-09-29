@@ -29,14 +29,15 @@ function callerFor(userId = 42) {
       createdAt: new Date(),
       updatedAt: new Date(),
       lastSignedIn: new Date(),
+      isGuest: 0,
     },
-    req: {} as TrpcContext["req"],
+    req: { headers: {} } as TrpcContext["req"],
     res: {} as TrpcContext["res"],
   });
 }
 
 function guestCaller() {
-  return appRouter.createCaller({ user: null, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] });
+  return appRouter.createCaller({ user: null, req: { headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] });
 }
 
 describe("chat draft ownership boundary", () => {

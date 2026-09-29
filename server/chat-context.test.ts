@@ -35,12 +35,13 @@ vi.mock("./knowledge", () => ({
 
 vi.mock("./_core/llm", () => ({ invokeLLM: vi.fn() }));
 
-import { buildChatContext, canUsePublicSearchCache, classifyWebGroundingIntent, extractMemoryFacts, FLASH_WEB_RESEARCH_BUDGET_MS, freshnessSearchPolicy, FRESHNESS_EMPTY_PROMPT, FRESHNESS_UNAVAILABLE_PROMPT, isKairemaIdentityQuery, needsWebResearch, processMemoryExtractionJob, shouldSkipAutoMemoryExtraction, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
+import { buildChatContext, canUsePublicSearchCache, classifyWebGroundingIntent, extractMemoryFacts, FLASH_WEB_RESEARCH_BUDGET_MS, freshnessSearchPolicy, FRESHNESS_EMPTY_PROMPT, FRESHNESS_UNAVAILABLE_PROMPT, isKairemaIdentityQuery, isLiveValueQuery, needsWebResearch, processMemoryExtractionJob, shouldSkipAutoMemoryExtraction, WEB_RESEARCH_ROLE_POLICY } from "./chat-context";
 import { claimMemoryExtractionJob, completeMemoryExtractionJob, deleteMemoryEntryByKey, getMemoryExtractionJobTurn, getMemoryProfile, getMemorySettings, getOwnedChatAttachments, getUserSettings, listMemoryEntries, refreshAutoMemoryProfileSummary, retryMemoryExtractionJob, upsertMemoryEntry } from "./db";
 import { invokeLLM } from "./_core/llm";
 import { WebSearchUnavailableError, searchWeb } from "./web-search";
 import { getOwnedAttachmentVisionDataUrl } from "./attachments";
 import { retrieveRagContext } from "./knowledge";
+import { LIVE_VALUE_UNCONFIRMED_PROMPT } from "./web-search-value";
 
 const input = { query: "Что нового?", attachmentIds: [] };
 
@@ -57,10 +58,11 @@ beforeEach(() => {
 });
 
 describe("chat context soft web research", () => {
-  it("does not auto-extract test markers or live-search turns into durable memory", () => {
+  it("does not auto-extract test markers into durable memory, but no longer drops a whole live-search turn", () => {
     expect(shouldSkipAutoMemoryExtraction("Это временный тестовый marker для проверки.")).toBe(true);
     expect(shouldSkipAutoMemoryExtraction("Обычный долговременный факт.")).toBe(false);
-    expect(shouldSkipAutoMemoryExtraction("Обычный запрос", { hadLiveSearch: true })).toBe(true);
+    // A turn that also ran live web search must still reach the conservative extractor.
+    expect(shouldSkipAutoMemoryExtraction("Обычный запрос", { hadLiveSearch: true })).toBe(false);
   });
 
   it("retains the server-side policy for exactly four public roles", () => {
@@ -74,8 +76,136 @@ describe("chat context soft web research", () => {
     expect(classifyWebGroundingIntent("Сколько будет 2 + 2?")).toBe("NONE");
   });
 
-  it("uses public cache only for non-personal fresh research with no attachments or memory context", () => {
-    expect(canUsePublicSearchCache("Какая последняя версия браузера?", { hasAttachments: false, hasMemoryContext: false })).toBe(true);
+  it("recognises lookup-shaped and explicit search requests without widening search to ordinary questions", () => {
+    // A live-lookup topic plus current framing is freshness-bound even without question punctuation.
+    expect(classifyWebGroundingIntent("Погода в Москве сегодня")).toBe("REQUIRED");
+    // An explicit look-up instruction plus a verifiable topic is source-seeking, not freshness-bound.
+    expect(classifyWebGroundingIntent("Поищи информацию о марс")).toBe("PREFERRED");
+    expect(classifyWebGroundingIntent("Search for OpenAI pricing")).toBe("PREFERRED");
+    // Ordinary knowledge questions stay out of live search.
+    expect(classifyWebGroundingIntent("Что такое Kairema?")).toBe("NONE");
+    expect(classifyWebGroundingIntent("Расскажи про Марс")).toBe("NONE");
+    // An explicit look-up instruction is only source-seeking, never freshness-bound.
+    expect(classifyWebGroundingIntent("Найди, что ты умеешь")).toBe("PREFERRED");
+    expect(classifyWebGroundingIntent("Найди, что ты умеешь")).not.toBe("REQUIRED");
+    expect(searchWeb).not.toHaveBeenCalled();
+  });
+
+  it("requires dated sources only for a freshness-bound request", async () => {
+    // PREFERRED: source-seeking, so an undated reference page must stay usable.
+    await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Поищи информацию о марс", role: "context" });
+    expect(searchWeb).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ requireDatedSources: false }));
+
+    vi.mocked(searchWeb).mockClear();
+
+    // REQUIRED: freshness-bound, so the existing dated-source requirement is preserved.
+    await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какая последняя версия браузера?", role: "context" });
+    expect(searchWeb).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ requireDatedSources: true, publishedAfter: expect.any(String) }));
+  });
+
+  it("keeps a current-moment live-value request off the publication-date requirement without weakening its grounding", async () => {
+    // A clock, a forecast or a rate is read from page content, so the page itself carries
+    // no `publishedAt`. Grounding stays REQUIRED: live search, the user setting and the
+    // cascade are untouched; only the dated-source requirement is not applied.
+    for (const query of ["Который сейчас час в Одессе?", "Какая сейчас погода в Одессе?"]) {
+      vi.mocked(searchWeb).mockClear();
+      expect(isLiveValueQuery(query)).toBe(true);
+      expect(classifyWebGroundingIntent(query)).toBe("REQUIRED");
+
+      const context = await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query, role: "context" });
+      expect(searchWeb).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ requireDatedSources: false }));
+      expect(context.webGrounding).toMatchObject({ intent: "REQUIRED", state: "verified" });
+      expect(context.searchStatus).toMatchObject({ state: "found", sourcesCount: 1 });
+    }
+  });
+
+  it("keeps a publication-dated current request strictly freshness-bound", async () => {
+    // "latest release" and "news" stay date-bound even though the same queries also
+    // look current, so an undated or old page must still be rejected.
+    for (const query of ["Какой последний Claude вышел?", "Последние новости Украины", "Какая последняя версия браузера?", "Какой сейчас последний релиз Claude?"]) {
+      vi.mocked(searchWeb).mockClear();
+      expect(isLiveValueQuery(query)).toBe(false);
+      expect(classifyWebGroundingIntent(query)).toBe("REQUIRED");
+
+      await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query, role: "context" });
+      expect(searchWeb).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ requireDatedSources: true, publishedAfter: expect.any(String) }));
+    }
+  });
+
+  it("never reaches the search provider for a general-knowledge question", async () => {
+    expect(isLiveValueQuery("Что такое Марс?")).toBe(false);
+    expect(classifyWebGroundingIntent("Что такое Марс?")).toBe("NONE");
+
+    const context = await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Что такое Марс?", role: "context" });
+    expect(searchWeb).not.toHaveBeenCalled();
+    expect(context.webGrounding).toBeUndefined();
+    expect(context.searchStatus).toBeUndefined();
+    expect(context.freshnessWarning).toBeUndefined();
+  });
+
+  it("asks one narrower second question only for a live value and never for a dated request", async () => {
+    const sessionId = "11111111-1111-4111-8111-111111111111";
+    vi.mocked(searchWeb).mockClear();
+    await buildChatContext(7, sessionId, { ...input, query: "Какая сейчас погода в Одессе?", role: "context" });
+    expect(searchWeb).toHaveBeenCalledWith("Какая сейчас погода в Одессе?", expect.objectContaining({ taskKind: "LIVE_VALUE", targetedQuery: "current weather Одессе temperature precipitation" }));
+
+    vi.mocked(searchWeb).mockClear();
+    await buildChatContext(7, sessionId, { ...input, query: "Какой последний Claude вышел?", role: "context" });
+    expect(searchWeb).toHaveBeenCalledWith("Какой последний Claude вышел?", expect.objectContaining({ taskKind: "RECENT" }));
+    expect(vi.mocked(searchWeb).mock.calls[0]?.[1]).not.toHaveProperty("targetedQuery");
+  });
+
+  it("reports a confirmed live value without a warning and an unproven one honestly", async () => {
+    const sessionId = "11111111-1111-4111-8111-111111111111";
+    const source = { title: "Погода в Одессе", url: "https://example.com/weather/odesa", domain: "example.com", sourceId: "source-001", retrievedAt: "2026-08-21T00:00:00.000Z" };
+    const evidence = { fact: "Фрагмент", sourceUrl: source.url, sourceTitle: source.title, sourceDomain: source.domain, retrievedAt: source.retrievedAt, confidence: "medium" as const, sourceId: source.sourceId };
+
+    vi.mocked(searchWeb).mockResolvedValueOnce({ summary: "ИСКОМОЕ ЗНАЧЕНИЕ: температура +19 °C (example.com)\n\nФрагмент", state: "found", verificationStatus: "verified", cascadeUsed: "you", sources: [source], evidence: [{ ...evidence, valueStatus: "confirmed" }], liveValue: { valueStatus: "confirmed", liveValueKind: "temperature" } });
+    const confirmed = await buildChatContext(7, sessionId, { ...input, query: "Какая сейчас погода в Одессе?", role: "context" });
+    expect(confirmed.searchStatus).toMatchObject({ liveValue: { kind: "temperature", status: "confirmed" } });
+    expect(confirmed.freshnessWarning).toBeUndefined();
+
+    vi.mocked(searchWeb).mockResolvedValueOnce({ summary: "ИСКОМОЕ ЗНАЧЕНИЕ НЕ ПОДТВЕРЖДЕНО\n\nФрагмент", state: "found", verificationStatus: "verified", cascadeUsed: "you", sources: [source], evidence: [{ ...evidence, valueStatus: "unconfirmed" }], liveValue: { valueStatus: "unconfirmed", liveValueKind: "temperature" } });
+    const unconfirmed = await buildChatContext(7, sessionId, { ...input, query: "Какая сейчас погода в Одессе?", role: "context" });
+    expect(unconfirmed.searchStatus).toMatchObject({ liveValue: { kind: "temperature", status: "unconfirmed" } });
+    // The pages are still delivered as context, but the user is told the value is missing.
+    expect(unconfirmed.webGrounding).toMatchObject({ state: "verified", sourcesCount: 1 });
+    expect(unconfirmed.freshnessWarning).toBe(LIVE_VALUE_UNCONFIRMED_PROMPT);
+  });
+
+  it("marks a live value as not found when no source came back at all", async () => {
+    vi.mocked(searchWeb).mockResolvedValueOnce({ summary: "", state: "empty", verificationStatus: "no_results", cascadeUsed: null, sources: [], evidence: [] });
+
+    const context = await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Который сейчас час в Одессе?", role: "context" });
+
+    expect(context.searchStatus).toMatchObject({ liveValue: { kind: "clock", status: "not_found" } });
+  });
+
+  it("carries no live-value verdict for a request that is not a live value", async () => {
+    const context = await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { ...input, query: "Какой последний Claude вышел?", role: "context" });
+
+    expect(context.searchStatus).not.toHaveProperty("liveValue");
+  });
+
+  it("recognises a Russian current-data question that has no question mark", () => {
+    // Regression: `\b` is ASCII-only, so the Russian question word could never anchor the
+    // pattern and this request was classified NONE, leaving searchWeb() unreachable.
+    expect(classifyWebGroundingIntent("Какой сейчас год, день и время в Украине, какой последний Клауд вышел.")).toBe("REQUIRED");
+    expect(classifyWebGroundingIntent("Какая погода в Одессе сегодня.")).toBe("REQUIRED");
+    expect(classifyWebGroundingIntent("Сколько стоит подписка.")).not.toBe("NONE");
+    expect(needsWebResearch("Какой сейчас год, день и время в Украине, какой последний Клауд вышел.")).toBe(true);
+  });
+
+  it("keeps identity, arithmetic and general knowledge requests out of live search without a question mark", () => {
+    expect(classifyWebGroundingIntent("Кто ты")).toBe("NONE");
+    expect(classifyWebGroundingIntent("Напиши стихотворение")).toBe("NONE");
+    expect(classifyWebGroundingIntent("Привет, как дела?")).toBe("NONE");
+    expect(classifyWebGroundingIntent("Что такое Kairema?")).toBe("NONE");
+    expect(classifyWebGroundingIntent("Сколько будет 2 + 2?")).toBe("NONE");
+    expect(classifyWebGroundingIntent("Где находится Марс")).toBe("NONE");
+  });
+
+  it("uses public cache only for non-personal fresh research with no attachments or memory context", () => {    expect(canUsePublicSearchCache("Какая последняя версия браузера?", { hasAttachments: false, hasMemoryContext: false })).toBe(true);
     expect(canUsePublicSearchCache("Какая текущая цена для моего аккаунта?", { hasAttachments: false, hasMemoryContext: false })).toBe(false);
     expect(canUsePublicSearchCache("Какая последняя версия браузера?", { hasAttachments: true, hasMemoryContext: false })).toBe(false);
     expect(canUsePublicSearchCache("Какая последняя версия браузера?", { hasAttachments: false, hasMemoryContext: true })).toBe(false);
@@ -240,6 +370,22 @@ describe("chat context soft web research", () => {
     expect(deleteMemoryEntryByKey).not.toHaveBeenCalled();
   });
 
+  it("still auto-extracts a durable user fact from a turn that ran live web search", async () => {
+    vi.mocked(getMemorySettings).mockResolvedValueOnce({ enabled: 1, autoExtract: 1 });
+    vi.mocked(invokeLLM).mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({
+      facts: [{ action: "add", key: "city", value: "Пользователь живёт в Казани" }],
+      topic: "погода в Казани",
+    }) } }] } as never);
+
+    await extractMemoryFacts(7, "Я живу в Казани, какая там сейчас погода?", { assistantText: "Сейчас +18", role: "flagship", hadLiveSearch: true, sessionId: "11111111-1111-4111-8111-111111111111" });
+
+    // The extractor ran for the same user and wrote the user's own fact, not the weather lookup.
+    expect(invokeLLM).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-5-nano" }));
+    expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "fact", "Пользователь живёт в Казани", expect.objectContaining({ memoryKey: "city", source: "auto" }));
+    expect(upsertMemoryEntry).toHaveBeenCalledWith(7, "dialog_topic", expect.stringContaining("Apex: погода в Казани"), expect.objectContaining({ role: "flagship", source: "auto" }));
+    expect(upsertMemoryEntry).not.toHaveBeenCalledWith(7, "fact", expect.stringContaining("+18"), expect.anything());
+  });
+
   it("keeps automatic extraction independently disabled while enabled memory remains readable", async () => {
     vi.mocked(getMemorySettings).mockResolvedValueOnce({ enabled: 1, autoExtract: 0 });
 
@@ -321,5 +467,19 @@ describe("chat context soft web research", () => {
 
     await expect(buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Обычный вопрос", role: "fast" }))
       .resolves.toMatchObject({ style: "default", responseLength: "balanced", effort: "standard", thinking: false, toolAccess: true });
+  });
+
+  it("passes the clarifying-questions preference through as a boolean and defaults it to off", async () => {
+    vi.mocked(getUserSettings).mockResolvedValueOnce({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, webSearch: 0, askClarifyingQuestions: 1 } as never);
+    const on = await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Обычный вопрос", role: "fast" });
+    expect(on.askClarifyingQuestions).toBe(true);
+
+    vi.mocked(getUserSettings).mockResolvedValueOnce({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, webSearch: 0, askClarifyingQuestions: 0 } as never);
+    const off = await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Обычный вопрос", role: "fast" });
+    expect(off.askClarifyingQuestions).toBe(false);
+
+    vi.mocked(getUserSettings).mockResolvedValueOnce({ responseStyle: "default", responseLength: "balanced", quickReplies: 1, effort: "standard", thinking: 0, webSearch: 0 } as never);
+    const absent = await buildChatContext(7, "11111111-1111-4111-8111-111111111111", { query: "Обычный вопрос", role: "fast" });
+    expect(absent.askClarifyingQuestions).toBe(false);
   });
 });

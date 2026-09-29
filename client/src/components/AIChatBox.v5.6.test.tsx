@@ -23,9 +23,11 @@ describe("AIChatBox v5.6", () => {
     expect(onCopyUser).toHaveBeenCalledWith(expect.objectContaining({ id: "user-1", role: "user", content: "Проверочный текст" }));
   });
 
-  it("shows only source count and normalized date range without source links", () => {
+  it("shows neither the source count nor the date range in the chat", () => {
     render(<AIChatBox messages={[{ id: "assistant-1", role: "assistant", content: "Ответ", searchStatus: { state: "found", sourcesCount: 2, sourceDateMin: "2026-08-19T00:00:00.000Z", sourceDateMax: "2026-08-23T00:00:00.000Z" } }]} onSendMessage={vi.fn()} emptyStateMessage="Kairema" />);
-    expect(screen.getByRole("status").textContent).toMatch(/Источники проверены · 2 · Даты источников: 19\.08\.2026–23\.08\.2026/);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText(/Источники проверены/)).toBeNull();
+    expect(screen.queryByText(/Даты источников/)).toBeNull();
     expect(screen.queryByRole("link")).toBeNull();
     expect(screen.queryByText(/example\.com|Свежий материал|Официальный RSS/)).toBeNull();
   });

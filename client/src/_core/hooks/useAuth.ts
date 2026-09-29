@@ -1,5 +1,6 @@
 import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
+import { clearDirectKeys } from "@/lib/direct-key-store";
 import { TRPCClientError } from "@trpc/client";
 import { useCallback, useEffect, useMemo } from "react";
 
@@ -35,6 +36,8 @@ export function useAuth(options?: UseAuthOptions) {
         error instanceof TRPCClientError &&
         error.data?.code === "UNAUTHORIZED"
       ) {
+        // The session is already gone server-side. Clearing below still has to run, or a key that
+        // only ever lived in this tab would outlive the account that entered it.
         return;
       }
       throw error;
@@ -45,6 +48,10 @@ export function useAuth(options?: UseAuthOptions) {
       try {
         sessionStorage.removeItem("manus-cookie");
       } catch {}
+      // A browser-direct key belongs to the account that typed it. Leaving it in the tab across a
+      // logout would hand the next person to use this browser the previous user's credential, and
+      // it would still be attached to that user's provider requests.
+      clearDirectKeys();
       utils.auth.me.setData(undefined, null);
       await utils.auth.me.invalidate();
     }

@@ -12,7 +12,11 @@ describe("multi-user server boundaries", () => {
   it("keeps attachment upload, download and vision paths bound to the authenticated server user", () => {
     const uploadRoute = source("attachment-upload.ts");
     const attachmentService = source("attachments.ts");
-    expect(uploadRoute).toContain("authenticateRequest: request => sdk.authenticateRequest(request)");
+    // Upload must resolve identity through the shared permanent-first resolver, never
+    // a raw sdk call that could return a guest row shadowing a verified Stytch session.
+    expect(uploadRoute).toContain('import { resolveRequestUser } from "./_core/context"');
+    expect(uploadRoute).toContain("authenticateRequest: request => resolveRequestUser({ req: request })");
+    expect(uploadRoute).not.toContain("sdk.authenticateRequest");
     expect(uploadRoute).toContain("user = await dependencies.authenticateRequest(req)");
     expect(uploadRoute).toContain("dependencies.upload(user.id");
     expect(attachmentService).toContain("attachments/${userId}/${input.sessionId}/");

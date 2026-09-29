@@ -1,0 +1,706 @@
+import { useEffect, useState } from "react";
+import { ArrowLeft, CheckCircle2, Eye, EyeOff, KeyRound, Plug, Plus, Power, RefreshCw, TriangleAlert, XCircle } from "lucide-react";
+import { useLocation } from "wouter";
+import { trpc } from "@/lib/trpc";
+import { ModelMenu, MODEL_MENU_LABELS } from "@/components/ModelMenu";
+import { usesDirectExecution } from "@shared/provider-capabilities";
+import { clearDirectKey, hasDirectKey, setDirectKey } from "@/lib/direct-key-store";
+
+type ProviderView =
+  | { id: string; displayName: string; available: true; keyUrl: string; keyEndpoint: string; modelsEndpoint: string; chatEndpoint: string }
+  | { id: string; displayName: string; available: false; keyUrl?: string; note: string };
+
+type SavedConfig = { provider: string; activeModel: string; keyHint: string; updatedAt: string; displayName: string | null; baseUrl: string | null; modelsEndpoint: string | null };
+
+/** Server-issued ids for user-defined providers; built-in ids never carry this prefix. */
+const CUSTOM_PROVIDER_PREFIX = "custom-";
+/** Placeholder id for a provider that has not been stored yet, so a draft can be probed. */
+const CUSTOM_DRAFT_PROVIDER = "custom-draft";
+
+function isCustomProvider(providerId: string) {
+  return providerId.startsWith(CUSTOM_PROVIDER_PREFIX);
+}
+
+/** The not-yet-stored values a user is typing into the custom provider form. */
+type CustomDraft = { provider: string | null; displayName: string; baseUrl: string; apiKey: string; modelId: string };
+
+function emptyCustomDraft(): CustomDraft {
+  return { provider: null, displayName: "", baseUrl: "", apiKey: "", modelId: "" };
+}
+
+/** Only server-defined text is shown for a failure; nothing from a provider response is rendered. */
+function errorText(error: unknown, fallback: string) {
+  if (error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string") {
+    const message = (error as { message: string }).message;
+    if (message) return message;
+  }
+  return fallback;
+}
+
+function savedAt(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
+}
+
+/** One compact provider block: title, connection state, and the form only while it is open. */
+function ProviderCard({ title, subtitle, connected, active, expanded, busy, disabled, onToggle, onMakeActive, onDisconnect, hasConfig, addLabel, summary, children }: {
+  title: string;
+  subtitle: string;
+  connected: boolean;
+  active: boolean;
+  expanded: boolean;
+  busy: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+  onMakeActive?: () => void;
+  onDisconnect?: () => void;
+  hasConfig?: boolean;
+  addLabel?: string;
+  summary?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="kairema-providers-card">
+      <div className="kairema-providers-card-head">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="kairema-providers-title">{title}</span>
+            {active && <span className="kairema-providers-badge">активен</span>}
+          </div>
+          <p className="kairema-providers-sub">{connected ? `Connected · ${subtitle}` : subtitle}</p>
+        </div>
+        <span className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            className="kairema-providers-btn px-2.5 py-1 text-xs"
+            onClick={onToggle}
+            disabled={busy}
+            aria-expanded={expanded}
+          >
+            {expanded ? "Свернуть" : addLabel ?? (hasConfig ? "Настроить" : "Connect")}
+          </button>
+          {onMakeActive && !active && (
+            <button type="button" className="kairema-providers-btn px-2.5 py-1 text-xs" onClick={onMakeActive} disabled={busy}>
+              Активировать
+            </button>
+          )}
+          {onDisconnect && (
+            <button type="button" className="kairema-providers-btn kairema-providers-btn-danger px-2.5 py-1 text-xs" onClick={onDisconnect} disabled={busy}>
+              Отключить
+            </button>
+          )}
+        </span>
+      </div>
+      {!expanded && summary && <div className="kairema-providers-card-body">{summary}</div>}
+      {expanded && !disabled && <div className="kairema-providers-card-body">{children}</div>}
+    </section>
+  );
+}
+
+/** Password-style key input with a reveal toggle; the value never leaves this component. */
+function KeyField({ label, fieldLabel, value, visible, onVisibleChange, onChange, placeholder }: { label: string; fieldLabel: string; value: string; visible: boolean; onVisibleChange: (value: boolean) => void; onChange: (value: string) => void; placeholder: string }) {
+  return (
+    <label className="grid gap-1">
+      <span className="kairema-providers-label">{label}</span>
+      <span className="kairema-providers-keyfield">
+        <KeyRound className="kairema-providers-keyfield-icon size-4 shrink-0" />
+        <input
+          className="kairema-providers-keyfield-input py-2 text-sm"
+          type={visible ? "text" : "password"}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          autoComplete="off"
+          spellCheck={false}
+          aria-label={fieldLabel}
+        />
+        <button type="button" className="kairema-providers-icon-btn size-8 shrink-0" onClick={() => onVisibleChange(!visible)} aria-label={visible ? "Скрыть ключ" : "Показать ключ"}>
+          {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+        </button>
+      </span>
+    </label>
+  );
+}
+
+/**
+ * Model picker fed only by the provider's live catalog.
+ *
+ * A refresh button sits next to the select because the catalog depends on the key: it cannot be
+ * fetched up front, and re-typing a key must not re-send it on every keystroke.
+ */
+function ModelField({ label, fieldLabel, value, fallback, models, pending, error, empty, errorText: failureText, onChange, onReload, canReload, placeholder }: { label: string; fieldLabel: string; value: string; fallback?: string; models: Array<{ id: string; name: string; displayName?: string | null; isFree?: boolean }>; pending: boolean; error: boolean; empty: boolean; errorText?: string; onChange: (value: string) => void; onReload: () => void; canReload: boolean; placeholder: string }) {
+  // A model that is already stored stays listed until the catalog arrives, so reopening a
+  // connected provider never shows an empty picker.
+  const options = fallback && !models.some((model) => model.id === fallback)
+    ? [{ id: fallback, name: fallback, displayName: fallback }, ...models]
+    : models;
+  return (
+    <label className="grid gap-1">
+      <span className="kairema-providers-label">{label}</span>
+      <span className="flex items-center gap-2">
+        {/* The same picker the chat header uses, so the model list looks and behaves identically
+            in both places instead of being a plain browser select here. */}
+        <ModelMenu
+          value={value}
+          models={options}
+          disabled={pending}
+          ariaLabel={fieldLabel}
+          labels={MODEL_MENU_LABELS.ru}
+          placeholder={pending ? MODEL_MENU_LABELS.ru.loading : placeholder}
+          onSelect={onChange}
+          triggerClassName="kairema-settings-model-trigger"
+          triggerTextClassName="kairema-settings-model-trigger-text" />
+        <button
+          type="button"
+          className="kairema-providers-btn shrink-0 p-2"
+          onClick={onReload}
+          disabled={pending || !canReload}
+          aria-label={`Обновить список моделей (${fieldLabel})`}
+          title="Обновить список моделей"
+        >
+          <RefreshCw className={`size-4 ${pending ? "animate-spin" : ""}`} />
+        </button>
+      </span>
+      {/* The server's own sanitised reason separates an unreachable provider from a stored key
+          that no longer opens, which a single generic sentence would hide. */}
+      {error && <span className="kairema-providers-error">{failureText || "Не удалось загрузить модели. Проверьте ключ и адрес."}</span>}
+      {empty && <span className="kairema-providers-hint">Провайдер не вернул список моделей для этого ключа.</span>}
+    </label>
+  );
+}
+
+export default function AIProviders() {
+  const [, navigate] = useLocation();
+  const utils = trpc.useUtils();
+  const [editingProvider, setEditingProvider] = useState<string | null>(null);
+  const [apiKey, setApiKey] = useState("");
+  const [keyVisible, setKeyVisible] = useState(false);
+  const [modelId, setModelId] = useState("");
+  const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  const [customDraft, setCustomDraft] = useState<CustomDraft | null>(null);
+  // Typed-but-unsaved direct keys. Held in component state so the value never outlives the form
+  // and never reaches any persistence layer; only the button below puts one in the memory store.
+  const [directKeys, setDirectKeys] = useState<Record<string, string>>({});
+  const [directKeyVisible, setDirectKeyVisible] = useState<string | null>(null);
+  const directKeyPresent = (providerId: string) => hasDirectKey(providerId);
+  const storeDirectKey = (providerId: string, value: string) => {
+    // Storing a key is itself a recovery action: the user has just supplied a credential, so any
+    // "no provider can answer" state from before is stale.
+    setDirectKey(providerId, value.trim());
+    setDirectKeys((current) => ({ ...current, [providerId]: "" }));
+    setDirectKeyVisible(null);
+  };
+  const forgetDirectKey = (providerId: string) => {
+    clearDirectKey(providerId);
+    setDirectKeys((current) => ({ ...current, [providerId]: "" }));
+  };
+
+  const listQuery = trpc.userProviders.list.useQuery(undefined, { staleTime: 30_000 });
+  const providers = (listQuery.data?.providers ?? []) as ProviderView[];
+  const configs = (listQuery.data?.configs ?? []) as SavedConfig[];
+  const activeProvider = listQuery.data?.activeProvider ?? null;
+  const storageReady = listQuery.data?.storageReady ?? false;
+  // A custom provider is not part of the built-in catalog, so its rows are listed separately.
+  const customConfigs = configs.filter((config) => isCustomProvider(config.provider));
+  const activeConfig = configs.find((config) => config.provider === activeProvider) ?? null;
+  const activeName = activeConfig?.displayName || providers.find((provider) => provider.id === activeProvider)?.displayName || activeProvider;
+
+  const openrouter = providers.find((provider) => provider.id === "openrouter" && provider.available) ?? null;
+  const openrouterConfig = configs.find((config) => config.provider === "openrouter") ?? null;
+  const unavailable = providers.filter((provider) => !provider.available);
+  const selected = providers.find((provider) => provider.id === editingProvider) ?? null;
+  const selectedConfig = configs.find((config) => config.provider === editingProvider) ?? null;
+  // The registry is the only thing that decides this list, so a provider whose CORS policy is not
+  // established as allowed never gets a direct key field at all.
+  const directProviders = providers.filter((provider) => provider.available && usesDirectExecution(provider.id, true));
+
+
+  // The catalog is fetched explicitly, never as a declarative query: a query would carry the
+  // typed key in the GET query string, and an automatic fetch would re-send it on every
+  // keystroke. A typed key is forwarded in the POST body and never stored client-side; when no
+  // key is typed the server falls back to the caller's own saved key and no key is sent at all.
+  // Two catalogs, two mutations: a built-in provider's list and a custom provider's list are
+  // fetched from different endpoints, so one shared cache could show the wrong provider's models
+  // next to the other provider's key and could preselect a model the provider does not serve.
+  const modelsMutation = trpc.userProviders.models.useMutation();
+  const customModelsMutation = trpc.userProviders.models.useMutation();
+  const testMutation = trpc.userProviders.test.useMutation();
+  const saveMutation = trpc.userProviders.save.useMutation();
+  const createCustomMutation = trpc.userProviders.createCustom.useMutation();
+  const updateCustomMutation = trpc.userProviders.updateCustom.useMutation();
+  const setActiveMutation = trpc.userProviders.setActive.useMutation();
+  const removeMutation = trpc.userProviders.remove.useMutation();
+  const busy = modelsMutation.isPending || customModelsMutation.isPending || testMutation.isPending || saveMutation.isPending || createCustomMutation.isPending || updateCustomMutation.isPending || setActiveMutation.isPending || removeMutation.isPending;
+  const models = modelsMutation.data?.models ?? [];
+  const customModels = customModelsMutation.data?.models ?? [];
+  const customReady = Boolean(customDraft && customDraft.displayName.trim() && customDraft.baseUrl.trim() && customDraft.apiKey.trim().length >= 8);
+  // Saving needs a model the provider actually returned, so an empty catalog leaves it disabled.
+  const customCanSave = customReady && customModels.some((model) => model.id === customDraft!.modelId) && storageReady;
+  // A model id is only acceptable when the provider's live catalog returned it, so a stale or
+  // invented selection can never be persisted and an empty catalog keeps Save disabled.
+  const canSubmit = Boolean(selected?.available && apiKey.trim().length >= 8 && models.some((model) => model.id === modelId) && storageReady);
+
+  // Switching provider resets the whole form so one provider's models or result can never be
+  // shown next to another provider's key.
+  useEffect(() => {
+    setApiKey("");
+    setKeyVisible(false);
+    // An already connected provider reopens on the model it already uses; a new one starts empty
+    // so the first model the catalog returns is preselected.
+    setModelId(selectedConfig?.activeModel ?? "");
+    setNotice(null);
+    modelsMutation.reset();
+    // Opening a provider that already has a saved key loads its catalog from the server's own
+    // copy, so this request carries no key at all.
+    if (editingProvider && selectedConfig) void modelsMutation.mutateAsync({ provider: editingProvider }).catch(() => undefined);
+  }, [editingProvider]);
+
+  useEffect(() => {
+    if (!modelId && modelsMutation.data?.models.length) setModelId(modelsMutation.data.models[0]!.id);
+  }, [modelsMutation.data, modelId]);
+
+  /**
+   * Asks the provider whether the typed key is accepted.
+   *
+   * The probe is the provider's own key or catalog route, so it costs no inference and the only
+   * thing that comes back is a verdict. A rejected key is explained before anything is saved,
+   * which is what the user needs to tell a typo from a provider-side problem.
+   */
+  const runKeyCheck = async () => {
+    setNotice(null);
+    try {
+      const result = selected?.available
+        ? await testMutation.mutateAsync({ provider: selected.id, ...(apiKey.trim().length >= 8 ? { apiKey: apiKey.trim() } : {}) })
+        : customDraft
+          ? await testMutation.mutateAsync({
+            provider: customDraft.provider ?? CUSTOM_DRAFT_PROVIDER,
+            apiKey: customDraft.apiKey.trim(),
+            draft: { displayName: customDraft.displayName.trim(), baseUrl: customDraft.baseUrl.trim() },
+          })
+          : null;
+      if (!result) return;
+      if (result.ok) setNotice({ tone: "ok", text: result.label ? `${result.message} (${result.label})` : result.message });
+      else setNotice({ tone: "error", text: result.message });
+    } catch (error) {
+      setNotice({ tone: "error", text: errorText(error, "Не удалось проверить API-ключ.") });
+    }
+  };
+
+  const openPanel = (providerId: string) => setEditingProvider((current) => (current === providerId ? null : providerId));
+
+  /** Loads the live catalog for the provider currently being edited. */
+  const loadModels = async () => {
+    if (!selected?.available || !editingProvider) return;
+    if (apiKey.trim().length < 8 && !selectedConfig) return;
+    try {
+      await modelsMutation.mutateAsync({ provider: editingProvider, ...(apiKey.trim().length >= 8 ? { apiKey: apiKey.trim() } : {}) });
+    } catch {
+      // The panel already renders the classified error from the mutation state.
+    }
+  };
+
+  const runSave = async () => {
+    if (!selected?.available || !canSubmit) return;
+    setNotice(null);
+    try {
+      await saveMutation.mutateAsync({ provider: selected.id, apiKey: apiKey.trim(), activeModel: modelId, makeActive: true });
+      // The key is dropped from component state as soon as the server has it; the page then
+      // shows only the masked suffix it received back.
+      setApiKey("");
+      setKeyVisible(false);
+      await utils.userProviders.list.invalidate();
+      setNotice({ tone: "ok", text: "Провайдер сохранён и назначен активным для режима «Мой API»." });
+    } catch (error) {
+      setNotice({ tone: "error", text: errorText(error, "Не удалось сохранить провайдера.") });
+    }
+  };
+
+  const makeActive = async (providerId: string) => {
+    setNotice(null);
+    try {
+      await setActiveMutation.mutateAsync({ provider: providerId });
+      await utils.userProviders.list.invalidate();
+      setNotice({ tone: "ok", text: "Провайдер назначен активным." });
+    } catch (error) {
+      setNotice({ tone: "error", text: errorText(error, "Не удалось назначить провайдера активным.") });
+    }
+  };
+
+  const disconnect = async (providerId: string) => {
+    setNotice(null);
+    try {
+      await removeMutation.mutateAsync({ provider: providerId });
+      await utils.userProviders.list.invalidate();
+      if (editingProvider === providerId) setEditingProvider(null);
+      if (customDraft?.provider === providerId) setCustomDraft(null);
+      setNotice({ tone: "ok", text: "Провайдер отключён, сохранённый ключ удалён." });
+    } catch (error) {
+      setNotice({ tone: "error", text: errorText(error, "Не удалось отключить провайдера.") });
+    }
+  };
+
+  /** Opens the custom form, prefilled from a saved row or empty for a new provider. */
+  const openCustomDraft = (config?: SavedConfig) => {
+    setNotice(null);
+    // Only the custom catalog is dropped: the built-in panel keeps its own, separately loaded list.
+    customModelsMutation.reset();
+    setCustomDraft(
+      config
+        ? { provider: config.provider, displayName: config.displayName ?? "", baseUrl: config.baseUrl ?? "", apiKey: "", modelId: config.activeModel }
+        : emptyCustomDraft(),
+    );
+    // Reopening a saved provider reads its catalog from the server's own copy of the key, so the
+    // user sees their models again without retyping anything. Nothing is sent from the browser.
+    if (config) void customModelsMutation.mutateAsync({ provider: config.provider }).catch(() => undefined);
+  };
+
+  const patchCustomDraft = (patch: Partial<CustomDraft>) => setCustomDraft((current) => (current ? { ...current, ...patch } : current));
+
+  /**
+   * Selects the first model the provider actually returned.
+   *
+   * Without this the select would display the first option while React state stayed empty, so the
+   * save button could never enable: the browser reports no change when the already-shown option is
+   * re-picked. Writing the id into the draft removes that mismatch entirely.
+   */
+  useEffect(() => {
+    const first = customModelsMutation.data?.models[0]?.id;
+    if (!first) return;
+    setCustomDraft((current) => (current && !current.modelId ? { ...current, modelId: first } : current));
+  }, [customModelsMutation.data]);
+
+  /**
+   * Probes a not-yet-saved provider. The typed key is required because there is no stored copy
+   * yet, and it travels in the POST body as a draft, never in the URL.
+   */
+  const loadCustomModels = async () => {
+    if (!customDraft) return;
+    // A provider that is already stored is read with its own saved key; a provider being typed for
+    // the first time has to carry the key, because the server has nothing else to use.
+    if (customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER) {
+      try {
+        await customModelsMutation.mutateAsync({ provider: customDraft.provider });
+      } catch {
+        // The form renders the classified error from the mutation state.
+      }
+      return;
+    }
+    if (!customReady) return;
+    try {
+      await customModelsMutation.mutateAsync({
+        provider: CUSTOM_DRAFT_PROVIDER,
+        apiKey: customDraft.apiKey.trim(),
+        draft: { displayName: customDraft.displayName.trim(), baseUrl: customDraft.baseUrl.trim() },
+      });
+    } catch {
+      // The form renders the classified error from the mutation state.
+    }
+  };
+
+  const runCustomSave = async () => {
+    if (!customDraft || !customCanSave) return;
+    setNotice(null);
+    const payload = { displayName: customDraft.displayName.trim(), baseUrl: customDraft.baseUrl.trim(), apiKey: customDraft.apiKey.trim(), activeModel: customDraft.modelId };
+    const editingExisting = Boolean(customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER);
+    try {
+      if (editingExisting) {
+        await updateCustomMutation.mutateAsync({ provider: customDraft.provider!, ...payload });
+        // Saving from this screen means "use this one", the same intent as Connect, so a row that
+        // is not the active binding becomes active instead of leaving My API on the old provider.
+        if (activeProvider !== customDraft.provider) await setActiveMutation.mutateAsync({ provider: customDraft.provider! });
+      } else {
+        await createCustomMutation.mutateAsync({ ...payload, makeActive: true });
+      }
+      // The key leaves component state as soon as the server holds it; only the masked hint remains.
+      setCustomDraft(null);
+      customModelsMutation.reset();
+      await utils.userProviders.list.invalidate();
+      setNotice({ tone: "ok", text: "Провайдер сохранён и назначен активным для режима «Мой API»." });
+    } catch (error) {
+      setNotice({ tone: "error", text: errorText(error, "Не удалось сохранить провайдера.") });
+    }
+  };
+
+  return (
+    <main className="kairema-providers-page">
+      <div className="mx-auto max-w-2xl">
+        <header className="mb-4">
+          <button className="kairema-providers-btn mb-3 px-3 py-2 text-sm" onClick={() => navigate("/")}>
+            <ArrowLeft className="size-4" />К чату
+          </button>
+          <h1 className="text-xl font-semibold">AI Providers</h1>
+          <p className="kairema-providers-hint mt-1 text-sm">Подключите свой API-ключ и используйте выбранную модель в режиме «Мой API».</p>
+        </header>
+
+        {!storageReady && (
+          <p className="kairema-providers-notice kairema-providers-notice-warn" role="status">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+            <span>Сервер пока не настроен на хранение пользовательских API-ключей. Подключение станет доступно после настройки сервера.</span>
+          </p>
+        )}
+
+        {notice && (
+          <p className={`kairema-providers-notice ${notice.tone === "ok" ? "kairema-providers-notice-ok" : "kairema-providers-notice-error"}`} role="status">
+            {notice.tone === "ok" ? <CheckCircle2 className="mt-0.5 size-4 shrink-0" /> : <XCircle className="mt-0.5 size-4 shrink-0" />}
+            <span>{notice.text}</span>
+          </p>
+        )}
+
+        {directProviders.length > 0 && (
+          <section className="kairema-providers-direct" aria-labelledby="kairema-direct-heading">
+            <h2 id="kairema-direct-heading" className="kairema-providers-h">
+              Прямое подключение из браузера
+            </h2>
+            <p className="kairema-providers-hint">
+              Ключ хранится только в памяти этой вкладки и не отправляется на сервер Kairema. Он исчезает
+              при переключении провайдера и при выходе из аккаунта. Остальные провайдеры всегда
+              выполняются на сервере.
+            </p>
+            {directProviders.map((entry) => {
+              const present = directKeyPresent(entry.id);
+              return (
+                <div key={entry.id} className="kairema-providers-row kairema-providers-direct-row">
+                  <div className="kairema-providers-direct-main">
+                    <label className="kairema-providers-label" htmlFor={`direct-key-${entry.id}`}>
+                      {entry.displayName} — ключ для прямых запросов
+                    </label>
+                    <div className="kairema-providers-keyfield">
+                      <KeyRound className="kairema-providers-keyfield-icon" aria-hidden="true" />
+                      <input
+                        id={`direct-key-${entry.id}`}
+                        className="kairema-providers-keyfield-input"
+                        type={directKeyVisible === entry.id ? "text" : "password"}
+                        autoComplete="off"
+                        spellCheck={false}
+                        placeholder={present ? "Ключ сохранён в памяти вкладки" : "Вставьте API-ключ"}
+                        value={directKeys[entry.id] ?? ""}
+                        onChange={(event) => setDirectKeys((current) => ({ ...current, [entry.id]: event.target.value }))}
+                      />
+                      <button
+                        type="button"
+                        className="kairema-providers-btn kairema-providers-btn-quiet"
+                        onClick={() => setDirectKeyVisible((current) => (current === entry.id ? null : entry.id))}
+                      >
+                        {directKeyVisible === entry.id ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+                      </button>
+                    </div>
+                    <div className="kairema-providers-actions">
+                      <button
+                        type="button"
+                        className="kairema-providers-btn kairema-providers-btn-primary"
+                        disabled={(directKeys[entry.id] ?? "").trim().length < 8}
+                        onClick={() => storeDirectKey(entry.id, directKeys[entry.id] ?? "")}
+                      >
+                        Держать ключ в браузере
+                      </button>
+                      {present && (
+                        <button
+                          type="button"
+                          className="kairema-providers-btn"
+                          onClick={() => forgetDirectKey(entry.id)}
+                        >
+                          Забыть ключ
+                        </button>
+                      )}
+                    </div>
+                    {present && <span className="kairema-providers-hint">ключ в памяти вкладки · отправки идут напрямую провайдеру</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </section>
+        )}
+
+        {openrouter && (
+          <ProviderCard
+            title="OpenRouter"
+            subtitle="Модели OpenRouter"
+            connected={Boolean(openrouterConfig)}
+            // "Active" is shown only while the row still exists: disconnecting the active
+            // provider leaves the stored pointer behind, and the screen must not claim a
+            // binding the user no longer has.
+            active={activeProvider === "openrouter" && Boolean(openrouterConfig)}
+            expanded={editingProvider === "openrouter"}
+            busy={busy}
+            disabled={!storageReady}
+            onToggle={() => openPanel("openrouter")}
+            // Only a provider that already has a stored row can be activated; offering it for an
+            // unconnected provider would send the user to a server-side "not found".
+            onMakeActive={openrouterConfig ? () => void makeActive("openrouter") : undefined}
+            onDisconnect={() => void disconnect("openrouter")}
+            hasConfig={Boolean(openrouterConfig)}
+            summary={openrouterConfig ? <p className="kairema-providers-sub">ключ {openrouterConfig.keyHint} · {openrouterConfig.activeModel}</p> : null}
+          >
+            <div className="grid gap-3">
+              <KeyField
+                label="API key"
+                fieldLabel="API key (OpenRouter)"
+                value={apiKey}
+                visible={keyVisible}
+                onVisibleChange={setKeyVisible}
+                onChange={setApiKey}
+                placeholder={openrouterConfig ? `Сохранённый ключ ${openrouterConfig.keyHint} — введите, чтобы заменить` : "Вставьте API-ключ OpenRouter"}
+              />
+              <ModelField
+                label="Model"
+                fieldLabel="Model (OpenRouter)"
+                value={modelId}
+                fallback={selectedConfig?.activeModel}
+                models={models}
+                pending={modelsMutation.isPending}
+                error={modelsMutation.isError}
+                errorText={errorText(modelsMutation.error, "")}
+                empty={modelsMutation.isSuccess && !models.length}
+                onChange={setModelId}
+                onReload={() => void loadModels()}
+                canReload={apiKey.trim().length >= 8 || Boolean(openrouterConfig)}
+                placeholder={openrouterConfig ? "Нажмите, чтобы обновить список моделей" : "Сначала укажите API-ключ"}
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="kairema-providers-btn-primary px-3 py-2 text-sm"
+                  onClick={() => void runSave()}
+                  disabled={busy || !canSubmit}
+                >
+                  {openrouterConfig ? "Save" : "Connect"}
+                </button>
+                <button
+                  type="button"
+                  className="kairema-providers-btn px-3 py-2 text-sm"
+                  onClick={() => void runKeyCheck()}
+                  disabled={busy || (apiKey.trim().length < 8 && !openrouterConfig)}
+                >
+                  Проверить ключ
+                </button>
+                {openrouterConfig?.keyHint && <span className="kairema-providers-hint">ключ {openrouterConfig.keyHint}</span>}
+              </div>
+              {!canSubmit && <p className="kairema-providers-hint">Сохранить можно после проверки ключа и выбора модели из списка провайдера.</p>}
+            </div>
+          </ProviderCard>
+        )}
+
+        <div className="mt-3">
+          <ProviderCard
+            title="Custom provider"
+            subtitle={customDraft?.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER ? `Редактируется: ${customDraft.displayName || "Мой провайдер"}` : "Любой OpenAI-совместимый API"}
+            connected={customConfigs.length > 0}
+            active={customConfigs.some((config) => config.provider === activeProvider)}
+            expanded={customDraft !== null}
+            busy={busy}
+            disabled={!storageReady}
+            onToggle={() => (customDraft ? setCustomDraft(null) : openCustomDraft())}
+            addLabel="Connect"
+            summary={customConfigs.length > 0 ? (
+              <ul className="grid gap-1.5">
+                {customConfigs.map((config) => (
+                  <li key={config.provider} className="flex flex-wrap items-center gap-2">
+                    <span className="kairema-providers-sub kairema-providers-sub-strong min-w-0 flex-1 truncate text-sm">
+                      {config.displayName || "Мой провайдер"}<span className="kairema-providers-sub"> · {config.activeModel}</span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {activeProvider !== config.provider && (
+                        <button type="button" className="kairema-providers-btn px-2 py-1 text-xs" onClick={() => void makeActive(config.provider)} disabled={busy}>
+                          Активировать
+                        </button>
+                      )}
+                      <button type="button" className="kairema-providers-btn px-2 py-1 text-xs" onClick={() => openCustomDraft(config)} disabled={busy}>
+                        Настроить
+                      </button>
+                      <button type="button" className="kairema-providers-btn kairema-providers-btn-danger px-2 py-1 text-xs" onClick={() => void disconnect(config.provider)} disabled={busy}>
+                        Отключить
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          >
+            {customDraft && (
+              <div className="grid gap-3">
+                <label className="grid gap-1">
+                  <span className="kairema-providers-label">Name</span>
+                  <input
+                    className="kairema-providers-field w-full px-3 py-2 text-sm"
+                    value={customDraft.displayName}
+                    onChange={(event) => patchCustomDraft({ displayName: event.target.value })}
+                    placeholder="My Provider"
+                    maxLength={64}
+                    aria-label="Название провайдера"
+                  />
+                </label>
+
+                <label className="grid gap-1">
+                  <span className="kairema-providers-label">API URL</span>
+                  <input
+                    className="kairema-providers-field w-full px-3 py-2 text-sm"
+                    value={customDraft.baseUrl}
+                    onChange={(event) => patchCustomDraft({ baseUrl: event.target.value })}
+                    placeholder="https://api.example.com/v1"
+                    inputMode="url"
+                    spellCheck={false}
+                    aria-label="API URL провайдера"
+                  />
+                </label>
+
+                <KeyField
+                  label="API key"
+                  fieldLabel="API key (Custom provider)"
+                  value={customDraft.apiKey}
+                  visible={keyVisible}
+                  onVisibleChange={setKeyVisible}
+                  onChange={(value) => patchCustomDraft({ apiKey: value })}
+                  placeholder={customDraft.provider ? "Введите, чтобы заменить сохранённый ключ" : "Вставьте API-ключ провайдера"}
+                />
+
+                <ModelField
+                  label="Model"
+                  fieldLabel="Model (Custom provider)"
+                  value={customDraft.modelId}
+                  fallback={customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER ? customDraft.modelId : undefined}
+                  models={customModels}
+                  pending={customModelsMutation.isPending}
+                  error={customModelsMutation.isError}
+                  errorText={errorText(customModelsMutation.error, "")}
+                  empty={customModelsMutation.isSuccess && !customModels.length}
+                  onChange={(value) => patchCustomDraft({ modelId: value })}
+                  onReload={() => void loadCustomModels()}
+                  canReload={customReady || Boolean(customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER)}
+                  placeholder={customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER ? "Нажмите, чтобы обновить список моделей" : "Сначала укажите URL и API-ключ"}
+                />
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className="kairema-providers-btn-primary px-3 py-2 text-sm"
+                    onClick={() => void runCustomSave()}
+                    disabled={busy || !customCanSave}
+                  >
+                    {customDraft.provider && customDraft.provider !== CUSTOM_DRAFT_PROVIDER ? "Save" : "Connect"}
+                  </button>
+                  <button
+                    type="button"
+                    className="kairema-providers-btn px-3 py-2 text-sm"
+                    onClick={() => void runKeyCheck()}
+                    disabled={busy || !customReady}
+                  >
+                    Проверить ключ
+                  </button>
+                </div>
+                {!customCanSave && <p className="kairema-providers-hint">Сохранить можно после проверки ключа и выбора модели из списка провайдера.</p>}
+              </div>
+            )}
+          </ProviderCard>
+        </div>
+
+        {unavailable.length > 0 && (
+          // The unimplemented providers are not pretended into existence, and the alternative that
+          // already works today is named instead: anything that speaks the OpenAI API shape.
+          <p className="kairema-providers-hint mt-3 text-center">
+            Другие провайдеры — скоро. Любой совместимый API (например, OpenAI, Groq, Together) подключается через «Custom provider».
+          </p>
+        )}
+      </div>
+    </main>
+  );
+}

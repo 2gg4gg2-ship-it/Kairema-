@@ -1,12 +1,14 @@
 import { and, asc, desc, eq, gt, inArray, isNull, like, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createHash, randomUUID } from "node:crypto";
-import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryExtractionJob, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatDrafts, chatExports, chatSessions, chatStreamRateWindows, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryExtractionJobs, memoryFacts, memoryProfiles, memorySettings, messages, providerControlFlags, providerDailyUsage, providerHealth, providerIdentities, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, technicalEvents, userSettings, users, webSearchStatus } from "../drizzle/schema";
+import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryExtractionJob, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatDrafts, chatExports, chatSessions, chatStreamRateWindows, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryExtractionJobs, memoryFacts, memoryProfiles, memorySettings, messages, myApiRateWindows, providerControlFlags, providerDailyUsage, providerHealth, providerIdentities, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, technicalEvents, userProviderConfigs, userSettings, users, webSearchStatus } from "../drizzle/schema";
 import { providerHealthHistory } from "../drizzle/schema";
 import { stytchLinkIntents } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { GUEST_MAX_LIFETIME_MS, GUEST_TTL_MS } from "@shared/const";
 import { decodeHistoryPageCursor, encodeHistoryPageCursor, normalizeHistoryPageLimit } from "./history-pagination";
 import { selectTranscriptWindow, TRANSCRIPT_WINDOW_BUDGETS, type TranscriptRole } from "./transcript-window";
+import type { SearchTaskKind } from "./web-search-value";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -34,6 +36,18 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       updateSet[field] = values[field];
     }
   }
+  if (user.isGuest !== undefined) {
+    values.isGuest = user.isGuest;
+    updateSet.isGuest = user.isGuest;
+  }
+  if (user.expiresAt !== undefined) {
+    values.expiresAt = user.expiresAt;
+    updateSet.expiresAt = user.expiresAt;
+  }
+  if (user.lastActivityAt !== undefined) {
+    values.lastActivityAt = user.lastActivityAt;
+    updateSet.lastActivityAt = user.lastActivityAt;
+  }
   if (user.role !== undefined) {
     values.role = user.role;
     updateSet.role = user.role;
@@ -56,6 +70,22 @@ export async function getUserById(userId: number) {
   if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   return result[0];
+}
+
+export async function updateUserActivity(userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  // H2: Enforce absolute lifetime on guest activity updates.
+  // expiresAt = min(now + GUEST_TTL_MS, createdAt + GUEST_MAX_LIFETIME_MS)
+  const user = await db.select({ createdAt: users.createdAt }).from(users).where(eq(users.id, userId)).limit(1);
+  if (!user[0]) return;
+  const now = Date.now();
+  const sliding = now + GUEST_TTL_MS;
+  const absolute = new Date(user[0].createdAt).getTime() + GUEST_MAX_LIFETIME_MS;
+  const expiresAt = new Date(Math.min(sliding, absolute));
+  await db.update(users)
+    .set({ lastActivityAt: new Date(), expiresAt })
+    .where(eq(users.id, userId));
 }
 
 export async function getUserByProviderIdentity(provider: string, providerSubject: string) {
@@ -159,37 +189,114 @@ export async function resolveOrCreateProviderUser(input: {
   displayName?: string | null;
   loginMethod: string;
 }) {
-  const existing = await getUserByProviderIdentity(input.provider, input.providerSubject);
-  if (existing) {
-    const db = requireDatabase(await getDb());
-    await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, existing.id));
-    return existing;
+  let candidate: Awaited<ReturnType<typeof getUserByOpenId>> | null = null;
+  try {
+    const existing = await getUserByProviderIdentity(input.provider, input.providerSubject);
+    if (existing) {
+      const db = requireDatabase(await getDb());
+      await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, existing.id));
+      console.error("[RESOLVE_EXISTING_OK]");
+      return existing;
+    }
+    console.error("[RESOLVE_EXISTING_OK]");
+  } catch (error) {
+     const cause = (error as { cause?: unknown })?.cause;
+    const source = cause ?? error;
+    const e = source as { code?: unknown; errno?: unknown; syscall?: unknown };
+    const message = (source as { message?: unknown })?.message?.toString() ?? "none";
+    console.error(
+      `[RESOLVE_EXISTING_ERROR] ` +
+      `error_name=${error?.constructor?.name ?? "Error"} ` +
+      `message=${message} ` +
+      `errno=${e.errno?.toString() ?? "none"} ` +
+      `code=${e.code?.toString() ?? "none"} ` +
+      `syscall=${e.syscall?.toString() ?? "none"} ` +
+      `stage=getUserByProviderIdentity`
+    );
+    throw error;
   }
 
-  await upsertUser({
-    openId: input.canonicalOpenId,
-    email: input.verifiedEmail,
-    name: input.displayName ?? null,
-    loginMethod: input.loginMethod,
-    lastSignedIn: new Date(),
-  });
-
-  const candidate = await getUserByOpenId(input.canonicalOpenId);
-  if (!candidate) {
-    throw new Error("Canonical user could not be resolved");
+  try {
+    await upsertUser({
+      openId: input.canonicalOpenId,
+      email: input.verifiedEmail,
+      name: input.displayName ?? null,
+      loginMethod: input.loginMethod,
+      lastSignedIn: new Date(),
+    });
+    console.error("[RESOLVE_UPSERT_OK]");
+  } catch (error) {
+    const cause = (error as { cause?: unknown })?.cause;
+    const source = cause ?? error;
+    const e = source as { code?: unknown; errno?: unknown; syscall?: unknown };
+    const message = (source as { message?: unknown })?.message?.toString() ?? "none";
+    console.error(
+      `[RESOLVE_UPSERT_ERROR] ` +
+      `error_name=${error?.constructor?.name ?? "Error"} ` +
+      `message=${message} ` +
+      `errno=${e.errno?.toString() ?? "none"} ` +
+      `code=${e.code?.toString() ?? "none"} ` +
+      `syscall=${e.syscall?.toString() ?? "none"}`
+    );
+    throw error;
   }
 
-  await linkProviderIdentityToUser({
-    provider: input.provider,
-    providerSubject: input.providerSubject,
-    userId: candidate.id,
-  });
-
-  const mapped = await getUserByProviderIdentity(input.provider, input.providerSubject);
-  if (!mapped) {
-    throw new Error("Provider identity mapping could not be resolved");
+  try {
+    candidate = await getUserByOpenId(input.canonicalOpenId);
+    if (!candidate) {
+      throw new Error("Canonical user could not be resolved");
+    }
+    console.error("[RESOLVE_OPENID_OK]");
+  } catch (error) {
+    const cause = (error as { cause?: unknown })?.cause;
+    const source = cause ?? error;
+    const e = source as { code?: unknown; errno?: unknown; syscall?: unknown };
+    const message = (source as { message?: unknown })?.message?.toString() ?? "none";
+    console.error(
+      `[RESOLVE_OPENID_ERROR] ` +
+      `error_name=${error?.constructor?.name ?? "Error"} ` +
+      `message=${message} ` +
+      `errno=${e.errno?.toString() ?? "none"} ` +
+      `code=${e.code?.toString() ?? "none"} ` +
+      `syscall=${e.syscall?.toString() ?? "none"}`
+    );
+    throw error;
   }
-  return mapped;
+
+  try {
+    await linkProviderIdentityToUser({
+      provider: input.provider,
+      providerSubject: input.providerSubject,
+      userId: candidate!.id,
+    });
+    console.error("[RESOLVE_LINK_OK]");
+  } catch (error) {
+    const cause = (error as { cause?: unknown })?.cause;
+    const source = cause ?? error;
+    const e = source as { code?: unknown; errno?: unknown; syscall?: unknown };
+    const message = (source as { message?: unknown })?.message?.toString() ?? "none";
+    console.error(
+      `[RESOLVE_LINK_ERROR] ` +
+      `error_name=${error?.constructor?.name ?? "Error"} ` +
+      `message=${message} ` +
+      `errno=${e.errno?.toString() ?? "none"} ` +
+      `code=${e.code?.toString() ?? "none"} ` +
+      `syscall=${e.syscall?.toString() ?? "none"}`
+    );
+    throw error;
+  }
+
+  try {
+    const mapped = await getUserByProviderIdentity(input.provider, input.providerSubject);
+    if (!mapped) {
+      throw new Error("Provider identity mapping could not be resolved");
+    }
+    console.error("[RESOLVE_FINAL_LOOKUP_OK]");
+    return mapped;
+  } catch (error) {
+    console.error(`[RESOLVE_FINAL_LOOKUP_ERROR] error_name=${error?.constructor?.name ?? "Error"}`);
+    throw error;
+  }
 }
 
 function requireDatabase(db: Awaited<ReturnType<typeof getDb>>) {
@@ -324,6 +431,50 @@ export async function listSessionMessagesPage(userId: number, sessionId: string,
  * Appends a message once. A client UUID is accepted only for original user
  * messages; retries return `created: false` without creating another record.
  */
+/**
+ * Rolls back the user message of a turn that produced no answer.
+ *
+ * A question is stored before the provider is called so that an answer can be attached to it, which
+ * means a failed turn otherwise leaves its question behind in the transcript forever — the user
+ * reloads the page and finds a question with no reply, and every later turn is built on it. Only
+ * the named message is removed, and only from the session the caller owns, so the history that came
+ * before the failed turn is untouched.
+ */
+/**
+ * Rolls back the user message of a turn that produced no answer.
+ *
+ * A question is stored before the provider is called so that an answer can be attached to it, which
+ * means a failed turn otherwise leaves its question behind in the transcript forever — the user
+ * reloads the page and finds a question with no reply, and every later turn is built on it. Only
+ * the named message is removed, and only from the session the caller owns, so the history that came
+ * before the failed turn is untouched.
+ *
+ * The `clientMessageId` is the browser-generated id of that exact question, not a position or a
+ * range, so a caller can only ever remove the one turn it names. Assistant messages are never
+ * touched by this: a turn that produced an answer must survive its question being removed.
+ */
+export async function deleteOwnedFailedUserMessage(userId: number, sessionId: string, clientMessageId: string): Promise<boolean> {
+  const db = requireDatabase(await getDb());
+  requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
+  const removed = await db.delete(messages).where(and(
+    eq(messages.sessionId, sessionId),
+    eq(messages.clientMessageId, clientMessageId),
+    eq(messages.role, "user"),
+  ));
+  return Number(removed[0]?.affectedRows ?? 0) > 0;
+}
+
+export async function deleteOwnedSessionUserMessage(userId: number, sessionId: string, messageId: number): Promise<boolean> {
+  const db = requireDatabase(await getDb());
+  requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
+  const removed = await db.delete(messages).where(and(
+    eq(messages.id, messageId),
+    eq(messages.sessionId, sessionId),
+    eq(messages.role, "user"),
+  ));
+  return Number(removed?.[0]?.affectedRows ?? 0) > 0;
+}
+
 export async function appendChatMessage(userId: number, sessionId: string, role: "user" | "assistant", content: string, modelId?: string, metadata?: string, clientMessageId?: string): Promise<{ created: boolean; id: number }> {
   const db = requireDatabase(await getDb());
   requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
@@ -676,6 +827,10 @@ export type SearchQualityInput = {
   attemptedLayerCount: number;
   staleBlocked: boolean;
   latencyMs: number;
+  taskKind?: SearchTaskKind;
+  /** Only meaningful for a live-value sample: whether a source provably carried the value. */
+  valueConfirmed?: boolean;
+  targetedPass?: boolean;
 };
 
 type SearchQualityPeriod = {
@@ -686,22 +841,33 @@ type SearchQualityPeriod = {
   staleBlockedCount: number;
   foundRate: number;
   verificationPassRate: number;
+  liveValue: SearchQualityLiveValue;
 };
 
-export type SearchQualityPanel = { last24h: SearchQualityPeriod; last7d: SearchQualityPeriod };
+type SearchQualityLiveValue = { sampleCount: number; confirmed: number; unconfirmed: number; notFound: number; confirmationRate: number };
 
-function summarizeSearchQuality(rows: Array<{ outcome: SearchQualityInput["outcome"]; verification: SearchQualityInput["verification"]; verifiedSourceCount: number; staleBlocked: number }>): SearchQualityPeriod {
+function summarizeSearchQuality(rows: Array<{ outcome: SearchQualityInput["outcome"]; verification: SearchQualityInput["verification"]; verifiedSourceCount: number; staleBlocked: number; taskKind?: string | null; valueConfirmed?: number | null }>): SearchQualityPeriod {
   const counts: SearchQualityPeriod["counts"] = { found: 0, empty: 0, degraded: 0, error: 0 };
   let verifiedSourceCount = 0;
   let zeroSourceCount = 0;
   let staleBlockedCount = 0;
   let verificationPassCount = 0;
+  let liveValueSampleCount = 0;
+  let liveValueConfirmed = 0;
+  let liveValueNotFound = 0;
   for (const row of rows) {
     counts[row.outcome] += 1;
     verifiedSourceCount += row.verifiedSourceCount;
     if (row.verifiedSourceCount === 0) zeroSourceCount += 1;
     if (row.staleBlocked) staleBlockedCount += 1;
     if (row.verification === "verified") verificationPassCount += 1;
+    // Only aggregate rows that actually carry a verdict: a task kind without a value to
+    // prove must never be counted as a failed confirmation.
+    if (row.taskKind === "LIVE_VALUE" && typeof row.valueConfirmed === "number") {
+      liveValueSampleCount += 1;
+      if (row.valueConfirmed === 1) liveValueConfirmed += 1;
+      else if (row.verifiedSourceCount === 0) liveValueNotFound += 1;
+    }
   }
   const sampleCount = rows.length;
   return {
@@ -712,6 +878,13 @@ function summarizeSearchQuality(rows: Array<{ outcome: SearchQualityInput["outco
     staleBlockedCount,
     foundRate: sampleCount ? Math.round((counts.found / sampleCount) * 10_000) / 100 : 0,
     verificationPassRate: sampleCount ? Math.round((verificationPassCount / sampleCount) * 10_000) / 100 : 0,
+    liveValue: {
+      sampleCount: liveValueSampleCount,
+      confirmed: liveValueConfirmed,
+      unconfirmed: liveValueSampleCount - liveValueConfirmed - liveValueNotFound,
+      notFound: liveValueNotFound,
+      confirmationRate: liveValueSampleCount ? Math.round((liveValueConfirmed / liveValueSampleCount) * 10_000) / 100 : 0,
+    },
   };
 }
 
@@ -723,9 +896,14 @@ export async function recordSearchQuality(input: SearchQualityInput): Promise<vo
     outcome: input.outcome,
     verification: input.verification,
     verifiedSourceCount: Math.max(0, Math.min(Math.round(input.verifiedSourceCount), 5)),
-    attemptedLayerCount: Math.max(0, Math.min(Math.round(input.attemptedLayerCount), 3)),
+    // A live-value turn may run a second pass over the same layers, so the ceiling is the
+    // request budget, not the number of layers.
+    attemptedLayerCount: Math.max(0, Math.min(Math.round(input.attemptedLayerCount), 6)),
     staleBlocked: input.staleBlocked ? 1 : 0,
     latencyMs: Math.max(0, Math.min(Math.round(input.latencyMs), 30_000)),
+    taskKind: input.taskKind ?? null,
+    valueConfirmed: typeof input.valueConfirmed === "boolean" ? (input.valueConfirmed ? 1 : 0) : null,
+    targetedPass: typeof input.targetedPass === "boolean" ? (input.targetedPass ? 1 : 0) : null,
   });
 }
 
@@ -738,6 +916,8 @@ export async function cleanupSearchQualityMetrics(): Promise<number> {
   return Number((result as { rowsAffected?: number } | undefined)?.rowsAffected ?? 0);
 }
 
+export type SearchQualityPanel = { last24h: SearchQualityPeriod; last7d: SearchQualityPeriod };
+
 /** Narrow owner-only quality DTO. It contains aggregate numbers only and deliberately omits content, identity and routing data. */
 export async function getSearchQualityPanel(): Promise<SearchQualityPanel> {
   const db = await getDb();
@@ -746,7 +926,7 @@ export async function getSearchQualityPanel(): Promise<SearchQualityPanel> {
   const now = Date.now();
   const since7d = new Date(now - 7 * 24 * 60 * 60 * 1_000);
   const since24h = now - 24 * 60 * 60 * 1_000;
-  const rows = await db.select({ outcome: searchQualityMetrics.outcome, verification: searchQualityMetrics.verification, verifiedSourceCount: searchQualityMetrics.verifiedSourceCount, staleBlocked: searchQualityMetrics.staleBlocked, createdAt: searchQualityMetrics.createdAt })
+  const rows = await db.select({ outcome: searchQualityMetrics.outcome, verification: searchQualityMetrics.verification, verifiedSourceCount: searchQualityMetrics.verifiedSourceCount, staleBlocked: searchQualityMetrics.staleBlocked, taskKind: searchQualityMetrics.taskKind, valueConfirmed: searchQualityMetrics.valueConfirmed, createdAt: searchQualityMetrics.createdAt })
     .from(searchQualityMetrics).where(gt(searchQualityMetrics.createdAt, since7d)).orderBy(desc(searchQualityMetrics.createdAt)).limit(20_000);
   return {
     last24h: summarizeSearchQuality(rows.filter((row) => row.createdAt.getTime() >= since24h)),
@@ -876,8 +1056,7 @@ export async function upsertWebSearchStatus(input: WebSearchStatusInput): Promis
   });
 }
 
-export type UserSettingsPatch = Partial<Pick<UserSettings, "language" | "theme" | "responseStyle" | "responseLength" | "effort" | "thinking" | "defaultRole" | "webSearch" | "toolAccess" | "healthRefreshSeconds" | "highContrast" | "emailNotifications">>;
-export type KnowledgeSourcePatch = Omit<KnowledgeSource, "updatedAt">;
+export type UserSettingsPatch = Partial<Pick<UserSettings, "language" | "theme" | "responseStyle" | "responseLength" | "effort" | "thinking" | "defaultRole" | "webSearch" | "toolAccess" | "healthRefreshSeconds" | "highContrast" | "emailNotifications" | "askClarifyingQuestions">>;export type KnowledgeSourcePatch = Omit<KnowledgeSource, "updatedAt">;
 export type KnowledgeDocumentInput = Omit<KnowledgeDocument, "retrievedAt" | "updatedAt">;
 export type KnowledgeRunInput = Omit<KnowledgeIngestionRun, "startedAt" | "finishedAt">;
 
@@ -993,6 +1172,28 @@ export async function consumeChatStreamRequestQuota(userId: number, limit = 60, 
   return { allowed: current.requestCount <= limit, retryAfterSeconds: Math.max(1, Math.ceil((windowMs - elapsed) / 1_000)) };
 }
 
+/**
+ * Fixed-window quota for My API (BYOK) turns, counted in `my_api_rate_windows`.
+ *
+ * The increment and the window rollover happen in one atomic upsert, so concurrent requests cannot
+ * both read a pre-increment count and both be admitted past the limit. The read-back afterwards is
+ * what turns the stored counter into a verdict; the upsert is what makes that verdict trustworthy.
+ */
+export async function consumeMyApiRequestQuota(userId: number, limit = 15, windowMs = 60_000): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+  const db = requireDatabase(await getDb());
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - windowMs);
+  await db.insert(myApiRateWindows).values({ userId, windowStarted: now, requestCount: 1 }).onDuplicateKeyUpdate({ set: {
+    requestCount: sql`if(${myApiRateWindows.windowStarted} <= ${cutoff}, 1, ${myApiRateWindows.requestCount} + 1)`,
+    windowStarted: sql`if(${myApiRateWindows.windowStarted} <= ${cutoff}, ${now}, ${myApiRateWindows.windowStarted})`,
+  } });
+  const rows = await db.select().from(myApiRateWindows).where(eq(myApiRateWindows.userId, userId)).limit(1);
+  const current = rows[0];
+  if (!current) throw new Error("Не удалось проверить лимит My API.");
+  const elapsed = Math.max(0, now.getTime() - current.windowStarted.getTime());
+  return { allowed: current.requestCount <= limit, retryAfterSeconds: Math.max(1, Math.ceil((windowMs - elapsed) / 1_000)) };
+}
+
 /** Writes only outcome metadata; prompts, responses, credentials, headers and IP addresses are never persisted. */
 export async function recordDevApiAudit(input: DevApiAuditInput): Promise<void> {
   const db = requireDatabase(await getDb());
@@ -1023,6 +1224,104 @@ export async function updateUserSettings(userId: number, patch: UserSettingsPatc
   await ensureUserSettings(userId);
   if (Object.keys(patch).length) await db.update(userSettings).set(patch).where(eq(userSettings.userId, userId));
   return getUserSettings(userId);
+}
+
+/**
+ * BYOK storage. Every function here takes the resolved owner id from the request context and
+ * filters on it; a provider id alone never selects a row, so no caller can read or overwrite
+ * another user's configuration by guessing a provider.
+ */
+export async function listUserProviderConfigs(userId: number) {
+  const db = requireDatabase(await getDb());
+  const rows = await db.select().from(userProviderConfigs).where(eq(userProviderConfigs.userId, userId));
+  return rows;
+}
+
+export async function getUserProviderConfig(userId: number, provider: string) {
+  const db = requireDatabase(await getDb());
+  const rows = await db.select().from(userProviderConfigs)
+    .where(and(eq(userProviderConfigs.userId, userId), eq(userProviderConfigs.provider, provider))).limit(1);
+  return rows[0];
+}
+
+/**
+ * Saves against the (userId, provider) unique key, so choosing a different model for the same
+ * provider updates the existing row instead of creating a second one, and two concurrent saves
+ * for one provider collapse into a single row rather than duplicating the credential.
+ */
+export async function upsertUserProviderConfig(input: { userId: number; provider: string; activeModel: string; encryptedApiKey: string; keyHint: string; displayName?: string | null; baseUrl?: string | null; modelsEndpoint?: string | null }) {
+  const db = requireDatabase(await getDb());
+  const now = new Date();
+  const identity = { displayName: input.displayName ?? null, baseUrl: input.baseUrl ?? null, modelsEndpoint: input.modelsEndpoint ?? null };
+  await db.insert(userProviderConfigs).values({ userId: input.userId, provider: input.provider, activeModel: input.activeModel, encryptedApiKey: input.encryptedApiKey, keyHint: input.keyHint, ...identity, createdAt: now, updatedAt: now })
+    .onDuplicateKeyUpdate({ set: { activeModel: input.activeModel, encryptedApiKey: input.encryptedApiKey, keyHint: input.keyHint, ...identity, updatedAt: now } });
+  return getUserProviderConfig(input.userId, input.provider);
+}
+
+/**
+ * Switches only the selected model on a row the caller already owns.
+ *
+ * The credential, endpoint and name are deliberately left untouched: switching models must never
+ * require re-entering the key, and must never be able to rewrite the endpoint behind a click.
+ * The WHERE clause still carries the user id, so another user's row is simply not matched.
+ */
+export async function setUserProviderActiveModel(userId: number, provider: string, activeModel: string) {
+  const db = requireDatabase(await getDb());
+  await db.update(userProviderConfigs).set({ activeModel, updatedAt: new Date() }).where(and(eq(userProviderConfigs.userId, userId), eq(userProviderConfigs.provider, provider)));
+  return getUserProviderConfig(userId, provider);
+}
+
+/**
+ * The active provider pointer lives in user_settings, so a single column decides which
+ * credential backs "My API" and cannot drift into disagreeing with the rows themselves.
+ */
+export async function setActiveUserProvider(userId: number, provider: string | null) {
+  const db = requireDatabase(await getDb());
+  await ensureUserSettings(userId);
+  await db.update(userSettings).set({ myApiProvider: provider }).where(eq(userSettings.userId, userId));
+  return getUserSettings(userId);
+}
+
+/** Deleting the active provider clears the pointer in the same operation, leaving nothing dangling. */
+export async function deleteUserProviderConfig(userId: number, provider: string) {
+  const db = requireDatabase(await getDb());
+  await db.delete(userProviderConfigs).where(and(eq(userProviderConfigs.userId, userId), eq(userProviderConfigs.provider, provider)));
+  const current = await getUserSettings(userId);
+  if (current.myApiProvider === provider) await setActiveUserProvider(userId, null);
+  return { removed: true as const };
+}
+
+/**
+ * Resolves the one binding a "My API" request may use. Returns undefined when the user has
+ * not chosen a provider or when the chosen provider has no saved row; the caller turns that
+ * into a clear "not configured" answer, and decrypts the envelope afterwards so a blob that no
+ * longer opens is reported as a decryption failure rather than as a missing configuration.
+ *
+ * The endpoint fields travel with the binding so inference reuses the configuration that was
+ * validated at save time instead of accepting an endpoint from the request.
+ */
+export async function getActiveUserProviderBinding(userId: number) {
+  const settings = await getUserSettings(userId);
+  const provider = settings.myApiProvider;
+  if (!provider) return undefined;
+  const config = await getUserProviderConfig(userId, provider);
+  if (!config) return undefined;
+  return {
+    provider,
+    model: config.activeModel,
+    encryptedApiKey: config.encryptedApiKey,
+    keyHint: config.keyHint,
+    displayName: config.displayName,
+    baseUrl: config.baseUrl,
+    modelsEndpoint: config.modelsEndpoint,
+    updatedAt: config.updatedAt,
+  };
+}
+
+/** Profile display name only. Never called with a client-supplied userId. */
+export async function updateUserName(userId: number, name: string | null): Promise<void> {
+  const db = requireDatabase(await getDb());
+  await db.update(users).set({ name }).where(eq(users.id, userId));
 }
 
 async function ensureMemoryProfile(userId: number): Promise<void> {

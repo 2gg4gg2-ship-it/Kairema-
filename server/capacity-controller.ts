@@ -379,6 +379,8 @@ type GenerationReservationInput = {
   roleId: RoleId;
   target: CapacityProviderTarget;
   attemptIndex: number;
+  /** The per-user WCU window is a logical-request budget: only the first admitted attempt of one request charges it. */
+  chargeUserScope: boolean;
   wcu: number;
   policy: CapacityPolicy;
 };
@@ -414,7 +416,9 @@ async function reserve(input: GenerationReservationInput | { actor: CapacityActo
   const scopeLimits: ScopeLimit[] = kind === "generation"
     ? [
       { key: "global:generation", limit: protectedGlobalGenerationLimit, blockingScope: "global" },
-      { key: `user:generation:${input.actor.userId}`, limit: policy.perUserGenerationWcuLimit, blockingScope: "user" },
+      // The per-user window bounds logical requests, not provider attempts: one request charges it once,
+      // while global/provider/model scopes stay charged per real upstream attempt.
+      ...("target" in input && input.chargeUserScope ? [{ key: `user:generation:${input.actor.userId}`, limit: policy.perUserGenerationWcuLimit, blockingScope: "user" as const }] : []),
       { key: providerScope({ provider: target!.provider }), limit: providerPolicy?.generationWcuLimit ?? null, blockingScope: "provider" },
       ...(target!.modelId ? [{ key: providerScope(target!), limit: modelPolicy?.generationWcuLimit ?? null, blockingScope: "provider" as const }] : []),
     ]
@@ -559,14 +563,19 @@ export async function beginCapacityGeneration(actor: CapacityActor, roleId: Role
   const weight = calculation(settings, roleId, policy);
   const release = policy.enabled ? await acquireLocal("generation", actor, policy, roleId) : () => undefined;
   localCounters.admissions += 1;
+  // All attempts of one logical request run on the instance that owns that request, so this flag
+  // charges the per-user WCU window exactly once per request without weakening any per-attempt scope.
+  let userScopeCharged = false;
   return {
     policy,
     wcu: weight.wcu,
     modifiers: weight.modifiers,
     reserveAttempt: async (target, attemptIndex) => {
       try {
-        const ticket = await reserve({ actor, roleId, target, attemptIndex, wcu: weight.wcu, policy });
+        const ticket = await reserve({ actor, roleId, target, attemptIndex, chargeUserScope: !userScopeCharged, wcu: weight.wcu, policy });
         if (attemptIndex > 1) localCounters.fallbackReservations += 1;
+        // A deduplicated replay means an earlier identical attempt already accounted for this request.
+        userScopeCharged = true;
         return ticket;
       } catch (error) {
         if (error instanceof CapacityAdmissionError) localCounters.rejectedCapacity += 1;

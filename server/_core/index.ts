@@ -11,8 +11,11 @@ import { registerAttachmentUploadRoute } from "../attachment-upload";
 import { registerProviderHealthScheduleRoute } from "../provider-health-schedule";
 import { registerKnowledgeScheduleRoute } from "../knowledge-schedule";
 import { registerMemoryExtractionScheduleRoute } from "../memory-extraction-schedule";
+import { registerGuestCleanupScheduleRoute } from "../guest-cleanup-schedule";
+import { startupCleanupExpiredGuests } from "./guest-session";
 import { registerDevRoute } from "../dev-api";
 import { registerStytchAuthRoutes } from "../stytch-auth";
+import { registerWebSearchDiagnosticRoute } from "../web-search-diagnostic";
 import { refreshProviderHealth } from "../providers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -50,7 +53,10 @@ async function startServer() {
   registerProviderHealthScheduleRoute(app);
   registerKnowledgeScheduleRoute(app);
   registerMemoryExtractionScheduleRoute(app);
+  registerGuestCleanupScheduleRoute(app);
   registerDevRoute(app);
+  // TEMPORARY read-only permanent-user diagnostic; remove together with server/web-search-diagnostic.ts.
+  registerWebSearchDiagnosticRoute(app);
   // tRPC API
   app.use(
     "/api/trpc",
@@ -66,15 +72,21 @@ async function startServer() {
     serveStatic(app);
   }
 
-  const preferredPort = parseInt(process.env.PORT || "3000");
-  const port = await findAvailablePort(preferredPort);
+  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : await findAvailablePort(3000);
 
-  if (port !== preferredPort) {
-    console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
-  }
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`Port ${port} is already in use`);
+    } else {
+      console.error(err);
+    }
+    process.exitCode = 1;
+  });
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    // C4: free-first fallback for Render sleep — runs once at startup
+    void startupCleanupExpiredGuests().catch(() => undefined);
     // Best-effort deployment/start check. Daily rechecks are handled by Heartbeat.
     void refreshProviderHealth().catch(() => undefined);
   });

@@ -1,9 +1,10 @@
 export type StreamSource = { title: string; url: string; publishedAt?: string | null };
+export type StreamLiveValue = { kind: "temperature" | "conditions" | "clock" | "rate"; status: "confirmed" | "unconfirmed" | "not_found" };
 export type StreamDonePayload = {
   content?: string;
   modelUsed?: string;
   label?: string;
-  searchStatus?: { state?: "found" | "empty" | "degraded" | "error"; verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable"; sourcesCount?: number; freshnessBlocked?: boolean; staleRagOnly?: boolean; sourceDateMin?: string; sourceDateMax?: string };
+  searchStatus?: { state?: "found" | "empty" | "degraded" | "error"; verificationStatus?: "verified" | "no_results" | "degraded" | "unavailable"; sourcesCount?: number; freshnessBlocked?: boolean; staleRagOnly?: boolean; sourceDateMin?: string; sourceDateMax?: string; liveValue?: StreamLiveValue };
   sources?: StreamSource[];
   webGrounding?: { intent?: "PREFERRED" | "REQUIRED"; state?: "verified" | "disabled" | "empty" | "degraded" | "unavailable" | "admission_denied"; sourcesCount?: number; citations?: StreamSource[]; freshnessBlocked?: boolean };
 };

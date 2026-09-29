@@ -21,7 +21,7 @@ const mockDb = vi.hoisted(() => ({
 
 vi.mock("drizzle-orm/mysql2", () => ({ drizzle: () => mockDb }));
 
-import { consumeChatStreamRequestQuota } from "./db";
+import { consumeChatStreamRequestQuota, consumeMyApiRequestQuota } from "./db";
 
 describe("durable chat-stream quota", () => {
   beforeEach(() => {
@@ -53,5 +53,43 @@ describe("durable chat-stream quota", () => {
 
     expect(result.allowed).toBe(true);
     expect(state.inserted[0]).toMatchObject({ userId: 45 });
+  });
+});
+
+describe("durable My API quota", () => {
+  beforeEach(() => {
+    process.env.DATABASE_URL = "mysql://test";
+    state.rows = [];
+    state.inserted = [];
+    vi.clearAllMocks();
+  });
+
+  it("admits the request that reaches the limit and refuses the one past it", async () => {
+    const now = Date.now();
+    state.rows = [{ userId: 51, windowStarted: new Date(now), requestCount: 15, updatedAt: new Date(now) }];
+    await expect(consumeMyApiRequestQuota(51, 15, 60_000)).resolves.toMatchObject({ allowed: true });
+    state.rows = [{ userId: 51, windowStarted: new Date(now), requestCount: 16, updatedAt: new Date(now) }];
+    await expect(consumeMyApiRequestQuota(51, 15, 60_000)).resolves.toMatchObject({ allowed: false });
+  });
+
+  it("counts against a window of its own, never the ordinary chat window", async () => {
+    const now = Date.now();
+    state.rows = [{ userId: 52, windowStarted: new Date(now), requestCount: 1, updatedAt: new Date(now) }];
+    await consumeMyApiRequestQuota(52, 15, 60_000);
+    // The My API call wrote its own row keyed by the user, with no session or prompt alongside it.
+    expect(state.inserted[0]).toMatchObject({ userId: 52, requestCount: 1 });
+    expect(state.inserted[0]).not.toHaveProperty("content");
+    expect(state.inserted[0]).not.toHaveProperty("sessionId");
+  });
+
+  it("tells the caller how long to wait before retrying", async () => {
+    const now = Date.now();
+    state.rows = [{ userId: 53, windowStarted: new Date(now - 10_000), requestCount: 99, updatedAt: new Date(now) }];
+    await expect(consumeMyApiRequestQuota(53, 15, 60_000)).resolves.toEqual({ allowed: false, retryAfterSeconds: 50 });
+  });
+
+  it("fails loudly when the window row cannot be read back", async () => {
+    state.rows = [];
+    await expect(consumeMyApiRequestQuota(54, 15, 60_000)).rejects.toThrow(/My API/);
   });
 });

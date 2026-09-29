@@ -5,7 +5,15 @@ type Language = "ru" | "en";
 
 type SortMode = "asc" | "desc" | null;
 
-function InteractiveGfmTable({ children, language, ...props }: React.ComponentPropsWithoutRef<"table"> & { language: Language }) {
+/**
+ * Streamdown hands every component a `node` prop holding the raw hast element. It is a parser
+ * detail, not a DOM attribute, so spreading it through reaches the real `<table>` and React renders
+ * `node="[object Object]"` into the document. The prop is destructured away here — naming it
+ * `_node` keeps it out of the rest object — so only genuine table attributes reach the DOM.
+ */
+type GfmTableProps = Omit<React.ComponentPropsWithoutRef<"table">, "ref"> & { node?: unknown };
+
+function InteractiveGfmTable({ children, language, node: _parserNode, ...props }: GfmTableProps & { language: Language }) {
   const tableRef = useRef<HTMLTableElement>(null);
   const [sortMode, setSortMode] = useState<SortMode>(null);
   const labels = language === "ru"
@@ -41,8 +49,47 @@ function InteractiveGfmTable({ children, language, ...props }: React.ComponentPr
 }
 
 /**
- * Safely renders streamed model output as GFM Markdown. Raw HTML is skipped,
- * so model output is never interpreted as executable or trusted markup.
+ * Tags that must never be produced from model output.
+ *
+ * The list is about what a tag can *do*, not about how it is spelled: `script` executes, `style`
+ * and `link` inject CSS from the network, `meta` can redirect the page, `base` rewrites every
+ * relative URL, and `iframe`/`object`/`embed`/`form` frame or phish. `noscript` and `template` are
+ * inert but are classic parser-confusion tricks and cost nothing to drop.
+ *
+ * `svg` is deliberately absent: Streamdown draws its own image-download button with a Lucide
+ * `<svg>`, so nulling the tag would remove a working control. An `<svg>` cannot execute anything
+ * on its own, and a `<script>` nested inside one is already removed by the `script` entry.
+ *
+ * `a` is deliberately absent too — links are a supported feature, and their `javascript:` scheme
+ * is handled upstream by Streamdown's `rehype-harden` rather than here.
+ */
+const UNSAFE_RAW_TAGS = ["script", "style", "iframe", "object", "embed", "form", "link", "meta", "base", "noscript", "template"] as const;
+
+/** Renders nothing, so the tag never reaches the document. */
+function dropRawHtmlNode() {
+  return null;
+}
+
+const droppedRawTags = Object.fromEntries(UNSAFE_RAW_TAGS.map((tag) => [tag, dropRawHtmlNode]));
+
+/**
+ * Safely renders streamed model output as GFM Markdown.
+ *
+ * `skipHtml` is passed, but on its own it does not neutralise raw HTML: Streamdown always runs
+ * `rehype-raw`, which re-parses raw HTML back into real nodes before `skipHtml` can apply, and
+ * `rehype-harden` does not remove `<script>`. `UNSAFE_RAW_TAGS` closes that gap by making those
+ * tags render nothing.
+ *
+ * It is done through `components` rather than `rehypePlugins` on purpose. The `rehypePlugins` prop
+ * *replaces* Streamdown's default plugin list (`{harden, raw, katex}`) instead of appending to it —
+ * verified against the installed version — and the rehype packages are not resolvable from this
+ * project under pnpm's strict layout, so rebuilding that list by hand would mean pinning duplicate
+ * copies of `rehype-harden` and `rehype-katex` and re-deriving their options from a minified
+ * bundle. Overriding `components` instead is additive: `rehype-harden` keeps blocking `javascript:`
+ * URLs and KaTeX keeps rendering, and the only rendering it removes is the unsafe markup itself.
+ *
+ * Visual styling lives in `.kairema-gfm` in client/src/index.css, not in this component: Streamdown
+ * ships its styles as Tailwind class names and exports no stylesheet of its own.
  */
 export function InlineMarkdown({ text, language = "ru" }: { text: string; language?: Language }) {
   const tableCount = (text.match(/^\s*\|.+\|\s*\n\s*\|(?:\s*:?-+:?\s*\|)+\s*$/gm) ?? []).length;
@@ -59,7 +106,8 @@ export function InlineMarkdown({ text, language = "ru" }: { text: string; langua
       parseIncompleteMarkdown
       skipHtml
       components={{
-        table: ({ children, ...props }) => <InteractiveGfmTable language={language} {...props}>{children}</InteractiveGfmTable>,
+        ...droppedRawTags,
+        table: ({ children, ...props }: GfmTableProps) => <InteractiveGfmTable language={language} {...props}>{children}</InteractiveGfmTable>,
       }}
     >
       {text}

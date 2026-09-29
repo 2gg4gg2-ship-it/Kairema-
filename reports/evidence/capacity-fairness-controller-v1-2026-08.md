@@ -12,8 +12,8 @@ Controller V1 добавляется как единственный server-side
 |---|---|---|
 | WCU | Server-derived role plus modifier weights (`thinking`, `vision`, `detailed`, `highEffort`, `webResearch`) | WCU is a configured policy unit, **not** measured provider tokens, price or global capacity proof. |
 | Admission | Canonical `userId` plus server-saved message identity form trusted actor/request keys | Client neither supplies quota identity nor reservation key. |
-| Reservation | Durable idempotent reservation before each actual provider fetch; settlement/release is guarded | A rejected reservation creates no upstream attempt and does not consume the existing four-attempt budget. |
-| Fallback | Each existing fallback attempt is independently reserved; no fifth attempt is introduced | Existing provider chains, health and cooldown logic stay authoritative. |
+| Reservation | Durable idempotent reservation before each actual provider fetch; settlement/release is guarded; the per-user WCU window is charged once per logical request, not per attempt | A rejected reservation creates no upstream attempt and does not consume the existing four-attempt budget. |
+| Fallback | Each existing fallback attempt is independently reserved on provider/model scopes; no fifth attempt is introduced | Existing provider chains, health and cooldown logic stay authoritative. |
 | Fairness | Durable scoped minute WCU windows plus instance-local generation/search concurrency | Instance-local counters are expressly **not** global production concurrency. |
 | Queue | Safe default is disabled; if explicitly enabled, only low-cost Flash may use the short-lived, instance-local queue bounded to 1,500 ms / 64 waiters | It is not a distributed queue or fairness proof across replicas. |
 | Search | Separate search reservation hook wraps only the existing live-search call | Search order and truthful stale/degraded outcomes remain unchanged; no query/content cache is stored. |

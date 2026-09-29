@@ -157,7 +157,7 @@
 }
 .high-contrast .kairema-send { border-color:#ffffff; color:#000000!important; background:#ffffff!important; }
 .high-contrast .kairema-cancel { border-color:#ffffff!important; color:#000000!important; background:#ffff00!important; }
-.high-contrast .kairema-status,.high-contrast .kairema-health-dot,.high-contrast .kairema-availability-cell { outline:1px solid #ffffff; }
+.high-contrast .kairema-status,.high-contrast .kairema-availability-cell { outline:1px solid #ffffff; }
 
 /* Radix puts data-state on the root, not on the thumb. Keep this selector explicit
    so the thumb always reaches its checked endpoint in the compiled production CSS. */
@@ -228,10 +228,27 @@
   }
 }
 
-/* Kairema visual system */
-:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+/* Kairema visual system
+
+   The UI face is a native system stack. `Inter` used to lead this list, but the project ships no
+   @font-face and loads no font CDN, so it never resolved on any platform and every reader silently
+   fell through to `system-ui` anyway — a dead name in front of the real font. Removing it changes
+   no rendering and makes the stack say what it actually uses.
+
+   Code gets its own stack because a code block that inherits the UI face stops reading as code;
+   the monospace face is also what makes an inline `code` distinguishable from the paragraph
+   around it. */
+:root {
+  color-scheme: dark;
+  --k-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
+  --k-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-family: var(--k-font-sans);
+}
 body { margin: 0; min-width: 320px; background: #070912; color: #e8edf8; }
-.kairema-shell { min-height: 100vh; display: flex; background: radial-gradient(circle at 66% -10%, rgba(103,80,255,.16), transparent 32rem), #070912; }.kairema-sidebar { width: 300px; min-height: 100vh; flex: 0 0 300px; display: flex; flex-direction: column; padding: 18px 14px 13px; border-right: 1px solid rgba(255,255,255,.07); background: rgba(12,15,25,.94); z-index: 20; }.kairema-brand-row { display: flex; align-items: center; gap: 10px; padding: 3px 7px 19px; color: white; font-size: 17px; font-weight: 700; letter-spacing: -.02em; }.kairema-logo,.kairema-orb { display: grid; place-items: center; color:#fff; background: linear-gradient(135deg,#8e7dff,#4c49d7); box-shadow: 0 7px 22px rgba(86,73,220,.38); }.kairema-logo { width:29px; height:29px; border-radius:12px; }.kairema-orb { width:60px; height:60px; border-radius:21px; }.kairema-new-chat { display:flex; align-items:center; justify-content:center; gap:8px; width:100%; padding:10px 12px; border:1px solid rgba(161,151,255,.42); border-radius:11px; color:#f5f3ff; background:linear-gradient(100deg,rgba(112,94,255,.25),rgba(83,75,185,.18)); font-size:13px; font-weight:600; transition:.18s ease; }.kairema-new-chat:hover { background:linear-gradient(100deg,rgba(124,105,255,.38),rgba(83,75,185,.29)); transform:translateY(-1px); }.kairema-sidebar-label,.kairema-history-head { display:flex; align-items:center; gap:7px; margin:23px 7px 10px; color:#80899c; font-size:11px; font-weight:700; letter-spacing:.11em; text-transform:uppercase; }.kairema-providers { display:flex; flex-direction:column; gap:4px; }.kairema-provider { display:flex; align-items:center; gap:9px; width:100%; padding:8px; border:1px solid transparent; border-radius:10px; color:#fff; background:transparent; transition:.16s ease; }.kairema-provider:hover { background:rgba(255,255,255,.045); }.kairema-provider-selected { border-color:rgba(143,128,255,.25); background:rgba(127,112,255,.14); }.kairema-provider-icon { display:grid; place-items:center; width:28px; height:28px; flex:none; border-radius:8px; color:#c7bfff; background:#1c2131; }.kairema-status { flex:none; padding:3px 6px; border-radius:99px; font-size:9px; font-weight:700; line-height:1; white-space:nowrap; }.status-ready{color:#6ee7ae;background:rgba(43,180,111,.14)}.status-quota{color:#f7c86b;background:rgba(250,180,57,.14)}.status-auth{color:#f99da6;background:rgba(245,96,111,.14)}.status-muted{color:#9ba5b6;background:rgba(148,163,184,.13)}.status-unavailable{color:#ffb377;background:rgba(255,141,70,.13)}.kairema-status-loading { width:13px; height:13px; border:2px solid #364056; border-top-color:#a096ff; border-radius:50%; animation:kairema-spin .75s linear infinite; }.kairema-history-head { justify-content:space-between; margin-top:21px; margin-bottom:8px; }.kairema-icon-btn { display:inline-grid; place-items:center; width:30px; height:30px; border:0; border-radius:8px; color:#9aa4b5; background:transparent; transition:.16s ease; }.kairema-icon-btn:hover { color:#fff; background:rgba(255,255,255,.07); }.kairema-search { display:flex; align-items:center; gap:7px; margin:0 2px 8px; padding:7px 9px; border:1px solid rgba(255,255,255,.07); border-radius:9px; color:#5d6677; background:rgba(255,255,255,.025); }.kairema-search input { width:100%; border:0; outline:0; color:#dbe2f0; background:transparent; font-size:12px; }.kairema-history-list { display:flex; flex-direction:column; gap:2px; min-height:50px; max-height:150px; overflow:auto; }.kairema-history-item { overflow:hidden; padding:8px 9px; border:0; border-radius:8px; color:#96a0b2; background:transparent; text-align:left; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }.kairema-history-item:hover,.kairema-history-active { color:#e9edfa; background:rgba(255,255,255,.05); }.kairema-sidebar-footer { display:grid; gap:2px; margin-top:auto; padding:12px 4px 0; border-top:1px solid rgba(255,255,255,.06); }.kairema-footer-link { display:flex; align-items:center; gap:8px; padding:8px 4px; border:0; color:#a5afbf; background:transparent; font-size:12px; text-align:left; }.kairema-footer-link:hover { color:#fff; }.kairema-sidebar-footer p { margin:4px 4px 0; color:#586174; font-size:10px; }.kairema-main { display:flex; flex:1; flex-direction:column; min-width:0; min-height:100vh; }.kairema-topbar { display:flex; align-items:center; justify-content:space-between; height:64px; padding:0 23px; border-bottom:1px solid rgba(255,255,255,.06); background:rgba(8,10,18,.50); backdrop-filter:blur(16px); }.kairema-select-wrap { position:relative; }.kairema-select-wrap select { appearance:none; padding:7px 31px 7px 11px; border:1px solid rgba(255,255,255,.09); border-radius:9px; outline:none; color:#dce4f4; background:#131725; font-size:12px; font-weight:600; }.kairema-select-wrap select:focus { border-color:#9386ff; }.kairema-chat { min-height:0; }.kairema-message { padding:11px 14px; border-radius:14px; }.kairema-message-user { color:#fff; background:linear-gradient(135deg,#7163eb,#5b52c9); box-shadow:0 8px 18px rgba(76,65,189,.18); }.kairema-message-ai { border:1px solid rgba(255,255,255,.06); color:#e9edf8; background:rgba(22,27,42,.74); }.kairema-message-error { border-color:rgba(250,108,121,.24); color:#ffd9dd; background:rgba(125,31,45,.22); }.kairema-avatar { display:grid; place-items:center; width:29px; height:29px; flex:none; border-radius:9px; color:#abb5c7; background:#242b3b; }.kairema-avatar-ai { color:#fff; background:linear-gradient(135deg,#8070ff,#584ee1); }.kairema-typing { display:flex; align-items:center; gap:8px; padding:9px 12px; border:1px solid rgba(255,255,255,.06); border-radius:12px; color:#939cb0; background:#161b2a; font-size:12px; }.kairema-prompt { padding:9px 11px; border:1px solid rgba(255,255,255,.08); border-radius:10px; color:#aeb7c8; background:rgba(255,255,255,.025); font-size:12px; transition:.15s ease; }.kairema-prompt:hover { border-color:rgba(143,128,255,.45); color:#eeecff; background:rgba(126,108,249,.09); }.kairema-composer { display:flex; align-self:center; align-items:end; gap:9px; width:min(100%,896px); padding:14px 16px 8px; }.kairema-textarea { min-height:45px; max-height:132px; resize:none; padding:12px 46px 11px 14px; border:1px solid rgba(255,255,255,.10); border-radius:13px; color:#e7edfb; background:#111624; box-shadow:0 8px 30px rgba(0,0,0,.12); }.kairema-textarea::placeholder { color:#6d7789; }.kairema-textarea:focus { border-color:rgba(140,125,255,.75); outline:0; box-shadow:0 0 0 3px rgba(118,101,243,.14); }.kairema-send { width:44px; height:44px; flex:none; border-radius:12px; color:#fff; background:#7869ed; }.kairema-send:hover { background:#8a7dfa; }.kairema-dialog { border:1px solid rgba(255,255,255,.10)!important; color:#dce4f1!important; background:#121724!important; }.kairema-settings-provider { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 12px; border:1px solid rgba(255,255,255,.06); border-radius:11px; background:rgba(255,255,255,.025); }.kairema-setting-chip { padding:5px 8px; border:1px solid rgba(255,255,255,.09); border-radius:99px; color:#aeb7c8; background:rgba(255,255,255,.03); font-size:11px; }.kairema-backdrop { display:none; }@keyframes kairema-spin{to{transform:rotate(360deg)}}
+/* The app is a fixed-height shell: the chat column is height-bounded, so the message
+   list is the only scrollport and sticky chat controls resolve against it. Without a
+   definite height here the document scrolls instead and sticky degrades to the page. */
+.kairema-shell { height: 100vh; height: 100dvh; overflow: hidden; display: flex; background: radial-gradient(circle at 66% -10%, rgba(103,80,255,.16), transparent 32rem), #070912; }.kairema-sidebar { width: 300px; min-height: 0; height: 100%; overflow-y: auto; flex: 0 0 300px; display: flex; flex-direction: column; padding: 18px 14px 13px; border-right: 1px solid rgba(255,255,255,.07); background: rgba(12,15,25,.94); z-index: 20; }.kairema-brand-row { display: flex; align-items: center; gap: 10px; padding: 3px 7px 19px; color: white; font-size: 17px; font-weight: 700; letter-spacing: -.02em; }.kairema-logo,.kairema-orb { display: grid; place-items: center; color:#fff; background: linear-gradient(135deg,#8e7dff,#4c49d7); box-shadow: 0 7px 22px rgba(86,73,220,.38); }.kairema-logo { width:29px; height:29px; border-radius:12px; }.kairema-orb { width:60px; height:60px; border-radius:21px; }.kairema-new-chat { display:flex; align-items:center; justify-content:center; gap:8px; width:100%; padding:10px 12px; border:1px solid rgba(161,151,255,.42); border-radius:11px; color:#f5f3ff; background:linear-gradient(100deg,rgba(112,94,255,.25),rgba(83,75,185,.18)); font-size:13px; font-weight:600; transition:.18s ease; }.kairema-new-chat:hover { background:linear-gradient(100deg,rgba(124,105,255,.38),rgba(83,75,185,.29)); transform:translateY(-1px); }.kairema-sidebar-label,.kairema-history-head { display:flex; align-items:center; gap:7px; margin:23px 7px 10px; color:#80899c; font-size:11px; font-weight:700; letter-spacing:.11em; text-transform:uppercase; }.kairema-providers { display:flex; flex-direction:column; gap:4px; }.kairema-provider { display:flex; align-items:center; gap:9px; width:100%; padding:8px; border:1px solid transparent; border-radius:10px; color:#fff; background:transparent; transition:.16s ease; }.kairema-provider:hover { background:rgba(255,255,255,.045); }.kairema-provider-selected { border-color:rgba(143,128,255,.25); background:rgba(127,112,255,.14); }.kairema-provider-icon { display:grid; place-items:center; width:28px; height:28px; flex:none; border-radius:8px; color:#c7bfff; background:#1c2131; }.kairema-status { flex:none; padding:3px 6px; border-radius:99px; font-size:9px; font-weight:700; line-height:1; white-space:nowrap; }.status-ready{color:#6ee7ae;background:rgba(43,180,111,.14)}.status-quota{color:#f7c86b;background:rgba(250,180,57,.14)}.status-auth{color:#f99da6;background:rgba(245,96,111,.14)}.status-muted{color:#9ba5b6;background:rgba(148,163,184,.13)}.status-unavailable{color:#ffb377;background:rgba(255,141,70,.13)}.kairema-status-loading { width:13px; height:13px; border:2px solid #364056; border-top-color:#a096ff; border-radius:50%; animation:kairema-spin .75s linear infinite; }.kairema-history-head { justify-content:space-between; margin-top:21px; margin-bottom:8px; }.kairema-icon-btn { display:inline-grid; place-items:center; width:30px; height:30px; border:0; border-radius:8px; color:#9aa4b5; background:transparent; transition:.16s ease; }.kairema-icon-btn:hover { color:#fff; background:rgba(255,255,255,.07); }.kairema-search { display:flex; align-items:center; gap:7px; margin:0 2px 8px; padding:7px 9px; border:1px solid rgba(255,255,255,.07); border-radius:9px; color:#5d6677; background:rgba(255,255,255,.025); }.kairema-search input { width:100%; border:0; outline:0; color:#dbe2f0; background:transparent; font-size:12px; }.kairema-history-list { display:flex; flex-direction:column; gap:2px; min-height:50px; max-height:150px; overflow:auto; }.kairema-history-item { overflow:hidden; padding:8px 9px; border:0; border-radius:8px; color:#96a0b2; background:transparent; text-align:left; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }.kairema-history-item:hover,.kairema-history-active { color:#e9edfa; background:rgba(255,255,255,.05); }.kairema-sidebar-footer { display:grid; gap:2px; margin-top:auto; padding:12px 4px 0; border-top:1px solid rgba(255,255,255,.06); }.kairema-footer-link { display:flex; align-items:center; gap:8px; padding:8px 4px; border:0; color:#a5afbf; background:transparent; font-size:12px; text-align:left; }.kairema-footer-link:hover { color:#fff; }.kairema-sidebar-footer p { margin:4px 4px 0; color:#586174; font-size:10px; }.kairema-main { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; height:100%; overflow:hidden; }.kairema-topbar { display:flex; align-items:center; justify-content:flex-start; height:64px; padding:0 23px; border-bottom:1px solid rgba(255,255,255,.06); background:rgba(8,10,18,.50); backdrop-filter:blur(16px); }.kairema-select-wrap { position:relative; }.kairema-select-wrap select { appearance:none; padding:7px 31px 7px 11px; border:1px solid rgba(255,255,255,.09); border-radius:9px; outline:none; color:#dce4f4; background:#131725; font-size:12px; font-weight:600; }.kairema-select-wrap select:focus { border-color:#9386ff; }.kairema-chat { min-height:0; }.kairema-message { padding:11px 14px; border-radius:14px; }.kairema-message-user { color:#fff; background:linear-gradient(135deg,#7163eb,#5b52c9); box-shadow:0 8px 18px rgba(76,65,189,.18); }.kairema-message-ai { border:1px solid rgba(255,255,255,.06); color:#e9edf8; background:rgba(22,27,42,.74); }.kairema-message-error { border-color:rgba(250,108,121,.24); color:#ffd9dd; background:rgba(125,31,45,.22); }.kairema-typing { display:flex; align-items:center; gap:8px; padding:9px 12px; border:1px solid rgba(255,255,255,.06); border-radius:12px; color:#939cb0; background:#161b2a; font-size:12px; }.kairema-prompt { padding:9px 11px; border:1px solid rgba(255,255,255,.08); border-radius:10px; color:#aeb7c8; background:rgba(255,255,255,.025); font-size:12px; transition:.15s ease; }.kairema-prompt:hover { border-color:rgba(143,128,255,.45); color:#eeecff; background:rgba(126,108,249,.09); }.kairema-composer { display:flex; align-self:center; align-items:end; gap:9px; width:min(100%,896px); padding:14px 16px 8px; }.kairema-textarea { min-height:45px; max-height:132px; resize:none; padding:12px 46px 11px 14px; border:1px solid rgba(255,255,255,.10); border-radius:13px; color:#e7edfb; background:#111624; box-shadow:0 8px 30px rgba(0,0,0,.12); }.kairema-textarea::placeholder { color:#6d7789; }.kairema-textarea:focus { border-color:rgba(140,125,255,.75); outline:0; box-shadow:0 0 0 3px rgba(118,101,243,.14); }.kairema-send { width:44px; height:44px; flex:none; border-radius:12px; color:#fff; background:#7869ed; }.kairema-send:hover { background:#8a7dfa; }.kairema-dialog { border:1px solid rgba(255,255,255,.10)!important; color:#dce4f1!important; background:#121724!important; }.kairema-settings-provider { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 12px; border:1px solid rgba(255,255,255,.06); border-radius:11px; background:rgba(255,255,255,.025); }.kairema-setting-chip { padding:5px 8px; border:1px solid rgba(255,255,255,.09); border-radius:99px; color:#aeb7c8; background:rgba(255,255,255,.03); font-size:11px; }.kairema-backdrop { display:none; }@keyframes kairema-spin{to{transform:rotate(360deg)}}
 @media(max-width:767px){.kairema-sidebar{position:fixed;top:0;bottom:0;left:0;transform:translateX(-105%);transition:transform .22s cubic-bezier(.23,1,.32,1);box-shadow:24px 0 60px rgba(0,0,0,.45)}.kairema-sidebar-open{transform:translateX(0)}.kairema-backdrop{display:block;position:fixed;inset:0;z-index:10;border:0;background:rgba(0,0,0,.56)}.kairema-topbar{padding:0 12px}.kairema-composer{padding:11px 12px 7px}.kairema-message{padding:10px 11px}}
 
 /* v6-MEM: filterable, bounded personal-memory lists remain compact and touch-safe. */
@@ -242,18 +259,27 @@ body { margin: 0; min-width: 320px; background: #070912; color: #e8edf8; }
 .kairema-topbar-left { display:flex; align-items:center; gap:8px; min-width:0; flex:1 1 190px; }
 .kairema-topbar-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
 .kairema-topbar-controls { display:flex; align-items:center; justify-content:flex-end; flex:0 1 auto; flex-wrap:wrap; gap:6px; }
-.kairema-topbar-controls > .kairema-icon-btn, .kairema-health-widget, .kairema-role-menu-trigger { min-width:44px; min-height:44px; }
-.kairema-health-widget { display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:0 10px; border:1px solid rgba(255,255,255,.1); border-radius:10px; color:#c7cfdf; background:rgba(255,255,255,.025); font-size:11px; font-weight:700; }
-.kairema-health-dot { width:8px; height:8px; border-radius:50%; background:#6ee7ae; box-shadow:0 0 0 3px rgba(110,231,174,.13); }.kairema-health-dot-limited { background:#f7c86b; box-shadow:0 0 0 3px rgba(247,200,107,.13); }
+.kairema-topbar-controls > .kairema-icon-btn, .kairema-role-menu-trigger { min-width:44px; min-height:44px; }
 .kairema-model-limits { display:grid; gap:8px; margin-top:24px; }.kairema-model-limits h3 { margin:0 0 2px; font-size:12px; color:#dfe6f4; }
 .kairema-limit-card { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 11px; border:1px solid rgba(255,255,255,.08); border-radius:11px; background:rgba(255,255,255,.025); }.kairema-limit-card div { display:grid; gap:2px; min-width:0; }.kairema-limit-card b { color:#f0f4ff; font-size:12px; }.kairema-limit-card small { color:#909bb0; font-size:10px; line-height:1.35; }
-@media(max-width:767px){.kairema-topbar{align-items:flex-start;padding:9px 10px}.kairema-topbar-left{min-height:44px;flex-basis:100%}.kairema-topbar-controls{width:100%;justify-content:flex-start}.kairema-select-wrap{flex:1 1 124px;min-width:124px}.kairema-select-wrap select{width:100%;min-height:44px}.kairema-health-widget{padding-inline:8px}.kairema-health-widget-count{font-size:10px}.kairema-role-menu{max-width:calc(100vw - 20px)}.kairema-limit-card{align-items:flex-start}.kairema-limit-card .kairema-status{margin-top:2px}}
+@media(max-width:767px){.kairema-topbar{align-items:flex-start;padding:9px 10px}.kairema-topbar-left{min-height:44px}.kairema-topbar-controls{justify-content:flex-start}.kairema-select-wrap{flex:0 1 auto;min-width:0}.kairema-select-wrap select{width:100%;min-height:44px}.kairema-role-menu{max-width:calc(100vw - 20px)}.kairema-limit-card{align-items:flex-start}.kairema-limit-card .kairema-status{margin-top:2px}}
 
 /* Model cards preserve the entire required Russian model name; status sits below the role. */
-.kairema-sidebar { width: 320px; flex-basis: 320px; overflow-y: auto; }
-.kairema-sidebar > * { transition: opacity 140ms ease; }
-@media (min-width:768px){.kairema-sidebar{overflow-x:hidden;transition:width 220ms cubic-bezier(.23,1,.32,1),flex-basis 220ms cubic-bezier(.23,1,.32,1),padding 220ms cubic-bezier(.23,1,.32,1),border-color 160ms ease}.kairema-sidebar-collapsed{width:0;flex-basis:0;padding-left:0;padding-right:0;border-right-color:transparent;pointer-events:none}.kairema-sidebar-collapsed>*{opacity:0;visibility:hidden}}
+/* The sidebar is its own scroll container: a fixed viewport height plus `align-self` so the
+   flex parent cannot stretch it to the full page, which is what pushed the footer links
+   (memory, exports, settings) out of reach. On mobile it is `position: fixed` and the same
+   height cap turns it into a bounded, touch-scrollable panel. */
+.kairema-sidebar { width: 320px; flex-basis: 320px; height: 100vh; height: 100dvh; max-height: 100vh; max-height: 100dvh; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.kairema-sidebar > * { transition: opacity 140ms ease; min-height: 0; flex: none; }
+@media (min-width:768px){.kairema-sidebar{align-self:flex-start;position:sticky;top:0;transition:width 220ms cubic-bezier(.23,1,.32,1),flex-basis 220ms cubic-bezier(.23,1,.32,1),padding 220ms cubic-bezier(.23,1,.32,1),border-color 160ms ease}.kairema-sidebar-collapsed{width:0;flex-basis:0;padding-left:0;padding-right:0;border-right-color:transparent;pointer-events:none}.kairema-sidebar-collapsed>*{opacity:0;visibility:hidden}}
 @media (prefers-reduced-motion:reduce){.kairema-sidebar,.kairema-sidebar>*{transition-duration:0ms}}
+/* On mobile the panel is `position: fixed`, so `height` wins over the `bottom: 0` declared by
+   the max-width:767px block and the box is sized from the top edge only. `100dvh` tracks the
+   *layout* viewport, which on Android Chrome is taller than the visible area once the browser
+   and system bars are accounted for, so the footer tail (settings) fell below the screen and
+   scrolling could never surface it. `100svh` is the smallest viewport height and therefore
+   never exceeds the visible area. Must stay after the base rule above to win the cascade. */
+@media(max-width:767px){.kairema-sidebar{height:100svh;max-height:100svh;padding-bottom:calc(13px + env(safe-area-inset-bottom, 0px))}}
 .kairema-provider { align-items: flex-start; }
 .kairema-provider-icon { margin-top: 1px; }
 .kairema-provider-copy { display: block; min-width: 0; flex: 1; text-align: left; }
@@ -265,45 +291,205 @@ body { margin: 0; min-width: 320px; background: #070912; color: #e8edf8; }
 .status-ready { box-shadow: inset 0 0 0 1px rgba(110,231,174,.16); }
 .status-quota { box-shadow: inset 0 0 0 1px rgba(247,200,107,.18); }
 .status-auth,.status-unavailable { box-shadow: inset 0 0 0 1px rgba(249,157,166,.14); }
-.kairema-chat-tools { display:flex; align-items:center; justify-content:space-between; gap:10px; width:min(100%,896px); align-self:center; padding:10px 18px 3px; color:#778298; font-size:11px; font-weight:600; letter-spacing:.03em; }
-.kairema-table-scroll { max-width:100%; margin:12px 0; overflow-x:auto; border:1px solid rgba(255,255,255,.10); border-radius:10px; background:rgba(7,9,18,.48); }
-.kairema-table-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:max-content; padding:7px 9px; border-bottom:1px solid rgba(255,255,255,.08); color:#98a4b8; background:rgba(255,255,255,.025); font-size:11px; }
+.kairema-chat-tools { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; align-self:stretch; padding:7px 12px 2px; color:#778298; font-size:11px; font-weight:600; letter-spacing:.03em; }
+.kairema-chat-tools-label { display:inline-flex; min-width:0; align-items:center; gap:6px; }
+.kairema-chat-sticky > .kairema-chat-tools-toggle { margin:6px 0 0 12px; }
+.kairema-chat-tools-toggle { width:22px; height:22px; padding:0; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; border:1px solid var(--k-line); background:var(--k-panel-2); color:var(--k-text); border-radius:6px; cursor:pointer; }
+.kairema-chat-tools-toggle:hover { background:var(--k-panel); }
+.kairema-chat-tools-label > svg { flex:0 0 auto; }
+/* GFM tables inside an AI answer.
+
+   The scroll container is the containment strategy and is load-bearing: a table wider than the
+   bubble scrolls inside this box rather than widening the message, the chat column or the page.
+   `width:max-content` on the table lets narrow tables stay narrow while wide ones overflow into
+   the scroller, which is why both are needed. Nothing here sets `text-align` on a cell, so the
+   per-column alignment GFM emits as an inline style (`|---:|`, `|:---:|`) survives untouched.
+
+   Every colour is a --k-* token. These rules used to hardcode dark literals (#171c2c, #eef2ff,
+   rgba(7,9,18,.48)), which made every table render as a dark slab inside a light-theme bubble. */
+.kairema-table-scroll { max-width:100%; margin:14px 0; overflow-x:auto; border:1px solid var(--k-line); border-radius:10px; background:var(--k-panel); }
+.kairema-table-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:max-content; padding:7px 9px; border-bottom:1px solid var(--k-line); color:var(--k-muted); background:var(--k-panel-2); font-size:11px; }
 .kairema-table-toolbar-label { font-weight:600; }
 .kairema-table-sort-actions { display:flex; gap:5px; }
-.kairema-table-sort { min-height:28px; padding:4px 7px; border:1px solid rgba(255,255,255,.12); border-radius:7px; color:#cbd5e8; background:rgba(255,255,255,.03); font-size:10px; font-weight:650; transition:background .16s ease,border-color .16s ease,color .16s ease; }
-.kairema-table-sort:hover,.kairema-table-sort[aria-pressed="true"] { border-color:rgba(151,134,255,.62); color:#f3f0ff; background:rgba(122,105,237,.20); }
+.kairema-table-sort { min-height:28px; padding:4px 7px; border:1px solid var(--k-line); border-radius:7px; color:var(--k-text); background:var(--k-panel); font-size:10px; font-weight:650; transition:background .16s ease,border-color .16s ease,color .16s ease; }
+.kairema-table-sort:hover,.kairema-table-sort[aria-pressed="true"] { border-color:var(--k-text); color:var(--k-invert); background:var(--k-strong); }
 .kairema-table-scroll table { width:max-content; min-width:100%; border-collapse:separate; border-spacing:0; }
-.kairema-table-scroll th,.kairema-table-scroll td { padding:9px 11px; border-right:1px solid rgba(255,255,255,.06); border-bottom:1px solid rgba(255,255,255,.06); text-align:left; vertical-align:top; white-space:normal; }
+.kairema-table-scroll th,.kairema-table-scroll td { padding:9px 11px; border-right:1px solid var(--k-line); border-bottom:1px solid var(--k-line); vertical-align:top; white-space:normal; overflow-wrap:anywhere; }
 .kairema-table-scroll th:last-child,.kairema-table-scroll td:last-child { border-right:0; }
 .kairema-table-scroll tbody tr:last-child td { border-bottom:0; }
-.kairema-table-scroll thead th { position:sticky; top:0; z-index:1; color:#eef2ff; background:#171c2c; box-shadow:0 1px 0 rgba(255,255,255,.10); }
+.kairema-table-scroll thead th { position:sticky; top:0; z-index:1; font-weight:650; color:var(--k-text); background:var(--k-panel-2); box-shadow:0 1px 0 var(--k-line); }
+
+/* ---- Markdown body: the `.kairema-gfm` scope --------------------------------------------
+
+   Streamdown renders GitHub-flavoured markdown into this container, but it ships its styling as
+   Tailwind *utility class names* (`text-3xl`, `whitespace-nowrap`, `bg-muted/80`) rather than as
+   a stylesheet, and it exports no CSS of its own. Tailwind v4 only generates utilities for classes
+   it finds in scanned source, and this project has no `@source` pointing at node_modules — so none
+   of those utilities exist in the build and the markdown arrived completely unstyled. That is why
+   the whole visual layer is defined here rather than tweaked.
+
+   Selectors are scoped to `.kairema-gfm` and written as a plain class + element (specificity
+   0,1,1) rather than wrapped in `:where()`. `:where()` is zero-specificity, and Tailwind's
+   preflight — which IS in the build — resets `h1..h6` to `font-size:inherit;font-weight:inherit`
+   at 0,0,1. A `:where(h1)` rule would lose that comparison and every heading would render as body
+   text. One class of specificity is the minimum that actually wins, and it still cannot leak into
+   the rest of the app.
+
+   Where GFM expresses a cell's alignment the renderer puts an inline `style="text-align:..."` on
+   the cell. Nothing below sets `text-align`, so those alignments are preserved rather than
+   flattened to a single column. */
+.kairema-gfm { color:var(--k-bubble-ai-text); font-size:1rem; line-height:1.65; }
+
+/* Vertical rhythm. Streamdown asks for a `space-y-4` utility that is never generated, so the
+   spacing between sibling blocks has to be stated here or the answer renders as one dense wall. */
+.kairema-gfm > * { margin:0 0 .9em; }
+.kairema-gfm > *:last-child { margin-bottom:0; }
+
+/* Headings. Four distinct sizes on a moderate scale: an H1 is a section opener, not a poster, so
+   it stays under 1.6rem rather than the text-3xl (1.875rem) that the ungenerated utility asked
+   for. The scale is deliberately spaced in 0.15rem steps down to H4, which the old rules omitted
+   entirely — without a rule, h4 fell through to the browser default and could render larger than
+   h3. Weight is set on every level because preflight strips it. */
+.kairema-gfm h1,.kairema-gfm h2,.kairema-gfm h3,.kairema-gfm h4 { font-weight:700; line-height:1.3; letter-spacing:-.011em; margin:1.6em 0 .55em; }
+.kairema-gfm > :is(h1,h2,h3,h4):first-child { margin-top:0; }
+.kairema-gfm h1 { font-size:1.5rem; }
+.kairema-gfm h2 { font-size:1.3rem; }
+.kairema-gfm h3 { font-size:1.15rem; }
+.kairema-gfm h4 { font-size:1.02rem; color:var(--k-muted); }
+
+/* A GFM heading may wrap out a short document, so it is allowed to break rather than overflow. */
+.kairema-gfm :is(h1,h2,h3,h4,p,li,th,td) { overflow-wrap:anywhere; }
+
+/* Lists. Nesting depth is kept shallow by design: each level pulls in a little and switches marker
+   so a deeply nested answer stays readable instead of walking off the left edge. */
+.kairema-gfm :is(ul,ol) { margin:0 0 .9em; padding-left:1.4em; }
+.kairema-gfm ul { list-style:disc; }
+.kairema-gfm ol { list-style:decimal; }
+.kairema-gfm :is(ul,ol) :is(ul,ol) { margin:.35em 0 .35em; }
+.kairema-gfm ul :is(ul,ol) { list-style:circle; }
+.kairema-gfm li { margin:.22em 0; }
+.kairema-gfm li > :is(ul,ol) { margin-top:.22em; }
+.kairema-gfm li::marker { color:var(--k-muted); }
+
+/* Task lists. Streamdown marks the item with a `task-list-item` class and drops a real, disabled
+   checkbox inside it. The native marker has to be suppressed or it renders next to the box, and
+   the box is absolutely positioned back into the gutter the marker vacated. `accent-color` is
+   driven by a token so the check stays legible against both themes. */
+.kairema-gfm li.task-list-item,.kairema-gfm li:has(> input[type="checkbox"]) { list-style:none; position:relative; padding-left:1.35em; }
+.kairema-gfm li > input[type="checkbox"] { position:absolute; left:0; top:.45em; width:1em; height:1em; margin:0; accent-color:var(--k-strong); opacity:1; }
+
+/* Blockquotes read as quoted material because they are inset and dimmed, not because they are
+   italic throughout — italics plus muted colour on a long quote is hard to read. */
+.kairema-gfm blockquote { margin:0 0 .9em; padding:.1em 0 .1em 1em; border-left:3px solid var(--k-line); color:var(--k-muted); }
+.kairema-gfm blockquote > :last-child { margin-bottom:0; }
+
+/* Inline code. The chip needs a real background and a monospace face to separate from the
+   paragraph; on its own the monospace was the only cue, which vanished against a plain bubble. */
+.kairema-gfm :not(pre) > code { padding:.15em .38em; border:1px solid var(--k-line); border-radius:5px; background:var(--k-panel-2); color:var(--k-text); font-family:var(--k-font-mono); font-size:.87em; word-break:break-word; }
+
+/* Fenced code. The container and its language header are framed and rounded as one unit; the
+   header carries the language name that the markdown fence supplied. */
+.kairema-gfm [data-code-block-container="true"] { margin:0 0 .9em; border:1px solid var(--k-line); border-radius:10px; background:var(--k-panel); overflow:hidden; }
+.kairema-gfm [data-code-block-header="true"] { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:7px 11px; border-bottom:1px solid var(--k-line); background:var(--k-panel-2); color:var(--k-muted); font-family:var(--k-font-mono); font-size:11px; letter-spacing:.04em; text-transform:lowercase; }
+.kairema-gfm [data-code-block="true"] { margin:0; padding:12px 13px; overflow-x:auto; background:var(--k-panel); }
+.kairema-gfm [data-code-block="true"] pre { margin:0; font-family:var(--k-font-mono); font-size:.85rem; line-height:1.6; }
+.kairema-gfm [data-code-block="true"] code { font-family:inherit; font-size:inherit; white-space:pre; background:none; border:0; padding:0; color:inherit; }
+
+/* Streamdown emits two parallel code bodies — one for each Shiki theme — and relies on the
+   `dark:hidden` / `hidden dark:block` utilities to pick between them. Those utilities are not
+   generated either, so both bodies would paint at once. The theme is chosen here instead, by
+   index: Streamdown always renders light first and dark second. */
+.kairema-gfm [data-code-block="true"]:nth-of-type(1) { display:block; }
+.kairema-gfm [data-code-block="true"]:nth-of-type(2) { display:none; }
+.dark .kairema-gfm [data-code-block="true"]:nth-of-type(1) { display:none; }
+.dark .kairema-gfm [data-code-block="true"]:nth-of-type(2) { display:block; }
+
+/* Inline emphasis. `strong` arrives as a <span> carrying the `strong` marker, not as a <strong>
+   element, so both forms are matched. `em` and `del` are real elements. */
+.kairema-gfm strong,.kairema-gfm [data-streamdown="strong"] { font-weight:700; }
+.kairema-gfm em { font-style:italic; }
+.kairema-gfm del { color:var(--k-muted); text-decoration-thickness:1px; }
+
+/* Links. Underline is kept — an AI answer that cites sources is exactly the case where the
+   destination needs to be visible — and colour comes from the theme rather than a hardcoded hue. */
+.kairema-gfm a { color:var(--k-text); font-weight:600; text-decoration:underline; text-underline-offset:2px; }
+.kairema-gfm a:hover { background:var(--k-panel-2); text-decoration-thickness:2px; }
+
+/* A rule between sections is decorative; it stays on the token line colour so it recedes. */
+.kairema-gfm hr { margin:1.4em 0; border:0; border-top:1px solid var(--k-line); }
+.kairema-gfm img { max-width:100%; height:auto; border-radius:8px; }
+
+/* Table rows get a hover tint so a long table can be read across without losing the row. The
+   sticky header sits above the body, so the tint is applied to the cell and the header keeps its
+   own background at the same z-index. */
+.kairema-gfm .kairema-table-scroll tbody tr:hover td { background:var(--k-panel-2); }
 @media(max-width:640px){.kairema-table-toolbar{align-items:flex-start;flex-direction:column}.kairema-table-sort-actions{width:100%;overflow-x:auto}.kairema-table-scroll th,.kairema-table-scroll td{min-width:126px;padding:8px 10px}.kairema-table-sort{white-space:nowrap}}
-.kairema-topbar { min-height:64px; height:auto; align-items:center; gap:8px 12px; flex-wrap:wrap; padding-top:8px; padding-bottom:8px; }
-.kairema-topbar-left,.kairema-topbar-controls { display:flex; min-width:0; align-items:center; gap:8px; }
-.kairema-topbar-left { flex:1 1 180px; }
-.kairema-topbar-controls { flex:0 1 auto; flex-wrap:wrap; justify-content:flex-end; }
-.kairema-topbar .kairema-icon-btn,.kairema-health-widget,.kairema-role-menu-trigger { min-width:44px; min-height:44px; }
+
+/* Narrow-screen markdown. This is containment, not a redesign: the bubble is already full-width
+   here, and `overflow-wrap:anywhere` on text plus the table scroller are what stop a long word or
+   a wide table from pushing the page sideways around 430px. Headings step down one notch because
+   an H1 that reads as a comfortable opener on desktop becomes a two-line banner in a narrow
+   column. The page is deliberately never given `overflow-x:hidden` — that hides the symptom and
+   would also clip the table scroller that is supposed to receive the overflow. */
+@media(max-width:640px){
+  .kairema-gfm { font-size:.95rem; }
+  .kairema-gfm h1 { font-size:1.3rem; }
+  .kairema-gfm h2 { font-size:1.18rem; }
+  .kairema-gfm h3 { font-size:1.06rem; }
+  .kairema-gfm h4 { font-size:.98rem; }
+  .kairema-gfm :is(h1,h2,h3,h4) { margin:1.3em 0 .5em; }
+  .kairema-gfm blockquote { padding-left:.8em; }
+  .kairema-gfm [data-code-block="true"] { padding:10px 11px; }
+  .kairema-gfm [data-code-block="true"] pre { font-size:.8rem; }
+  .kairema-gfm [data-code-block-header="true"] { padding:6px 11px; }
+}
+.kairema-topbar { min-height:0; height:auto; align-items:center; gap:5px 9px; flex-wrap:wrap; padding-top:3px; padding-bottom:3px; }
+.kairema-topbar-left,.kairema-topbar-controls { display:flex; min-width:0; align-items:center; gap:5px; }
+.kairema-topbar-left { flex:0 0 auto; flex-wrap:wrap; }
+.kairema-topbar-controls { flex:0 1 auto; flex-wrap:wrap; justify-content:flex-end; margin-left:auto; }
+.kairema-topbar .kairema-icon-btn,.kairema-role-menu-trigger { min-width:44px; min-height:44px; }
 .kairema-guest-login { display:inline-flex; min-height:44px; align-items:center; justify-content:center; gap:7px; padding:8px 12px; border:1px solid rgba(148,131,255,.62); border-radius:10px; color:#f3f0ff; background:rgba(122,104,242,.20); font-size:12px; font-weight:750; line-height:1.1; white-space:nowrap; transition:transform .16s cubic-bezier(.23,1,.32,1),border-color .16s ease,background .16s ease; }
 .kairema-guest-login:hover,.kairema-guest-login:focus-visible { border-color:#b9adff; background:rgba(122,104,242,.34); outline:none; }.kairema-guest-login:focus-visible { box-shadow:0 0 0 3px rgba(148,131,255,.28); }.kairema-guest-login:active { transform:scale(.97); }
 .kairema-guest-login-empty { margin-top:24px; padding-inline:16px; font-size:14px; }
 .kairema-topbar-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.kairema-role-menu-trigger { display:inline-flex; align-items:center; max-width:184px; padding:8px 12px; border:1px solid var(--k-line); border-radius:10px; color:var(--k-text); background:var(--k-panel); font-size:12px; font-weight:700; line-height:1.15; text-align:left; }
-.kairema-role-menu { position:absolute; z-index:60; right:0; top:calc(100% + 8px); display:grid; width:min(360px,calc(100vw - 24px)); gap:6px; padding:7px; border:1px solid var(--k-line); border-radius:13px; background:var(--k-panel); box-shadow:0 18px 44px rgba(0,0,0,.34); }
+/* Model name: plain compact topbar label. No pill, no border, no fill. The click
+   target and text truncation stay so the existing 4-item menu still opens. */
+.kairema-role-menu-trigger { display:inline-flex; align-items:center; max-width:190px; padding:0 2px; border:0; border-radius:0; color:var(--k-text); background:transparent; font-size:13px; font-weight:700; line-height:1.2; text-align:left; }
+/* Settings and Profile are two independent chips, sized like other small topbar
+   items (26px) so they stay well under the 44px model label and never grow the row.
+   The gap between them comes from .kairema-topbar-controls. */
+.kairema-topbar-chip { display:inline-flex; align-items:center; flex:0 0 auto; min-width:0; border:1px solid var(--k-line); background:var(--k-panel-2); border-radius:6px; overflow:hidden; }
+.kairema-topbar-chip > button { height:26px; padding:0 7px; display:inline-flex; align-items:center; justify-content:center; gap:4px; border:0; background:transparent; border-radius:6px; color:var(--k-text); font-size:11px; font-weight:600; line-height:1; white-space:nowrap; }
+.kairema-topbar-chip > button:hover { background:var(--k-panel); }
+/* Single sticky header for both control rows. It lives inside the message scrollport
+   (see .kairema-chat-scroll) so it pins against that scroller, not the document.
+   The toggle sits outside .kairema-chat-controls so it survives the collapsed state. */
+.kairema-chat-scroll { min-height:0; flex:1 1 auto; overflow-y:auto; overscroll-behavior:contain; }
+.kairema-chat-sticky { position:sticky; top:0; z-index:6; display:flex; align-items:flex-start; gap:6px; background:var(--k-panel); border-bottom:1px solid var(--k-line); }
+.kairema-chat-controls { flex:1 1 auto; min-width:0; }
+.kairema-mode-bar { display:flex; justify-content:flex-start; padding:3px 12px; }
+.kairema-mode-switch { display:flex; gap:4px; min-width:0; padding:2px; border:1px solid var(--k-line); border-radius:8px; background:var(--k-panel-2); }
+.kairema-mode-option { display:inline-flex; flex:0 0 auto; min-width:0; min-height:22px; align-items:center; justify-content:center; gap:4px; padding:0 8px; border:1px solid transparent; border-radius:6px; color:var(--k-muted); background:transparent; font-size:11px; font-weight:700; line-height:1.15; white-space:nowrap; transition:transform .16s cubic-bezier(.23,1,.32,1),border-color .16s ease,background .16s ease,color .16s ease; }
+.kairema-mode-option > svg { flex:0 0 auto; }
+.kairema-mode-option > span { overflow:hidden; text-overflow:ellipsis; }
+.kairema-mode-option:hover { color:var(--k-text); }
+.kairema-mode-option[aria-pressed="true"] { border-color:rgba(148,131,255,.85); color:#fff; background:rgba(122,104,242,.42); box-shadow:inset 0 1px 0 rgba(255,255,255,.10); }
+.kairema-mode-option:focus-visible { border-color:var(--k-text); outline:2px solid transparent; box-shadow:0 0 0 3px rgba(148,131,255,.28); }
+.kairema-mode-option:active { transform:scale(.97); }
+.kairema-role-menu { position:fixed; z-index:60; display:grid; width:min(360px,calc(100vw - 24px)); max-height:calc(100dvh - 16px); overflow-y:auto; overscroll-behavior:contain; gap:6px; padding:7px; border:1px solid var(--k-line); border-radius:13px; background:var(--k-panel); box-shadow:0 18px 44px rgba(0,0,0,.34); }
 .kairema-role-menu[hidden] { display:none; }
 .kairema-role-menu-item { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; min-height:62px; padding:10px 11px; border:1px solid transparent; border-radius:9px; color:var(--k-text); background:transparent; text-align:left; }
 .kairema-role-menu-item:hover,.kairema-role-menu-item:focus-visible,.kairema-role-menu-item-active { border-color:var(--k-line); background:var(--k-panel-2); outline:none; }
 .kairema-role-menu-copy { display:grid; min-width:0; gap:3px; }
 .kairema-role-menu-copy strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
 .kairema-role-menu-copy small { display:-webkit-box; overflow:hidden; color:var(--k-muted); font-size:10px; line-height:1.25; -webkit-box-orient:vertical; -webkit-line-clamp:1; }
-.kairema-health-widget { display:inline-flex; align-items:center; justify-content:center; gap:7px; padding:7px 10px; border:1px solid var(--k-line); border-radius:10px; color:var(--k-text); background:var(--k-panel); font-size:12px; font-weight:700; }
-.kairema-health-dot { width:8px; height:8px; border-radius:99px; background:#53b982; }.kairema-health-dot-limited { background:#eaa958; }
-@media(max-width:767px){.kairema-topbar{align-content:center;padding:8px 10px}.kairema-topbar-left{flex:1 1 100%;order:2}.kairema-topbar-controls{order:1;margin-left:auto}.kairema-topbar-title{font-size:12px}.kairema-role-menu-trigger{max-width:128px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.kairema-health-widget{width:44px;padding:7px}.kairema-health-widget-count{font-size:11px}.kairema-role-menu{right:auto;left:0;top:calc(100% + 8px)}}
-@media(max-width:430px){.kairema-topbar-controls{gap:4px}.kairema-topbar .kairema-icon-btn{width:44px}.kairema-guest-login{padding-inline:9px;font-size:11px}.kairema-guest-login-empty{padding-inline:16px;font-size:13px}.kairema-role-menu-trigger{max-width:98px;padding-inline:8px}.kairema-topbar-left{flex-basis:100%}}
+@media(max-width:767px){.kairema-topbar{align-content:center;padding:5px 10px}.kairema-topbar-controls{order:1}.kairema-topbar-title{font-size:12px}.kairema-role-menu-trigger{max-width:168px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.kairema-mode-bar{padding:3px 10px}.kairema-chat-controls[data-controls-open="false"] .kairema-mode-bar{padding:0}.kairema-mode-option{padding:0 7px;font-size:11px}.kairema-chat-tools{padding:4px 12px 2px}.kairema-role-menu{max-height:calc(100dvh - 16px)}}
+@media(max-width:430px){.kairema-topbar-controls{gap:4px}.kairema-topbar .kairema-icon-btn{width:44px}.kairema-guest-login{padding-inline:9px;font-size:11px}.kairema-guest-login-empty{padding-inline:16px;font-size:13px}.kairema-role-menu-trigger{max-width:146px;padding:0 2px;font-size:12px}}
 .kairema-export-actions { display:flex; gap:6px; }
 .kairema-export-button { display:inline-flex; align-items:center; gap:5px; padding:5px 8px; border:1px solid rgba(255,255,255,.10); border-radius:8px; color:#cfd7e7; background:rgba(255,255,255,.025); font-size:11px; font-weight:600; transition:transform .16s cubic-bezier(.23,1,.32,1),background .16s ease,border-color .16s ease; }
 .kairema-export-button:hover:not(:disabled) { border-color:rgba(148,131,255,.55); color:#fff; background:rgba(122,104,242,.15); }
 .kairema-export-button:active:not(:disabled) { transform:scale(.97); }.kairema-export-button:disabled { cursor:not-allowed; opacity:.46; }
-.kairema-export-error { width:min(100%,896px); align-self:center; margin:0; padding:0 18px 4px; color:#f9a2ac; font-size:11px; }
+.kairema-export-error { width:100%; align-self:stretch; margin:0; padding:0 12px 4px; color:#f9a2ac; font-size:11px; }
 .kairema-message-actions { display:flex; gap:5px; padding:6px 2px 0; }
 .kairema-message-action,.kairema-export-history-actions button { display:inline-flex; align-items:center; gap:4px; padding:5px 7px; border:1px solid rgba(255,255,255,.10); border-radius:7px; color:#9da9bd; background:rgba(255,255,255,.025); font-size:10px; transition:.16s ease; }
 .kairema-message-action:hover:not(:disabled),.kairema-export-history-actions button:hover { border-color:rgba(113,231,211,.45); color:#d8fffa; background:rgba(49,184,162,.12); }.kairema-message-action:disabled { opacity:.45; cursor:not-allowed; }
@@ -313,9 +499,49 @@ body { margin: 0; min-width: 320px; background: #070912; color: #e8edf8; }
 .kairema-cancel { width:44px; height:44px; flex:none; border-radius:12px; color:#ffc0c8!important; background:rgba(234,66,93,.18)!important; }.kairema-cancel:hover { background:rgba(234,66,93,.28)!important; }
 .kairema-export-history { display:flex; flex-direction:column; gap:2px; max-height:172px; overflow:auto; padding:0 2px 6px; }.kairema-export-history-item { display:flex; align-items:center; justify-content:space-between; gap:6px; padding:7px 7px; border-radius:8px; }.kairema-export-history-item:hover { background:rgba(255,255,255,.045); }.kairema-export-history-item>div:first-child { display:grid; min-width:0; gap:2px; }.kairema-export-history-name { overflow:hidden; color:#cfd7e7; font-size:11px; text-overflow:ellipsis; white-space:nowrap; }.kairema-export-history-item span:last-child { color:#657087; font-size:9px; }.kairema-export-history-actions { display:flex; gap:3px; flex:none; }.kairema-export-history-actions button { padding:5px; }
 
+/* Verified sources: the small chip at the end of the answer opens one bottom sheet that holds every
+   source as a card. The list does not live in the chat, so a long list can never stretch or crowd the
+   message column. These rules own the block outright: no legacy `.kairema-sources *` rules may follow
+   them, or they would override the layout and the clamps. */
+.kairema-sources-chip { display:inline-flex; align-items:center; gap:6px; margin-top:10px; padding:6px 10px; border:1px solid var(--k-line); border-radius:999px; color:var(--k-muted); background:var(--k-panel-2); font-size:13px; font-weight:600; transition:background .16s ease,border-color .16s ease,color .16s ease; }
+.kairema-sources-chip:hover { border-color:var(--k-text); color:var(--k-text); background:var(--k-panel); }
+/* The sheet: edge to edge, bottom-anchored, rounded only at the top, safe-area aware. */
+.kairema-sources-sheet-overlay { background:rgb(0 0 0 / .58); }
+.kairema-sources-sheet { position:fixed; inset:auto 0 0 0; z-index:50; display:flex; flex-direction:column; gap:0; height:63dvh; max-height:63dvh; padding-bottom:calc(14px + env(safe-area-inset-bottom, 0px)); border:0; border-radius:22px 22px 0 0; color:var(--k-text); background:var(--k-panel); box-shadow:0 -18px 48px rgb(0 0 0 / .34); }
+.kairema-sources-sheet [data-vaul-handle] { width:38px; margin-top:10px; opacity:.45; background:var(--k-muted); }
+.kairema-sources-sheet-title { display:flex; align-items:center; gap:9px; margin:0; padding:10px 18px 0; color:var(--k-text); font-size:19px; font-weight:800; line-height:1.2; }
+.kairema-sources-sheet-close { display:grid; place-items:center; width:40px; height:40px; min-width:0; margin-left:auto; padding:0; border:0; border-radius:999px; color:var(--k-muted); background:transparent; }
+.kairema-sources-sheet-close:hover { color:var(--k-text); background:var(--k-panel-2); }
+.kairema-sources-sheet-subtitle { margin:0; padding:5px 18px 12px; color:var(--k-muted); font-size:13.5px; line-height:1.35; opacity:.62; }
+/* Only the list scrolls, so the sheet keeps its height once it is fully open. */
+.kairema-sources-sheet .kairema-source-list { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
+.kairema-source-list { display:grid; gap:10px; min-width:0; margin:0; padding:0 18px 4px; list-style:none; }
+.kairema-source-item { display:grid; min-width:0; }
+/* One card, one link: a tap anywhere on it opens the source, and nothing overlaps it. */
+.kairema-source-card { box-sizing:border-box; display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:start; gap:12px; width:100%; max-width:100%; min-width:0; padding:12px 13px; border:1px solid var(--k-line); border-radius:15px; color:var(--k-text); background:var(--k-panel-2); text-decoration:none; transition:background .16s ease,border-color .16s ease; }
+.kairema-source-card:hover { background:var(--k-panel); }
+.kairema-source-card:focus-visible { outline:2px solid var(--k-text); outline-offset:2px; }
+.kairema-source-icon { position:relative; display:grid; place-items:center; width:40px; height:40px; min-width:0; border:1px solid var(--k-line); border-radius:11px; color:var(--k-text); background:var(--k-panel); overflow:hidden; }
+.kairema-source-initial { font-size:16px; font-weight:800; line-height:1; }
+.kairema-source-favicon { position:absolute; inset:0; width:100%; height:100%; padding:7px; object-fit:contain; }
+.kairema-source-copy { display:grid; min-width:0; gap:3px; }
+.kairema-source-title { display:-webkit-box; overflow:hidden; min-width:0; color:var(--k-text); font-size:15.5px; font-weight:700; line-height:1.3; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+/* Host and date sit on their own wrapped line, so a card may grow instead of cutting the facts. */
+.kairema-source-meta-line { overflow-wrap:anywhere; min-width:0; color:var(--k-muted); font-size:13.5px; line-height:1.35; opacity:.7; }
+/* One line, cut with an ellipsis, so a long link can never widen the card. */
+.kairema-source-url { overflow:hidden; min-width:0; max-width:100%; color:var(--k-muted); font-size:12.5px; line-height:1.35; opacity:.5; text-overflow:ellipsis; white-space:nowrap; }
+/* The external-link square lines up with the title line, not the centre of a tall card. */
+.kairema-source-open { display:grid; place-items:center; width:20px; height:20px; min-width:0; margin-top:1px; color:var(--k-muted); opacity:.6; }
+
 /* Kairema v5 — monochrome product system. Status colors stay reserved for factual availability. */
 :root { color-scheme: light; --k-bg:#f7f7f5; --k-panel:#ffffff; --k-panel-2:#f0f0ed; --k-text:#121212; --k-muted:#4e4e49; --k-line:#bdbdb7; --k-strong:#181818; --k-invert:#fff; --k-bubble-user-bg:#191919; --k-bubble-user-text:#ffffff; --k-bubble-user-line:#191919; --k-bubble-ai-bg:#ffffff; --k-bubble-ai-text:#121212; --k-bubble-ai-line:#bdbdb7; --foreground:#121212; --card-foreground:#121212; --popover-foreground:#121212; --secondary-foreground:#242422; --muted-foreground:#4e4e49; --accent-foreground:#121212; --sidebar-foreground:#121212; --sidebar-accent-foreground:#121212; }
 .dark { color-scheme: dark; --k-bg:#0c0c0c; --k-panel:#131313; --k-panel-2:#1a1a1a; --k-text:#f4f4f1; --k-muted:#c4c4bc; --k-line:#5b5b55; --k-strong:#242422; --k-invert:#121212; --k-bubble-user-bg:#f2f2ee; --k-bubble-user-text:#101010; --k-bubble-user-line:#ffffff; --k-bubble-ai-bg:#171717; --k-bubble-ai-text:#f4f4f1; --k-bubble-ai-line:#62625d; --foreground:#f4f4f1; --card-foreground:#f4f4f1; --popover-foreground:#f4f4f1; --secondary-foreground:#e4e4dd; --muted-foreground:#c4c4bc; --accent-foreground:#f4f4f1; --sidebar-foreground:#f4f4f1; --sidebar-accent-foreground:#f4f4f1; }
+/* Status colours are reserved for factual availability, and each one needs a light-theme step of
+   its own: the dark tint that reads as "soft red" on #131313 turns muddy on #ffffff. These are
+   added to the existing two blocks rather than as a separate system, so the one theme toggle
+   repaints them along with everything else. */
+:root { --k-danger:#c0303c; --k-danger-text:#a32430; --k-danger-soft:color-mix(in srgb, var(--k-danger) 10%, transparent); --k-warn:#a1700f; --k-warn-text:#8a5d0b; --k-ok:#1d7a4d; --k-ok-text:#166641; }
+.dark { --k-danger:#e8878f; --k-danger-text:#ffd9dd; --k-danger-soft:color-mix(in srgb, var(--k-danger) 12%, transparent); --k-warn:#e0a94a; --k-warn-text:#f7d9a0; --k-ok:#63c894; --k-ok-text:#bdf0d5; }
 body { background:var(--k-bg); color:var(--k-text); }
 .kairema-auth-gate{position:relative;display:grid;min-height:100dvh;overflow:hidden;background:#f3f2ed;color:#171716;isolation:isolate}.kairema-auth-gate__background{position:absolute;z-index:-1;inset:0;background:radial-gradient(circle at 8% 11%,rgba(115,105,238,.14),transparent 31%),radial-gradient(circle at 95% 91%,rgba(197,182,126,.18),transparent 33%),linear-gradient(135deg,#f7f6f2,#ededE7)}.kairema-auth-gate__shell{display:grid;place-items:center;width:min(100%,1080px);margin:auto;padding:28px 20px}.kairema-auth-gate__panel{width:min(100%,470px);padding:clamp(28px,6vw,52px);border:1px solid rgba(20,20,19,.12);border-radius:28px;background:rgba(255,255,253,.86);box-shadow:0 24px 70px rgba(29,28,23,.13);backdrop-filter:blur(16px)}.kairema-auth-gate__brand{display:flex;align-items:center;gap:9px;color:#161615;font-size:17px;font-weight:820;letter-spacing:-.03em}.kairema-auth-gate__brand-mark{display:grid;place-items:center;width:31px;height:31px;border-radius:10px;color:#fff;background:#181817}.kairema-auth-gate__copy{margin-top:38px}.kairema-auth-gate__eyebrow{margin:0 0 10px;color:#68675f;font-size:10px;font-weight:800;letter-spacing:.14em}.kairema-auth-gate__copy h1{margin:0;color:#141413;font-size:clamp(29px,7vw,39px);font-weight:830;letter-spacing:-.055em;line-height:1.05}.kairema-auth-gate__copy p{max-width:355px;margin:14px 0 0;color:#5f5e58;font-size:15px;line-height:1.55}.kairema-auth-gate__trust{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}.kairema-auth-gate__trust span{display:inline-flex;align-items:center;gap:5px;padding:6px 9px;border:1px solid #d8d6ce;border-radius:999px;color:#4d4c47;background:rgba(255,255,255,.66);font-size:11px;font-weight:720}.kairema-auth-gate__trust svg{color:#4f8f6d}.kairema-auth-gate__actions{display:grid;gap:12px;margin-top:34px}.kairema-auth-gate__google,.kairema-auth-gate__secure{display:flex;align-items:center;justify-content:center;width:100%;min-height:52px;padding:12px 15px;border-radius:13px;font-size:14px;font-weight:760;transition:transform 160ms cubic-bezier(.23,1,.32,1),box-shadow 160ms ease,background 160ms ease,border-color 160ms ease}.kairema-auth-gate__google{gap:10px;border:1px solid #1d1d1b;color:#fff;background:#1d1d1b;box-shadow:0 9px 18px rgba(24,24,22,.14)}.kairema-auth-gate__google:hover,.kairema-auth-gate__google:focus-visible{background:#32322f;outline:none}.kairema-auth-gate__secure{gap:8px;border:1px solid #c9c7be;color:#282825;background:rgba(255,255,255,.72)}.kairema-auth-gate__secure:hover,.kairema-auth-gate__secure:focus-visible{border-color:#9a978b;background:#fff;outline:none}.kairema-auth-gate__google:focus-visible,.kairema-auth-gate__secure:focus-visible,.kairema-auth-gate__security-link:focus-visible,.kairema-auth-gate__legal a:focus-visible{box-shadow:0 0 0 3px rgba(108,95,229,.28)}.kairema-auth-gate__google:active,.kairema-auth-gate__secure:active{transform:scale(.98)}.kairema-auth-gate__google-g{display:grid;place-items:center;width:21px;height:21px;border-radius:50%;color:#20201f;background:#fff;font-size:13px;font-weight:850}.kairema-auth-gate__divider{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;color:#8a8881;font-size:11px}.kairema-auth-gate__divider span{height:1px;background:#dedcd4}.kairema-auth-gate__security-link{display:flex;align-items:center;justify-content:center;gap:6px;width:max-content;max-width:100%;margin:18px auto 0;border:0;border-radius:7px;padding:5px;color:#67665f;background:transparent;font-size:11px;font-weight:650;text-decoration:underline;text-underline-offset:3px}.kairema-auth-gate__security-link:hover{color:#282825}.kairema-auth-gate__security-note{margin-top:12px;padding:10px 12px;border:1px solid #d9d7cf;border-radius:10px;color:#65635d;background:#f7f6f1;font-size:11px;line-height:1.48}.kairema-auth-gate__legal{display:flex;align-items:flex-start;justify-content:center;gap:5px;margin-top:25px;color:#78766f;font-size:10px;line-height:1.45;text-align:center}.kairema-auth-gate__legal svg{flex:none;margin-top:1px}.kairema-auth-gate__legal a{color:#474641;text-decoration:underline;text-underline-offset:2px}@media(max-width:520px){.kairema-auth-gate__shell{align-items:start;padding:20px 14px}.kairema-auth-gate__panel{margin-top:max(0px,env(safe-area-inset-top));padding:28px 22px;border-radius:22px}.kairema-auth-gate__copy{margin-top:31px}.kairema-auth-gate__trust{gap:6px}.kairema-auth-gate__trust span{font-size:10px}.kairema-auth-gate__actions{margin-top:29px}.kairema-auth-gate__legal{margin-top:21px}}
 .kairema-auth-gate__email{display:grid;gap:12px;margin-top:28px;padding:18px;border:1px solid #dedbd1;border-radius:16px;background:rgba(255,255,255,.64)}.kairema-auth-gate__email-heading{display:flex;align-items:center;gap:7px;color:#252521}.kairema-auth-gate__email-heading h2{margin:0;font-size:15px;font-weight:800;letter-spacing:-.02em}.kairema-auth-gate__email>p{margin:0;color:#66645d;font-size:12px;line-height:1.5}.kairema-auth-gate__email label{display:grid;gap:6px;color:#4e4d47;font-size:12px;font-weight:700}.kairema-auth-gate__email input{width:100%;min-height:42px;border:1px solid #cbc8be;border-radius:10px;padding:9px 10px;color:#22221f;background:#fff;font-size:16px;outline:none}.kairema-auth-gate__email input:focus{border-color:#7770d5;box-shadow:0 0 0 3px rgba(108,95,229,.16)}.kairema-auth-gate__email button:disabled{cursor:not-allowed;opacity:.6}.kairema-auth-gate__text-button{display:inline-flex;align-items:center;justify-content:center;gap:4px;width:max-content;max-width:100%;border:0;padding:2px;color:#5b59a0;background:transparent;font-size:12px;font-weight:700;text-decoration:underline;text-underline-offset:3px}.kairema-auth-gate__notice{margin:14px 0 0;padding:10px 12px;border:1px solid #d8d4c7;border-radius:10px;color:#514f49;background:#f5f3ec;font-size:12px;line-height:1.45}.kairema-shell { background:var(--k-bg); color:var(--k-text); }
@@ -327,13 +553,17 @@ body { background:var(--k-bg); color:var(--k-text); }
 .kairema-sidebar-label,.kairema-history-head,.kairema-provider-role,.kairema-sidebar-footer p { color:var(--k-muted); }
 .kairema-provider:hover,.kairema-history-item:hover,.kairema-history-active { background:var(--k-panel-2); color:var(--k-text); }
 .kairema-provider-selected { border-color:var(--k-text); background:var(--k-panel-2); }
-.kairema-provider-icon,.kairema-avatar { background:var(--k-panel-2); color:var(--k-text); }.kairema-avatar-ai { background:var(--k-strong); color:var(--k-invert); }
+.kairema-provider-icon { background:var(--k-panel-2); color:var(--k-text); }
 .kairema-sidebar-footer { border-color:var(--k-line); }.kairema-footer-link { color:var(--k-muted); }.kairema-footer-link:hover { color:var(--k-text); }
 .kairema-search { border-color:var(--k-line); background:var(--k-panel-2); color:var(--k-muted); }.kairema-search input { color:var(--k-text); }
 .kairema-topbar { position:sticky; top:0; z-index:25; border-color:var(--k-line); background:var(--k-panel); backdrop-filter:none; }.kairema-icon-btn { color:var(--k-muted); }.kairema-icon-btn:hover { color:var(--k-text); background:var(--k-panel-2); }
 .kairema-select-wrap select { border-color:var(--k-line); color:var(--k-text); background:var(--k-panel); }.kairema-select-wrap select:focus { border-color:var(--k-text); }
-.kairema-select-wrap { position:relative; }.kairema-role-menu-trigger { display:inline-flex; min-height:36px; max-width:190px; align-items:center; justify-content:space-between; gap:8px; padding:7px 30px 7px 11px; border:1px solid var(--k-line); border-radius:9px; color:var(--k-text); background:var(--k-panel); font-size:12px; font-weight:600; }.kairema-role-menu-trigger::after { position:absolute; right:11px; content:"⌄"; color:var(--k-muted); }.kairema-role-menu { position:absolute; z-index:30; top:calc(100% + 6px); right:0; display:grid; width:min(360px,calc(100vw - 28px)); gap:4px; padding:6px; border:1px solid var(--k-line); border-radius:10px; background:var(--k-panel); box-shadow:0 16px 42px rgba(0,0,0,.35); }.kairema-role-menu-item { min-height:42px; padding:8px 10px; border:1px solid transparent; border-radius:7px; color:var(--k-text); background:transparent; text-align:left; font-size:12px; line-height:1.35; }.kairema-role-menu-item:hover,.kairema-role-menu-item:focus-visible,.kairema-role-menu-trigger:focus-visible { border-color:var(--k-text); outline:2px solid transparent; color:var(--k-text); background:var(--k-panel-2); }
-.kairema-message { max-width:100%; overflow-wrap:anywhere; word-break:break-word; }.kairema-message :is(h1,h2,h3) { margin:1em 0 .5em; line-height:1.25; }.kairema-message h1 { font-size:1.25rem; }.kairema-message h2 { font-size:1.15rem; }.kairema-message h3 { font-size:1.05rem; }.kairema-message-user { border:1px solid var(--k-bubble-user-line); background:var(--k-bubble-user-bg); color:var(--k-bubble-user-text); box-shadow:none; }.kairema-message-ai,.kairema-typing { border-color:var(--k-bubble-ai-line); color:var(--k-bubble-ai-text); background:var(--k-bubble-ai-bg); }
+.kairema-select-wrap { position:relative; }.kairema-role-menu-trigger { position:relative; display:inline-flex; min-height:44px; align-items:center; gap:6px; padding:0 2px; border:0; border-radius:0; color:var(--k-text); background:transparent; font-size:13px; font-weight:700; line-height:1.2; }.kairema-role-menu-trigger::after { content:none; }.kairema-role-menu { position:fixed; z-index:30; display:grid; width:min(360px,calc(100vw - 28px)); max-height:calc(100dvh - 16px); overflow-y:auto; overscroll-behavior:contain; gap:4px; padding:6px; border:1px solid var(--k-line); border-radius:10px; background:var(--k-panel); box-shadow:0 16px 42px rgba(0,0,0,.35); }.kairema-role-menu-item { min-height:42px; padding:8px 10px; border:1px solid transparent; border-radius:7px; color:var(--k-text); background:transparent; text-align:left; font-size:12px; line-height:1.35; }.kairema-role-menu-item:hover,.kairema-role-menu-item:focus-visible,.kairema-role-menu-trigger:focus-visible { border-color:var(--k-text); outline:2px solid transparent; color:var(--k-text); background:var(--k-panel-2); }
+/* Heading sizes and margins for message content now live in the `.kairema-gfm` block below, which
+   covers all four levels. The rules that used to sit here set h1/h2/h3 only 0.1rem apart — too
+   close to read as a hierarchy — and gave h4 no size at all, so it fell back to the browser
+   default and could render larger than h3. */
+.kairema-message { max-width:100%; overflow-wrap:anywhere; word-break:break-word; }.kairema-message-user { border:1px solid var(--k-bubble-user-line); background:var(--k-bubble-user-bg); color:var(--k-bubble-user-text); box-shadow:none; }.kairema-message-ai,.kairema-typing { border-color:var(--k-bubble-ai-line); color:var(--k-bubble-ai-text); background:var(--k-bubble-ai-bg); }
 .kairema-message-user,.kairema-message-ai { -webkit-user-select:text; user-select:text; }
 .kairema-runtime-meta { display:block; margin-top:3px; color:var(--k-muted); font-size:10px; line-height:1.35; }
 .kairema-prompt { border-color:var(--k-line); color:var(--k-text); background:var(--k-panel); }.kairema-prompt:hover { border-color:var(--k-text); color:var(--k-text); background:var(--k-panel-2); }
@@ -345,21 +575,28 @@ body { background:var(--k-bg); color:var(--k-text); }
 .kairema-empty { margin:0 7px; color:var(--k-muted); font-size:12px; }.kairema-topbar-title { font-size:13px; font-weight:600; }.kairema-history-item { display:block; min-height:44px; color:var(--k-muted); line-height:1.3; }.kairema-history-active { box-shadow:inset 3px 0 0 var(--k-text); font-weight:700; }.kairema-history-item:focus-visible,.kairema-provider:focus-visible,.kairema-search-result:focus-visible { outline:2px solid var(--k-text); outline-offset:2px; }
 .kairema-attachment-list { display:grid; gap:3px; padding:0 2px; }.kairema-attachment-row { display:flex; align-items:center; gap:6px; padding:6px 7px; border-radius:8px; color:var(--k-muted); font-size:11px; }.kairema-attachment-row:hover { background:var(--k-panel-2); }.kairema-attachment-row span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.kairema-attachment-row button { margin-left:auto; border:0; color:var(--k-muted); background:transparent; }.kairema-attachment-row button:hover { color:var(--k-text); }
 .kairema-search-result { display:flex; gap:7px; width:100%; padding:7px; border:0; border-radius:8px; color:var(--k-muted); background:transparent; text-align:left; }.kairema-search-result:hover { color:var(--k-text); background:var(--k-panel-2); }.kairema-search-result span { display:grid; min-width:0; gap:2px; }.kairema-search-result b,.kairema-search-result small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.kairema-search-result b { color:inherit; font-size:11px; }.kairema-search-result small { color:var(--k-muted); font-size:10px; }
-.kairema-dialog { max-width:min(720px,calc(100vw - 24px))!important; max-height:min(82vh,720px); overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; border-color:var(--k-line)!important; color:var(--k-text)!important; background:var(--k-panel)!important; }.kairema-dialog-wide { max-width:min(840px,calc(100vw - 24px))!important; }.kairema-dialog-note { margin:-4px 0 8px; color:var(--k-muted); font-size:12px; }.kairema-settings-grid { display:grid; grid-template-columns:1fr 1fr; gap:24px; }.kairema-settings-grid section { display:grid; align-content:start; gap:11px; }.kairema-settings-grid h3 { margin:0 0 2px; color:var(--k-text); font-size:13px; font-weight:700; }.kairema-settings-grid label,.kairema-field-label { display:grid; gap:5px; color:var(--k-muted); font-size:11px; font-weight:600; }.kairema-settings-grid select,.kairema-field-label textarea,.kairema-fact-add input { width:100%; border:1px solid var(--k-line); border-radius:8px; outline:0; padding:8px 9px; color:var(--k-text); background:var(--k-panel-2); font:inherit; font-size:12px; }.kairema-field-label textarea { min-height:115px; resize:vertical; }.kairema-settings-grid select:focus,.kairema-field-label textarea:focus,.kairema-fact-add input:focus { border-color:var(--k-text); }
+.kairema-dialog { max-width:min(720px,calc(100vw - 24px))!important; max-height:min(82vh,720px); overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; border-color:var(--k-line)!important; color:var(--k-text)!important; background:var(--k-panel)!important; }.kairema-dialog-wide { max-width:min(840px,calc(100vw - 24px))!important; }.kairema-dialog-note { margin:-4px 0 8px; color:var(--k-muted); font-size:12px; }.kairema-settings-grid { display:grid; grid-template-columns:1fr 1fr; gap:24px; }.kairema-settings-grid section { display:grid; align-content:start; gap:11px; }.kairema-settings-grid h3 { margin:0 0 2px; color:var(--k-text); font-size:13px; font-weight:700; }.kairema-settings-grid label,.kairema-field-label { display:grid; gap:5px; color:var(--k-muted); font-size:11px; font-weight:600; }.kairema-settings-grid select,.kairema-field-label textarea,.kairema-field-label input,.kairema-fact-add input { width:100%; border:1px solid var(--k-line); border-radius:8px; outline:0; padding:8px 9px; color:var(--k-text); background:var(--k-panel-2); font:inherit; font-size:12px; }.kairema-field-label textarea { min-height:115px; resize:vertical; }.kairema-settings-grid select:focus,.kairema-field-label textarea:focus,.kairema-field-label input:focus,.kairema-fact-add input:focus { border-color:var(--k-text); }
+.kairema-dialog-action { display:inline-flex; align-items:center; justify-content:center; gap:6px; margin-top:10px; padding:8px 12px; border:1px solid var(--k-text); border-radius:8px; color:var(--k-invert); background:var(--k-text); font-size:12px; font-weight:700; line-height:1.1; }
+.kairema-dialog-action:hover:not(:disabled) { opacity:.9; }
+.kairema-dialog-action:disabled { opacity:.45; cursor:not-allowed; }
 .kairema-settings-provider { border-color:var(--k-line); background:var(--k-panel-2); }.kairema-settings-provider span { display:grid; gap:2px; }.kairema-settings-provider b { color:var(--k-text); font-size:11px; }.kairema-settings-provider small { color:var(--k-muted); font-size:10px; }.kairema-inline-status { display:flex; align-items:center; gap:5px; margin:0; color:var(--k-muted); font-size:11px; }
 .kairema-switch-row { display:flex; align-items:center; justify-content:space-between; gap:16px; width:100%; padding:8px 0; color:var(--k-text); font-size:12px; text-align:left; }.kairema-switch-control { width:40px!important; height:22px!important; flex:none; border:1px solid var(--k-line)!important; background:var(--k-panel-2)!important; box-shadow:none!important; }.kairema-switch-control[data-state="checked"] { border-color:var(--k-text)!important; background:var(--k-text)!important; }.kairema-switch-control[data-slot="switch"]:focus-visible { outline:2px solid var(--k-text); outline-offset:3px; }.kairema-switch-control [data-slot="switch-thumb"] { width:16px!important; height:16px!important; background:var(--k-muted)!important; }.kairema-switch-control[data-state="checked"] [data-slot="switch-thumb"] { background:var(--k-invert)!important; }
 .kairema-setting-help,.kairema-switch-copy small { color:var(--k-muted); font-size:10px; font-weight:500; line-height:1.35; }.kairema-switch-copy { display:grid; gap:3px; padding-right:12px; }.kairema-switch-copy b { font-size:12px; font-weight:700; }
 .kairema-fact-add { display:flex; gap:7px; margin-top:6px; }.kairema-fact-add button,.kairema-danger-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; border:1px solid var(--k-text); border-radius:8px; padding:8px 10px; color:var(--k-invert); background:var(--k-text); font-size:11px; font-weight:700; white-space:nowrap; }.kairema-fact-add button:disabled { cursor:not-allowed; opacity:.4; }.kairema-facts { display:grid; gap:5px; max-height:190px; overflow:auto; }.kairema-facts>div { display:flex; align-items:flex-start; gap:8px; padding:8px; border:1px solid var(--k-line); border-radius:8px; color:var(--k-text); background:var(--k-panel-2); font-size:12px; }.kairema-facts span { flex:1; }.kairema-facts button { border:0; color:var(--k-muted); background:transparent; }.kairema-facts button:hover { color:var(--k-text); }.kairema-danger-button { width:100%; margin-top:8px; border-color:var(--k-line); color:var(--k-text); background:transparent; }.kairema-danger-button:hover { background:var(--k-panel-2); }
 .kairema-template-filters { display:flex; flex-wrap:wrap; gap:7px; margin:2px 0 14px; }.kairema-template-filters button { min-height:32px; padding:5px 9px; border:1px solid var(--k-line); border-radius:999px; color:var(--k-text); background:var(--k-panel); font-size:11px; font-weight:650; }.kairema-template-filters button[aria-pressed="true"],.kairema-template-filters button:hover { border-color:var(--k-text); background:var(--k-strong); color:var(--k-invert); }.kairema-template-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }.kairema-template-card { display:grid; min-width:0; gap:11px; padding:13px; border:1px solid var(--k-line); border-radius:12px; background:var(--k-panel-2); }.kairema-template-card-head { display:grid; gap:5px; }.kairema-template-category { width:max-content; padding:3px 6px; border:1px solid var(--k-line); border-radius:999px; color:var(--k-muted); background:var(--k-panel); font-size:9px; font-weight:750; letter-spacing:.04em; text-transform:uppercase; }.kairema-template-card h3 { margin:0; color:var(--k-text); font-size:14px; line-height:1.25; }.kairema-template-card p { margin:0; color:var(--k-muted); font-size:11px; line-height:1.4; }.kairema-template-text { max-height:116px; min-height:80px; overflow:auto; margin:0; padding:9px; border:1px solid var(--k-line); border-radius:8px; color:var(--k-text); background:var(--k-panel); font-family:inherit; font-size:11px; line-height:1.45; white-space:pre-wrap; }.kairema-template-token { display:inline-block; padding:0 3px; border:1px solid var(--k-line); border-radius:4px; color:var(--k-text); background:var(--k-panel-2); font-weight:700; }.kairema-template-actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; }.kairema-template-actions button { display:inline-flex; align-items:center; justify-content:center; gap:5px; min-height:36px; padding:6px 8px; border:1px solid var(--k-line); border-radius:8px; color:var(--k-text); background:var(--k-panel); font-size:11px; font-weight:700; }.kairema-template-actions button:hover { border-color:var(--k-text); background:var(--k-strong); color:var(--k-invert); }.kairema-template-actions .kairema-template-insert { background:var(--k-strong); color:var(--k-invert); }
 @media(max-width:620px){.kairema-template-grid{grid-template-columns:1fr}.kairema-template-actions{grid-template-columns:1fr}.kairema-template-text{max-height:132px}}
-.kairema-composer { width:min(100%,900px); }.kairema-composer-main { display:grid; flex:1; min-width:0; gap:6px; }.kairema-composer-row { display:flex; align-items:center; gap:8px; }.kairema-composer-row .kairema-textarea { flex:1; }.kairema-composer-tool { display:grid; place-items:center; width:34px; height:34px; flex:none; border:1px solid var(--k-line); border-radius:8px; color:var(--k-muted); background:var(--k-panel); }.kairema-composer-tool:hover:not(:disabled) { border-color:var(--k-text); color:var(--k-text); background:var(--k-panel-2); }.kairema-composer-tool:disabled { cursor:not-allowed; opacity:.45; }.kairema-attachment-chips { display:flex; flex-wrap:wrap; gap:5px; }.kairema-attachment-chip { display:inline-flex; align-items:center; gap:5px; max-width:220px; padding:5px 7px; border:1px solid var(--k-line); border-radius:7px; color:var(--k-muted); background:var(--k-panel-2); font-size:10px; }.kairema-attachment-chip>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.kairema-attachment-chip button { display:grid; place-items:center; border:0; color:var(--k-muted); background:transparent; }.kairema-composer-note { margin:0; padding-left:42px; color:var(--k-muted); font-size:10px; }.kairema-suggestion-chips { display:flex; flex-wrap:wrap; gap:7px; margin-top:9px; }.kairema-suggestion-chip { max-width:100%; padding:7px 10px; border:1px solid var(--k-line); border-radius:999px; color:var(--k-text); background:var(--k-panel-2); font-size:11px; font-weight:650; line-height:1.25; text-align:left; transition:transform .16s cubic-bezier(.23,1,.32,1),background .16s ease,border-color .16s ease; }.kairema-suggestion-chip:hover:not(:disabled),.kairema-suggestion-chip:focus-visible { border-color:var(--k-text); background:var(--k-panel); outline:2px solid transparent; }.kairema-suggestion-chip:active:not(:disabled) { transform:scale(.97); }.kairema-suggestion-chip:disabled { cursor:not-allowed; opacity:.52; }.kairema-sources { max-width:100%; margin-top:8px; border:1px solid var(--k-line); border-radius:10px; background:var(--k-panel-2); overflow:hidden; color:var(--k-muted); font-size:11px; }.kairema-sources-toggle { display:flex; align-items:center; justify-content:space-between; width:100%; gap:8px; padding:8px 10px; color:var(--k-text); background:transparent; font-size:11px; font-weight:700; text-align:left; }.kairema-sources-toggle:hover { background:var(--k-panel); }.kairema-sources ul { display:grid; gap:1px; margin:0; padding:0; border-top:1px solid var(--k-line); list-style:none; }.kairema-sources li { min-width:0; }.kairema-sources a { display:grid; gap:2px; max-width:100%; padding:8px 10px; color:var(--k-text); text-decoration:none; overflow-wrap:anywhere; word-break:break-word; }.kairema-sources a:hover { background:var(--k-panel); }.kairema-source-title { display:flex; align-items:flex-start; gap:5px; min-width:0; }.kairema-source-title svg { flex:none; margin-top:2px; }.kairema-sources small { color:var(--k-muted); overflow-wrap:anywhere; }
-.kairema-attachment-menu { position:relative; flex:none; }.kairema-attachment-menu summary { list-style:none; cursor:pointer; }.kairema-attachment-menu summary::-webkit-details-marker { display:none; }.kairema-attachment-menu-popover { position:absolute; z-index:45; bottom:calc(100% + 8px); left:0; display:grid; min-width:132px; gap:3px; padding:5px; border:1px solid var(--k-line); border-radius:9px; background:var(--k-panel); box-shadow:0 14px 30px rgba(0,0,0,.22); }.kairema-attachment-menu-popover button { min-height:36px; padding:7px 9px; border:1px solid transparent; border-radius:7px; color:var(--k-text); background:transparent; text-align:left; font-size:11px; font-weight:650; }.kairema-attachment-menu-popover button:hover:not(:disabled),.kairema-attachment-menu-popover button:focus-visible { border-color:var(--k-line); background:var(--k-panel-2); outline:none; }.kairema-attachment-menu-popover button:disabled { cursor:not-allowed; opacity:.45; }.kairema-composer-attachment-chip:has(.kairema-attachment-preview) { width:64px; height:64px; padding:3px; position:relative; }.kairema-composer-attachment-chip:has(.kairema-attachment-preview) .kairema-attachment-preview-trigger { width:54px; height:54px; overflow:hidden; border-radius:6px; }.kairema-composer-attachment-chip:has(.kairema-attachment-preview) .kairema-attachment-preview { width:54px; height:54px; object-fit:cover; }.kairema-composer-attachment-chip:has(.kairema-attachment-preview) .kairema-attachment-remove { position:absolute; top:-7px; right:-7px; width:22px; height:22px; border:1px solid var(--k-line); border-radius:999px; color:var(--k-text); background:var(--k-panel); box-shadow:0 2px 8px rgba(0,0,0,.18); }.kairema-message-attachments .kairema-attachment-open:has(.kairema-message-image) { padding:3px; }.kairema-message-attachments .kairema-message-image { display:block; width:68px; height:68px; border-radius:6px; object-fit:cover; }
+.kairema-composer { width:min(100%,900px); }.kairema-composer-main { display:grid; flex:1; min-width:0; gap:6px; }.kairema-composer-row { display:flex; align-items:center; gap:8px; }.kairema-composer-row .kairema-textarea { flex:1; }.kairema-composer-tool { display:grid; place-items:center; width:34px; height:34px; flex:none; border:1px solid var(--k-line); border-radius:8px; color:var(--k-muted); background:var(--k-panel); }.kairema-composer-tool:hover:not(:disabled) { border-color:var(--k-text); color:var(--k-text); background:var(--k-panel-2); }.kairema-composer-tool:disabled { cursor:not-allowed; opacity:.45; }.kairema-attachment-chips { display:flex; flex-wrap:wrap; gap:5px; }.kairema-attachment-chip { display:inline-flex; align-items:center; gap:5px; max-width:220px; padding:5px 7px; border:1px solid var(--k-line); border-radius:7px; color:var(--k-muted); background:var(--k-panel-2); font-size:10px; }.kairema-attachment-chip>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.kairema-attachment-chip button { display:grid; place-items:center; border:0; color:var(--k-muted); background:transparent; }.kairema-composer-note { margin:0; padding-left:42px; color:var(--k-muted); font-size:10px; }.kairema-suggestion-chips { display:flex; flex-wrap:wrap; gap:7px; margin-top:9px; }.kairema-suggestion-chip { max-width:100%; padding:7px 10px; border:1px solid var(--k-line); border-radius:999px; color:var(--k-text); background:var(--k-panel-2); font-size:11px; font-weight:650; line-height:1.25; text-align:left; transition:transform .16s cubic-bezier(.23,1,.32,1),background .16s ease,border-color .16s ease; }.kairema-suggestion-chip:hover:not(:disabled),.kairema-suggestion-chip:focus-visible { border-color:var(--k-text); background:var(--k-panel); outline:2px solid transparent; }.kairema-suggestion-chip:active:not(:disabled) { transform:scale(.97); }.kairema-suggestion-chip:disabled { cursor:not-allowed; opacity:.52; }
+.kairema-attachment-menu { position:relative; flex:none; }.kairema-attachment-menu summary { list-style:none; cursor:pointer; }.kairema-attachment-menu summary::-webkit-details-marker { display:none; }.kairema-attachment-menu-popover { position:absolute; z-index:45; bottom:calc(100% + 8px); left:0; display:grid; min-width:132px; gap:3px; padding:5px; border:1px solid var(--k-line); border-radius:9px; background:var(--k-panel); box-shadow:0 14px 30px rgba(0,0,0,.22); }.kairema-attachment-menu-popover button { min-height:36px; padding:7px 9px; border:1px solid transparent; border-radius:7px; color:var(--k-text); background:transparent; text-align:left; font-size:11px; font-weight:650; }.kairema-attachment-menu-popover button:hover:not(:disabled),.kairema-attachment-menu-popover button:focus-visible { border-color:var(--k-line); background:var(--k-panel-2); outline:none; }.kairema-attachment-menu-popover button:disabled { cursor:not-allowed; opacity:.45; }
+/* The author `display: grid` above outranks the user-agent rule that hides non-summary
+   children of a closed <details>, so the popover stayed painted after React removed the
+   `open` attribute. Higher specificity and later in the file, so it actually wins. */
+.kairema-attachment-menu:not([open]) .kairema-attachment-menu-popover { display: none; }.kairema-composer-attachment-chip:has(.kairema-attachment-preview) { width:64px; height:64px; padding:3px; position:relative; }.kairema-composer-attachment-chip:has(.kairema-attachment-preview) .kairema-attachment-preview-trigger { width:54px; height:54px; overflow:hidden; border-radius:6px; }.kairema-composer-attachment-chip:has(.kairema-attachment-preview) .kairema-attachment-preview { width:54px; height:54px; object-fit:cover; }.kairema-composer-attachment-chip:has(.kairema-attachment-preview) .kairema-attachment-remove { position:absolute; top:-7px; right:-7px; width:22px; height:22px; border:1px solid var(--k-line); border-radius:999px; color:var(--k-text); background:var(--k-panel); box-shadow:0 2px 8px rgba(0,0,0,.18); }.kairema-message-attachments .kairema-attachment-open:has(.kairema-message-image) { padding:3px; }.kairema-message-attachments .kairema-message-image { display:block; width:68px; height:68px; border-radius:6px; object-fit:cover; }
 .kairema-history-row { display:flex; align-items:center; min-width:0; border-radius:8px; }.kairema-history-row .kairema-history-item { min-width:0; flex:1; width:100%; }.kairema-history-row:hover,.kairema-history-row.kairema-history-active { background:var(--k-panel-2); }.kairema-history-delete { display:grid; place-items:center; flex:none; width:32px; height:32px; margin-right:4px; border:0; border-radius:7px; color:var(--k-muted); background:transparent; }.kairema-history-delete:hover:not(:disabled) { color:var(--k-text); background:var(--k-panel); }.kairema-history-delete:focus-visible { outline:2px solid var(--k-text); outline-offset:1px; }
 @media(max-width:767px){.kairema-settings-grid{grid-template-columns:1fr}.kairema-dialog{max-height:86vh;padding:18px!important}.kairema-composer{align-items:flex-end}.kairema-composer-row{gap:6px}.kairema-sidebar{background:var(--k-panel)}.kairema-composer-note{padding-left:0}.kairema-sidebar-footer{margin-top:18px}}
 .kairema-ops-overlay { position:fixed; inset:0; z-index:80; display:grid; place-items:center; padding:1rem; background:rgb(0 0 0 / .58); }
 .kairema-ops-panel { width:min(42rem,100%); max-height:min(44rem,90vh); overflow:auto; border:1px solid var(--k-line); border-radius:1rem; padding:1.25rem; color:var(--k-text); background:var(--k-panel); box-shadow:0 24px 80px rgb(0 0 0 / .35); }
 .kairema-ops-panel>header { display:flex; align-items:center; justify-content:space-between; gap:1rem; }.kairema-ops-panel h2,.kairema-ops-card h3 { margin:0; color:var(--k-text); font-weight:700; }.kairema-ops-panel h2 { font-size:1.05rem; }.kairema-ops-list { display:grid; gap:.7rem; margin-top:1rem; }.kairema-ops-card { display:grid; gap:.35rem; min-width:0; padding:.85rem; border:1px solid var(--k-line); border-radius:.75rem; color:var(--k-muted); background:var(--k-panel-2); overflow-wrap:anywhere; word-break:break-word; }.kairema-ops-card p,.kairema-ops-card a,.kairema-ops-list>p { margin:0; color:var(--k-muted); font-size:.78rem; overflow-wrap:anywhere; word-break:break-word; }.kairema-ops-card a:hover { color:var(--k-text); text-decoration:underline; }
-.kairema-health-widget { display:inline-flex; align-items:center; gap:.4rem; min-height:32px; padding:.35rem .55rem; border:1px solid var(--k-line); border-radius:.6rem; color:var(--k-muted); background:var(--k-panel); font-size:.73rem; font-weight:700; }.kairema-health-widget:hover { border-color:var(--k-text); color:var(--k-text); background:var(--k-panel-2); }.kairema-health-widget:focus-visible { outline:2px solid var(--k-text); outline-offset:2px; }.kairema-health-dot { width:.52rem; height:.52rem; border-radius:999px; background:#30c98b; box-shadow:0 0 0 3px rgb(48 201 139 / .14); }.kairema-health-dot-limited { background:#f4ae43; box-shadow:0 0 0 3px rgb(244 174 67 / .14); }.kairema-availability-history { display:grid; gap:.32rem; margin-top:.25rem; color:var(--k-muted); font-size:.72rem; }.kairema-availability-segments { display:grid; grid-template-columns:repeat(24,minmax(4px,1fr)); gap:2px; width:100%; }.kairema-availability-cell { min-width:4px; height:.55rem; border-radius:2px; background:var(--k-line); }.kairema-availability-ready { background:#30c98b; }.kairema-availability-limited { background:#f4ae43; }.kairema-availability-unavailable,.kairema-availability-error { background:#ef6d6d; }.kairema-availability-events { display:grid; gap:.2rem; margin:.15rem 0 0; padding:0; list-style:none; color:var(--k-muted); font-size:.72rem; }.kairema-availability-events-title { color:var(--k-text); font-weight:700; }
+.kairema-availability-history { display:grid; gap:.32rem; margin-top:.25rem; color:var(--k-muted); font-size:.72rem; }.kairema-availability-segments { display:grid; grid-template-columns:repeat(24,minmax(4px,1fr)); gap:2px; width:100%; }.kairema-availability-cell { min-width:4px; height:.55rem; border-radius:2px; background:var(--k-line); }.kairema-availability-ready { background:#30c98b; }.kairema-availability-limited { background:#f4ae43; }.kairema-availability-unavailable,.kairema-availability-error { background:#ef6d6d; }.kairema-availability-events { display:grid; gap:.2rem; margin:.15rem 0 0; padding:0; list-style:none; color:var(--k-muted); font-size:.72rem; }.kairema-availability-events-title { color:var(--k-text); font-weight:700; }
 
 /* v6-E: explicit action and sidebar contrast in both colour schemes. */
 .kairema-send { border:1px solid var(--k-text); color:var(--k-invert)!important; background:var(--k-text)!important; box-shadow:0 4px 14px color-mix(in srgb,var(--k-text) 22%,transparent); }.kairema-send:hover:not(:disabled) { border-color:var(--k-strong); background:var(--k-strong)!important; }.kairema-send:disabled { cursor:not-allowed; border-color:var(--k-line); color:var(--k-muted)!important; background:var(--k-panel-2)!important; box-shadow:none; opacity:1; }.kairema-send:focus-visible,.kairema-cancel:focus-visible { outline:3px solid var(--k-text); outline-offset:3px; }.kairema-cancel { border:1px solid #ff8796!important; color:#3a0811!important; background:#ffb6c0!important; box-shadow:0 4px 14px rgb(234 66 93 / .2); }.kairema-cancel:hover:not(:disabled) { border-color:#ff6077!important; color:#26050c!important; background:#ff95a4!important; }
@@ -391,3 +628,334 @@ body { background:var(--k-bg); color:var(--k-text); }
 .kairema-attachment-remove:hover,.kairema-attachment-remove:focus-visible { border-color:var(--k-text)!important; color:var(--k-invert)!important; background:var(--k-strong)!important; }
 .kairema-attachment-remove:focus-visible { outline:2px solid var(--k-text); outline-offset:2px; }
 .kairema-attachment-retry { align-self:stretch; padding:0 4px; font-size:10px; text-decoration:underline; }
+
+/* v7-A: the Kairema control header. Row 1 is the system bar (.kairema-topbar);
+   the compact in-chat panel below it is .kairema-chat-controls.
+   Every hex in the spec is expressed with the existing product tokens so the light and
+   dark schemes and the reserved violet accent stay exactly as they were. */
+
+/* One geometry for the standalone outline buttons: Settings, Profile and Export. */
+.kairema-header-button { display:inline-flex; flex:0 0 auto; align-items:center; justify-content:center; gap:6px; height:34px; max-width:100%; padding:0 12px; border:1px solid var(--k-line); border-radius:8px; color:var(--k-text); background:transparent; font:inherit; font-size:13px; font-weight:650; line-height:1.1; white-space:nowrap; }
+.kairema-header-button > svg { flex:0 0 auto; }
+.kairema-header-button > span { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+button.kairema-header-button,.kairema-header-button[role="button"] { cursor:pointer; }
+button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:hover { background:var(--k-panel-2); }
+.kairema-header-button:disabled { cursor:not-allowed; opacity:.45; }
+.kairema-header-button:focus-visible { outline:2px solid var(--k-text); outline-offset:2px; }
+
+/* Row 1. */
+.kairema-topbar { display:flex; min-height:40px; height:auto; flex-wrap:nowrap; align-items:center; justify-content:space-between; gap:12px; padding:3px 12px; }
+.kairema-topbar-left { display:flex; flex:1 1 auto; flex-wrap:nowrap; align-items:center; gap:12px; min-width:0; }
+.kairema-topbar-controls { display:flex; flex:0 0 auto; flex-wrap:nowrap; align-items:center; justify-content:flex-end; gap:8px; min-width:0; margin-left:auto; }
+/* The chip is a layout wrapper only: the outline now belongs to the button itself. */
+.kairema-topbar-chip { display:inline-flex; flex:0 0 auto; align-items:center; min-width:0; border:0; background:transparent; border-radius:0; overflow:visible; }
+.kairema-topbar-chip > .kairema-header-button { height:34px; padding:0 12px; border:1px solid var(--k-line); border-radius:8px; color:var(--k-text); background:transparent; font-size:13px; font-weight:650; }
+/* Hamburger: 20x20, no frame, no fill, still a real button. */
+.kairema-topbar-left .kairema-icon-btn { display:inline-flex; flex:0 0 auto; align-items:center; justify-content:center; width:20px; height:20px; min-width:20px; min-height:20px; padding:0; border:0; background:transparent; }
+/* The role name is the visible heading, so the dynamic model/role label keeps driving it
+   and the existing four-item role menu still opens from it. */
+/* The role picker keeps a single interactive trigger inside .kairema-select-wrap, so the
+   sparkle and the chevron are decorative siblings of that wrapper rather than children
+   of it: the trigger stays the only control, and the wrapper stays icon-free. */
+.kairema-model-pill { display:inline-flex; flex:0 1 auto; min-width:0; align-items:center; justify-content:center; gap:10px; height:42px; box-sizing:border-box; padding:8px 16px; border:none; border-radius:999px; background:#242529; }
+.kairema-model-pill:hover { background:#2D2E33; }
+.kairema-model-sparkle { flex:0 0 auto; width:18px; height:18px; color:#FFFFFF; }
+.kairema-mode-hint-link { color:#a096ff; text-decoration:underline; text-underline-offset:2px; }
+.kairema-mode-hint-link:hover { color:#c7bfff; }
+/* My API header: the saved user binding shown in place of the Kairema role selector. */
+/* My API binding in the header: provider name plus a model picker. Both are allowed to shrink
+   to nothing so a long provider/model pair can never widen the bar or start a horizontal
+   scrollbar; the name truncates with an ellipsis and the select is capped to the pill width. */
+.kairema-binding-name { flex:0 1 auto; min-width:0; max-width:45%; color:#FFFFFF; font-size:15px; font-weight:600; line-height:1.2; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-select-wrap.kairema-binding-wrap { flex:0 1 auto; min-width:0; }
+.kairema-binding-select { appearance:none; max-width:100%; min-width:0; padding:7px 10px; border:1px solid rgba(255,255,255,.09); border-radius:9px; outline:none; color:#dce4f4; background:#131725; font-size:12px; font-weight:600; text-overflow:ellipsis; }
+.kairema-binding-select:focus { border-color:rgba(255,255,255,.45); }
+.kairema-model-pill { max-width:100%; overflow:hidden; }
+/* Narrow viewports: the binding keeps truncating instead of pushing the bar wider. */
+/* Profile dialog: a single compact column, so it never stretches into a wall of whitespace. */
+.kairema-dialog-narrow { max-width:26rem; }
+.kairema-profile-grid { display:grid; gap:14px; }
+.kairema-profile-grid h3 { margin:0 0 6px; font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#8b94a7; }
+.kairema-profile-grid .kairema-dialog-note { margin:0 0 8px; }
+.kairema-dialog-action { align-self:flex-start; }
+
+@media (max-width:767px) {
+  .kairema-model-pill { max-width:100%; }
+  .kairema-binding-name { max-width:40%; font-size:13px; }
+  .kairema-binding-select { max-width:52vw; font-size:11px; }
+}
+@media (max-width:430px) {
+  .kairema-binding-name { max-width:34%; font-size:12px; }
+  .kairema-binding-select { max-width:46vw; font-size:11px; }
+}
+.kairema-model-chevron { flex:0 0 auto; width:15px; height:15px; color:#FFFFFF; stroke-width:2.25; }
+.kairema-select-wrap { display:inline-flex; flex:0 1 auto; min-width:0; }
+.kairema-topbar .kairema-role-menu-trigger { display:inline-flex; flex:0 1 auto; min-width:0; min-height:0; max-width:min(40vw,300px); padding:0; border:0; border-radius:0; color:#FFFFFF; background:transparent; font-size:15px; font-weight:600; line-height:1.2; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-topbar .kairema-role-menu-trigger:hover { color:#FFFFFF; }
+
+/* v7-C: header model pill, and the in-chat control panel.
+   [ Чат | Мой API ]  on the left, then the collapse toggle directly beneath it, with
+   Export held at the right of that second row. The saved-chat history that lives in the
+   sidebar is a different surface and is untouched here. */
+.kairema-chat-sticky { align-items:stretch; }
+.kairema-chat-controls { order:1; display:block; min-width:0; }
+/* One compact row: Chat/My API, then Export, then the collapse toggle, separated by the
+   same small gap. No space-between, so nothing is pushed to the far edge. */
+.kairema-mode-bar { display:flex; align-items:center; gap:6px; margin-top:2px; padding:0 12px; transition:gap .18s ease; }
+.kairema-mode-switch { display:inline-flex; flex:0 0 auto; align-items:center; gap:3px; width:fit-content; min-width:0; padding:2px; border:1px solid var(--k-line); border-radius:8px; background:var(--k-panel-2); }
+.kairema-mode-option { display:inline-flex; flex:0 0 auto; align-items:center; justify-content:center; gap:5px; height:23px; min-height:23px; min-width:100px; padding:0 12px; border:1px solid transparent; border-radius:7px; color:var(--k-muted); background:transparent; font-size:12px; font-weight:700; line-height:1.15; white-space:nowrap; }
+/* The active tab keeps the product's existing violet accent, unchanged. */
+
+/* The toggle is the same existing button, now sitting in the mode row right after Export. */
+.kairema-mode-bar > .kairema-chat-tools-toggle { flex:0 0 auto; align-self:center; width:24px; height:24px; min-width:24px; min-height:24px; margin:0; }
+/* Export is a sibling of the segmented control inside the same row, never inside it. */
+/* Export is a sibling of the segmented control and may compress, so the row can never be
+   pushed wider than the chat header: the fixed-width segment keeps its place on the left
+   and only the Export label gives ground, ending in an ellipsis rather than overflow. */
+.kairema-chat-tools { display:flex; flex:0 1 auto; align-items:center; justify-content:flex-end; gap:8px; min-width:0; margin:0; padding:0; color:var(--k-muted); font-size:12px; }
+/* flex:0 0 auto would pin both to their intrinsic width, so each one is given a shrink
+   factor too: that is what actually lets the row fit instead of overflowing. */
+/* Right-anchored to the button, which already sits at the row's end, so the panel can
+   never push the page sideways; the viewport cap covers very narrow screens. */
+/* A single compact icon button. Its panel is portaled to the body, so no row can clip it. */
+.kairema-export-trigger { display:inline-flex; flex:0 0 auto; width:24px; height:24px; align-items:center; justify-content:center; padding:0; border:1px solid var(--k-line); border-radius:6px; background:var(--k-panel-2); color:var(--k-text); cursor:pointer; }
+.kairema-export-trigger:hover:not(:disabled) { background:var(--k-panel); }
+.kairema-export-trigger:focus-visible { outline:2px solid var(--k-text); outline-offset:2px; }
+.kairema-export-trigger:disabled { cursor:progress; opacity:.7; }
+.kairema-export-menu-popover { position:fixed; z-index:60; display:grid; gap:3px; min-width:140px; max-width:calc(100vw - 24px); padding:5px; border:1px solid var(--k-line); border-radius:9px; background:var(--k-panel); box-shadow:0 14px 30px rgba(0,0,0,.22); }
+.kairema-export-menu-popover button { display:flex; align-items:center; gap:6px; min-height:32px; padding:6px 9px; border:1px solid transparent; border-radius:7px; color:var(--k-text); background:transparent; text-align:left; font-size:12px; font-weight:650; }
+.kairema-export-menu-popover button > svg { flex:0 0 auto; }
+.kairema-export-menu-popover button:hover:not(:disabled),.kairema-export-menu-popover button:focus-visible { border-color:var(--k-line); background:var(--k-panel-2); outline:none; }
+.kairema-export-menu-popover button:disabled { cursor:not-allowed; opacity:.45; }
+.kairema-export-menu-note { margin:2px 4px 1px; color:var(--k-muted); font-size:11px; line-height:1.35; }
+/* The author `display: grid` above outranks the user-agent rule that hides non-summary
+   children of a closed <details>, so the popover stayed painted after React removed the
+   `open` attribute. Higher specificity and later in the file, so it actually wins. */
+
+/* Narrow screens: the title and the segmented control are the two shrinkable parts, so
+   the rows keep their geometry and never overflow sideways. */
+@media(max-width:767px){
+  .kairema-topbar { padding:3px 10px; }
+  .kairema-topbar-left { gap:10px; }
+  .kairema-topbar .kairema-role-menu-trigger { max-width:min(42vw,220px); font-size:15px; }
+  .kairema-header-button { gap:5px; height:32px; padding:0 10px; font-size:12px; }
+  .kairema-topbar-chip > .kairema-header-button { height:32px; padding:0 10px; font-size:12px; }
+  .kairema-mode-bar { gap:6px; padding:0 10px; }
+  .kairema-mode-option { gap:5px; height:23px; min-height:23px; min-width:92px; padding:0 10px; font-size:12px; }
+  .kairema-mode-bar > .kairema-chat-tools-toggle { width:26px; height:26px; min-width:26px; min-height:26px; }
+  .kairema-mode-bar { gap:6px; padding:0 10px 4px; }
+  .kairema-model-pill { gap:8px; height:38px; padding:6px 12px; }
+  .kairema-model-sparkle { width:16px; height:16px; }
+  .kairema-model-chevron { width:14px; height:14px; }
+  .kairema-topbar .kairema-role-menu-trigger { max-width:min(34vw,180px); font-size:14px; }
+}
+/* Below this width the labels stop fitting next to each other, so the outline buttons
+   keep their icon and their accessible name and drop the visible word. */
+@media(max-width:400px){
+  .kairema-topbar-chip .kairema-header-button > span { display:none; }
+  .kairema-header-button,.kairema-topbar-chip > .kairema-header-button { padding:0 9px; }
+  .kairema-mode-option { min-width:84px; padding:0 8px; }
+  .kairema-model-pill { gap:6px; height:36px; padding:6px 10px; }
+  .kairema-topbar .kairema-role-menu-trigger { max-width:min(30vw,140px); font-size:13px; }
+}
+
+/* v7-D: the model dropdown gets the same quick, non-bouncy reveal the Export control
+   already uses. The only animation on the Export control is its caret, which runs
+   `transform .16s ease`, so the panel reuses that exact duration and easing rather than
+   a spring or an overshoot curve. Appearing and disappearing both run it, so the panel
+   never jumps: it starts and ends at the same offset and scale. */
+.kairema-role-menu { opacity:0; transform:translateY(-4px) scale(.98); transform-origin:top right; transition:opacity .16s ease, transform .16s ease; }
+.kairema-role-menu.kairema-role-menu-open { opacity:1; transform:none; }
+.kairema-role-menu.kairema-role-menu-closing { opacity:0; transform:translateY(-4px) scale(.98); }
+@media (prefers-reduced-motion:reduce) { .kairema-role-menu { transition:none; } }
+
+/* v7-E: the model chevron reuses the single arrow that is already in the pill and flips
+   with the same rule the Export caret uses, so the two dropdowns read identically. The
+   rotation is driven by the aria-expanded that the existing open/close path already
+   maintains, which means Escape and picking a model both restore the closed arrow for
+   free, and no second arrow or second state is introduced. */
+.kairema-model-chevron { transition:transform .16s ease; }
+.kairema-select-wrap:has(.kairema-role-menu-trigger[aria-expanded="true"]) + .kairema-model-chevron { transform:rotate(180deg); }
+@media (prefers-reduced-motion:reduce) { .kairema-model-chevron { transition:none; } }
+
+/* v7-G: the controls collapse to the toggle alone, inside the same row. The height of the
+   row shrinks to the toggle because the segment and Export share one horizontal slot that
+   narrows to zero, and the gap closes with it, so no hollow strip is ever left behind.
+   max-width is used rather than a fixed height so nothing hard-codes a size, and no
+   min-height or margin stays reserved while collapsed. `overflow:clip` keeps the content
+   inside the shrinking slot while a generous bottom clip margin still lets the Export
+   popover escape downwards. The row above is a separate element and never animates. */
+/* The trailing `visibility 0s` keeps the row reachable while open. The collapsed rule
+   delays that same step by the length of the transition, so the fade-out is still seen and
+   the clipped controls then leave the tab order and the accessibility tree together,
+   instead of staying focusable while invisible. Expanding restores them immediately. */
+.kairema-panel-collapse { display:flex; flex:0 1 auto; align-items:center; gap:6px; min-width:0; max-width:100%; overflow:clip; overflow-clip-margin:0 0 240px 0; transition:max-width .18s ease, opacity .18s ease, transform .18s ease, visibility 0s linear 0s; }
+.kairema-chat-controls[data-controls-open="false"] .kairema-panel-collapse { max-width:0; opacity:0; transform:translateY(-8px); visibility:hidden; transition:max-width .18s ease, opacity .18s ease, transform .18s ease, visibility 0s linear .18s; }
+.kairema-chat-controls[data-controls-open="false"] .kairema-mode-bar { gap:0; }
+/* Collapsed, the bar holds nothing but the arrow, so the row's own padding and top offset are
+   removed with it: what is left is a single control, not a short row that reserves the space a
+   full set of controls once occupied. The toggle carries its own inset. */
+.kairema-chat-controls[data-controls-open="false"] .kairema-mode-bar { margin-top:0; padding:0; }
+.kairema-chat-sticky:has(.kairema-chat-controls[data-controls-open="false"]) { border-bottom-color:transparent; }
+@media (prefers-reduced-motion:reduce) { .kairema-panel-collapse { transition:none; } .kairema-mode-bar { transition:none; } }
+.kairema-mode-hint { flex:0 1 auto; min-width:0; overflow:hidden; padding-left:6px; color:var(--k-muted); font-size:11px; line-height:1.15; text-overflow:ellipsis; white-space:nowrap; }
+/* Catalog and switch states sit on the same line; the line itself truncates on a phone. */
+.kairema-mode-hint-state { color:var(--k-muted); }
+.kairema-mode-hint .kairema-mode-hint-link { border:0; padding:0; background:transparent; font:inherit; cursor:pointer; }
+
+/* The My API model menu. It is a black panel with its own scroll, portaled to <body> and placed
+   with fixed coordinates, so the header pill keeps the `overflow:hidden` that stops a long
+   binding from widening the bar while this panel still escapes it and can never add horizontal
+   overflow. Free/Paid grouping and the search field are the only additions here: the models
+   themselves always come from the live catalog Kairema already fetched. */
+.kairema-binding-trigger { display:inline-flex; align-items:center; gap:6px; max-width:100%; min-width:0; cursor:pointer; font-family:inherit; background:#111114; }
+.kairema-binding-trigger-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-binding-trigger:disabled { cursor:not-allowed; opacity:.6; }
+.kairema-binding-trigger:hover:not(:disabled),.kairema-binding-trigger[aria-expanded="true"] { border-color:rgba(255,255,255,.22); background:#17171b; }
+.kairema-binding-trigger:focus-visible { border-color:rgba(255,255,255,.45); }
+/* The same arrow and the same rotation the role menu uses, driven by the aria-expanded the
+   open/close path already maintains, so Escape and picking a model restore it for free. */
+.kairema-select-wrap:has(.kairema-binding-trigger[aria-expanded="true"]) .kairema-model-chevron { transform:rotate(180deg); }
+/* The model menu and the provider menu are one shared component, so they follow the same
+   --k-* tokens as the rest of the product. Previously every value here was a literal: the panel
+   was #0a0a0c and the borders were fixed white alphas, which is why the menu stayed dark after
+   the app switched to the light theme. Hairlines are mixed from --k-text instead of a literal
+   white, so dark keeps the same near-white edge and light gets the same edge in near-black. */
+.kairema-model-menu { position:fixed; z-index:60; display:flex; flex-direction:column; min-width:0; max-height:calc(100vh - 32px); box-sizing:border-box; overflow:hidden; border:1px solid color-mix(in srgb, var(--k-text) 14%, transparent); border-radius:12px; background:var(--k-panel); box-shadow:0 24px 60px rgba(0,0,0,.65); }
+.kairema-model-menu-search { display:flex; flex:0 0 auto; align-items:center; gap:7px; padding:9px 10px; border-bottom:1px solid color-mix(in srgb, var(--k-text) 8%, transparent); background:var(--k-bg); }
+.kairema-model-menu-search-icon { flex:0 0 auto; width:14px; height:14px; color:var(--k-muted); }
+.kairema-model-menu-search-input { flex:1 1 auto; min-width:0; padding:6px 8px; border:1px solid color-mix(in srgb, var(--k-text) 10%, transparent); border-radius:8px; outline:none; color:var(--k-text); background:var(--k-panel-2); font-family:inherit; font-size:13px; }
+.kairema-model-menu-search-input::placeholder { color:var(--k-muted); opacity:.8; }
+.kairema-model-menu-search-input:focus { border-color:color-mix(in srgb, var(--k-text) 45%, transparent); }
+/* The list is the only scrolling part: the panel keeps a bounded height, so a long catalog can
+   never stretch the page, and overscroll containment keeps the scroll off the chat behind it. */
+.kairema-model-menu-list { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:6px; }
+.kairema-model-menu-group + .kairema-model-menu-group { margin-top:6px; padding-top:6px; border-top:1px solid color-mix(in srgb, var(--k-text) 7%, transparent); }
+.kairema-model-menu-group-title { padding:5px 8px; color:var(--k-muted); font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+.kairema-model-menu-item { display:flex; width:100%; align-items:center; justify-content:space-between; gap:10px; padding:7px 9px; border:1px solid transparent; border-radius:9px; color:var(--k-text); background:transparent; text-align:left; cursor:pointer; }
+.kairema-model-menu-item:hover,.kairema-model-menu-item:focus-visible { border-color:color-mix(in srgb, var(--k-text) 10%, transparent); background:var(--k-panel-2); outline:none; }
+/* The selected model stays visibly active: a stronger edge, a gray tint, the full-contrast label. */
+.kairema-model-menu-item-active { border-color:color-mix(in srgb, var(--k-text) 22%, transparent); color:var(--k-text); background:color-mix(in srgb, var(--k-text) 10%, transparent); }
+.kairema-model-menu-item-active .kairema-model-menu-item-id { color:var(--k-muted); }
+/* Long catalog ids truncate with an ellipsis inside the panel instead of pushing it wider. */
+.kairema-model-menu-item-copy { display:flex; min-width:0; flex-direction:column; gap:1px; }
+.kairema-model-menu-item-title { min-width:0; overflow:hidden; font-size:13px; font-weight:600; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-model-menu-item-id { min-width:0; overflow:hidden; color:var(--k-muted); font-size:11px; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-model-menu-badge { flex:0 0 auto; padding:2px 7px; border:1px solid color-mix(in srgb, var(--k-text) 24%, transparent); border-radius:999px; color:var(--k-text); background:color-mix(in srgb, var(--k-text) 7%, transparent); font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.kairema-model-menu-empty { margin:0; padding:14px 10px; color:var(--k-muted); font-size:12px; text-align:center; }
+/* The one caret the shared model menu draws. It rotates while the panel is open, so a trigger
+   anywhere in the app shows the same affordance. */
+.kairema-model-menu-caret { flex:0 0 auto; width:12px; height:12px; transition:transform .16s ease; }
+/* The settings page trigger is a field on a form, so it takes the same tokens as every other
+   field there. It was #020617 on #334155, which is what pinned it to dark. */
+.kairema-settings-model-trigger { display:flex; flex:1 1 auto; min-width:0; align-items:center; justify-content:space-between; gap:8px; padding:9px 11px; border:1px solid var(--k-line); border-radius:8px; outline:none; color:var(--k-text); background:var(--k-panel); font:inherit; font-size:14px; text-align:left; cursor:pointer; }
+.kairema-settings-model-trigger:hover:not(:disabled) { border-color:color-mix(in srgb, var(--k-text) 34%, transparent); }
+.kairema-settings-model-trigger:focus-visible { border-color:color-mix(in srgb, var(--k-text) 52%, transparent); box-shadow:0 0 0 3px color-mix(in srgb, var(--k-text) 14%, transparent); }
+.kairema-settings-model-trigger:disabled { cursor:not-allowed; opacity:.6; }
+.kairema-settings-model-trigger-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-settings-model-trigger[aria-expanded="true"] .kairema-model-menu-caret { transform:rotate(180deg); }
+/* The provider trigger lives in the mode row next to the Chat / My API switch, so it is styled
+   as an inline link there rather than as the pill button the model trigger uses. */
+.kairema-provider-trigger { display:inline-flex; max-width:100%; min-width:0; align-items:center; gap:4px; margin:0; padding:0 2px; border:0; border-radius:6px; outline:none; color:var(--k-text); background:transparent; font:inherit; font-weight:600; cursor:pointer; vertical-align:baseline; }
+.kairema-provider-trigger-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-provider-trigger-chevron { flex:0 0 auto; width:12px; height:12px; transition:transform .16s ease; }
+.kairema-provider-trigger[aria-expanded="true"] .kairema-provider-trigger-chevron { transform:rotate(180deg); }
+.kairema-provider-trigger:hover:not(:disabled) { text-decoration:underline; text-underline-offset:2px; }
+.kairema-provider-trigger:focus-visible { outline:2px solid var(--k-text); outline-offset:2px; }
+.kairema-provider-trigger:disabled { cursor:not-allowed; opacity:.6; }
+.kairema-provider-menu { padding:0; }
+.kairema-provider-menu-list { padding:5px; }
+.kairema-provider-menu-item { display:flex; width:100%; align-items:center; gap:8px; padding:8px 9px; border:1px solid transparent; border-radius:9px; color:var(--k-text); background:transparent; text-align:left; cursor:pointer; }
+.kairema-provider-menu-item:hover,.kairema-provider-menu-item:focus-visible { border-color:color-mix(in srgb, var(--k-text) 10%, transparent); background:var(--k-panel-2); outline:none; }
+.kairema-provider-menu-item.kairema-model-menu-item-active { border-color:color-mix(in srgb, var(--k-text) 22%, transparent); color:var(--k-text); background:color-mix(in srgb, var(--k-text) 10%, transparent); }
+.kairema-provider-menu-check { display:grid; flex:0 0 auto; width:14px; height:14px; place-items:center; color:var(--k-text); }
+.kairema-provider-menu-check svg { width:14px; height:14px; }
+.kairema-provider-menu-name { flex:1 1 auto; min-width:0; overflow:hidden; font-size:13px; font-weight:600; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-provider-menu-status { flex:0 0 auto; color:var(--k-muted); font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
+@media (max-width:430px) { .kairema-model-menu-search-input,.kairema-model-menu-item-title { font-size:12px; } .kairema-model-menu-item { padding:6px 8px; } }
+
+/* The notice under a question that got no answer. It sits with the question, not in a modal or a
+   toast, so the text it refers to is still on screen and still selectable while it is read. */
+.kairema-message-failed-notice { display:flex; flex-direction:column; gap:2px; max-width:min(86%,420px); margin-top:6px; padding:6px 9px; border:1px solid var(--k-line); border-left:2px solid var(--k-muted); border-radius:8px; background:var(--k-panel-2); text-align:left; }
+.kairema-message-failed-reason { margin:0; color:var(--k-text); font-size:12px; font-weight:600; line-height:1.35; }
+.kairema-message-failed-detail { margin:0; color:var(--k-muted); font-size:11px; line-height:1.35; }
+
+/* ── AI Providers page (/settings/providers) ────────────────────────────────────────────────
+   This page was the one screen that never joined the --k-* system: every surface, field and
+   border was a literal Tailwind dark utility (bg-slate-950, bg-slate-900/60, border-slate-700,
+   text-slate-200) with no dark: counterpart, so the .dark class the theme toggle puts on <html>
+   had nothing to switch and the page stayed dark-blue-black in light mode.
+
+   Rather than add a second theme system, these classes read the same --k-* tokens the rest of
+   the product uses, so the toggle is inherited for free. Dark keeps its current values: the
+   light and dark token sets below are chosen so the page reads the same near-black in dark as
+   the literals did. Notice colours stay semantic (amber/rose/green) and only their contrast
+   steps are theme-aware, because a status colour is carrying meaning, not decoration. */
+.kairema-providers-page { min-height:100vh; min-height:100dvh; padding:20px 16px; background:var(--k-bg); color:var(--k-text); }
+@media (min-width:640px) { .kairema-providers-page { padding-left:24px; padding-right:24px; } }
+.kairema-providers-card { border:1px solid var(--k-line); border-radius:16px; background:var(--k-panel); }
+.kairema-providers-card-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px; }
+.kairema-providers-card-body { display:grid; gap:12px; padding:12px; border-top:1px solid var(--k-line); }
+.kairema-providers-title { min-width:0; overflow:hidden; color:var(--k-text); font-size:14px; font-weight:500; }
+.kairema-providers-sub { min-width:0; overflow:hidden; color:var(--k-muted); font-size:12px; }
+.kairema-providers-sub-strong { color:var(--k-text); }
+.kairema-providers-badge { flex:0 0 auto; padding:2px 8px; border:1px solid var(--k-line); border-radius:999px; background:var(--k-panel-2); color:var(--k-text); font-size:11px; font-weight:600; }
+.kairema-providers-label { color:var(--k-muted); font-size:12px; font-weight:500; letter-spacing:.04em; text-transform:uppercase; }
+.kairema-providers-hint { color:var(--k-muted); font-size:12px; }
+.kairema-providers-error { color:var(--k-danger-text); font-size:12px; }
+/* Fields, buttons and the one primary action all read the same tokens, so a single toggle
+   repaints the whole form. */
+.kairema-providers-field { border:1px solid var(--k-line); border-radius:8px; background:var(--k-panel); color:var(--k-text); outline:none; }
+.kairema-providers-field::placeholder { color:var(--k-muted); opacity:.75; }
+.kairema-providers-field:focus { border-color:color-mix(in srgb, var(--k-text) 55%, transparent); }
+.kairema-providers-btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; border:1px solid var(--k-line); border-radius:8px; background:var(--k-panel); color:var(--k-text); transition:background .15s ease,border-color .15s ease; }
+.kairema-providers-btn:hover:not(:disabled) { background:var(--k-panel-2); }
+.kairema-providers-btn:disabled { opacity:.4; }
+/* The single filled action. Inverts through --k-strong/--k-invert so it stays the highest
+   contrast element on the page in either theme without introducing an accent hue. */
+.kairema-providers-btn-primary { display:inline-flex; align-items:center; justify-content:center; gap:6px; border:1px solid var(--k-strong); border-radius:8px; background:var(--k-strong); color:var(--k-invert); font-weight:500; transition:opacity .15s ease; }
+.kairema-providers-btn-primary:hover:not(:disabled) { opacity:.86; }
+.kairema-providers-btn-primary:disabled { opacity:.4; }
+.kairema-providers-btn-danger { color:var(--k-danger); }
+.kairema-providers-btn-danger:hover:not(:disabled) { background:var(--k-danger-soft); }
+.kairema-providers-icon-btn { display:inline-flex; align-items:center; justify-content:center; border:0; border-radius:8px; background:transparent; color:var(--k-muted); transition:color .15s ease,background .15s ease; }
+.kairema-providers-icon-btn:hover:not(:disabled) { color:var(--k-text); background:var(--k-panel-2); }
+/* The key field is a bordered row with a bare input inside it, so the input itself must not
+   paint a second border of its own. */
+.kairema-providers-keyfield { display:flex; align-items:center; gap:8px; border:1px solid var(--k-line); border-radius:8px; background:var(--k-panel); padding:0 12px; }
+.kairema-providers-keyfield:focus-within { border-color:color-mix(in srgb, var(--k-text) 55%, transparent); }
+.kairema-providers-keyfield-icon { flex:0 0 auto; color:var(--k-muted); }
+.kairema-providers-keyfield-input { min-width:0; flex:1; border:0; background:transparent; color:var(--k-text); outline:none; }
+.kairema-providers-keyfield-input::placeholder { color:var(--k-muted); opacity:.75; }
+.kairema-providers-list { display:grid; gap:8px; margin:0; padding:0; list-style:none; }
+.kairema-providers-row { display:flex; align-items:center; gap:8px; border-radius:8px; background:var(--k-panel-2); }
+.kairema-providers-notice { display:flex; align-items:flex-start; gap:8px; margin-bottom:12px; padding:12px; border:1px solid; border-radius:12px; font-size:14px; }
+.kairema-providers-notice-warn { border-color:color-mix(in srgb, var(--k-warn) 45%, transparent); background:color-mix(in srgb, var(--k-warn) 10%, transparent); color:var(--k-warn-text); }
+.kairema-providers-notice-ok { border-color:color-mix(in srgb, var(--k-ok) 45%, transparent); background:color-mix(in srgb, var(--k-ok) 10%, transparent); color:var(--k-ok-text); }
+.kairema-providers-notice-error { border-color:color-mix(in srgb, var(--k-danger) 45%, transparent); background:color-mix(in srgb, var(--k-danger) 10%, transparent); color:var(--k-danger-text); }
+
+/* Provider-unavailable notice. Compact and non-blocking: it overlays the conversation near the
+   vertical centre and never covers the page, so the composer, sidebar and history stay usable
+   while a fallback runs or after the turn has stopped. `width:max-content` with a capped
+   `max-width` is what keeps the long Russian sentence from stretching across a wide monitor, and
+   the same max-width stops it overflowing a ~430px phone. */
+.kairema-provider-notice { position:fixed; top:62%; left:50%; transform:translate(-50%,-50%); z-index:60; display:flex; align-items:flex-start; gap:10px; width:max-content; max-width:min(440px,calc(100vw - 32px)); padding:12px 14px; border:1px solid color-mix(in srgb, var(--k-warn) 45%, transparent); border-radius:12px; background:var(--k-panel); color:var(--k-warn-text); box-shadow:0 8px 24px color-mix(in srgb, var(--k-text) 12%, transparent); }
+.kairema-provider-notice-icon { flex:0 0 auto; width:16px; height:16px; margin-top:1px; color:var(--k-warn); }
+.kairema-provider-notice-body { min-width:0; }
+.kairema-provider-notice-text { margin:0; font-size:13px; font-weight:700; line-height:1.45; overflow-wrap:anywhere; }
+.kairema-provider-notice-reason { margin:4px 0 0; color:var(--k-muted); font-size:12px; line-height:1.45; overflow-wrap:anywhere; }
+@media (max-width:520px) { .kairema-provider-notice { top:60%; max-width:calc(100vw - 24px); padding:10px 12px; border-radius:11px; } .kairema-provider-notice-text { font-size:12.5px; } .kairema-provider-notice-reason { font-size:11.5px; } }
+
+/* Direct browser-connection panel on the providers page. Uses the same tokens as the rest of the
+   page so the theme toggle repaints it; the reserved warn/danger hues are not involved here. */
+.kairema-providers-direct { display:grid; gap:10px; margin-bottom:18px; padding:14px; border:1px solid var(--k-line); border-radius:12px; background:var(--k-panel-2); }
+.kairema-providers-direct-row { padding:10px; }
+.kairema-providers-direct-main { display:grid; gap:8px; }
+.kairema-providers-direct .kairema-providers-h { margin:0; font-size:14px; }
+.kairema-providers-btn-quiet { display:inline-flex; align-items:center; justify-content:center; padding:6px; }
+.kairema-providers-btn-quiet svg { width:15px; height:15px; }
+
+/* The blocked Send button is aria-disabled rather than natively disabled, so a press still reaches
+   the handler and can re-state the reason. It must still read as unavailable, which is what the
+   reserved muted tone is for. */
+.kairema-send[aria-disabled="true"] { cursor:not-allowed; opacity:.45; }
