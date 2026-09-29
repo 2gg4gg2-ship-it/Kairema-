@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, deleteOwnedFailedUserMessage, deleteUserProviderConfig, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserProviderConfig, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, listUserProviderConfigs, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, setActiveUserProvider, setUserProviderActiveModel, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserName, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag, upsertUserProviderConfig } from "./db";
+import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, deleteOwnedFailedUserMessage, deleteUserProviderConfig, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserProviderConfig, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, listUserProviderConfigs, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, setActiveUserProvider, setUserProviderActiveModel, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserName, updateUserProfileDetails, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag, upsertUserProviderConfig } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { clearStytchLinkIntentCookie, clearStytchOtpEmailIdCookie, clearStytchPasswordRecoveryEmailCookie, clearStytchPasswordSessionCookie, clearStytchResetCookie, clearStytchSessionCookie, getSafeStytchDeliveryFailure, getStytchCallbackUrl, getStytchClient, getStytchOtpEmailId, getStytchPasswordRecoveryEmail, getStytchPasswordSessionToken, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, logSafeStytchDiagnostic, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchOtpEmailIdCookie, setStytchPasswordRecoveryEmailCookie, setStytchPasswordSessionCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
 import Stytch, { StytchError } from "stytch";
@@ -252,6 +252,23 @@ export const appRouter = router({
         // Scoped to the caller's own row only; a client-supplied userId is never accepted.
         await updateUserName(ctx.user.id, input.name || null);
         return { name: input.name || null };
+      }),
+    /**
+     * The address form and the personal preferences. Separate from `updateName` on purpose: the
+     * full name and the form of address are two different answers to two different questions, and
+     * one save must never overwrite the other. Scoped to the caller's own row; a client-supplied
+     * userId is never accepted, and neither value is ever read back into a prompt.
+     */
+    updateProfileDetails: protectedProcedure
+      .input(z.object({
+        preferredName: z.string().trim().max(120).optional(),
+        personalPreferences: z.string().trim().max(4000).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const preferredName = input.preferredName === undefined ? undefined : input.preferredName || null;
+        const personalPreferences = input.personalPreferences === undefined ? undefined : input.personalPreferences || null;
+        await updateUserProfileDetails(ctx.user.id, { preferredName, personalPreferences });
+        return { preferredName: preferredName ?? null, personalPreferences: personalPreferences ?? null };
       }),
     logout: publicProcedure.mutation(async ({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);

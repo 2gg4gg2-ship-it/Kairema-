@@ -4,6 +4,14 @@ export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
+  /**
+   * How the user wants to be addressed, kept apart from the legal-ish `name`. Distinct values, so
+   * a user can have a full name on their account and a short form for greetings without either
+   * overwriting the other. Never reaches a prompt or a chat request.
+   */
+  preferredName: text("preferredName"),
+  /** Free-text personal preferences, shown back in the profile and stored on the row. */
+  personalPreferences: text("personalPreferences"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),

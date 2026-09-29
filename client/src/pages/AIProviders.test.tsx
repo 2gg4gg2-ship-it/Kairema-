@@ -963,7 +963,9 @@ describe("the providers page follows the theme", () => {
       [".kairema-providers-card {", "var(--k-panel)"],
       [".kairema-providers-field {", "var(--k-line)"],
       [".kairema-providers-keyfield {", "var(--k-panel)"],
-      [".kairema-providers-btn-primary {", "var(--k-strong)"],
+      // --k-text, not --k-strong: --k-invert is only a correct foreground on a --k-text
+      // background, and the primary button is the one that has to read as active in both themes.
+      [".kairema-providers-btn-primary {", "var(--k-text)"],
       [".kairema-providers-hint {", "var(--k-muted)"],
     ] as const) {
       expect(ruleFor(selector), `${selector} is not themed`).toContain(token);
@@ -988,5 +990,63 @@ describe("the providers page follows the theme", () => {
     const main = await screen.findByRole("main");
     expect(main.className).toContain("kairema-providers-page");
     expect(main.className).not.toMatch(/slate-/);
+  });
+});
+
+/**
+ * The key is memory-only by architecture, so the UI must not offer a control that implies a
+ * persistence mode that does not exist, and must not offer a way to read the secret back.
+ */
+describe("the API key field", () => {
+  it("renders every key input as a password field with no reveal control", async () => {
+    render(<Harness />);
+    await screen.findByRole("main");
+    const passwords = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="password"]'));
+    expect(passwords.length).toBeGreaterThan(0);
+    // Nothing on the page offers to read a key back, and there is no eye button anywhere.
+    expect(screen.queryByRole("button", { name: /Показать ключ|Скрыть ключ/ })).toBeNull();
+    expect(document.body.textContent ?? "").not.toMatch(/Показать ключ|Скрыть ключ/);
+  });
+
+  it("keeps a typed key in the tab only, and never in storage", async () => {
+    render(<Harness />);
+    await screen.findByRole("main");
+    const input = document.querySelector<HTMLInputElement>('input[type="password"]')!;
+    await userEvent.type(input, "sk-test-key-value");
+    expect(input.value).toBe("sk-test-key-value");
+    // The architecture is memory-only by design: no persistence layer is introduced by the field.
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+    expect(document.cookie).not.toContain("sk-test-key-value");
+  });
+});
+
+/**
+ * The reveal control is gone, but the connect flow it sat next to is untouched: a typed key is
+ * still installed into the tab's memory-only store and the field still clears afterwards.
+ */
+describe("the direct key still installs memory-only", () => {
+  it("stores the typed key in the tab, clears the field, and persists nothing", async () => {
+    render(<Harness />);
+    await screen.findByRole("main");
+
+    const action = screen.getByRole("button", { name: "Использовать ключ в этой вкладке" });
+    const input = document.querySelector<HTMLInputElement>('input[type="password"]')!;
+
+    // Empty input means the action stays unavailable, so this is a real disabled-to-enabled check.
+    expect((action as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.type(input, "sk-direct-key-value");
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
+
+    await userEvent.click(action);
+
+    // Stored: a "forget" control appears, which only exists once a key is held for this provider.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Забыть ключ" })).toBeTruthy());
+    // Cleared: the secret is not left sitting in the DOM after it has been handed over.
+    await waitFor(() => expect((document.querySelector('input[type="password"]') as HTMLInputElement).value).toBe(""));
+    // Memory-only: nothing reached any persistence layer.
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+    expect(document.cookie).not.toContain("sk-direct-key-value");
   });
 });

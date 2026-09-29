@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, CheckCircle2, Eye, EyeOff, KeyRound, Plug, Plus, Power, RefreshCw, TriangleAlert, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, KeyRound, Plug, Plus, Power, RefreshCw, TriangleAlert, XCircle } from "lucide-react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { ModelMenu, MODEL_MENU_LABELS } from "@/components/ModelMenu";
@@ -97,8 +97,14 @@ function ProviderCard({ title, subtitle, connected, active, expanded, busy, disa
   );
 }
 
-/** Password-style key input with a reveal toggle; the value never leaves this component. */
-function KeyField({ label, fieldLabel, value, visible, onVisibleChange, onChange, placeholder }: { label: string; fieldLabel: string; value: string; visible: boolean; onVisibleChange: (value: boolean) => void; onChange: (value: string) => void; placeholder: string }) {
+/**
+ * Password-style key input; the value never leaves this component.
+ *
+ * There is deliberately no reveal toggle. The field is a password input from the moment it is
+ * rendered and the key is cleared after a successful connect, so a show/hide control would only
+ * offer a second way to read back a secret that is never meant to be read back.
+ */
+function KeyField({ label, fieldLabel, value, onChange, placeholder }: { label: string; fieldLabel: string; value: string; onChange: (value: string) => void; placeholder: string }) {
   return (
     <label className="grid gap-1">
       <span className="kairema-providers-label">{label}</span>
@@ -106,7 +112,7 @@ function KeyField({ label, fieldLabel, value, visible, onVisibleChange, onChange
         <KeyRound className="kairema-providers-keyfield-icon size-4 shrink-0" />
         <input
           className="kairema-providers-keyfield-input py-2 text-sm"
-          type={visible ? "text" : "password"}
+          type="password"
           value={value}
           onChange={(event) => onChange(event.target.value)}
           placeholder={placeholder}
@@ -114,9 +120,6 @@ function KeyField({ label, fieldLabel, value, visible, onVisibleChange, onChange
           spellCheck={false}
           aria-label={fieldLabel}
         />
-        <button type="button" className="kairema-providers-icon-btn size-8 shrink-0" onClick={() => onVisibleChange(!visible)} aria-label={visible ? "Скрыть ключ" : "Показать ключ"}>
-          {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-        </button>
       </span>
     </label>
   );
@@ -174,21 +177,18 @@ export default function AIProviders() {
   const utils = trpc.useUtils();
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
-  const [keyVisible, setKeyVisible] = useState(false);
   const [modelId, setModelId] = useState("");
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [customDraft, setCustomDraft] = useState<CustomDraft | null>(null);
   // Typed-but-unsaved direct keys. Held in component state so the value never outlives the form
   // and never reaches any persistence layer; only the button below puts one in the memory store.
   const [directKeys, setDirectKeys] = useState<Record<string, string>>({});
-  const [directKeyVisible, setDirectKeyVisible] = useState<string | null>(null);
   const directKeyPresent = (providerId: string) => hasDirectKey(providerId);
   const storeDirectKey = (providerId: string, value: string) => {
     // Storing a key is itself a recovery action: the user has just supplied a credential, so any
     // "no provider can answer" state from before is stale.
     setDirectKey(providerId, value.trim());
     setDirectKeys((current) => ({ ...current, [providerId]: "" }));
-    setDirectKeyVisible(null);
   };
   const forgetDirectKey = (providerId: string) => {
     clearDirectKey(providerId);
@@ -244,7 +244,6 @@ export default function AIProviders() {
   // shown next to another provider's key.
   useEffect(() => {
     setApiKey("");
-    setKeyVisible(false);
     // An already connected provider reopens on the model it already uses; a new one starts empty
     // so the first model the catalog returns is preselected.
     setModelId(selectedConfig?.activeModel ?? "");
@@ -307,8 +306,7 @@ export default function AIProviders() {
       // The key is dropped from component state as soon as the server has it; the page then
       // shows only the masked suffix it received back.
       setApiKey("");
-      setKeyVisible(false);
-      await utils.userProviders.list.invalidate();
+        await utils.userProviders.list.invalidate();
       setNotice({ tone: "ok", text: "Провайдер сохранён и назначен активным для режима «Мой API»." });
     } catch (error) {
       setNotice({ tone: "error", text: errorText(error, "Не удалось сохранить провайдера.") });
@@ -469,20 +467,13 @@ export default function AIProviders() {
                       <input
                         id={`direct-key-${entry.id}`}
                         className="kairema-providers-keyfield-input"
-                        type={directKeyVisible === entry.id ? "text" : "password"}
+                        type="password"
                         autoComplete="off"
                         spellCheck={false}
                         placeholder={present ? "Ключ сохранён в памяти вкладки" : "Вставьте API-ключ"}
                         value={directKeys[entry.id] ?? ""}
                         onChange={(event) => setDirectKeys((current) => ({ ...current, [entry.id]: event.target.value }))}
                       />
-                      <button
-                        type="button"
-                        className="kairema-providers-btn kairema-providers-btn-quiet"
-                        onClick={() => setDirectKeyVisible((current) => (current === entry.id ? null : entry.id))}
-                      >
-                        {directKeyVisible === entry.id ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
-                      </button>
                     </div>
                     <div className="kairema-providers-actions">
                       <button
@@ -491,7 +482,7 @@ export default function AIProviders() {
                         disabled={(directKeys[entry.id] ?? "").trim().length < 8}
                         onClick={() => storeDirectKey(entry.id, directKeys[entry.id] ?? "")}
                       >
-                        Держать ключ в браузере
+                        Использовать ключ в этой вкладке
                       </button>
                       {present && (
                         <button
@@ -536,8 +527,6 @@ export default function AIProviders() {
                 label="API key"
                 fieldLabel="API key (OpenRouter)"
                 value={apiKey}
-                visible={keyVisible}
-                onVisibleChange={setKeyVisible}
                 onChange={setApiKey}
                 placeholder={openrouterConfig ? `Сохранённый ключ ${openrouterConfig.keyHint} — введите, чтобы заменить` : "Вставьте API-ключ OpenRouter"}
               />
@@ -647,8 +636,6 @@ export default function AIProviders() {
                   label="API key"
                   fieldLabel="API key (Custom provider)"
                   value={customDraft.apiKey}
-                  visible={keyVisible}
-                  onVisibleChange={setKeyVisible}
                   onChange={(value) => patchCustomDraft({ apiKey: value })}
                   placeholder={customDraft.provider ? "Введите, чтобы заменить сохранённый ключ" : "Вставьте API-ключ провайдера"}
                 />
