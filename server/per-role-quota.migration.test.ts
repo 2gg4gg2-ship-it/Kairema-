@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { ROLE_IDS } from "./providers";
 
 const root = path.resolve(import.meta.dirname, "..");
-const migration = readFileSync(path.join(root, "drizzle/0050_chat_stream_rate_windows_role.sql"), "utf8");
+const migration = readFileSync(path.join(root, "drizzle/0050_per_role_chat_rate_windows.sql"), "utf8");
 const journal = JSON.parse(readFileSync(path.join(root, "drizzle/meta/_journal.json"), "utf8")) as { entries: Array<{ idx: number; tag: string }> };
 const schemaSource = readFileSync(path.join(root, "drizzle/schema.ts"), "utf8");
 
@@ -16,8 +16,8 @@ function sqlBody() {
 
 describe("migration 0050 registration", () => {
   it("is the next index after 0049 and reuses no index", () => {
-    const entry = journal.entries.find((item) => item.tag === "0050_chat_stream_rate_windows_role");
-    expect(entry?.tag).toBe("0050_chat_stream_rate_windows_role");
+    const entry = journal.entries.find((item) => item.tag === "0050_per_role_chat_rate_windows");
+    expect(entry?.tag).toBe("0050_per_role_chat_rate_windows");
     expect(entry?.idx).toBe(50);
     expect(journal.entries.find((item) => item.tag === "0049_user_profile_details")!.idx).toBe(49);
     expect(journal.entries.filter((item) => item.idx === 50)).toHaveLength(1);

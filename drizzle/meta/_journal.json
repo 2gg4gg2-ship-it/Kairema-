@@ -356,7 +356,7 @@
       "idx": 50,
       "version": "7",
       "when": 1791000000000,
-      "tag": "0050_chat_stream_rate_windows_role",
+      "tag": "0050_per_role_chat_rate_windows",
       "breakpoints": true
     }
   ]
