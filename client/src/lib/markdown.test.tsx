@@ -217,16 +217,118 @@ describe("InlineMarkdown — streaming and safety", () => {
     expect(image?.getAttribute("onerror")).toBeFalsy();
   });
 
-  // NOTE: raw `<script>` in model output is NOT neutralised. Streamdown runs `rehype-raw`, which
-  // parses raw HTML into real nodes and therefore defeats the `skipHtml` prop the component passes;
-  // `rehype-harden` does not remove script elements. This is pre-existing and is called out in
-  // markdown.tsx rather than asserted here, so the gap stays visible instead of being locked in by
-  // a passing test. See the note above InteractiveGfmTable.
   it("neutralises a javascript: link", () => {
     const container = renderMarkdown("[click](javascript:alert(1))");
     const href = container.querySelector("a")?.getAttribute("href") ?? "";
 
     expect(href).not.toContain("javascript:");
+  });
+});
+
+/**
+ * Raw HTML in model output.
+ *
+ * Streamdown runs `rehype-raw`, which re-parses raw HTML back into real nodes *before* the
+ * `skipHtml` prop can apply, and `rehype-harden` (which runs first, on the still-unparsed node)
+ * does not remove scripts. Left alone, a raw `<script>` in an answer reached the document. The
+ * component now drops those tags via `components`, and these tests pin that down.
+ */
+describe("InlineMarkdown — raw HTML is not rendered", () => {
+  it("does not render a script element or its body", () => {
+    const container = renderMarkdown('<script>alert("xss")</script>');
+
+    expect(container.querySelector("script")).toBeNull();
+    expect(container.innerHTML).not.toContain("alert(");
+  });
+
+  it("does not render a style element or its body", () => {
+    const container = renderMarkdown("<style>body{display:none}</style>");
+
+    expect(container.querySelector("style")).toBeNull();
+    expect(container.innerHTML).not.toContain("display:none");
+  });
+
+  it("drops script markup that is embedded inside other raw HTML", () => {
+    const container = renderMarkdown('<div><script>alert(1)</script>text</div>');
+    const div = container.querySelector("div div");
+
+    expect(container.querySelector("script")).toBeNull();
+    // The surrounding element is ordinary raw HTML and is still rendered; only the script is gone.
+    expect(div?.textContent).toBe("text");
+  });
+
+  it("does not render framing, plugin or form elements", () => {
+    const container = renderMarkdown(
+      [
+        '<iframe src="https://evil.example"></iframe>',
+        '<object data="x.swf"></object>',
+        '<embed src="x.swf">',
+        '<form action="https://evil.example"><input name="pin"></form>',
+        '<link rel="stylesheet" href="https://evil.example/x.css">',
+        '<meta http-equiv="refresh" content="0;url=https://evil.example">',
+        '<base href="https://evil.example/">',
+      ].join("\n\n"),
+    );
+
+    for (const tag of ["iframe", "object", "embed", "form", "input", "link", "meta", "base"]) {
+      expect(container.querySelector(tag), `<${tag}> should not be rendered`).toBeNull();
+    }
+  });
+
+  it("does not attach inline event handlers to rendered raw HTML", () => {
+    const container = renderMarkdown('<div onclick="alert(1)">click</div>\n\n<b onmouseover="alert(2)">bold</b>');
+
+    // The elements are harmless text; what must not survive is the handler.
+    for (const element of Array.from(container.querySelectorAll("div, b"))) {
+      for (const attribute of Array.from(element.attributes)) {
+        expect(attribute.name.toLowerCase()).not.toMatch(/^on/);
+      }
+    }
+    expect(container.innerHTML).not.toContain("alert(");
+  });
+
+  it("keeps ordinary markdown that sits next to blocked raw HTML", () => {
+    const container = renderMarkdown('<script>alert(1)</script>\n\n# Заголовок\n\n**жирный** текст');
+
+    expect(container.querySelector("h1")?.textContent).toBe("Заголовок");
+    expect(container.querySelector("[data-streamdown='strong']")?.textContent).toBe("жирный");
+  });
+
+  it("keeps a GFM table working when raw HTML is present in the same answer", () => {
+    const container = renderMarkdown('<style>p{color:red}</style>\n\n| A | B |\n|---|---|\n| 1 | 2 |');
+
+    expect(container.querySelector("style")).toBeNull();
+    expect(container.querySelector("table")).not.toBeNull();
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(1);
+  });
+
+  it("still renders KaTeX, which the hardening must not disable", () => {
+    // Streamdown's default plugin list includes rehype-katex, and `$$...$$` is the form it renders
+    // (its `singleDollarTextMath` option is off). The fix works through `components` precisely so
+    // that the default plugin list — and therefore KaTeX — is left intact.
+    const container = renderMarkdown("Значение $$\\frac{a}{b}$$ верно");
+
+    expect(container.querySelector(".katex")).not.toBeNull();
+    expect(container.querySelector("math")).not.toBeNull();
+  });
+
+  it("keeps links, images and inline code working", () => {
+    const container = renderMarkdown("[docs](https://example.com) and `code`");
+
+    const link = container.querySelector("a");
+    expect(link?.getAttribute("href")).toContain("example.com");
+    expect(link?.getAttribute("rel")).toContain("noopener");
+    expect(container.querySelector("[data-streamdown='inline-code']")?.textContent).toBe("code");
+  });
+
+  it("keeps rendering an answer that streams in while still blocked", () => {
+    // `parseIncompleteMarkdown` sees a half-arrived answer; a tag split across chunks must not
+    // break the rest of the document.
+    const container = renderMarkdown("# Итог\n\n- пункт оди\n\n<scr");
+
+    expect(container.querySelector("h1")?.textContent).toBe("Итог");
+    expect(container.querySelectorAll("li")).toHaveLength(1);
+    expect(container.querySelector("script")).toBeNull();
   });
 });
 

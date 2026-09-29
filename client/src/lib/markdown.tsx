@@ -49,14 +49,44 @@ function InteractiveGfmTable({ children, language, node: _parserNode, ...props }
 }
 
 /**
+ * Tags that must never be produced from model output.
+ *
+ * The list is about what a tag can *do*, not about how it is spelled: `script` executes, `style`
+ * and `link` inject CSS from the network, `meta` can redirect the page, `base` rewrites every
+ * relative URL, and `iframe`/`object`/`embed`/`form` frame or phish. `noscript` and `template` are
+ * inert but are classic parser-confusion tricks and cost nothing to drop.
+ *
+ * `svg` is deliberately absent: Streamdown draws its own image-download button with a Lucide
+ * `<svg>`, so nulling the tag would remove a working control. An `<svg>` cannot execute anything
+ * on its own, and a `<script>` nested inside one is already removed by the `script` entry.
+ *
+ * `a` is deliberately absent too — links are a supported feature, and their `javascript:` scheme
+ * is handled upstream by Streamdown's `rehype-harden` rather than here.
+ */
+const UNSAFE_RAW_TAGS = ["script", "style", "iframe", "object", "embed", "form", "link", "meta", "base", "noscript", "template"] as const;
+
+/** Renders nothing, so the tag never reaches the document. */
+function dropRawHtmlNode() {
+  return null;
+}
+
+const droppedRawTags = Object.fromEntries(UNSAFE_RAW_TAGS.map((tag) => [tag, dropRawHtmlNode]));
+
+/**
  * Safely renders streamed model output as GFM Markdown.
  *
- * `skipHtml` is passed and `javascript:` URLs are dropped by Streamdown's `rehype-harden`, but the
- * `skipHtml` prop alone does not neutralise raw HTML: Streamdown always runs `rehype-raw`, which
- * re-parses raw HTML into real nodes before that prop can apply, and `rehype-harden` does not
- * remove `<script>`. A raw `<script>` in model output therefore reaches the DOM. Overriding
- * `rehypePlugins` to strip it would also replace Streamdown's default plugin list and silently
- * disable KaTeX, so that trade-off is left to be made deliberately rather than absorbed here.
+ * `skipHtml` is passed, but on its own it does not neutralise raw HTML: Streamdown always runs
+ * `rehype-raw`, which re-parses raw HTML back into real nodes before `skipHtml` can apply, and
+ * `rehype-harden` does not remove `<script>`. `UNSAFE_RAW_TAGS` closes that gap by making those
+ * tags render nothing.
+ *
+ * It is done through `components` rather than `rehypePlugins` on purpose. The `rehypePlugins` prop
+ * *replaces* Streamdown's default plugin list (`{harden, raw, katex}`) instead of appending to it —
+ * verified against the installed version — and the rehype packages are not resolvable from this
+ * project under pnpm's strict layout, so rebuilding that list by hand would mean pinning duplicate
+ * copies of `rehype-harden` and `rehype-katex` and re-deriving their options from a minified
+ * bundle. Overriding `components` instead is additive: `rehype-harden` keeps blocking `javascript:`
+ * URLs and KaTeX keeps rendering, and the only rendering it removes is the unsafe markup itself.
  *
  * Visual styling lives in `.kairema-gfm` in client/src/index.css, not in this component: Streamdown
  * ships its styles as Tailwind class names and exports no stylesheet of its own.
@@ -76,6 +106,7 @@ export function InlineMarkdown({ text, language = "ru" }: { text: string; langua
       parseIncompleteMarkdown
       skipHtml
       components={{
+        ...droppedRawTags,
         table: ({ children, ...props }: GfmTableProps) => <InteractiveGfmTable language={language} {...props}>{children}</InteractiveGfmTable>,
       }}
     >
