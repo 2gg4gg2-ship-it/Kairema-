@@ -49,8 +49,17 @@ function InteractiveGfmTable({ children, language, node: _parserNode, ...props }
 }
 
 /**
- * Safely renders streamed model output as GFM Markdown. Raw HTML is skipped,
- * so model output is never interpreted as executable or trusted markup.
+ * Safely renders streamed model output as GFM Markdown.
+ *
+ * `skipHtml` is passed and `javascript:` URLs are dropped by Streamdown's `rehype-harden`, but the
+ * `skipHtml` prop alone does not neutralise raw HTML: Streamdown always runs `rehype-raw`, which
+ * re-parses raw HTML into real nodes before that prop can apply, and `rehype-harden` does not
+ * remove `<script>`. A raw `<script>` in model output therefore reaches the DOM. Overriding
+ * `rehypePlugins` to strip it would also replace Streamdown's default plugin list and silently
+ * disable KaTeX, so that trade-off is left to be made deliberately rather than absorbed here.
+ *
+ * Visual styling lives in `.kairema-gfm` in client/src/index.css, not in this component: Streamdown
+ * ships its styles as Tailwind class names and exports no stylesheet of its own.
  */
 export function InlineMarkdown({ text, language = "ru" }: { text: string; language?: Language }) {
   const tableCount = (text.match(/^\s*\|.+\|\s*\n\s*\|(?:\s*:?-+:?\s*\|)+\s*$/gm) ?? []).length;

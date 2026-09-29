@@ -228,8 +228,22 @@
   }
 }
 
-/* Kairema visual system */
-:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+/* Kairema visual system
+
+   The UI face is a native system stack. `Inter` used to lead this list, but the project ships no
+   @font-face and loads no font CDN, so it never resolved on any platform and every reader silently
+   fell through to `system-ui` anyway — a dead name in front of the real font. Removing it changes
+   no rendering and makes the stack say what it actually uses.
+
+   Code gets its own stack because a code block that inherits the UI face stops reading as code;
+   the monospace face is also what makes an inline `code` distinguishable from the paragraph
+   around it. */
+:root {
+  color-scheme: dark;
+  --k-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
+  --k-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-family: var(--k-font-sans);
+}
 body { margin: 0; min-width: 320px; background: #070912; color: #e8edf8; }
 /* The app is a fixed-height shell: the chat column is height-bounded, so the message
    list is the only scrollport and sticky chat controls resolve against it. Without a
@@ -283,18 +297,152 @@ body { margin: 0; min-width: 320px; background: #070912; color: #e8edf8; }
 .kairema-chat-tools-toggle { width:22px; height:22px; padding:0; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; border:1px solid var(--k-line); background:var(--k-panel-2); color:var(--k-text); border-radius:6px; cursor:pointer; }
 .kairema-chat-tools-toggle:hover { background:var(--k-panel); }
 .kairema-chat-tools-label > svg { flex:0 0 auto; }
-.kairema-table-scroll { max-width:100%; margin:12px 0; overflow-x:auto; border:1px solid rgba(255,255,255,.10); border-radius:10px; background:rgba(7,9,18,.48); }
-.kairema-table-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:max-content; padding:7px 9px; border-bottom:1px solid rgba(255,255,255,.08); color:#98a4b8; background:rgba(255,255,255,.025); font-size:11px; }
+/* GFM tables inside an AI answer.
+
+   The scroll container is the containment strategy and is load-bearing: a table wider than the
+   bubble scrolls inside this box rather than widening the message, the chat column or the page.
+   `width:max-content` on the table lets narrow tables stay narrow while wide ones overflow into
+   the scroller, which is why both are needed. Nothing here sets `text-align` on a cell, so the
+   per-column alignment GFM emits as an inline style (`|---:|`, `|:---:|`) survives untouched.
+
+   Every colour is a --k-* token. These rules used to hardcode dark literals (#171c2c, #eef2ff,
+   rgba(7,9,18,.48)), which made every table render as a dark slab inside a light-theme bubble. */
+.kairema-table-scroll { max-width:100%; margin:14px 0; overflow-x:auto; border:1px solid var(--k-line); border-radius:10px; background:var(--k-panel); }
+.kairema-table-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:max-content; padding:7px 9px; border-bottom:1px solid var(--k-line); color:var(--k-muted); background:var(--k-panel-2); font-size:11px; }
 .kairema-table-toolbar-label { font-weight:600; }
 .kairema-table-sort-actions { display:flex; gap:5px; }
-.kairema-table-sort { min-height:28px; padding:4px 7px; border:1px solid rgba(255,255,255,.12); border-radius:7px; color:#cbd5e8; background:rgba(255,255,255,.03); font-size:10px; font-weight:650; transition:background .16s ease,border-color .16s ease,color .16s ease; }
-.kairema-table-sort:hover,.kairema-table-sort[aria-pressed="true"] { border-color:rgba(151,134,255,.62); color:#f3f0ff; background:rgba(122,105,237,.20); }
+.kairema-table-sort { min-height:28px; padding:4px 7px; border:1px solid var(--k-line); border-radius:7px; color:var(--k-text); background:var(--k-panel); font-size:10px; font-weight:650; transition:background .16s ease,border-color .16s ease,color .16s ease; }
+.kairema-table-sort:hover,.kairema-table-sort[aria-pressed="true"] { border-color:var(--k-text); color:var(--k-invert); background:var(--k-strong); }
 .kairema-table-scroll table { width:max-content; min-width:100%; border-collapse:separate; border-spacing:0; }
-.kairema-table-scroll th,.kairema-table-scroll td { padding:9px 11px; border-right:1px solid rgba(255,255,255,.06); border-bottom:1px solid rgba(255,255,255,.06); text-align:left; vertical-align:top; white-space:normal; }
+.kairema-table-scroll th,.kairema-table-scroll td { padding:9px 11px; border-right:1px solid var(--k-line); border-bottom:1px solid var(--k-line); vertical-align:top; white-space:normal; overflow-wrap:anywhere; }
 .kairema-table-scroll th:last-child,.kairema-table-scroll td:last-child { border-right:0; }
 .kairema-table-scroll tbody tr:last-child td { border-bottom:0; }
-.kairema-table-scroll thead th { position:sticky; top:0; z-index:1; color:#eef2ff; background:#171c2c; box-shadow:0 1px 0 rgba(255,255,255,.10); }
+.kairema-table-scroll thead th { position:sticky; top:0; z-index:1; font-weight:650; color:var(--k-text); background:var(--k-panel-2); box-shadow:0 1px 0 var(--k-line); }
+
+/* ---- Markdown body: the `.kairema-gfm` scope --------------------------------------------
+
+   Streamdown renders GitHub-flavoured markdown into this container, but it ships its styling as
+   Tailwind *utility class names* (`text-3xl`, `whitespace-nowrap`, `bg-muted/80`) rather than as
+   a stylesheet, and it exports no CSS of its own. Tailwind v4 only generates utilities for classes
+   it finds in scanned source, and this project has no `@source` pointing at node_modules — so none
+   of those utilities exist in the build and the markdown arrived completely unstyled. That is why
+   the whole visual layer is defined here rather than tweaked.
+
+   Selectors are scoped to `.kairema-gfm` and written as a plain class + element (specificity
+   0,1,1) rather than wrapped in `:where()`. `:where()` is zero-specificity, and Tailwind's
+   preflight — which IS in the build — resets `h1..h6` to `font-size:inherit;font-weight:inherit`
+   at 0,0,1. A `:where(h1)` rule would lose that comparison and every heading would render as body
+   text. One class of specificity is the minimum that actually wins, and it still cannot leak into
+   the rest of the app.
+
+   Where GFM expresses a cell's alignment the renderer puts an inline `style="text-align:..."` on
+   the cell. Nothing below sets `text-align`, so those alignments are preserved rather than
+   flattened to a single column. */
+.kairema-gfm { color:var(--k-bubble-ai-text); font-size:1rem; line-height:1.65; }
+
+/* Vertical rhythm. Streamdown asks for a `space-y-4` utility that is never generated, so the
+   spacing between sibling blocks has to be stated here or the answer renders as one dense wall. */
+.kairema-gfm > * { margin:0 0 .9em; }
+.kairema-gfm > *:last-child { margin-bottom:0; }
+
+/* Headings. Four distinct sizes on a moderate scale: an H1 is a section opener, not a poster, so
+   it stays under 1.6rem rather than the text-3xl (1.875rem) that the ungenerated utility asked
+   for. The scale is deliberately spaced in 0.15rem steps down to H4, which the old rules omitted
+   entirely — without a rule, h4 fell through to the browser default and could render larger than
+   h3. Weight is set on every level because preflight strips it. */
+.kairema-gfm h1,.kairema-gfm h2,.kairema-gfm h3,.kairema-gfm h4 { font-weight:700; line-height:1.3; letter-spacing:-.011em; margin:1.6em 0 .55em; }
+.kairema-gfm > :is(h1,h2,h3,h4):first-child { margin-top:0; }
+.kairema-gfm h1 { font-size:1.5rem; }
+.kairema-gfm h2 { font-size:1.3rem; }
+.kairema-gfm h3 { font-size:1.15rem; }
+.kairema-gfm h4 { font-size:1.02rem; color:var(--k-muted); }
+
+/* A GFM heading may wrap out a short document, so it is allowed to break rather than overflow. */
+.kairema-gfm :is(h1,h2,h3,h4,p,li,th,td) { overflow-wrap:anywhere; }
+
+/* Lists. Nesting depth is kept shallow by design: each level pulls in a little and switches marker
+   so a deeply nested answer stays readable instead of walking off the left edge. */
+.kairema-gfm :is(ul,ol) { margin:0 0 .9em; padding-left:1.4em; }
+.kairema-gfm ul { list-style:disc; }
+.kairema-gfm ol { list-style:decimal; }
+.kairema-gfm :is(ul,ol) :is(ul,ol) { margin:.35em 0 .35em; }
+.kairema-gfm ul :is(ul,ol) { list-style:circle; }
+.kairema-gfm li { margin:.22em 0; }
+.kairema-gfm li > :is(ul,ol) { margin-top:.22em; }
+.kairema-gfm li::marker { color:var(--k-muted); }
+
+/* Task lists. Streamdown marks the item with a `task-list-item` class and drops a real, disabled
+   checkbox inside it. The native marker has to be suppressed or it renders next to the box, and
+   the box is absolutely positioned back into the gutter the marker vacated. `accent-color` is
+   driven by a token so the check stays legible against both themes. */
+.kairema-gfm li.task-list-item,.kairema-gfm li:has(> input[type="checkbox"]) { list-style:none; position:relative; padding-left:1.35em; }
+.kairema-gfm li > input[type="checkbox"] { position:absolute; left:0; top:.45em; width:1em; height:1em; margin:0; accent-color:var(--k-strong); opacity:1; }
+
+/* Blockquotes read as quoted material because they are inset and dimmed, not because they are
+   italic throughout — italics plus muted colour on a long quote is hard to read. */
+.kairema-gfm blockquote { margin:0 0 .9em; padding:.1em 0 .1em 1em; border-left:3px solid var(--k-line); color:var(--k-muted); }
+.kairema-gfm blockquote > :last-child { margin-bottom:0; }
+
+/* Inline code. The chip needs a real background and a monospace face to separate from the
+   paragraph; on its own the monospace was the only cue, which vanished against a plain bubble. */
+.kairema-gfm :not(pre) > code { padding:.15em .38em; border:1px solid var(--k-line); border-radius:5px; background:var(--k-panel-2); color:var(--k-text); font-family:var(--k-font-mono); font-size:.87em; word-break:break-word; }
+
+/* Fenced code. The container and its language header are framed and rounded as one unit; the
+   header carries the language name that the markdown fence supplied. */
+.kairema-gfm [data-code-block-container="true"] { margin:0 0 .9em; border:1px solid var(--k-line); border-radius:10px; background:var(--k-panel); overflow:hidden; }
+.kairema-gfm [data-code-block-header="true"] { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:7px 11px; border-bottom:1px solid var(--k-line); background:var(--k-panel-2); color:var(--k-muted); font-family:var(--k-font-mono); font-size:11px; letter-spacing:.04em; text-transform:lowercase; }
+.kairema-gfm [data-code-block="true"] { margin:0; padding:12px 13px; overflow-x:auto; background:var(--k-panel); }
+.kairema-gfm [data-code-block="true"] pre { margin:0; font-family:var(--k-font-mono); font-size:.85rem; line-height:1.6; }
+.kairema-gfm [data-code-block="true"] code { font-family:inherit; font-size:inherit; white-space:pre; background:none; border:0; padding:0; color:inherit; }
+
+/* Streamdown emits two parallel code bodies — one for each Shiki theme — and relies on the
+   `dark:hidden` / `hidden dark:block` utilities to pick between them. Those utilities are not
+   generated either, so both bodies would paint at once. The theme is chosen here instead, by
+   index: Streamdown always renders light first and dark second. */
+.kairema-gfm [data-code-block="true"]:nth-of-type(1) { display:block; }
+.kairema-gfm [data-code-block="true"]:nth-of-type(2) { display:none; }
+.dark .kairema-gfm [data-code-block="true"]:nth-of-type(1) { display:none; }
+.dark .kairema-gfm [data-code-block="true"]:nth-of-type(2) { display:block; }
+
+/* Inline emphasis. `strong` arrives as a <span> carrying the `strong` marker, not as a <strong>
+   element, so both forms are matched. `em` and `del` are real elements. */
+.kairema-gfm strong,.kairema-gfm [data-streamdown="strong"] { font-weight:700; }
+.kairema-gfm em { font-style:italic; }
+.kairema-gfm del { color:var(--k-muted); text-decoration-thickness:1px; }
+
+/* Links. Underline is kept — an AI answer that cites sources is exactly the case where the
+   destination needs to be visible — and colour comes from the theme rather than a hardcoded hue. */
+.kairema-gfm a { color:var(--k-text); font-weight:600; text-decoration:underline; text-underline-offset:2px; }
+.kairema-gfm a:hover { background:var(--k-panel-2); text-decoration-thickness:2px; }
+
+/* A rule between sections is decorative; it stays on the token line colour so it recedes. */
+.kairema-gfm hr { margin:1.4em 0; border:0; border-top:1px solid var(--k-line); }
+.kairema-gfm img { max-width:100%; height:auto; border-radius:8px; }
+
+/* Table rows get a hover tint so a long table can be read across without losing the row. The
+   sticky header sits above the body, so the tint is applied to the cell and the header keeps its
+   own background at the same z-index. */
+.kairema-gfm .kairema-table-scroll tbody tr:hover td { background:var(--k-panel-2); }
 @media(max-width:640px){.kairema-table-toolbar{align-items:flex-start;flex-direction:column}.kairema-table-sort-actions{width:100%;overflow-x:auto}.kairema-table-scroll th,.kairema-table-scroll td{min-width:126px;padding:8px 10px}.kairema-table-sort{white-space:nowrap}}
+
+/* Narrow-screen markdown. This is containment, not a redesign: the bubble is already full-width
+   here, and `overflow-wrap:anywhere` on text plus the table scroller are what stop a long word or
+   a wide table from pushing the page sideways around 430px. Headings step down one notch because
+   an H1 that reads as a comfortable opener on desktop becomes a two-line banner in a narrow
+   column. The page is deliberately never given `overflow-x:hidden` — that hides the symptom and
+   would also clip the table scroller that is supposed to receive the overflow. */
+@media(max-width:640px){
+  .kairema-gfm { font-size:.95rem; }
+  .kairema-gfm h1 { font-size:1.3rem; }
+  .kairema-gfm h2 { font-size:1.18rem; }
+  .kairema-gfm h3 { font-size:1.06rem; }
+  .kairema-gfm h4 { font-size:.98rem; }
+  .kairema-gfm :is(h1,h2,h3,h4) { margin:1.3em 0 .5em; }
+  .kairema-gfm blockquote { padding-left:.8em; }
+  .kairema-gfm [data-code-block="true"] { padding:10px 11px; }
+  .kairema-gfm [data-code-block="true"] pre { font-size:.8rem; }
+  .kairema-gfm [data-code-block-header="true"] { padding:6px 11px; }
+}
 .kairema-topbar { min-height:0; height:auto; align-items:center; gap:5px 9px; flex-wrap:wrap; padding-top:3px; padding-bottom:3px; }
 .kairema-topbar-left,.kairema-topbar-controls { display:flex; min-width:0; align-items:center; gap:5px; }
 .kairema-topbar-left { flex:0 0 auto; flex-wrap:wrap; }
@@ -411,7 +559,11 @@ body { background:var(--k-bg); color:var(--k-text); }
 .kairema-topbar { position:sticky; top:0; z-index:25; border-color:var(--k-line); background:var(--k-panel); backdrop-filter:none; }.kairema-icon-btn { color:var(--k-muted); }.kairema-icon-btn:hover { color:var(--k-text); background:var(--k-panel-2); }
 .kairema-select-wrap select { border-color:var(--k-line); color:var(--k-text); background:var(--k-panel); }.kairema-select-wrap select:focus { border-color:var(--k-text); }
 .kairema-select-wrap { position:relative; }.kairema-role-menu-trigger { position:relative; display:inline-flex; min-height:44px; align-items:center; gap:6px; padding:0 2px; border:0; border-radius:0; color:var(--k-text); background:transparent; font-size:13px; font-weight:700; line-height:1.2; }.kairema-role-menu-trigger::after { content:none; }.kairema-role-menu { position:fixed; z-index:30; display:grid; width:min(360px,calc(100vw - 28px)); max-height:calc(100dvh - 16px); overflow-y:auto; overscroll-behavior:contain; gap:4px; padding:6px; border:1px solid var(--k-line); border-radius:10px; background:var(--k-panel); box-shadow:0 16px 42px rgba(0,0,0,.35); }.kairema-role-menu-item { min-height:42px; padding:8px 10px; border:1px solid transparent; border-radius:7px; color:var(--k-text); background:transparent; text-align:left; font-size:12px; line-height:1.35; }.kairema-role-menu-item:hover,.kairema-role-menu-item:focus-visible,.kairema-role-menu-trigger:focus-visible { border-color:var(--k-text); outline:2px solid transparent; color:var(--k-text); background:var(--k-panel-2); }
-.kairema-message { max-width:100%; overflow-wrap:anywhere; word-break:break-word; }.kairema-message :is(h1,h2,h3) { margin:1em 0 .5em; line-height:1.25; }.kairema-message h1 { font-size:1.25rem; }.kairema-message h2 { font-size:1.15rem; }.kairema-message h3 { font-size:1.05rem; }.kairema-message-user { border:1px solid var(--k-bubble-user-line); background:var(--k-bubble-user-bg); color:var(--k-bubble-user-text); box-shadow:none; }.kairema-message-ai,.kairema-typing { border-color:var(--k-bubble-ai-line); color:var(--k-bubble-ai-text); background:var(--k-bubble-ai-bg); }
+/* Heading sizes and margins for message content now live in the `.kairema-gfm` block below, which
+   covers all four levels. The rules that used to sit here set h1/h2/h3 only 0.1rem apart — too
+   close to read as a hierarchy — and gave h4 no size at all, so it fell back to the browser
+   default and could render larger than h3. */
+.kairema-message { max-width:100%; overflow-wrap:anywhere; word-break:break-word; }.kairema-message-user { border:1px solid var(--k-bubble-user-line); background:var(--k-bubble-user-bg); color:var(--k-bubble-user-text); box-shadow:none; }.kairema-message-ai,.kairema-typing { border-color:var(--k-bubble-ai-line); color:var(--k-bubble-ai-text); background:var(--k-bubble-ai-bg); }
 .kairema-message-user,.kairema-message-ai { -webkit-user-select:text; user-select:text; }
 .kairema-runtime-meta { display:block; margin-top:3px; color:var(--k-muted); font-size:10px; line-height:1.35; }
 .kairema-prompt { border-color:var(--k-line); color:var(--k-text); background:var(--k-panel); }.kairema-prompt:hover { border-color:var(--k-text); color:var(--k-text); background:var(--k-panel-2); }
