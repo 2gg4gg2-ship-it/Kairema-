@@ -58,19 +58,19 @@ function ProviderCard({ title, subtitle, connected, active, expanded, busy, disa
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-2xl border border-slate-800 bg-slate-900/60">
-      <div className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+    <section className="kairema-providers-card">
+      <div className="kairema-providers-card-head">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-medium text-slate-100">{title}</span>
-            {active && <span className="rounded-full bg-violet-500/20 px-2 py-0.5 text-[11px] font-semibold text-violet-200">активен</span>}
+            <span className="kairema-providers-title">{title}</span>
+            {active && <span className="kairema-providers-badge">активен</span>}
           </div>
-          <p className="truncate text-xs text-slate-500">{connected ? `Connected · ${subtitle}` : subtitle}</p>
+          <p className="kairema-providers-sub">{connected ? `Connected · ${subtitle}` : subtitle}</p>
         </div>
         <span className="flex shrink-0 items-center gap-1.5">
           <button
             type="button"
-            className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40"
+            className="kairema-providers-btn px-2.5 py-1 text-xs"
             onClick={onToggle}
             disabled={busy}
             aria-expanded={expanded}
@@ -78,19 +78,19 @@ function ProviderCard({ title, subtitle, connected, active, expanded, busy, disa
             {expanded ? "Свернуть" : addLabel ?? (hasConfig ? "Настроить" : "Connect")}
           </button>
           {onMakeActive && !active && (
-            <button type="button" className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40" onClick={onMakeActive} disabled={busy}>
+            <button type="button" className="kairema-providers-btn px-2.5 py-1 text-xs" onClick={onMakeActive} disabled={busy}>
               Активировать
             </button>
           )}
           {onDisconnect && (
-            <button type="button" className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-rose-200 transition-colors hover:bg-rose-500/15 disabled:opacity-40" onClick={onDisconnect} disabled={busy}>
+            <button type="button" className="kairema-providers-btn kairema-providers-btn-danger px-2.5 py-1 text-xs" onClick={onDisconnect} disabled={busy}>
               Отключить
             </button>
           )}
         </span>
       </div>
-      {!expanded && summary && <div className="border-t border-slate-800 px-3 py-2">{summary}</div>}
-      {expanded && !disabled && <div className="border-t border-slate-800 px-3 py-3">{children}</div>}
+      {!expanded && summary && <div className="kairema-providers-card-body">{summary}</div>}
+      {expanded && !disabled && <div className="kairema-providers-card-body">{children}</div>}
     </section>
   );
 }
@@ -99,11 +99,11 @@ function ProviderCard({ title, subtitle, connected, active, expanded, busy, disa
 function KeyField({ label, fieldLabel, value, visible, onVisibleChange, onChange, placeholder }: { label: string; fieldLabel: string; value: string; visible: boolean; onVisibleChange: (value: boolean) => void; onChange: (value: string) => void; placeholder: string }) {
   return (
     <label className="grid gap-1">
-      <span className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
-      <span className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3">
-        <KeyRound className="size-4 shrink-0 text-slate-500" />
+      <span className="kairema-providers-label">{label}</span>
+      <span className="kairema-providers-keyfield">
+        <KeyRound className="kairema-providers-keyfield-icon size-4 shrink-0" />
         <input
-          className="min-w-0 flex-1 bg-transparent py-2 text-sm text-slate-100 outline-none"
+          className="kairema-providers-keyfield-input py-2 text-sm"
           type={visible ? "text" : "password"}
           value={value}
           onChange={(event) => onChange(event.target.value)}
@@ -112,7 +112,7 @@ function KeyField({ label, fieldLabel, value, visible, onVisibleChange, onChange
           spellCheck={false}
           aria-label={fieldLabel}
         />
-        <button type="button" className="shrink-0 text-slate-500 hover:text-slate-200" onClick={() => onVisibleChange(!visible)} aria-label={visible ? "Скрыть ключ" : "Показать ключ"}>
+        <button type="button" className="kairema-providers-icon-btn size-8 shrink-0" onClick={() => onVisibleChange(!visible)} aria-label={visible ? "Скрыть ключ" : "Показать ключ"}>
           {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
         </button>
       </span>
@@ -134,7 +134,7 @@ function ModelField({ label, fieldLabel, value, fallback, models, pending, error
     : models;
   return (
     <label className="grid gap-1">
-      <span className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
+      <span className="kairema-providers-label">{label}</span>
       <span className="flex items-center gap-2">
         {/* The same picker the chat header uses, so the model list looks and behaves identically
             in both places instead of being a plain browser select here. */}
@@ -150,7 +150,7 @@ function ModelField({ label, fieldLabel, value, fallback, models, pending, error
           triggerTextClassName="kairema-settings-model-trigger-text" />
         <button
           type="button"
-          className="shrink-0 rounded-lg border border-slate-700 p-2 text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40"
+          className="kairema-providers-btn shrink-0 p-2"
           onClick={onReload}
           disabled={pending || !canReload}
           aria-label={`Обновить список моделей (${fieldLabel})`}
@@ -161,8 +161,8 @@ function ModelField({ label, fieldLabel, value, fallback, models, pending, error
       </span>
       {/* The server's own sanitised reason separates an unreachable provider from a stored key
           that no longer opens, which a single generic sentence would hide. */}
-      {error && <span className="text-xs text-rose-300">{failureText || "Не удалось загрузить модели. Проверьте ключ и адрес."}</span>}
-      {empty && <span className="text-xs text-slate-500">Провайдер не вернул список моделей для этого ключа.</span>}
+      {error && <span className="kairema-providers-error">{failureText || "Не удалось загрузить модели. Проверьте ключ и адрес."}</span>}
+      {empty && <span className="kairema-providers-hint">Провайдер не вернул список моделей для этого ключа.</span>}
     </label>
   );
 }
@@ -401,25 +401,25 @@ export default function AIProviders() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-950 px-4 py-5 text-slate-100 sm:px-6">
+    <main className="kairema-providers-page">
       <div className="mx-auto max-w-2xl">
         <header className="mb-4">
-          <button className="mb-3 inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800" onClick={() => navigate("/")}>
+          <button className="kairema-providers-btn mb-3 px-3 py-2 text-sm" onClick={() => navigate("/")}>
             <ArrowLeft className="size-4" />К чату
           </button>
           <h1 className="text-xl font-semibold">AI Providers</h1>
-          <p className="mt-1 text-sm text-slate-400">Подключите свой API-ключ и используйте выбранную модель в режиме «Мой API».</p>
+          <p className="kairema-providers-hint mt-1 text-sm">Подключите свой API-ключ и используйте выбранную модель в режиме «Мой API».</p>
         </header>
 
         {!storageReady && (
-          <p className="mb-3 flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200" role="status">
+          <p className="kairema-providers-notice kairema-providers-notice-warn" role="status">
             <TriangleAlert className="mt-0.5 size-4 shrink-0" />
             <span>Сервер пока не настроен на хранение пользовательских API-ключей. Подключение станет доступно после настройки сервера.</span>
           </p>
         )}
 
         {notice && (
-          <p className={`mb-3 flex items-start gap-2 rounded-xl border p-3 text-sm ${notice.tone === "ok" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-rose-500/40 bg-rose-500/10 text-rose-200"}`} role="status">
+          <p className={`kairema-providers-notice ${notice.tone === "ok" ? "kairema-providers-notice-ok" : "kairema-providers-notice-error"}`} role="status">
             {notice.tone === "ok" ? <CheckCircle2 className="mt-0.5 size-4 shrink-0" /> : <XCircle className="mt-0.5 size-4 shrink-0" />}
             <span>{notice.text}</span>
           </p>
@@ -443,7 +443,7 @@ export default function AIProviders() {
             onMakeActive={openrouterConfig ? () => void makeActive("openrouter") : undefined}
             onDisconnect={() => void disconnect("openrouter")}
             hasConfig={Boolean(openrouterConfig)}
-            summary={openrouterConfig ? <p className="truncate text-xs text-slate-500">ключ {openrouterConfig.keyHint} · {openrouterConfig.activeModel}</p> : null}
+            summary={openrouterConfig ? <p className="kairema-providers-sub">ключ {openrouterConfig.keyHint} · {openrouterConfig.activeModel}</p> : null}
           >
             <div className="grid gap-3">
               <KeyField
@@ -473,7 +473,7 @@ export default function AIProviders() {
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-500 disabled:opacity-40"
+                  className="kairema-providers-btn-primary px-3 py-2 text-sm"
                   onClick={() => void runSave()}
                   disabled={busy || !canSubmit}
                 >
@@ -481,15 +481,15 @@ export default function AIProviders() {
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40"
+                  className="kairema-providers-btn px-3 py-2 text-sm"
                   onClick={() => void runKeyCheck()}
                   disabled={busy || (apiKey.trim().length < 8 && !openrouterConfig)}
                 >
                   Проверить ключ
                 </button>
-                {openrouterConfig?.keyHint && <span className="text-xs text-slate-500">ключ {openrouterConfig.keyHint}</span>}
+                {openrouterConfig?.keyHint && <span className="kairema-providers-hint">ключ {openrouterConfig.keyHint}</span>}
               </div>
-              {!canSubmit && <p className="text-xs text-slate-500">Сохранить можно после проверки ключа и выбора модели из списка провайдера.</p>}
+              {!canSubmit && <p className="kairema-providers-hint">Сохранить можно после проверки ключа и выбора модели из списка провайдера.</p>}
             </div>
           </ProviderCard>
         )}
@@ -509,19 +509,19 @@ export default function AIProviders() {
               <ul className="grid gap-1.5">
                 {customConfigs.map((config) => (
                   <li key={config.provider} className="flex flex-wrap items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate text-sm text-slate-200">
-                      {config.displayName || "Мой провайдер"}<span className="text-slate-500"> · {config.activeModel}</span>
+                    <span className="kairema-providers-sub kairema-providers-sub-strong min-w-0 flex-1 truncate text-sm">
+                      {config.displayName || "Мой провайдер"}<span className="kairema-providers-sub"> · {config.activeModel}</span>
                     </span>
                     <span className="flex shrink-0 items-center gap-1.5">
                       {activeProvider !== config.provider && (
-                        <button type="button" className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40" onClick={() => void makeActive(config.provider)} disabled={busy}>
+                        <button type="button" className="kairema-providers-btn px-2 py-1 text-xs" onClick={() => void makeActive(config.provider)} disabled={busy}>
                           Активировать
                         </button>
                       )}
-                      <button type="button" className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40" onClick={() => openCustomDraft(config)} disabled={busy}>
+                      <button type="button" className="kairema-providers-btn px-2 py-1 text-xs" onClick={() => openCustomDraft(config)} disabled={busy}>
                         Настроить
                       </button>
-                      <button type="button" className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-rose-200 transition-colors hover:bg-rose-500/15 disabled:opacity-40" onClick={() => void disconnect(config.provider)} disabled={busy}>
+                      <button type="button" className="kairema-providers-btn kairema-providers-btn-danger px-2 py-1 text-xs" onClick={() => void disconnect(config.provider)} disabled={busy}>
                         Отключить
                       </button>
                     </span>
@@ -533,9 +533,9 @@ export default function AIProviders() {
             {customDraft && (
               <div className="grid gap-3">
                 <label className="grid gap-1">
-                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Name</span>
+                  <span className="kairema-providers-label">Name</span>
                   <input
-                    className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-400"
+                    className="kairema-providers-field w-full px-3 py-2 text-sm"
                     value={customDraft.displayName}
                     onChange={(event) => patchCustomDraft({ displayName: event.target.value })}
                     placeholder="My Provider"
@@ -545,9 +545,9 @@ export default function AIProviders() {
                 </label>
 
                 <label className="grid gap-1">
-                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500">API URL</span>
+                  <span className="kairema-providers-label">API URL</span>
                   <input
-                    className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-400"
+                    className="kairema-providers-field w-full px-3 py-2 text-sm"
                     value={customDraft.baseUrl}
                     onChange={(event) => patchCustomDraft({ baseUrl: event.target.value })}
                     placeholder="https://api.example.com/v1"
@@ -586,7 +586,7 @@ export default function AIProviders() {
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-500 disabled:opacity-40"
+                    className="kairema-providers-btn-primary px-3 py-2 text-sm"
                     onClick={() => void runCustomSave()}
                     disabled={busy || !customCanSave}
                   >
@@ -594,14 +594,14 @@ export default function AIProviders() {
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-40"
+                    className="kairema-providers-btn px-3 py-2 text-sm"
                     onClick={() => void runKeyCheck()}
                     disabled={busy || !customReady}
                   >
                     Проверить ключ
                   </button>
                 </div>
-                {!customCanSave && <p className="text-xs text-slate-500">Сохранить можно после проверки ключа и выбора модели из списка провайдера.</p>}
+                {!customCanSave && <p className="kairema-providers-hint">Сохранить можно после проверки ключа и выбора модели из списка провайдера.</p>}
               </div>
             )}
           </ProviderCard>
@@ -610,7 +610,7 @@ export default function AIProviders() {
         {unavailable.length > 0 && (
           // The unimplemented providers are not pretended into existence, and the alternative that
           // already works today is named instead: anything that speaks the OpenAI API shape.
-          <p className="mt-3 text-center text-xs text-slate-500">
+          <p className="kairema-providers-hint mt-3 text-center">
             Другие провайдеры — скоро. Любой совместимый API (например, OpenAI, Groq, Together) подключается через «Custom provider».
           </p>
         )}
