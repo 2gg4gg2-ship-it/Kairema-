@@ -1,12 +1,13 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { myApiRateWindows, userProviderConfigs, userSettings } from "../drizzle/schema";
+import { myApiRateWindows, userProviderConfigs, userSettings, users } from "../drizzle/schema";
 
 const root = path.resolve(import.meta.dirname, "..");
 const migration = readFileSync(path.join(root, "drizzle/0046_user_provider_configs.sql"), "utf8");
 const customMigration = readFileSync(path.join(root, "drizzle/0047_user_provider_custom_endpoints.sql"), "utf8");
 const quotaMigration = readFileSync(path.join(root, "drizzle/0048_my_api_rate_windows.sql"), "utf8");
+const profileMigration = readFileSync(path.join(root, "drizzle/0049_user_profile_details.sql"), "utf8");
 const journal = JSON.parse(readFileSync(path.join(root, "drizzle/meta/_journal.json"), "utf8")) as { entries: Array<{ idx: number; tag: string }> };
 
 /** Column names drizzle would emit for a table, used to compare schema against SQL. */
@@ -136,5 +137,64 @@ describe("migration 0048 registration", () => {
       expect(quotaMigration).toContain(`\`${column}\``);
       expect(declared).toContain(column);
     }
+  });
+});
+
+describe("migration 0049 registration", () => {
+  it("is the next index after 0048 and reuses no index", () => {
+    const entry = journal.entries.find((item) => item.tag === "0049_user_profile_details");
+    expect(entry?.tag).toBe("0049_user_profile_details");
+    expect(entry?.idx).toBe(49);
+    expect(journal.entries.find((item) => item.tag === "0048_my_api_rate_windows")!.idx).toBe(48);
+    expect(journal.entries.filter((item) => item.idx === 49)).toHaveLength(1);
+  });
+});
+
+describe("migration 0049 sql", () => {
+  /** The migration body with comments stripped, which is what MySQL actually receives. */
+  function sqlBody() {
+    return profileMigration.replace(/--[^\n]*/g, "").trim();
+  }
+
+  it("adds both profile columns in a single statement", () => {
+    // The migrator sends the file to the driver as one statement, so two stacked ALTER TABLEs
+    // were rejected with ER_PARSE_ERROR and took the staging deploy down. Comments are stripped
+    // first because they contain no SQL and would otherwise count toward the statement total.
+    const body = sqlBody();
+    expect(body.match(/;/g)).toHaveLength(1);
+    expect(body.match(/ALTER TABLE/gi)).toHaveLength(1);
+  });
+
+  it("declares both columns in that one statement", () => {
+    // MySQL only allows one ADD per ALTER when separated this way, so both must appear inside the
+    // single statement rather than as a second one.
+    const body = sqlBody();
+    expect(body).toMatch(/ADD `preferredName` text/i);
+    expect(body).toMatch(/ADD `personalPreferences` text/i);
+    expect(body).toMatch(/^ALTER TABLE `users`/);
+  });
+
+  it("declares the same columns the users schema does", () => {
+    const declared = Object.values(users[Symbol.for("drizzle:Columns") as unknown as keyof typeof users] ?? {}).map((column) => String(column.name));
+    for (const column of ["preferredName", "personalPreferences"]) {
+      expect(declared).toContain(column);
+      expect(sqlBody()).toContain(`\`${column}\``);
+    }
+    // The full name column must survive: the profile regressions came from losing it.
+    expect(declared).toContain("name");
+    expect(sqlBody()).not.toContain("`name`");
+  });
+
+  it("leaves the columns nullable so existing rows need no backfill", () => {
+    expect(sqlBody()).not.toMatch(/ADD `preferredName` text NOT NULL/i);
+    expect(sqlBody()).not.toMatch(/ADD `personalPreferences` text NOT NULL/i);
+  });
+
+  it("contains no destructive statement", () => {
+    const body = sqlBody();
+    expect(body).not.toMatch(/DROP/i);
+    expect(body).not.toMatch(/TRUNCATE/i);
+    expect(body).not.toMatch(/DELETE/i);
+    expect(body).not.toMatch(/ALTER TABLE .* DROP\b/i);
   });
 });
