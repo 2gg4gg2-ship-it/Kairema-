@@ -1,6 +1,7 @@
 import { beginCapacityGeneration, settleCapacityReservation, type CapacityActor, type CapacityGenerationLease } from "./capacity-controller";
 import { KAIREMA_SYSTEM_PROMPT, createReasoningStreamFilter, dataFromSseBlock, openRouterStreamDelta, sanitizeAssistantContent, userPreferenceRules, type ChatMessage, type ChatSettings, type ModelStatus, type Provider, type StatusCategory } from "./providers";
 import { createRequestBudget } from "./providers";
+import { keyFingerprint, parseRetryAfter, retryUpstream } from "./upstream-retry";
 import { UserProviderKeyConfigurationError, UserProviderKeyDecryptionError } from "./user-provider-secrets";
 import { MAX_PROVIDER_NAME_LENGTH, UserProviderEndpointError, buildUserProviderChatEndpoint, buildUserProviderModelsEndpoint, normalizeUserProviderDisplayName } from "./user-provider-endpoints";
 
@@ -34,10 +35,40 @@ export const USER_PROVIDERS: readonly UserProviderDescriptor[] = [
     modelsEndpoint: "https://openrouter.ai/api/v1/models",
     chatEndpoint: "https://openrouter.ai/api/v1/chat/completions",
   },
+  // Anthropic is reached from the browser (see CLIENT_DIRECT_PROVIDERS): its API answers direct
+  // browser calls when the caller opts in with the opt-in header, so a BYOK turn with an Anthropic
+  // key never leaves the user's machine. The server keeps no Anthropic completion path.
+  {
+    id: "anthropic",
+    displayName: "Anthropic",
+    available: true,
+    keyUrl: "https://console.anthropic.com/settings/keys",
+    keyEndpoint: "https://api.anthropic.com/v1/models",
+    modelsEndpoint: "https://api.anthropic.com/v1/models",
+    chatEndpoint: "https://api.anthropic.com/v1/messages",
+  },
   { id: "openai", displayName: "OpenAI", available: false, note: "Адаптер ещё не реализован на сервере." },
-  { id: "anthropic", displayName: "Anthropic", available: false, note: "Адаптер ещё не реализован на сервере." },
   { id: "google", displayName: "Google", available: false, note: "Адаптер ещё не реализован на сервере." },
 ] as const;
+
+/** Providers the server can serve a completion for. Everything else is client-direct or unsupported. */
+export function isSupportedUserProvider(provider: string): boolean {
+  return USER_PROVIDERS.some((entry) => entry.id === provider && entry.available);
+}
+
+/**
+ * Providers whose completion runs in the browser rather than on the server.
+ *
+ * Both answer direct browser requests under their own CORS rules, so a user who connected one of
+ * them never has their prompt leave the server at all. Anthropic additionally requires an explicit
+ * opt-in header, which is set for Anthropic alone and is never sent to anyone else.
+ */
+export const CLIENT_DIRECT_PROVIDERS = ["openrouter", "anthropic"] as const;
+export type ClientDirectProvider = (typeof CLIENT_DIRECT_PROVIDERS)[number];
+
+export function isClientDirectProvider(provider: string): provider is ClientDirectProvider {
+  return (CLIENT_DIRECT_PROVIDERS as readonly string[]).includes(provider);
+}
 
 export class UserProviderError extends Error {
   constructor(
@@ -178,6 +209,26 @@ function classifyUserProviderFailure(http: number | null, upstream: unknown): { 
 }
 
 const USER_PROVIDER_TIMEOUT_MS = 25_000;
+
+/**
+ * The rate-limit headers a provider returns, read for diagnostics only.
+ *
+ * These are safe to record: they describe the provider's accounting of the request, not the request
+ * itself. The key never appears here — callers log a SHA-256 fingerprint instead — and neither the
+ * prompt nor the model's answer is ever part of a diagnostic record.
+ */
+export function upstreamRateLimitDiagnostics(response: Response): Record<string, string | number | null> {
+  const read = (name: string) => {
+    try { return response.headers?.get(name) ?? null; } catch { return null; }
+  };
+  return {
+    rateLimitLimit: read("x-ratelimit-limit"),
+    rateLimitRemaining: read("x-ratelimit-remaining"),
+    rateLimitReset: read("x-ratelimit-reset"),
+    retryAfter: read("retry-after"),
+    cfRay: read("cf-ray"),
+  };
+}
 const KEY_PROBE_TIMEOUT_MS = 12_000;
 const CATALOG_TIMEOUT_MS = 15_000;
 /**
@@ -475,30 +526,56 @@ export async function chatWithUserProviderStream(options: {
   onDelta: (delta: string) => void;
   signal?: AbortSignal;
   actor?: CapacityActor;
+  /**
+   * The user's own other providers, tried in order once this one has been rate-limited to death.
+   *
+   * Every entry is one the user connected themselves. There is deliberately no way to name a
+   * Kairema provider here: a BYOK turn that fails must surface the failure, never quietly answer
+   * from a provider the user did not choose and is not paying for.
+   */
+  fallbacks?: readonly { provider: string; model: string; apiKey: string; modelLabel?: string }[];
+  /** Injection point for tests; production uses the real clock and the real sleeper. */
+  retry?: { sleep?: (ms: number) => Promise<void>; now?: () => number };
 }): Promise<UserProviderStreamResult> {
   const target = toTarget(options.provider);
+  const primaryProviderId = target.id;
   const capacityLease: CapacityGenerationLease | null = options.actor
     ? await beginCapacityGeneration(options.actor, options.roleId, options.settings ?? {})
     : null;
   const budget = createRequestBudget(capacityLease ?? undefined);
   let reservation: Awaited<ReturnType<CapacityGenerationLease["reserveAttempt"]>> | null = null;
   const startedAt = Date.now();
-  const attemptIndex = 1;
-  // The attempt budget is spent immediately before the single real fetch, mirroring the
-  // platform path so a denied reservation can never reach a provider.
-  budget.remaining -= 1;
-  budget.used = 1;
-  try {
+  // The whole request — the first try, every retry, and every move to a fallback provider — spends
+  // this one budget. There is no per-provider budget on top of it.
+  const MAX_ATTEMPTS = budget.remaining + budget.used;
+
+  /**
+   * How many attempts one provider may spend before the chain moves on.
+   *
+   * Two is the point where a retry still has a chance (the first failure may be a blip) but a
+   * third attempt is not worth the latency: a provider that has throttled the key twice in a row
+   * will throttle the third call too. Whatever is left of the shared budget is handed to the next
+   * provider the user connected, so the total is still bounded by MAX_ATTEMPTS — this caps how
+   * long any single provider can hold the request, it never adds attempts to the request.
+   */
+  const MAX_ATTEMPTS_PER_PROVIDER = 2;
+
+  /**
+   * One real upstream call. Reports the status and the provider's own retry hint so the shared
+   * retry policy can decide, without this function deciding anything about retrying itself.
+   */
+  const invokeOnce = async (candidate: { target: UserProviderTarget; provider: string; model: string; apiKey: string; modelLabel?: string }, attempt: number) => {
     if (capacityLease) {
-      reservation = await capacityLease.reserveAttempt({ provider: "openrouter" as Provider, modelId: options.model }, attemptIndex);
+      reservation = await capacityLease.reserveAttempt({ provider: "openrouter" as Provider, modelId: candidate.model }, attempt);
     }
-    logByok("byok.invoke_start", { requestId: budget.requestId, attemptIndex, provider: target.id, model: options.model, budgetRemaining: budget.remaining });
+    budget.used += 1;
+    logByok("byok.invoke_start", { requestId: budget.requestId, attempt, provider: candidate.provider, model: candidate.model, keyFingerprint: keyFingerprint(candidate.apiKey), budgetRemaining: MAX_ATTEMPTS - budget.used });
     let response: Response;
     try {
-      response = await fetch(target.chatEndpoint, {
+      response = await fetch(candidate.target.chatEndpoint, {
         method: "POST",
-        headers: { ...userProviderHeaders(options.apiKey), Accept: "text/event-stream" },
-        body: JSON.stringify({ model: options.model, messages: buildUserProviderMessages(options.modelLabel, options.history, options.settings), stream: true }),
+        headers: { ...userProviderHeaders(candidate.apiKey), Accept: "text/event-stream" },
+        body: JSON.stringify({ model: candidate.model, messages: buildUserProviderMessages(candidate.modelLabel ?? options.modelLabel, options.history, options.settings), stream: true }),
         signal: timeoutSignal(options.signal, USER_PROVIDER_TIMEOUT_MS),
       });
     } catch (error) {
@@ -506,12 +583,67 @@ export async function chatWithUserProviderStream(options: {
       if (options.signal?.aborted) throw error;
       throw providerNetworkError(error);
     }
-    logByok("byok.invoke_response", { requestId: budget.requestId, provider: target.id, model: options.model, httpStatus: response.status, latencyMs: Date.now() - startedAt });
+    logByok("byok.invoke_response", {
+      requestId: budget.requestId, provider: candidate.provider, model: candidate.model, keyFingerprint: keyFingerprint(candidate.apiKey),
+      httpStatus: response.status, latencyMs: Date.now() - startedAt, ...upstreamRateLimitDiagnostics(response),
+    });
     if (!response.ok) {
+      const retryAfterMs = parseRetryAfter(response.headers?.get("retry-after"), options.retry?.now?.() ?? Date.now());
       const failure = classifyUserProviderFailure(response.status, await readUpstreamJson(response));
-      logByok("byok.invoke_error", { requestId: budget.requestId, provider: target.id, model: options.model, httpStatus: response.status, errorCategory: failure.category });
-      throw new UserProviderError(failure.category, failure.message, response.status);
+      logByok("byok.invoke_error", {
+        requestId: budget.requestId, provider: candidate.provider, model: candidate.model, keyFingerprint: keyFingerprint(candidate.apiKey),
+        httpStatus: response.status, errorCategory: failure.category, retryAttempt: attempt - 1, ...upstreamRateLimitDiagnostics(response),
+      });
+      return { ok: false as const, status: response.status, error: new UserProviderError(failure.category, failure.message, response.status), retryAfterMs };
     }
+    return { ok: true as const, value: response };
+  };
+
+  // Primary first, then the user's own other providers. A provider that is throttled gives up its
+  // remaining budget to the next one rather than to a provider the user did not connect. Every
+  // entry is one the user connected themselves, so the chain walks their own accounts and stops at
+  // the last one rather than reaching for a Kairema provider.
+  const candidates: Array<{ target: UserProviderTarget; provider: string; model: string; apiKey: string; modelLabel?: string }> = [
+    { target, provider: primaryProviderId, model: options.model, apiKey: options.apiKey, modelLabel: options.modelLabel },
+    ...(options.fallbacks ?? []).map((entry) => ({ target: toTarget(entry.provider), provider: entry.provider as string, model: entry.model, apiKey: entry.apiKey, modelLabel: entry.modelLabel })),
+  ];
+
+  let response: Response;
+  let lastError: unknown;
+  try {
+    for (const candidate of candidates) {
+      // Per-provider cap, and never more than what is left of the one shared budget. This is what
+      // makes the chain reachable: a provider that is throttled gives up its remaining budget to
+      // the next one rather than to a provider the user did not connect, so the total across every
+      // provider is still bounded by MAX_ATTEMPTS and no retry can push the request past it.
+      const providerAttemptCap = Math.min(MAX_ATTEMPTS_PER_PROVIDER, MAX_ATTEMPTS - budget.used);
+      if (providerAttemptCap <= 0) break;
+      const outcome = await retryUpstream<{ response: Response }>({
+        maxAttempts: providerAttemptCap,
+        // Counts this provider's own attempts, not the request's. The request-wide total is
+        // budget.used, which providerAttemptCap has already been clipped against, so a candidate
+        // late in the chain gets a smaller cap rather than a loop that starts already spent.
+        attemptsUsed: 0,
+        run: async () => {
+          const result = await invokeOnce(candidate, budget.used + 1);
+          return result.ok ? { ok: true as const, value: { response: result.value } } : result;
+        },
+        sleep: options.retry?.sleep,
+        signal: options.signal,
+        onRetry: (info) => logByok("byok.invoke_retry", {
+          requestId: budget.requestId, provider: candidate.provider, model: candidate.model, keyFingerprint: keyFingerprint(candidate.apiKey),
+          httpStatus: info.status, retryAttempt: info.attempt, delayMs: info.delayMs,
+        }),
+      });
+      if (outcome.value !== undefined) { response = outcome.value.response; lastError = undefined; break; }
+      lastError = outcome.error;
+      // Only a rate limit moves on to another provider. An invalid key or an unknown model is the
+      // user's configuration, and repeating it on a second provider would just fail there too.
+      if (!outcome.rateLimited) break;
+      if (budget.used >= MAX_ATTEMPTS) break;
+    }
+    if (lastError) throw lastError;
+    if (!response!) throw new UserProviderError("UNKNOWN", "Провайдер не вернул ответ. Повторите попытку позже.", null);
     const decoder = new TextDecoder();
     const parts: string[] = [];
     let buffer = "";

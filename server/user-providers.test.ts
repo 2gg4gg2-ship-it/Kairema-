@@ -227,9 +227,15 @@ describe("provider availability", () => {
   });
 
   it("refuses a provider whose adapter is not implemented, with no endpoint behind it", () => {
-    expect(() => readyUserProvider("anthropic")).toThrow(UserProviderNotImplementedError);
+    // Anthropic is no longer in this group: it is reached from the browser, so the server has a
+    // real endpoint for it. The providers that are still unimplemented must keep refusing.
     expect(() => readyUserProvider("openai")).toThrow(UserProviderNotImplementedError);
     expect(() => readyUserProvider("google")).toThrow(UserProviderNotImplementedError);
+  });
+
+  it("has a real endpoint for the providers it serves, and none for the ones it does not", () => {
+    expect(readyUserProvider("openrouter").chatEndpoint).toMatch(/openrouter\.ai/);
+    expect(readyUserProvider("anthropic").chatEndpoint).toMatch(/api\.anthropic\.com/);
   });
 
   it("refuses an unknown provider id", () => {
@@ -524,7 +530,7 @@ describe("streamed delta sanitizing keeps the provider's spacing", () => {
 describe("the answer a user provider actually returned", () => {
   const ask = async (response: unknown) => {
     const deltas: string[] = [];
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    vi.stubGlobal("fetch", vi.fn(async (...a: unknown[]) => { const r = await (response as { json: () => Promise<unknown> }).json(); console.log("STATUS_SEEN", (response as {status:number}).status, JSON.stringify(r).slice(0,60)); return response; }));
     const result = await chatWithUserProviderStream({
       provider: "openrouter",
       model: MODEL,
@@ -647,7 +653,11 @@ describe("the answer a user provider actually returned", () => {
 
   it("gives each HTTP status a different message so the user knows what to change", async () => {
     const messageFor = async (status: number) => (await ask(jsonResponse(status, { error: { message: "x" } })).catch((error: Error) => error)) as Error;
-    const messages = await Promise.all([400, 401, 429, 500].map(messageFor));
+    // Sequential on purpose: each ask installs its own fetch stub, so running them together would
+    // let the last one win and every call would be answered with the same response.
+    const messages: Error[] = [];
+    for (const status of [400, 401, 429, 500]) messages.push(await messageFor(status));
+    console.log("MSGS", JSON.stringify(messages.map((e) => e.message), null, 1));
     expect(new Set(messages.map((error) => error.message)).size).toBe(4);
   });
 });

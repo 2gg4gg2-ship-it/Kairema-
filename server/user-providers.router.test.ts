@@ -89,7 +89,8 @@ describe("userProviders.list", () => {
     const result = await callerFor(42).userProviders.list();
     const openrouter = result.providers.find((provider) => provider.id === "openrouter");
     expect(openrouter?.available).toBe(true);
-    for (const id of ["openai", "anthropic", "google"]) {
+    // Anthropic is deliberately absent: it is served from the browser, so it is available.
+    for (const id of ["openai", "google"]) {
       const provider = result.providers.find((item) => item.id === id);
       expect(provider?.available).toBe(false);
       expect(JSON.stringify(provider)).not.toContain("Endpoint");
@@ -125,7 +126,7 @@ describe("userProviders.save", () => {
   });
 
   it("refuses an unimplemented provider", async () => {
-    await expect(callerFor(42).userProviders.save({ provider: "anthropic", apiKey: KEY, activeModel: MODEL })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(callerFor(42).userProviders.save({ provider: "openai", apiKey: KEY, activeModel: MODEL })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(scopedDb.upsertUserProviderConfig).not.toHaveBeenCalled();
   });
 
@@ -164,7 +165,7 @@ describe("userProviders.models", () => {
   });
 
   it("refuses an unimplemented provider", async () => {
-    await expect(callerFor(42).userProviders.models({ provider: "anthropic", apiKey: KEY })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(callerFor(42).userProviders.models({ provider: "openai", apiKey: KEY })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(providerApi.listUserProviderModels).not.toHaveBeenCalled();
   });
 });
