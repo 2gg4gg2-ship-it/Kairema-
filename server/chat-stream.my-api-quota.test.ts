@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createChatStreamHandler, MY_API_RATE_LIMIT, MY_API_RATE_LIMIT_MESSAGE, resetChatStreamRateLimits } from "./chat-stream";
+import { publicUserProviderError, UserProviderError } from "./user-providers";
 
 const sessionId = "550e8400-e2e2-46c2-bd9a-58eb3eca0bc2";
 const KEY = "sk-or-v1-quota-secret-1111";
@@ -168,14 +169,24 @@ describe("the My API per-user quota", () => {
     expect((chat.res.status as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toBe(200);
   });
 
-  it("does not meter a My API turn against the ordinary chat quota", async () => {
+  it("meters a My API turn against the My API quota alone", async () => {
     const chatQuota = vi.fn().mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
     const myApiQuota = vi.fn().mockImplementation((userId: number, limit: number, windowMs: number) => consumeWindow(userId, limit, windowMs));
     const { stream } = handler({ consumeChatStreamRequestQuota: chatQuota, consumeMyApiRequestQuota: myApiQuota });
     await stream({ body: { ...baseBody, myApi: true } } as Request, response(), vi.fn());
-    // Both quotas are consulted, but they are two different counters with two different limits.
-    expect(chatQuota).toHaveBeenCalledWith(42, expect.any(Number), expect.any(Number));
+    // The My API budget is charged with its own limit; the chat budget is not touched at all, so
+    // BYOK usage can never exhaust the quota that ordinary Chat is limited by.
     expect(myApiQuota).toHaveBeenCalledWith(42, 15, 60_000);
+    expect(chatQuota).not.toHaveBeenCalled();
+  });
+
+  it("meters an ordinary chat turn against the chat quota alone", async () => {
+    const chatQuota = vi.fn().mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
+    const myApiQuota = vi.fn().mockImplementation((userId: number, limit: number, windowMs: number) => consumeWindow(userId, limit, windowMs));
+    const { stream } = handler({ consumeChatStreamRequestQuota: chatQuota, consumeMyApiRequestQuota: myApiQuota });
+    await stream({ body: { ...baseBody, myApi: false } } as Request, response(), vi.fn());
+    expect(chatQuota).toHaveBeenCalledWith(42, expect.any(Number), expect.any(Number));
+    expect(myApiQuota).not.toHaveBeenCalled();
   });
 
   it("refuses rather than proceeding when the quota cannot be read", async () => {
@@ -198,5 +209,91 @@ describe("the My API per-user quota", () => {
     await ask(true, {}, { auditChatStream });
     const events = auditChatStream.mock.calls.map(([record]) => (record as { event: string }).event);
     expect(events).toContain("chat_stream.my_api_rate_limited");
+  });
+});
+
+describe("our quota and the provider's own limit are told apart", () => {
+  const encoder = new TextEncoder();
+
+  it("passes two ordinary BYOK requests without spending anything near the limit", async () => {
+    // The reported symptom was a RATE_LIMIT after roughly two requests. Two requests must be
+    // admitted and reach the provider, so nothing in this path is a limiter of its own.
+    const { stream, answered } = handler();
+    for (const _ of [1, 2]) {
+      const res = response();
+      await stream({ body: { ...baseBody, myApi: true } } as Request, res, vi.fn());
+      expect((res.status as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toBe(200);
+    }
+    expect(answered).toHaveBeenCalledTimes(2);
+    expect(calls.myApi).toBe(2);
+  });
+
+  it("admits fifteen and refuses only the sixteenth", async () => {
+    for (let i = 0; i < 15; i += 1) {
+      const res = response();
+      const { stream } = handler();
+      await stream({ body: { ...baseBody, myApi: true } } as Request, res, vi.fn());
+      expect((res.status as ReturnType<typeof vi.fn>).mock.calls[0]?.[0], `request ${i + 1}`).toBe(200);
+    }
+    const res = response();
+    const { stream } = handler();
+    await stream({ body: { ...baseBody, myApi: true } } as Request, res, vi.fn());
+    expect((res.status as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toBe(429);
+  });
+
+  it("keeps a provider HTTP 429 as a provider-side limit, not as our quota", async () => {
+    const providerLimit = new UserProviderError("RATE_LIMIT", "Ваш провайдер ограничил частоту запросов по вашему API-ключу. Это ограничение на стороне провайдера, лимит Kairema не исчерпан. Повторите попытку позже или смените модель.", 429);
+    const audit = vi.fn();
+    const res = response();
+    const { stream } = handler({ chatWithUserProviderStream: vi.fn().mockRejectedValue(providerLimit), auditChatStream: audit });
+    await stream({ body: { ...baseBody, myApi: true } } as Request, res, vi.fn());
+
+    // The provider refused the request, so the turn is reported as a provider failure over SSE —
+    // not as the 429 JSON body that our own exhausted quota produces.
+    const body = (res.write as ReturnType<typeof vi.fn>).mock.calls.map(([chunk]) => String(chunk)).join("");
+    expect(body).toContain("event: error");
+    expect(body).toContain("Ваш провайдер ограничил частоту запросов");
+    expect((res.status as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).not.toBe(429);
+    expect((res.json as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    // And it is not recorded as the user having exhausted the Kairema budget.
+    const events = audit.mock.calls.map(([record]) => (record as { event: string }).event);
+    expect(events).not.toContain("chat_stream.my_api_rate_limited");
+  });
+
+  it("gives the two limits different text so a user can tell which one they hit", () => {
+    expect(MY_API_RATE_LIMIT_MESSAGE).toMatch(/Kairema|My API/i);
+    expect(MY_API_RATE_LIMIT_MESSAGE).toMatch(/15 запросов в минуту/);
+    expect(publicUserProviderError(new UserProviderError("RATE_LIMIT", "x", 429))).toMatch(/на стороне провайдера/);
+    // Neither message claims to be the other.
+    expect(MY_API_RATE_LIMIT_MESSAGE).not.toMatch(/на стороне провайдера/);
+    expect(publicUserProviderError(new UserProviderError("RATE_LIMIT", "x", 429))).not.toMatch(/15 запросов/);
+  });
+
+  it("does not let the ordinary chat limiter touch the My API budget", async () => {
+    // A chat quota that is already exhausted must not block My API, and a My API turn must not
+    // consume the chat quota: the two budgets are metered in separate tables.
+    const chatQuota = vi.fn().mockResolvedValue({ allowed: false, retryAfterSeconds: 30 });
+    const myApiQuota = vi.fn().mockImplementation((userId: number, limit: number, windowMs: number) => consumeWindow(userId, limit, windowMs));
+    const res = response();
+    const { stream } = handler({ consumeChatStreamRequestQuota: chatQuota, consumeMyApiRequestQuota: myApiQuota });
+    await stream({ body: { ...baseBody, myApi: true } } as Request, res, vi.fn());
+    expect((res.status as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toBe(200);
+    expect(calls.myApi).toBe(1);
+  });
+
+  it("gives each user a budget of their own", async () => {
+    for (let i = 0; i < 15; i += 1) await ask(true, { userId: 7 });
+    const blocked = await ask(true, { userId: 7 });
+    expect((blocked.res.status as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toBe(429);
+    const other = await ask(true, { userId: 8 });
+    expect((other.res.status as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toBe(200);
+  });
+
+  it("does not let a failed provider call count as a spent request beyond one", async () => {
+    // A 429 from the provider is one request, not a retry storm: the provider is called once.
+    const byok = vi.fn().mockRejectedValue(new UserProviderError("RATE_LIMIT", "provider limit", 429));
+    const { stream } = handler({ chatWithUserProviderStream: byok });
+    await stream({ body: { ...baseBody, myApi: true } } as Request, response(), vi.fn());
+    expect(byok).toHaveBeenCalledTimes(1);
   });
 });

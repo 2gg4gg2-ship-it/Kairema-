@@ -685,8 +685,8 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-model-menu-caret { flex:0 0 auto; width:12px; height:12px; transition:transform .16s ease; }
 /* The settings page trigger is a dark field on a dark form; the menu itself is the shared panel. */
 .kairema-settings-model-trigger { display:flex; flex:1 1 auto; min-width:0; align-items:center; justify-content:space-between; gap:8px; padding:9px 11px; border:1px solid #334155; border-radius:8px; outline:none; color:#e2e8f0; background:#020617; font:inherit; font-size:14px; text-align:left; cursor:pointer; }
-.kairema-settings-model-trigger:hover:not(:disabled) { border-color:#8b5cf6; }
-.kairema-settings-model-trigger:focus-visible { border-color:#a78bfa; box-shadow:0 0 0 3px rgba(139,92,246,.18); }
+.kairema-settings-model-trigger:hover:not(:disabled) { border-color:rgba(255,255,255,.34); }
+.kairema-settings-model-trigger:focus-visible { border-color:rgba(255,255,255,.52); box-shadow:0 0 0 3px rgba(255,255,255,.14); }
 .kairema-settings-model-trigger:disabled { cursor:not-allowed; opacity:.6; }
 .kairema-settings-model-trigger-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .kairema-settings-model-trigger[aria-expanded="true"] .kairema-model-menu-caret { transform:rotate(180deg); }

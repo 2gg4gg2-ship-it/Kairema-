@@ -29,6 +29,7 @@ const fixtures = vi.hoisted(() => ({
   downloadPrepared: vi.fn(),
   invalidateMessages: vi.fn(),
   historyPageFetch: vi.fn(),
+  discardFailedTurn: vi.fn(),
   invalidateSessions: vi.fn(),
   invalidateUserProviders: () => {},
   createChat: vi.fn(),
@@ -119,6 +120,7 @@ vi.mock("@/lib/trpc", async () => {
       clearAll: { useMutation: () => ({ mutateAsync: fixtures.clearHistory, isPending: false }) },
       saveDraft: { useMutation: () => ({ mutateAsync: fixtures.saveDraft, isPending: false }) },
       clearDraft: { useMutation: () => ({ mutateAsync: fixtures.clearDraft, isPending: false }) },
+      discardFailedTurn: { useMutation: () => ({ mutateAsync: fixtures.discardFailedTurn, isPending: false }) },
     },
     userProviders: {
       // The list is a live read, and an invalidate re-renders it: that is what a provider switch
@@ -236,6 +238,7 @@ function resetFixtures() {
   };
   fixtures.invalidateMessages.mockReset().mockImplementation(persistStreamedAnswer);
   fixtures.historyPageFetch.mockReset().mockImplementation(persistStreamedAnswer);
+  fixtures.discardFailedTurn.mockReset().mockResolvedValue({ removed: true });
   fixtures.releaseSecondDelta = null;
   fixtures.memoryData = { settings: { enabled: 1, autoExtract: 1 }, profile: { profile: "", summary: "Автоматически извлечённый нейтральный факт" }, facts: [{ id: "11111111-1111-4111-8111-111111111112", value: "Предпочитает русский язык" }], topics: [{ id: "11111111-1111-4111-8111-111111111113", value: "2026-08-21 Flash: настройка профиля", role: "fast" }] };
 }
@@ -2038,6 +2041,176 @@ describe("a question that got no answer", () => {
       await user.click((await screen.findAllByText("Активная история"))[0]!);
       await vi.advanceTimersByTimeAsync(11_000);
       expect(screen.getByText("Старое сообщение пользователя")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("a failed turn is removed for good, not just on screen", () => {
+  const encoder = new TextEncoder();
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    resetFixtures();
+  });
+
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  const failingStream = (message: string) => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ message })}\n\n`));
+      controller.close();
+    },
+  }));
+
+  const stubChatStream = (response: Response) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) !== "/api/chat/stream") return new Response("{}", { status: 200 });
+      return response;
+    }));
+  };
+
+  const ask = async (user: ReturnType<typeof userEvent.setup>, text: string) => {
+    const composer = await screen.findByPlaceholderText("Напишите сообщение…");
+    await user.type(composer, text);
+    await user.keyboard("{Enter}");
+  };
+
+  const notice = () => screen.queryByTestId("failed-turn-notice");
+
+  it("keeps the question for the whole ten seconds and removes it exactly at the deadline", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+      render(<Home />);
+
+      await ask(user, "Точный вопрос");
+      await waitFor(() => expect(notice()).toBeTruthy());
+
+      // 9.9s in, the question is still there. This is the boundary that matters: a removal at five
+      // seconds, or any other early one, fails here.
+      await vi.advanceTimersByTimeAsync(9_900);
+      expect(screen.queryByText("Точный вопрос"), "removed before 10s").toBeTruthy();
+      expect(notice(), "notice removed before 10s").toBeTruthy();
+      expect(fixtures.discardFailedTurn, "deleted before 10s").not.toHaveBeenCalled();
+
+      // 9.999s: still not gone.
+      await vi.advanceTimersByTimeAsync(99);
+      expect(screen.queryByText("Точный вопрос"), "removed before 10s").toBeTruthy();
+
+      // One more millisecond reaches the deadline, and it goes.
+      await vi.advanceTimersByTimeAsync(1);
+      await waitFor(() => expect(screen.queryByText("Точный вопрос")).toBeNull());
+      await waitFor(() => expect(notice()).toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("deletes the question from the stored transcript at the deadline", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+      render(<Home />);
+
+      await ask(user, "Вопрос для удаления");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      // Nothing is deleted while the question is still on screen and copyable.
+      expect(fixtures.discardFailedTurn).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await waitFor(() => expect(fixtures.discardFailedTurn).toHaveBeenCalledTimes(1));
+      const input = fixtures.discardFailedTurn.mock.calls[0]![0] as { sessionId: string; clientMessageId: string };
+      expect(input.sessionId).toBe(fixtures.sessionId);
+      expect(input.clientMessageId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sends the id the server was given, so the right question is the one removed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) !== "/api/chat/stream") return new Response("{}", { status: 200 });
+        void init;
+        return failingStream("Провайдер временно недоступен. Повторите попытку позже.");
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+      render(<Home />);
+
+      await ask(user, "Вопрос с известным id");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      const sent = JSON.parse(String((fetchSpy.mock.calls.find(([url]) => String(url) === "/api/chat/stream")?.[1] as RequestInit).body));
+      await vi.advanceTimersByTimeAsync(10_000);
+      await waitFor(() => expect(fixtures.discardFailedTurn).toHaveBeenCalledTimes(1));
+      // The delete names exactly the turn the request created, not a position or a range.
+      expect((fixtures.discardFailedTurn.mock.calls[0]![0] as { clientMessageId: string }).clientMessageId).toBe(sent.clientMessageId);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still deletes the stored turn when the user leaves the conversation first", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+      render(<Home />);
+
+      await ask(user, "Вопрос перед переключением");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      await user.click((await screen.findAllByText("Активная история"))[0]!);
+      // The question leaves the screen because the conversation changed, but the pending removal
+      // is not abandoned: the stored turn is still deleted at its deadline.
+      await vi.advanceTimersByTimeAsync(10_000);
+      await waitFor(() => expect(fixtures.discardFailedTurn).toHaveBeenCalledTimes(1));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports a failed deletion instead of pretending the question is gone", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fixtures.discardFailedTurn.mockRejectedValue(new Error("offline"));
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+      render(<Home />);
+
+      await ask(user, "Вопрос, который не удалится");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      await vi.advanceTimersByTimeAsync(10_000);
+      await waitFor(() => expect(fixtures.discardFailedTurn).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(screen.getByText(/Не удалось удалить неудачный вопрос из истории/)).toBeTruthy());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves the rest of the conversation alone", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      stubChatStream(failingStream("Провайдер временно недоступен. Повторите попытку позже."));
+      render(<Home />);
+
+      await screen.findByText("Старое сообщение пользователя");
+      await ask(user, "Единственный неудачный вопрос");
+      await waitFor(() => expect(notice()).toBeTruthy());
+      await vi.advanceTimersByTimeAsync(10_000);
+      await waitFor(() => expect(screen.queryByText("Единственный неудачный вопрос")).toBeNull());
+
+      expect(screen.getByText("Старое сообщение пользователя")).toBeTruthy();
+      expect(screen.getByText("Старый ответ Kairema")).toBeTruthy();
+      // Only this one question is removed; the session is not deleted and neither is any reply.
+      expect(fixtures.discardFailedTurn).toHaveBeenCalledTimes(1);
+      expect(fixtures.deleteChat).not.toHaveBeenCalled();
+      expect(fixtures.clearHistory).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

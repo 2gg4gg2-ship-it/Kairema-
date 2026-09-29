@@ -159,7 +159,10 @@ function classifyUserProviderFailure(http: number | null, upstream: unknown): { 
     return { category: "CREDITS", message: "На счёте провайдера недостаточно средств или квоты. Пополните баланс в аккаунте провайдера." };
   }
   if (http === 429) {
-    return { category: "RATE_LIMIT", message: "Провайдер ограничил частоту запросов по вашему ключу. Повторите попытку позже." };
+    // This is the provider refusing the request, not Kairema's own per-user budget being spent.
+    // The two are told apart in the wording on purpose: a user whose own key is being throttled
+    // must not be told to wait out a Kairema limit that was never reached.
+    return { category: "RATE_LIMIT", message: "Ваш провайдер ограничил частоту запросов по вашему API-ключу. Это ограничение на стороне провайдера, лимит Kairema не исчерпан. Повторите попытку позже или смените модель." };
   }
   if (http === 404 || /no endpoints found|model_not_found|model not found|unknown model|not available/.test(body)) {
     return { category: "MODEL", message: "Провайдер не предлагает выбранную модель. Выберите другую модель из списка." };
@@ -625,8 +628,13 @@ export function publicUserProviderError(error: unknown): string {
   if (error instanceof UserProviderKeyConfigurationError) return `Что произошло: на сервере не настроено шифрование пользовательских API-ключей | Что делать: обратитесь к администратору сервиса.`;
   if (error instanceof UserProviderError) {
     const category: StatusCategory = error.category === "CREDITS" ? "QUOTA" : error.category as StatusCategory;
-    const action = error.category === "RATE_LIMIT" || error.category === "CREDITS" ? "Повторите запрос позже." : error.category === "AUTH" || error.category === "MODEL" ? "Проверьте настройки в Настройках → AI Providers." : "Повторите попытку позже.";
-    return `Что произошло: Провайдер ИИ ответил ошибкой (${category}) | Почему: ${error.message} | Что делать: ${action}`;
+    // A provider 429 names the provider as the party that is throttling, and says plainly that
+    // Kairema's own budget is not involved, so it is never mistaken for the My API quota message.
+    const action = error.category === "RATE_LIMIT"
+      ? "Это лимит на стороне провайдера. Повторите позже или выберите другую модель."
+      : error.category === "CREDITS" ? "Пополните баланс у провайдера." : error.category === "AUTH" || error.category === "MODEL" ? "Проверьте настройки в Настройках → AI Providers." : "Повторите попытку позже.";
+    const what = error.category === "RATE_LIMIT" ? "Провайдер ограничил частоту запросов по вашему ключу" : `Провайдер ИИ ответил ошибкой (${category})`;
+    return `Что произошло: ${what} | Почему: ${error.message} | Что делать: ${action}`;
   }
   if (error instanceof Error) return `Что произошло: Провайдер ИИ ответил ошибкой | Что делать: Повторите попытку позже.`;
   return `Что произошло: Провайдер ИИ ответил ошибкой | Что делать: Повторите попытку позже.`;

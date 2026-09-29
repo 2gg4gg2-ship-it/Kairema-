@@ -634,7 +634,7 @@ describe("the answer a user provider actually returned", () => {
   it.each([
     [400, "Провайдер отклонил запрос"],
     [401, "Провайдер отклонил API-ключ"],
-    [429, "Провайдер ограничил частоту запросов"],
+    [429, "Ваш провайдер ограничил частоту запросов по вашему API-ключу"],
     [500, "Провайдер временно недоступен"],
   ])("surfaces HTTP %i as its own actionable message instead of an empty answer", async (status, expected) => {
     const failure = await ask(jsonResponse(status, { error: { message: `raw upstream detail for ${status}` } })).catch((error: Error) => error);
