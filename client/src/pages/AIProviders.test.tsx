@@ -1020,3 +1020,33 @@ describe("the API key field", () => {
     expect(document.cookie).not.toContain("sk-test-key-value");
   });
 });
+
+/**
+ * The reveal control is gone, but the connect flow it sat next to is untouched: a typed key is
+ * still installed into the tab's memory-only store and the field still clears afterwards.
+ */
+describe("the direct key still installs memory-only", () => {
+  it("stores the typed key in the tab, clears the field, and persists nothing", async () => {
+    render(<Harness />);
+    await screen.findByRole("main");
+
+    const action = screen.getByRole("button", { name: "Использовать ключ в этой вкладке" });
+    const input = document.querySelector<HTMLInputElement>('input[type="password"]')!;
+
+    // Empty input means the action stays unavailable, so this is a real disabled-to-enabled check.
+    expect((action as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.type(input, "sk-direct-key-value");
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
+
+    await userEvent.click(action);
+
+    // Stored: a "forget" control appears, which only exists once a key is held for this provider.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Забыть ключ" })).toBeTruthy());
+    // Cleared: the secret is not left sitting in the DOM after it has been handed over.
+    await waitFor(() => expect((document.querySelector('input[type="password"]') as HTMLInputElement).value).toBe(""));
+    // Memory-only: nothing reached any persistence layer.
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+    expect(document.cookie).not.toContain("sk-direct-key-value");
+  });
+});
