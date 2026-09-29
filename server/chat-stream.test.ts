@@ -7,7 +7,7 @@ vi.mock("./db", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./db")>()),
   consumeChatStreamRequestQuota: chatQuota,
 }));
-import { CHAT_STREAM_RATE_LIMIT, createChatStreamHandler, getChatStreamRuntimeGaugeSnapshot, resetChatStreamRateLimits } from "./chat-stream";
+import { CHAT_STREAM_RATE_LIMIT, chatStreamRateLimitMessage, createChatStreamHandler, getChatStreamRuntimeGaugeSnapshot, resetChatStreamRateLimits } from "./chat-stream";
 
 const context = { style: "default" as const, responseLength: "normal" as const, quickReplies: true, effort: "standard" as const, thinking: false };
 const validRequestBody = { sessionId: "550e8400-e29b-41d4-a716-446655440000", modelId: "fast", content: "Привет" };
@@ -250,7 +250,7 @@ describe("chat stream happy-path", () => {
 
     expect(limitedResponse.status).toHaveBeenCalledWith(429);
     expect(limitedResponse.set).toHaveBeenCalledWith("Retry-After", "37");
-    expect(limitedResponse.json).toHaveBeenCalledWith({ error: "Слишком много запросов. Подождите минуту." });
+    expect(limitedResponse.json).toHaveBeenCalledWith({ error: chatStreamRateLimitMessage("fast") });
     expect(auditChatStream).toHaveBeenLastCalledWith(expect.objectContaining({ event: "chat_stream.rate_limited", userId: 73 }));
     expect(getOwnedChatSession).toHaveBeenCalledOnce();
     expect(listSessionTranscriptWindow).not.toHaveBeenCalled();
@@ -349,7 +349,7 @@ describe("chat stream happy-path", () => {
     expect(firstUserResponse.status).toHaveBeenCalledWith(429);
     expect(secondUserResponse.status).toHaveBeenCalledWith(200);
     expect(chatWithRoleStream).toHaveBeenCalledOnce();
-    expect(chatQuota).toHaveBeenNthCalledWith(1, 81, CHAT_STREAM_RATE_LIMIT, 60_000);
-    expect(chatQuota).toHaveBeenNthCalledWith(2, 82, CHAT_STREAM_RATE_LIMIT, 60_000);
+    expect(chatQuota).toHaveBeenNthCalledWith(1, 81, "fast", CHAT_STREAM_RATE_LIMIT, 60_000);
+    expect(chatQuota).toHaveBeenNthCalledWith(2, 82, "fast", CHAT_STREAM_RATE_LIMIT, 60_000);
   });
 });
