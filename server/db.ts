@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, isNull, like, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createHash, randomUUID } from "node:crypto";
-import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryExtractionJob, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatDrafts, chatExports, chatSessions, chatStreamRateWindows, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryExtractionJobs, memoryFacts, memoryProfiles, memorySettings, messages, providerControlFlags, providerDailyUsage, providerHealth, providerIdentities, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, technicalEvents, userProviderConfigs, userSettings, users, webSearchStatus } from "../drizzle/schema";
+import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAuditRecord, InsertUser, KnowledgeDocument, KnowledgeIngestionRun, KnowledgeSource, MemoryEntry, MemoryExtractionJob, MemoryFact, MemoryProfile, MemorySettings, ProviderHealthRecord, UserSettings, WebSearchStatusRecord, chatAttachments, chatDrafts, chatExports, chatSessions, chatStreamRateWindows, devApiAuditRecords, devApiRateWindows, flashTtftMetrics, knowledgeDocuments, knowledgeIngestionRuns, knowledgeSources, memoryEntries, memoryExtractionJobs, memoryFacts, memoryProfiles, memorySettings, messages, myApiRateWindows, providerControlFlags, providerDailyUsage, providerHealth, providerIdentities, roleRuntimeStatus, searchOutageLogs, searchQualityMetrics, technicalEvents, userProviderConfigs, userSettings, users, webSearchStatus } from "../drizzle/schema";
 import { providerHealthHistory } from "../drizzle/schema";
 import { stytchLinkIntents } from "../drizzle/schema";
 import { ENV } from "./_core/env";
@@ -431,6 +431,26 @@ export async function listSessionMessagesPage(userId: number, sessionId: string,
  * Appends a message once. A client UUID is accepted only for original user
  * messages; retries return `created: false` without creating another record.
  */
+/**
+ * Rolls back the user message of a turn that produced no answer.
+ *
+ * A question is stored before the provider is called so that an answer can be attached to it, which
+ * means a failed turn otherwise leaves its question behind in the transcript forever — the user
+ * reloads the page and finds a question with no reply, and every later turn is built on it. Only
+ * the named message is removed, and only from the session the caller owns, so the history that came
+ * before the failed turn is untouched.
+ */
+export async function deleteOwnedSessionUserMessage(userId: number, sessionId: string, messageId: number): Promise<boolean> {
+  const db = requireDatabase(await getDb());
+  requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
+  const removed = await db.delete(messages).where(and(
+    eq(messages.id, messageId),
+    eq(messages.sessionId, sessionId),
+    eq(messages.role, "user"),
+  ));
+  return Number(removed?.[0]?.affectedRows ?? 0) > 0;
+}
+
 export async function appendChatMessage(userId: number, sessionId: string, role: "user" | "assistant", content: string, modelId?: string, metadata?: string, clientMessageId?: string): Promise<{ created: boolean; id: number }> {
   const db = requireDatabase(await getDb());
   requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
@@ -1124,6 +1144,28 @@ export async function consumeChatStreamRequestQuota(userId: number, limit = 60, 
   const rows = await db.select().from(chatStreamRateWindows).where(eq(chatStreamRateWindows.userId, userId)).limit(1);
   const current = rows[0];
   if (!current) throw new Error("Не удалось проверить лимит chat stream.");
+  const elapsed = Math.max(0, now.getTime() - current.windowStarted.getTime());
+  return { allowed: current.requestCount <= limit, retryAfterSeconds: Math.max(1, Math.ceil((windowMs - elapsed) / 1_000)) };
+}
+
+/**
+ * Fixed-window quota for My API (BYOK) turns, counted in `my_api_rate_windows`.
+ *
+ * The increment and the window rollover happen in one atomic upsert, so concurrent requests cannot
+ * both read a pre-increment count and both be admitted past the limit. The read-back afterwards is
+ * what turns the stored counter into a verdict; the upsert is what makes that verdict trustworthy.
+ */
+export async function consumeMyApiRequestQuota(userId: number, limit = 15, windowMs = 60_000): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+  const db = requireDatabase(await getDb());
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - windowMs);
+  await db.insert(myApiRateWindows).values({ userId, windowStarted: now, requestCount: 1 }).onDuplicateKeyUpdate({ set: {
+    requestCount: sql`if(${myApiRateWindows.windowStarted} <= ${cutoff}, 1, ${myApiRateWindows.requestCount} + 1)`,
+    windowStarted: sql`if(${myApiRateWindows.windowStarted} <= ${cutoff}, ${now}, ${myApiRateWindows.windowStarted})`,
+  } });
+  const rows = await db.select().from(myApiRateWindows).where(eq(myApiRateWindows.userId, userId)).limit(1);
+  const current = rows[0];
+  if (!current) throw new Error("Не удалось проверить лимит My API.");
   const elapsed = Math.max(0, now.getTime() - current.windowStarted.getTime());
   return { allowed: current.requestCount <= limit, retryAfterSeconds: Math.max(1, Math.ceil((windowMs - elapsed) / 1_000)) };
 }

@@ -31,6 +31,27 @@ type SourceEvidence = { title: string; url: string; publishedAt?: string };
 type WebGrounding = { intent: "PREFERRED" | "REQUIRED"; state: "verified" | "disabled" | "empty" | "degraded" | "unavailable" | "admission_denied"; sourcesCount: number; citations: SourceEvidence[]; freshnessBlocked?: boolean };
 
 const ACTIVE_CHAT_STORAGE_KEY = "active-chat-id";
+/** How long a question whose turn produced no answer stays readable and copyable. */
+const FAILED_TURN_GRACE_MS = 10_000;
+
+/**
+ * The two sentences shown under a question that got no answer. A rate limit is called out
+ * separately from every other failure because the user's next action differs: one is "wait", the
+ * other is "try again", and a single generic sentence would give the user neither.
+ */
+function failedTurnNotice(errorMessage: string, language: "ru" | "en") {
+  const rateLimited = /\b429\b|rate.?limit|too many|лимит|частот/i.test(errorMessage);
+  if (language === "en") {
+    return {
+      reason: rateLimited ? "Rate limit reached. The request was not sent to the provider." : "No answer came back from the provider.",
+      detail: `This question will be removed in ${FAILED_TURN_GRACE_MS / 1000} seconds. Copy the text now if you want to keep it.`,
+    };
+  }
+  return {
+    reason: rateLimited ? "Достигнут лимит запросов. Провайдер не был вызван." : "Провайдер не вернул ответ.",
+    detail: `Сообщение будет удалено через ${FAILED_TURN_GRACE_MS / 1000} секунд. Скопируйте текст, если хотите его сохранить.`,
+  };
+}
 
 function readStoredActiveChatId(): string {
   try { return window.localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY) ?? ""; } catch { return ""; }
@@ -276,7 +297,7 @@ export default function Home() {
   const [, navigate] = useLocation();
   const { theme, toggleTheme, setHighContrast } = useTheme();
   const [activeId, setActiveId] = useState(""); const [newConversation, setNewConversation] = useState(false); const [modelId, setModelId] = useState<ModelId>("fast"); const [chatMode, setChatMode] = useState<"chat" | "myApi">("chat"); const [search, setSearch] = useState(""); const [uploadStatus, setUploadStatus] = useState<{ sessionId: string; message: string } | null>(null);   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === "undefined" ? true : window.innerWidth >= SIDEBAR_DESKTOP_BREAKPOINT); const [settingsOpen, setSettingsOpen] = useState(false); const [profileOpen, setProfileOpen] = useState(false); const [memoryOpen, setMemoryOpen] = useState(false); const [exportHistoryOpen, setExportHistoryOpen] = useState(false); const [templatesOpen, setTemplatesOpen] = useState(false); const [pendingChatDeletionId, setPendingChatDeletionId] = useState<string | null>(null); const [isChatDeletionConfirming, setIsChatDeletionConfirming] = useState(false); const [pendingHistoryClear, setPendingHistoryClear] = useState(false); const [isHistoryClearConfirming, setIsHistoryClearConfirming] = useState(false); const [composerDraft, setComposerDraft] = useState(""); const [draftHydratedSessionId, setDraftHydratedSessionId] = useState(""); const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]); const [sentAttachmentFallbacks, setSentAttachmentFallbacks] = useState<ChatAttachment[]>([]); const [isStreaming, setIsStreaming] = useState(false); const [isExporting, setIsExporting] = useState<"markdown" | "pdf" | null>(null); const [notice, setNotice] = useState(""); const [settingsOverride, setSettingsOverride] = useState<Record<string, unknown>>({});
-  const streamAbortRef = useRef<AbortController | null>(null); const activeSessionRef = useRef(""); const pagedHistorySessionRef = useRef(""); const deleteConfirmationInFlightRef = useRef(false); const historyClearInFlightRef = useRef(false); const defaultRoleApplied = useRef(false); const themeApplied = useRef(false); const persistedDraftRef = useRef(""); const activeChatHydrated = useRef(false);
+  const streamAbortRef = useRef<AbortController | null>(null); const failedTurnTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>()); const activeSessionRef = useRef(""); const pagedHistorySessionRef = useRef(""); const deleteConfirmationInFlightRef = useRef(false); const historyClearInFlightRef = useRef(false); const defaultRoleApplied = useRef(false); const themeApplied = useRef(false); const persistedDraftRef = useRef(""); const activeChatHydrated = useRef(false);
   const [olderHistoryMessages, setOlderHistoryMessages] = useState<any[]>([]); const [olderHistoryCursor, setOlderHistoryCursor] = useState<string | null | undefined>(undefined); const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
   const modelsQuery = trpc.models.list.useQuery(undefined, { refetchInterval: 60_000, refetchOnWindowFocus: true }); const settingsQuery = trpc.settings.get.useQuery(undefined, { enabled: isAuthenticated }); const healthRefreshSeconds = Number(settingsQuery.data?.healthRefreshSeconds ?? 30); const memoryQuery = trpc.memory.get.useQuery(undefined, { enabled: isAuthenticated }); const webStatusQuery = trpc.webSearch.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const knowledgeStatusQuery = trpc.knowledge.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const providerDashboardQuery = trpc.providers.dashboard.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: healthRefreshSeconds > 0 ? healthRefreshSeconds * 1_000 : false, refetchOnWindowFocus: true }); const knowledgeAuditQuery = trpc.knowledge.audit.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const sessionsQuery = trpc.chats.list.useQuery(undefined, { enabled: isAuthenticated, refetchOnWindowFocus: true }); const messagesQuery = trpc.chats.historyPage.useQuery({ sessionId: activeId, limit: 60 }, { enabled: isAuthenticated && Boolean(activeId) }); const attachmentsQuery = trpc.attachments.list.useQuery({ sessionId: activeId }, { enabled: isAuthenticated && Boolean(activeId) }); const draftQuery = trpc.chats.draft.useQuery({ sessionId: activeId }, { enabled: isAuthenticated && Boolean(activeId), refetchOnWindowFocus: false }); const exportsQuery = trpc.exports.list.useQuery(undefined, { enabled: isAuthenticated && exportHistoryOpen }); const searchQuery = trpc.search.query.useQuery({ query: search }, { enabled: isAuthenticated && search.trim().length >= 2 }); const ownerQuery = trpc.owner.isOwner.useQuery(undefined, { enabled: isAuthenticated, staleTime: 300_000 });
   const createMutation = trpc.chats.create.useMutation(); const deleteChatMutation = trpc.chats.delete.useMutation(); const clearHistoryMutation = trpc.chats.clearAll.useMutation(); const draftSaveMutation = trpc.chats.saveDraft.useMutation(); const draftClearMutation = trpc.chats.clearDraft.useMutation(); const settingMutation = trpc.settings.update.useMutation(); const updateNameMutation = trpc.auth.updateName.useMutation(); const memoryUpdateMutation = trpc.memory.update.useMutation(); const memoryAddMutation = trpc.memory.addFact.useMutation(); const memoryDeleteMutation = trpc.memory.deleteEntry.useMutation(); const memoryClearMutation = trpc.memory.clear.useMutation(); const attachmentDeleteMutation = trpc.attachments.delete.useMutation(); const exportCreateMutation = trpc.exports.create.useMutation(); const exportDeleteMutation = trpc.exports.delete.useMutation(); const knowledgeRefreshMutation = trpc.knowledge.refresh.useMutation(); const utils = trpc.useUtils();
@@ -415,6 +436,19 @@ export default function Home() {
   useEffect(() => { if (!themeApplied.current && settingsQuery.data?.theme) { if (settingsQuery.data.theme !== theme) toggleTheme?.(); themeApplied.current = true; } }, [settingsQuery.data?.theme, theme, toggleTheme]);
   useEffect(() => { if (settingsQuery.data?.highContrast !== undefined) setHighContrast?.(Boolean(settingsQuery.data.highContrast)); }, [settingsQuery.data?.highContrast, setHighContrast]);
   useEffect(() => { pagedHistorySessionRef.current = activeId; setOlderHistoryMessages([]); setOlderHistoryCursor(undefined); setIsLoadingOlderHistory(false); setOptimisticMessages([]); setSentAttachmentFallbacks([]); setComposerDraft(""); setDraftHydratedSessionId(""); }, [activeId]);   useEffect(() => () => streamAbortRef.current?.abort(), []);
+  // A pending removal must not fire after the user has left the conversation or the page: the
+  // timer would then edit a message list that no longer holds the question it was scheduled for.
+  useEffect(() => () => {
+    for (const timer of failedTurnTimersRef.current.values()) clearTimeout(timer);
+    failedTurnTimersRef.current.clear();
+  }, []);
+  useEffect(() => {
+    for (const [messageId, timer] of failedTurnTimersRef.current) {
+      clearTimeout(timer);
+      failedTurnTimersRef.current.delete(messageId);
+    }
+    setOptimisticMessages([]);
+  }, [activeId]);
   // The topbar has no sidebar toggle, so crossing the breakpoint is the only moment the sidebar
   // state can be reconciled: desktop keeps its column open, mobile falls back to a closed drawer.
   // This keeps the sidebar reachable in both layouts without reintroducing a topbar button.
@@ -572,7 +606,8 @@ export default function Home() {
     const selectedId = modelId;
     const assistantId = `stream-${Date.now()}`;
     if (options?.attachments?.length) setSentAttachmentFallbacks((current) => [...current.filter((attachment) => !options.attachments!.some((item) => item.id === attachment.id)), ...options.attachments!]);
-    setOptimisticMessages([{ id: `user-${Date.now()}`, role: "user", content, attachments: options?.attachments }, { id: assistantId, role: "assistant", content: "" }]);
+    const userId = `user-${Date.now()}`;
+    setOptimisticMessages([{ id: userId, role: "user", content, attachments: options?.attachments }, { id: assistantId, role: "assistant", content: "" }]);
     setIsStreaming(true);
     const controller = new AbortController();
     streamAbortRef.current = controller;
@@ -593,7 +628,20 @@ export default function Home() {
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") { setOptimisticMessages([]); await Promise.all([utils.chats.historyPage.invalidate({ sessionId, limit: 60 }), utils.attachments.list.invalidate({ sessionId })]); return true; }
       const errorMessage = error instanceof Error ? error.message : "Stream error";
-      setOptimisticMessages((items) => [...items.filter((item) => item.id !== assistantId), { id: `stream-error-${Date.now()}`, role: "assistant", content: errorMessage, providerLabel: "Kairema", model: selectedId, status: language === "ru" ? "ошибка" : "error", isError: true }]);
+      // The question is kept for a grace period instead of vanishing or staying forever: long
+      // enough to read and copy, short enough that a dead turn does not silently become part of
+      // the conversation the next request is built on. Only this turn's own question is removed.
+      const notice_ = failedTurnNotice(errorMessage, language);
+      setOptimisticMessages((items) => [
+        ...items.filter((item) => item.id !== assistantId && item.id !== userId),
+        { id: userId, role: "user", content, attachments: options?.attachments, failedTurn: { ...notice_, removedAt: Date.now() + FAILED_TURN_GRACE_MS } },
+        { id: `stream-error-${Date.now()}`, role: "assistant", content: errorMessage, providerLabel: "Kairema", model: selectedId, status: language === "ru" ? "ошибка" : "error", isError: true },
+      ]);
+      const timer = setTimeout(() => {
+        failedTurnTimersRef.current.delete(userId);
+        setOptimisticMessages((items) => items.filter((item) => item.id !== userId));
+      }, FAILED_TURN_GRACE_MS);
+      failedTurnTimersRef.current.set(userId, timer);
       await Promise.all([utils.chats.historyPage.invalidate({ sessionId, limit: 60 }), utils.attachments.list.invalidate({ sessionId })]);
       return true;
     } finally { streamAbortRef.current = null; setIsStreaming(false); }

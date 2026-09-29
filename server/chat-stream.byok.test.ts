@@ -3,9 +3,11 @@ import type { Request, Response } from "express";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const chatQuota = vi.hoisted(() => vi.fn());
+const myApiQuota = vi.hoisted(() => vi.fn());
 vi.mock("./db", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./db")>()),
   consumeChatStreamRequestQuota: chatQuota,
+  consumeMyApiRequestQuota: myApiQuota,
 }));
 
 import { createChatStreamHandler, resetChatStreamRateLimits } from "./chat-stream";
@@ -41,6 +43,9 @@ function handlerWith(overrides: Record<string, unknown>, options: { isGuest?: bo
     authenticateRequest: vi.fn().mockResolvedValue(options.isGuest ? null : { id: 42 }),
     getOrCreateGuestUser: options.isGuest ? vi.fn().mockResolvedValue({ id: 77, isGuest: true }) : vi.fn().mockResolvedValue(null),
     getOwnedChatSession: vi.fn().mockResolvedValue({ id: sessionId, title: "Новый разговор" }),
+    consumeChatStreamRequestQuota: chatQuota,
+    consumeMyApiRequestQuota: myApiQuota,
+    deleteOwnedSessionUserMessage: vi.fn().mockResolvedValue(true),
     appendChatMessage: vi.fn().mockResolvedValue({ id: 1, created: true }),
     updateChatTitle: vi.fn(),
     listSessionTranscriptWindow: vi.fn().mockResolvedValue(transcriptWindow),
@@ -59,6 +64,7 @@ function handlerWith(overrides: Record<string, unknown>, options: { isGuest?: bo
 beforeEach(() => {
   resetChatStreamRateLimits();
   chatQuota.mockReset().mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
+  myApiQuota.mockReset().mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
   vi.spyOn(console, "info").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
@@ -269,5 +275,49 @@ describe("answer attribution for a custom provider", () => {
     expect(options.model).toBe(MODEL);
     expect(options.modelLabel).toBe(MODEL);
     expect(eventPayload(res, "done")).toMatchObject({ modelUsed: MODEL, label: `Мой провайдер · ${MODEL}` });
+  });
+});
+
+describe("a turn that produced no answer", () => {
+  it("rolls back its own question and leaves the rest of the conversation alone", async () => {
+    const deleteMessage = vi.fn().mockResolvedValue(true);
+    const append = vi.fn().mockResolvedValue({ id: 77, created: true });
+    const byok = vi.fn().mockRejectedValue(new UserProviderError("PROVIDER_UNAVAILABLE", "Провайдер временно недоступен. Повторите попытку позже.", 503));
+    const res = response();
+    await handlerWith({ chatWithUserProviderStream: byok, appendChatMessage: append, deleteOwnedSessionUserMessage: deleteMessage })({ body: { ...baseBody, myApi: true } } as Request, res, vi.fn());
+
+    // The question was written before the provider was called, so the failure has to take it back.
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(deleteMessage).toHaveBeenCalledWith(42, sessionId, 77);
+    expect(writes(res)).toContain("event: error");
+  });
+
+  it("keeps the transcript untouched when the rollback itself fails", async () => {
+    const deleteMessage = vi.fn().mockRejectedValue(new Error("db unavailable"));
+    const byok = vi.fn().mockRejectedValue(new UserProviderError("UNKNOWN", "Провайдер вернул пустой ответ. Повторите попытку.", 200));
+    const res = response();
+    await handlerWith({ chatWithUserProviderStream: byok, deleteOwnedSessionUserMessage: deleteMessage })({ body: { ...baseBody, myApi: true } } as Request, res, vi.fn());
+    // A rollback that fails must not replace the user's error with a second error.
+    expect(writes(res)).toContain("event: error");
+  });
+
+  it("never rolls back a question for a turn that succeeded", async () => {
+    const deleteMessage = vi.fn().mockResolvedValue(true);
+    const byok = vi.fn().mockResolvedValue({ content: "ok", modelUsed: MODEL, provider: "openrouter", fallbackUsed: false, label: MODEL, status: { state: "ready", badge: "", category: null, http: 200, checkedAt: new Date().toISOString(), confirmed: "" } });
+    const res = response();
+    await handlerWith({ chatWithUserProviderStream: byok, deleteOwnedSessionUserMessage: deleteMessage })({ body: { ...baseBody, myApi: true } } as Request, res, vi.fn());
+    expect(writes(res)).toContain("event: done");
+    expect(deleteMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not roll back a turn that was refused before the question was stored", async () => {
+    const deleteMessage = vi.fn().mockResolvedValue(true);
+    const append = vi.fn().mockResolvedValue({ id: 77, created: true });
+    const byok = vi.fn();
+    const res = response();
+    await handlerWith({ chatWithUserProviderStream: byok, appendChatMessage: append, deleteOwnedSessionUserMessage: deleteMessage, consumeMyApiRequestQuota: myApiQuota.mockResolvedValue({ allowed: false, retryAfterSeconds: 42 }) })({ body: { ...baseBody, myApi: true } } as Request, res, vi.fn());
+    expect(append).not.toHaveBeenCalled();
+    expect(deleteMessage).not.toHaveBeenCalled();
+    expect(byok).not.toHaveBeenCalled();
   });
 });

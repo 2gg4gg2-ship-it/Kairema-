@@ -337,6 +337,13 @@
       "when": 1790700000000,
       "tag": "0047_user_provider_custom_endpoints",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "5",
+      "when": 1790800000000,
+      "tag": "0048_my_api_rate_windows",
+      "breakpoints": true
     }
   ]
 }

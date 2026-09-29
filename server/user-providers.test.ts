@@ -9,6 +9,7 @@ vi.mock("./capacity-controller", async (importOriginal) => ({
   ...capacity,
 }));
 
+import { openRouterStreamDelta } from "./providers";
 import { chatWithUserProviderStream, customUserProviderTarget, listUserProviderModels, publicUserProviderError, readyUserProvider, sanitizeStreamDelta, UserProviderError, UserProviderGuestNotAllowedError, UserProviderNotImplementedError, verifyUserProviderKey } from "./user-providers";
 import { UserProviderNotConfiguredError } from "./user-providers";
 
@@ -23,11 +24,16 @@ function sse(chunks: string[]) {
       controller.close();
     },
   });
-  return { ok: true, status: 200, body, json: async () => ({}), text: async () => "" } as unknown as Response;
+  return { ok: true, status: 200, body, headers: new Headers({ "content-type": "text/event-stream" }), json: async () => ({}), text: async () => "" } as unknown as Response;
+}
+
+/** A provider that ignored "stream": true and answered with one JSON document. */
+function wholeJsonResponse(payload: unknown, raw?: string) {
+  return { ok: true, status: 200, body: null, headers: new Headers({ "content-type": "application/json" }), json: async () => payload, text: async () => raw ?? JSON.stringify(payload) } as unknown as Response;
 }
 
 function jsonResponse(status: number, payload: unknown) {
-  return { ok: false, status, body: null, json: async () => payload, text: async () => JSON.stringify(payload) } as unknown as Response;
+  return { ok: false, status, body: null, headers: new Headers({ "content-type": "application/json" }), json: async () => payload, text: async () => JSON.stringify(payload) } as unknown as Response;
 }
 
 let lease: { reserveAttempt: ReturnType<typeof vi.fn>; release: ReturnType<typeof vi.fn> };
@@ -512,5 +518,152 @@ describe("streamed delta sanitizing keeps the provider's spacing", () => {
     expect(sanitizeStreamDelta("text [source](https://example.com)")).toBe("text");
     expect(sanitizeStreamDelta(" [1]")).toBe(" [1]");
     expect(sanitizeStreamDelta("https://example.com/a")).toBe("");
+  });
+});
+
+describe("the answer a user provider actually returned", () => {
+  const ask = async (response: unknown) => {
+    const deltas: string[] = [];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    const result = await chatWithUserProviderStream({
+      provider: "openrouter",
+      model: MODEL,
+      modelLabel: "Моя модель",
+      apiKey: KEY,
+      history: [{ role: "user", content: "Привет" }],
+      roleId: "fast",
+      onDelta: (delta) => deltas.push(delta),
+    });
+    return { result, deltas, joined: deltas.join("") };
+  };
+
+  const frame = (payload: unknown) => `data: ${JSON.stringify(payload)}\n\n`;
+
+  it("reads a plain string delta", async () => {
+    const { result } = await ask(sse([frame({ choices: [{ delta: { content: "Hello" } }] }), frame({ choices: [{ delta: { content: " world" } }] }), "data: [DONE]\n\n"]));
+    expect(result.content).toBe("Hello world");
+  });
+
+  it("reads an array of content parts", async () => {
+    const { result } = await ask(sse([frame({ choices: [{ delta: { content: [{ type: "text", text: "Hello" }] } }] }), frame({ choices: [{ delta: { content: [{ type: "text", text: " world" }] } }] }), "data: [DONE]\n\n"]));
+    expect(result.content).toBe("Hello world");
+  });
+
+  it("reads the whole array when a frame carries every part at once", async () => {
+    const { result } = await ask(sse([frame({ choices: [{ delta: { content: [{ type: "text", text: "A" }, { type: "text", text: "B" }] } }] }), "data: [DONE]\n\n"]));
+    expect(result.content).toBe("AB");
+  });
+
+  it("reads a non-stream JSON answer whose content is a string", async () => {
+    const { result } = await ask(wholeJsonResponse({ choices: [{ message: { content: "Whole answer" } }] }));
+    expect(result.content).toBe("Whole answer");
+  });
+
+  it("reads a non-stream JSON answer whose content is an array of parts", async () => {
+    const { result } = await ask(wholeJsonResponse({ message: { content: [{ type: "text", text: "Part one " }, { type: "text", text: "part two" }] } }));
+    expect(result.content).toBe("Part one part two");
+  });
+
+  it("reads a pretty-printed non-stream answer that spans several lines", async () => {
+    // Without the content-type branch this document is split at every blank line and each fragment
+    // fails to parse, which the user sees as "the provider returned an empty answer".
+    const pretty = `{\n  "choices": [\n    {\n      "message": {\n        "content": "Pretty printed"\n      }\n    }\n  ]\n}`;
+    const { result } = await ask(wholeJsonResponse({ choices: [{ message: { content: "Pretty printed" } }] }, pretty));
+    expect(result.content).toBe("Pretty printed");
+  });
+
+  it("reads the legacy choices[0].text field", async () => {
+    const { result } = await ask(sse([frame({ choices: [{ text: "Legacy" }] }), "data: [DONE]\n\n"]));
+    expect(result.content).toBe("Legacy");
+  });
+
+  it("still reads a stream that arrived labelled as JSON", async () => {
+    const mislabelled = sse([frame({ choices: [{ delta: { content: "SSE body" } }] }), "data: [DONE]\n\n"]);
+    (mislabelled as { headers: Headers }).headers = new Headers({ "content-type": "application/json" });
+    const { result } = await ask(mislabelled);
+    expect(result.content).toBe("SSE body");
+  });
+
+  it("never publishes the reasoning channel as answer text", async () => {
+    const { result, joined } = await ask(sse([frame({ choices: [{ delta: { reasoning: "internal chain of thought" } }] }), frame({ choices: [{ delta: { content: "answer" } }] }), frame({ choices: [{ delta: { reasoning_content: "more private text" } }] }), "data: [DONE]\n\n"]));
+    expect(joined).toBe("answer");
+    expect(result.content).toBe("answer");
+    expect(result.content).not.toContain("chain of thought");
+  });
+
+  it("ignores non-text content parts", async () => {
+    const { result } = await ask(sse([frame({ choices: [{ delta: { content: [{ type: "image", text: "not prose" }, { type: "text", text: "kept" }] } }] }), "data: [DONE]\n\n"]));
+    expect(result.content).toBe("kept");
+  });
+
+  it("preserves the spacing between chunks instead of welding them together", async () => {
+    const { deltas, joined } = await ask(sse([frame({ choices: [{ delta: { content: "Hello" } }] }), frame({ choices: [{ delta: { content: " world" } }] }), frame({ choices: [{ delta: { content: " how" } }] }), frame({ choices: [{ delta: { content: " are you?" } }] }), "data: [DONE]\n\n"]));
+    expect(joined).toBe("Hello world how are you?");
+    expect(deltas.every((delta) => delta.length > 0)).toBe(true);
+  });
+
+  it("reassembles a frame split across two reads", async () => {
+    const whole = frame({ choices: [{ delta: { content: "Split frame" } }] });
+    const { result } = await ask(sse([whole.slice(0, 12), whole.slice(12), "data: [DONE]\n\n"]));
+    expect(result.content).toBe("Split frame");
+  });
+
+  it("handles CRLF frames, keep-alive comments and a missing final terminator", async () => {
+    const { result } = await ask(sse([": keep-alive\r\n\r\n", frame({ choices: [{ delta: { content: "CRLF" } }] }).replace(/\n/g, "\r\n"), "data: [DONE]\r\n\r\n", frame({ choices: [{ delta: { content: " tail" } }] }).replace(/\n/g, "\r\n")]));
+    expect(result.content).toBe("CRLF tail");
+  });
+
+  it("reports an empty answer as an error rather than returning nothing", async () => {
+    await expect(ask(sse([frame({ choices: [{ delta: { content: "" } }] }), "data: [DONE]\n\n"]))).rejects.toThrow(/пустой ответ/i);
+    await expect(ask(wholeJsonResponse({ choices: [{ message: { content: "" } }] }))).rejects.toThrow(/пустой ответ/i);
+  });
+
+  it("keeps a markdown table intact across streamed parts", async () => {
+    const { result } = await ask(sse([frame({ choices: [{ delta: { content: "| a | b |\n| --- | --- |\n" } }] }), frame({ choices: [{ delta: { content: "| 1 | 2 |" } }] }), "data: [DONE]\n\n"]));
+    expect(result.content).toContain("| a | b |");
+    expect(result.content).toContain("| 1 | 2 |");
+  });
+
+  it("attributes the answer to the configured model and never falls back to a system provider", async () => {
+    const { result } = await ask(sse([frame({ choices: [{ delta: { content: "Answer" } }] }), "data: [DONE]\n\n"]));
+    expect(result.label).toBe("Моя модель");
+    expect(result.fallbackUsed).toBe(false);
+    expect(result.provider).toBe("openrouter");
+  });
+
+  it.each([
+    [400, "Провайдер отклонил запрос"],
+    [401, "Провайдер отклонил API-ключ"],
+    [429, "Провайдер ограничил частоту запросов"],
+    [500, "Провайдер временно недоступен"],
+  ])("surfaces HTTP %i as its own actionable message instead of an empty answer", async (status, expected) => {
+    const failure = await ask(jsonResponse(status, { error: { message: `raw upstream detail for ${status}` } })).catch((error: Error) => error);
+    expect(failure).toBeInstanceOf(UserProviderError);
+    expect((failure as Error).message).toContain(expected);
+    // The upstream payload is the provider's to show its operator, not the user's to debug with.
+    expect((failure as Error).message).not.toContain("raw upstream detail");
+    expect((failure as Error).stack).not.toContain("raw upstream detail");
+  });
+
+  it("gives each HTTP status a different message so the user knows what to change", async () => {
+    const messageFor = async (status: number) => (await ask(jsonResponse(status, { error: { message: "x" } })).catch((error: Error) => error)) as Error;
+    const messages = await Promise.all([400, 401, 429, 500].map(messageFor));
+    expect(new Set(messages.map((error) => error.message)).size).toBe(4);
+  });
+});
+
+describe("openRouterStreamDelta frame shapes", () => {
+  it("returns the visible text of every supported shape", () => {
+    expect(openRouterStreamDelta({ choices: [{ delta: { content: "a" } }] })).toBe("a");
+    expect(openRouterStreamDelta({ delta: { text: "b" } })).toBe("b");
+    expect(openRouterStreamDelta({ message: { content: "c" } })).toBe("c");
+    expect(openRouterStreamDelta({ choices: [{ text: "d" }] })).toBe("d");
+    expect(openRouterStreamDelta({ content: [{ type: "text", text: "e" }] })).toBe("e");
+  });
+
+  it("returns an empty string for a frame with nothing visible", () => {
+    expect(openRouterStreamDelta({})).toBe("");
+    expect(openRouterStreamDelta(null)).toBe("");
+    expect(openRouterStreamDelta({ choices: [{ delta: { content: null } }] })).toBe("");
   });
 });

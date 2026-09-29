@@ -335,7 +335,7 @@ body { margin: 0; min-width: 320px; background: #070912; color: #e8edf8; }
 .kairema-role-menu-copy { display:grid; min-width:0; gap:3px; }
 .kairema-role-menu-copy strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
 .kairema-role-menu-copy small { display:-webkit-box; overflow:hidden; color:var(--k-muted); font-size:10px; line-height:1.25; -webkit-box-orient:vertical; -webkit-line-clamp:1; }
-@media(max-width:767px){.kairema-topbar{align-content:center;padding:5px 10px}.kairema-topbar-controls{order:1}.kairema-topbar-title{font-size:12px}.kairema-role-menu-trigger{max-width:168px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.kairema-mode-bar{padding:3px 10px}.kairema-mode-option{padding:0 7px;font-size:11px}.kairema-chat-tools{padding:4px 12px 2px}.kairema-role-menu{max-height:calc(100dvh - 16px)}}
+@media(max-width:767px){.kairema-topbar{align-content:center;padding:5px 10px}.kairema-topbar-controls{order:1}.kairema-topbar-title{font-size:12px}.kairema-role-menu-trigger{max-width:168px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.kairema-mode-bar{padding:3px 10px}.kairema-chat-controls[data-controls-open="false"] .kairema-mode-bar{padding:0}.kairema-mode-option{padding:0 7px;font-size:11px}.kairema-chat-tools{padding:4px 12px 2px}.kairema-role-menu{max-height:calc(100dvh - 16px)}}
 @media(max-width:430px){.kairema-topbar-controls{gap:4px}.kairema-topbar .kairema-icon-btn{width:44px}.kairema-guest-login{padding-inline:9px;font-size:11px}.kairema-guest-login-empty{padding-inline:16px;font-size:13px}.kairema-role-menu-trigger{max-width:146px;padding:0 2px;font-size:12px}}
 .kairema-export-actions { display:flex; gap:6px; }
 .kairema-export-button { display:inline-flex; align-items:center; gap:5px; padding:5px 8px; border:1px solid rgba(255,255,255,.10); border-radius:8px; color:#cfd7e7; background:rgba(255,255,255,.025); font-size:11px; font-weight:600; transition:transform .16s cubic-bezier(.23,1,.32,1),background .16s ease,border-color .16s ease; }
@@ -634,6 +634,10 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-panel-collapse { display:flex; flex:0 1 auto; align-items:center; gap:6px; min-width:0; max-width:100%; overflow:clip; overflow-clip-margin:0 0 240px 0; transition:max-width .18s ease, opacity .18s ease, transform .18s ease, visibility 0s linear 0s; }
 .kairema-chat-controls[data-controls-open="false"] .kairema-panel-collapse { max-width:0; opacity:0; transform:translateY(-8px); visibility:hidden; transition:max-width .18s ease, opacity .18s ease, transform .18s ease, visibility 0s linear .18s; }
 .kairema-chat-controls[data-controls-open="false"] .kairema-mode-bar { gap:0; }
+/* Collapsed, the bar holds nothing but the arrow, so the row's own padding and top offset are
+   removed with it: what is left is a single control, not a short row that reserves the space a
+   full set of controls once occupied. The toggle carries its own inset. */
+.kairema-chat-controls[data-controls-open="false"] .kairema-mode-bar { margin-top:0; padding:0; }
 .kairema-chat-sticky:has(.kairema-chat-controls[data-controls-open="false"]) { border-bottom-color:transparent; }
 @media (prefers-reduced-motion:reduce) { .kairema-panel-collapse { transition:none; } .kairema-mode-bar { transition:none; } }
 .kairema-mode-hint { flex:0 1 auto; min-width:0; overflow:hidden; padding-left:6px; color:var(--k-muted); font-size:11px; line-height:1.15; text-overflow:ellipsis; white-space:nowrap; }
@@ -654,12 +658,12 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 /* The same arrow and the same rotation the role menu uses, driven by the aria-expanded the
    open/close path already maintains, so Escape and picking a model restore it for free. */
 .kairema-select-wrap:has(.kairema-binding-trigger[aria-expanded="true"]) .kairema-model-chevron { transform:rotate(180deg); }
-.kairema-model-menu { position:fixed; z-index:60; display:flex; flex-direction:column; min-width:0; max-height:calc(100vh - 32px); box-sizing:border-box; overflow:hidden; border:1px solid rgba(147,134,255,.28); border-radius:12px; background:#0a0a0c; box-shadow:0 24px 60px rgba(0,0,0,.65); }
+.kairema-model-menu { position:fixed; z-index:60; display:flex; flex-direction:column; min-width:0; max-height:calc(100vh - 32px); box-sizing:border-box; overflow:hidden; border:1px solid rgba(255,255,255,.14); border-radius:12px; background:#0a0a0c; box-shadow:0 24px 60px rgba(0,0,0,.65); }
 .kairema-model-menu-search { display:flex; flex:0 0 auto; align-items:center; gap:7px; padding:9px 10px; border-bottom:1px solid rgba(255,255,255,.08); background:#0d0d10; }
 .kairema-model-menu-search-icon { flex:0 0 auto; width:14px; height:14px; color:#8b94a7; }
 .kairema-model-menu-search-input { flex:1 1 auto; min-width:0; padding:6px 8px; border:1px solid rgba(255,255,255,.10); border-radius:8px; outline:none; color:#f4f4f6; background:#000000; font-family:inherit; font-size:13px; }
 .kairema-model-menu-search-input::placeholder { color:#7d8496; }
-.kairema-model-menu-search-input:focus { border-color:#9386ff; }
+.kairema-model-menu-search-input:focus { border-color:rgba(255,255,255,.45); }
 /* The list is the only scrolling part: the panel keeps a bounded height, so a long catalog can
    never stretch the page, and overscroll containment keeps the scroll off the chat behind it. */
 .kairema-model-menu-list { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:6px; }
@@ -668,13 +672,13 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-model-menu-item { display:flex; width:100%; align-items:center; justify-content:space-between; gap:10px; padding:7px 9px; border:1px solid transparent; border-radius:9px; color:#e8eaf0; background:transparent; text-align:left; cursor:pointer; }
 .kairema-model-menu-item:hover,.kairema-model-menu-item:focus-visible { border-color:rgba(255,255,255,.10); background:#17171b; outline:none; }
 /* The selected model stays visibly active: violet edge, violet tint, white label. */
-.kairema-model-menu-item-active { border-color:rgba(147,134,255,.55); color:#FFFFFF; background:rgba(147,134,255,.14); }
-.kairema-model-menu-item-active .kairema-model-menu-item-id { color:#b9b1ff; }
+.kairema-model-menu-item-active { border-color:rgba(255,255,255,.22); color:#FFFFFF; background:rgba(255,255,255,.10); }
+.kairema-model-menu-item-active .kairema-model-menu-item-id { color:#c9ccd6; }
 /* Long catalog ids truncate with an ellipsis inside the panel instead of pushing it wider. */
 .kairema-model-menu-item-copy { display:flex; min-width:0; flex-direction:column; gap:1px; }
 .kairema-model-menu-item-title { min-width:0; overflow:hidden; font-size:13px; font-weight:600; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
 .kairema-model-menu-item-id { min-width:0; overflow:hidden; color:#7d8496; font-size:11px; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
-.kairema-model-menu-badge { flex:0 0 auto; padding:2px 7px; border:1px solid rgba(147,134,255,.45); border-radius:999px; color:#c7bfff; background:rgba(147,134,255,.12); font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.kairema-model-menu-badge { flex:0 0 auto; padding:2px 7px; border:1px solid rgba(255,255,255,.24); border-radius:999px; color:#d7dae2; background:rgba(255,255,255,.07); font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
 .kairema-model-menu-empty { margin:0; padding:14px 10px; color:#8b94a7; font-size:12px; text-align:center; }
 /* The one caret the shared model menu draws. It rotates while the panel is open, so a trigger
    anywhere in the app shows the same affordance. */
@@ -699,9 +703,15 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-provider-menu-list { padding:5px; }
 .kairema-provider-menu-item { display:flex; width:100%; align-items:center; gap:8px; padding:8px 9px; border:1px solid transparent; border-radius:9px; color:#e8eaf0; background:transparent; text-align:left; cursor:pointer; }
 .kairema-provider-menu-item:hover,.kairema-provider-menu-item:focus-visible { border-color:rgba(255,255,255,.10); background:#17171b; outline:none; }
-.kairema-provider-menu-item.kairema-model-menu-item-active { border-color:rgba(147,134,255,.55); color:#FFFFFF; background:rgba(147,134,255,.14); }
-.kairema-provider-menu-check { display:grid; flex:0 0 auto; width:14px; height:14px; place-items:center; color:#c7bfff; }
+.kairema-provider-menu-item.kairema-model-menu-item-active { border-color:rgba(255,255,255,.22); color:#FFFFFF; background:rgba(255,255,255,.10); }
+.kairema-provider-menu-check { display:grid; flex:0 0 auto; width:14px; height:14px; place-items:center; color:#e6e8ee; }
 .kairema-provider-menu-check svg { width:14px; height:14px; }
 .kairema-provider-menu-name { flex:1 1 auto; min-width:0; overflow:hidden; font-size:13px; font-weight:600; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
 .kairema-provider-menu-status { flex:0 0 auto; color:#7d8496; font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
 @media (max-width:430px) { .kairema-model-menu-search-input,.kairema-model-menu-item-title { font-size:12px; } .kairema-model-menu-item { padding:6px 8px; } }
+
+/* The notice under a question that got no answer. It sits with the question, not in a modal or a
+   toast, so the text it refers to is still on screen and still selectable while it is read. */
+.kairema-message-failed-notice { display:flex; flex-direction:column; gap:2px; max-width:min(86%,420px); margin-top:6px; padding:6px 9px; border:1px solid var(--k-line); border-left:2px solid var(--k-muted); border-radius:8px; background:var(--k-panel-2); text-align:left; }
+.kairema-message-failed-reason { margin:0; color:var(--k-text); font-size:12px; font-weight:600; line-height:1.35; }
+.kairema-message-failed-detail { margin:0; color:var(--k-muted); font-size:11px; line-height:1.35; }
