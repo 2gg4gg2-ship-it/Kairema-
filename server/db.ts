@@ -440,6 +440,30 @@ export async function listSessionMessagesPage(userId: number, sessionId: string,
  * the named message is removed, and only from the session the caller owns, so the history that came
  * before the failed turn is untouched.
  */
+/**
+ * Rolls back the user message of a turn that produced no answer.
+ *
+ * A question is stored before the provider is called so that an answer can be attached to it, which
+ * means a failed turn otherwise leaves its question behind in the transcript forever — the user
+ * reloads the page and finds a question with no reply, and every later turn is built on it. Only
+ * the named message is removed, and only from the session the caller owns, so the history that came
+ * before the failed turn is untouched.
+ *
+ * The `clientMessageId` is the browser-generated id of that exact question, not a position or a
+ * range, so a caller can only ever remove the one turn it names. Assistant messages are never
+ * touched by this: a turn that produced an answer must survive its question being removed.
+ */
+export async function deleteOwnedFailedUserMessage(userId: number, sessionId: string, clientMessageId: string): Promise<boolean> {
+  const db = requireDatabase(await getDb());
+  requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));
+  const removed = await db.delete(messages).where(and(
+    eq(messages.sessionId, sessionId),
+    eq(messages.clientMessageId, clientMessageId),
+    eq(messages.role, "user"),
+  ));
+  return Number(removed[0]?.affectedRows ?? 0) > 0;
+}
+
 export async function deleteOwnedSessionUserMessage(userId: number, sessionId: string, messageId: number): Promise<boolean> {
   const db = requireDatabase(await getDb());
   requireOwnedSession(userId, await getOwnedChatSession(userId, sessionId));

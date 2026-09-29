@@ -34,6 +34,9 @@ const ACTIVE_CHAT_STORAGE_KEY = "active-chat-id";
 /** How long a question whose turn produced no answer stays readable and copyable. */
 const FAILED_TURN_GRACE_MS = 10_000;
 
+/** A failed question waiting out its grace period, and what is needed to delete it for good. */
+type FailedTurnTimer = { timer: ReturnType<typeof setTimeout>; sessionId: string; turnId: string };
+
 /**
  * The two sentences shown under a question that got no answer. A rate limit is called out
  * separately from every other failure because the user's next action differs: one is "wait", the
@@ -297,10 +300,10 @@ export default function Home() {
   const [, navigate] = useLocation();
   const { theme, toggleTheme, setHighContrast } = useTheme();
   const [activeId, setActiveId] = useState(""); const [newConversation, setNewConversation] = useState(false); const [modelId, setModelId] = useState<ModelId>("fast"); const [chatMode, setChatMode] = useState<"chat" | "myApi">("chat"); const [search, setSearch] = useState(""); const [uploadStatus, setUploadStatus] = useState<{ sessionId: string; message: string } | null>(null);   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === "undefined" ? true : window.innerWidth >= SIDEBAR_DESKTOP_BREAKPOINT); const [settingsOpen, setSettingsOpen] = useState(false); const [profileOpen, setProfileOpen] = useState(false); const [memoryOpen, setMemoryOpen] = useState(false); const [exportHistoryOpen, setExportHistoryOpen] = useState(false); const [templatesOpen, setTemplatesOpen] = useState(false); const [pendingChatDeletionId, setPendingChatDeletionId] = useState<string | null>(null); const [isChatDeletionConfirming, setIsChatDeletionConfirming] = useState(false); const [pendingHistoryClear, setPendingHistoryClear] = useState(false); const [isHistoryClearConfirming, setIsHistoryClearConfirming] = useState(false); const [composerDraft, setComposerDraft] = useState(""); const [draftHydratedSessionId, setDraftHydratedSessionId] = useState(""); const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]); const [sentAttachmentFallbacks, setSentAttachmentFallbacks] = useState<ChatAttachment[]>([]); const [isStreaming, setIsStreaming] = useState(false); const [isExporting, setIsExporting] = useState<"markdown" | "pdf" | null>(null); const [notice, setNotice] = useState(""); const [settingsOverride, setSettingsOverride] = useState<Record<string, unknown>>({});
-  const streamAbortRef = useRef<AbortController | null>(null); const failedTurnTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>()); const activeSessionRef = useRef(""); const pagedHistorySessionRef = useRef(""); const deleteConfirmationInFlightRef = useRef(false); const historyClearInFlightRef = useRef(false); const defaultRoleApplied = useRef(false); const themeApplied = useRef(false); const persistedDraftRef = useRef(""); const activeChatHydrated = useRef(false);
+  const streamAbortRef = useRef<AbortController | null>(null); const failedTurnTimersRef = useRef(new Map<string, FailedTurnTimer>()); const activeSessionRef = useRef(""); const pagedHistorySessionRef = useRef(""); const deleteConfirmationInFlightRef = useRef(false); const historyClearInFlightRef = useRef(false); const defaultRoleApplied = useRef(false); const themeApplied = useRef(false); const persistedDraftRef = useRef(""); const activeChatHydrated = useRef(false);
   const [olderHistoryMessages, setOlderHistoryMessages] = useState<any[]>([]); const [olderHistoryCursor, setOlderHistoryCursor] = useState<string | null | undefined>(undefined); const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
   const modelsQuery = trpc.models.list.useQuery(undefined, { refetchInterval: 60_000, refetchOnWindowFocus: true }); const settingsQuery = trpc.settings.get.useQuery(undefined, { enabled: isAuthenticated }); const healthRefreshSeconds = Number(settingsQuery.data?.healthRefreshSeconds ?? 30); const memoryQuery = trpc.memory.get.useQuery(undefined, { enabled: isAuthenticated }); const webStatusQuery = trpc.webSearch.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const knowledgeStatusQuery = trpc.knowledge.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const providerDashboardQuery = trpc.providers.dashboard.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: healthRefreshSeconds > 0 ? healthRefreshSeconds * 1_000 : false, refetchOnWindowFocus: true }); const knowledgeAuditQuery = trpc.knowledge.audit.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const sessionsQuery = trpc.chats.list.useQuery(undefined, { enabled: isAuthenticated, refetchOnWindowFocus: true }); const messagesQuery = trpc.chats.historyPage.useQuery({ sessionId: activeId, limit: 60 }, { enabled: isAuthenticated && Boolean(activeId) }); const attachmentsQuery = trpc.attachments.list.useQuery({ sessionId: activeId }, { enabled: isAuthenticated && Boolean(activeId) }); const draftQuery = trpc.chats.draft.useQuery({ sessionId: activeId }, { enabled: isAuthenticated && Boolean(activeId), refetchOnWindowFocus: false }); const exportsQuery = trpc.exports.list.useQuery(undefined, { enabled: isAuthenticated && exportHistoryOpen }); const searchQuery = trpc.search.query.useQuery({ query: search }, { enabled: isAuthenticated && search.trim().length >= 2 }); const ownerQuery = trpc.owner.isOwner.useQuery(undefined, { enabled: isAuthenticated, staleTime: 300_000 });
-  const createMutation = trpc.chats.create.useMutation(); const deleteChatMutation = trpc.chats.delete.useMutation(); const clearHistoryMutation = trpc.chats.clearAll.useMutation(); const draftSaveMutation = trpc.chats.saveDraft.useMutation(); const draftClearMutation = trpc.chats.clearDraft.useMutation(); const settingMutation = trpc.settings.update.useMutation(); const updateNameMutation = trpc.auth.updateName.useMutation(); const memoryUpdateMutation = trpc.memory.update.useMutation(); const memoryAddMutation = trpc.memory.addFact.useMutation(); const memoryDeleteMutation = trpc.memory.deleteEntry.useMutation(); const memoryClearMutation = trpc.memory.clear.useMutation(); const attachmentDeleteMutation = trpc.attachments.delete.useMutation(); const exportCreateMutation = trpc.exports.create.useMutation(); const exportDeleteMutation = trpc.exports.delete.useMutation(); const knowledgeRefreshMutation = trpc.knowledge.refresh.useMutation(); const utils = trpc.useUtils();
+  const createMutation = trpc.chats.create.useMutation(); const deleteChatMutation = trpc.chats.delete.useMutation(); const clearHistoryMutation = trpc.chats.clearAll.useMutation(); const draftSaveMutation = trpc.chats.saveDraft.useMutation(); const draftClearMutation = trpc.chats.clearDraft.useMutation(); const discardFailedTurn = trpc.chats.discardFailedTurn.useMutation(); const settingMutation = trpc.settings.update.useMutation(); const updateNameMutation = trpc.auth.updateName.useMutation(); const memoryUpdateMutation = trpc.memory.update.useMutation(); const memoryAddMutation = trpc.memory.addFact.useMutation(); const memoryDeleteMutation = trpc.memory.deleteEntry.useMutation(); const memoryClearMutation = trpc.memory.clear.useMutation(); const attachmentDeleteMutation = trpc.attachments.delete.useMutation(); const exportCreateMutation = trpc.exports.create.useMutation(); const exportDeleteMutation = trpc.exports.delete.useMutation(); const knowledgeRefreshMutation = trpc.knowledge.refresh.useMutation(); const utils = trpc.useUtils();
   const setActiveModelMutation = trpc.userProviders.setActiveModel.useMutation();
   // The provider menu binds the credential; the model menu binds the model. Two independent moves.
   const setActiveProviderMutation = trpc.userProviders.setActive.useMutation();
@@ -439,14 +442,19 @@ export default function Home() {
   // A pending removal must not fire after the user has left the conversation or the page: the
   // timer would then edit a message list that no longer holds the question it was scheduled for.
   useEffect(() => () => {
-    for (const timer of failedTurnTimersRef.current.values()) clearTimeout(timer);
-    failedTurnTimersRef.current.clear();
-  }, []);
-  useEffect(() => {
-    for (const [messageId, timer] of failedTurnTimersRef.current) {
-      clearTimeout(timer);
+    for (const [messageId, pending] of failedTurnTimersRef.current) {
+      clearTimeout(pending.timer);
+      // Leaving the page must not leave an orphaned question in the stored transcript: the removal
+      // is finished immediately rather than waiting for a timer that will never fire.
+      void discardFailedTurn.mutateAsync({ sessionId: pending.sessionId, clientMessageId: pending.turnId }).catch(() => undefined);
       failedTurnTimersRef.current.delete(messageId);
     }
+  }, []);
+  // Switching conversations detaches a pending failed question from the screen, but its removal is
+  // not abandoned: the timer is left to run and still deletes the stored turn, so the question does
+  // not reappear in this session or in any other one ten seconds after it failed. Only the local
+  // list is reset here, which the effect on activeId below already does.
+  useEffect(() => {
     setOptimisticMessages([]);
   }, [activeId]);
   // The topbar has no sidebar toggle, so crossing the breakpoint is the only moment the sidebar
@@ -607,12 +615,15 @@ export default function Home() {
     const assistantId = `stream-${Date.now()}`;
     if (options?.attachments?.length) setSentAttachmentFallbacks((current) => [...current.filter((attachment) => !options.attachments!.some((item) => item.id === attachment.id)), ...options.attachments!]);
     const userId = `user-${Date.now()}`;
+    // A browser-generated id for this exact question. The server stores it, and it is what lets a
+    // failed turn be deleted later without touching any other message: an id, not a position.
+    const turnId = options?.clientMessageId ?? crypto.randomUUID();
     setOptimisticMessages([{ id: userId, role: "user", content, attachments: options?.attachments }, { id: assistantId, role: "assistant", content: "" }]);
     setIsStreaming(true);
     const controller = new AbortController();
     streamAbortRef.current = controller;
     try {
-      const response = await fetch("/api/chat/stream", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...runtimeAuthHeaders() }, signal: controller.signal, body: JSON.stringify({ sessionId, modelId: selectedId, content, ...(chatMode === "myApi" ? { myApi: true } : {}), settings: { style: settings.responseStyle, responseLength: settings.responseLength, effort: settings.effort, thinking: Boolean(settings.thinking) }, attachmentIds: options?.attachmentIds, clientMessageId: options?.clientMessageId }) });
+      const response = await fetch("/api/chat/stream", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...runtimeAuthHeaders() }, signal: controller.signal, body: JSON.stringify({ sessionId, modelId: selectedId, content, ...(chatMode === "myApi" ? { myApi: true } : {}), settings: { style: settings.responseStyle, responseLength: settings.responseLength, effort: settings.effort, thinking: Boolean(settings.thinking) }, attachmentIds: options?.attachmentIds, clientMessageId: turnId }) });
       if (!response.ok || !response.body) throw new Error(await streamStartErrorMessage(response, language === "ru" ? "Не удалось начать потоковый ответ." : "Could not start the stream."));
       await consumeChatStream(response, { onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)), onDone: (data) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: typeof data.content === "string" ? data.content : message.content, model: typeof data.modelUsed === "string" ? data.modelUsed : message.model, providerLabel: typeof data.label === "string" ? data.label : message.providerLabel, modelLabel: typeof data.label === "string" ? data.label : message.modelLabel, searchStatus: safeSearchStatus(data.searchStatus), sources: safeSourceEvidence(data.sources), webGrounding: safeWebGrounding(data.webGrounding) } : message)) });
       try {
@@ -637,11 +648,19 @@ export default function Home() {
         { id: userId, role: "user", content, attachments: options?.attachments, failedTurn: { ...notice_, removedAt: Date.now() + FAILED_TURN_GRACE_MS } },
         { id: `stream-error-${Date.now()}`, role: "assistant", content: errorMessage, providerLabel: "Kairema", model: selectedId, status: language === "ru" ? "ошибка" : "error", isError: true },
       ]);
+      // The deadline is anchored to when the notice was shown, not to when the timer object was
+      // created, and it is a single timer that fires exactly once at FAILED_TURN_GRACE_MS. Nothing
+      // else removes the question earlier: the stored turn is deleted at the same moment, so what
+      // the user saw for these ten seconds is what actually left the conversation.
+      const deadline = Date.now() + FAILED_TURN_GRACE_MS;
       const timer = setTimeout(() => {
         failedTurnTimersRef.current.delete(userId);
         setOptimisticMessages((items) => items.filter((item) => item.id !== userId));
-      }, FAILED_TURN_GRACE_MS);
-      failedTurnTimersRef.current.set(userId, timer);
+        void discardFailedTurn.mutateAsync({ sessionId, clientMessageId: turnId })
+          .then(() => utils.chats.historyPage.invalidate({ sessionId, limit: 60 }))
+          .catch(() => setNotice(language === "ru" ? "Не удалось удалить неудачный вопрос из истории. Обновите историю вручную." : "Could not remove the failed question from history. Refresh it manually."));
+      }, Math.max(0, deadline - Date.now()));
+      failedTurnTimersRef.current.set(userId, { timer, sessionId, turnId });
       await Promise.all([utils.chats.historyPage.invalidate({ sessionId, limit: 60 }), utils.attachments.list.invalidate({ sessionId })]);
       return true;
     } finally { streamAbortRef.current = null; setIsStreaming(false); }

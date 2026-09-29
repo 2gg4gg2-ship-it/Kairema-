@@ -875,12 +875,40 @@ describe("the model menu's colours", () => {
     expect(rule).not.toMatch(/147,\s*134,\s*255|#c7bfff/i);
   });
 
+  it("keeps the Settings trigger itself free of a coloured accent", () => {
+    // The panel was already neutral, but the trigger that opens it kept a violet hover and focus
+    // ring, so hovering the field in Settings still showed a purple border.
+    expect(ruleFor(".kairema-settings-model-trigger:hover:not(:disabled) {")).toMatch(/rgba\(255,255,255/);
+    expect(ruleFor(".kairema-settings-model-trigger:focus-visible {")).toMatch(/rgba\(255,255,255/);
+    for (const selector of [".kairema-settings-model-trigger:hover:not(:disabled) {", ".kairema-settings-model-trigger:focus-visible {"]) {
+      expect(ruleFor(selector), `violet accent left in ${selector}`).not.toMatch(/#8b5cf6|#a78bfa|139,\s*92,\s*246/i);
+    }
+  });
+
+  it("uses a near-black panel with white and grey text", () => {
+    expect(ruleFor(".kairema-model-menu-item {")).toContain("color:#e8eaf0");
+    expect(ruleFor(".kairema-model-menu-item-id {")).toContain("color:#7d8496");
+    expect(ruleFor(".kairema-model-menu-group-title {")).toContain("color:#8b94a7");
+  });
+
+  it("gives hover a neutral grey rather than a tint", () => {
+    const hover = ruleFor(".kairema-model-menu-item:hover,.kairema-model-menu-item:focus-visible {");
+    expect(hover).toContain("background:#17171b");
+    expect(hover).not.toMatch(/147,\s*134,\s*255|#9386ff/i);
+  });
+
+  it("scrolls inside the panel instead of growing past the window", () => {
+    expect(ruleFor(".kairema-model-menu-list {")).toContain("overflow-y:auto");
+    expect(ruleFor(".kairema-model-menu {")).toContain("max-height:calc(100vh - 32px)");
+    expect(ruleFor(".kairema-model-menu {")).toContain("overflow:hidden");
+  });
+
   it("leaves no violet anywhere in the menu's own rules", () => {
     const text = readFileSync(resolve(process.cwd(), "client/src/index.css"), "utf8");
-    const menuRules = text.split("\n").filter((line) => /kairema-(model|provider)-menu/.test(line));
+    const menuRules = text.split("\n").filter((line) => /kairema-(model|provider)-menu|kairema-settings-model-trigger/.test(line));
     expect(menuRules.length).toBeGreaterThan(0);
     for (const rule of menuRules) {
-      expect(rule, `violet accent left in: ${rule.slice(0, 80)}`).not.toMatch(/147,\s*134,\s*255|#9386ff|#b9b1ff|#c7bfff/i);
+      expect(rule, `violet accent left in: ${rule.slice(0, 80)}`).not.toMatch(/147,\s*134,\s*255|#9386ff|#b9b1ff|#c7bfff|#8b5cf6|#a78bfa/i);
     }
   });
 });

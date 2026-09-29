@@ -447,9 +447,14 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
         res.end();
         return;
       }
-      let rateLimit: { allowed: boolean; retryAfterSeconds: number };
+      // The two budgets are metered on separate tables and each is charged only for its own mode.
+      // A My API turn runs on the caller's own provider key and spends the caller's own money, so
+      // charging it against the ordinary chat ingress budget would let BYOK usage exhaust Chat (and
+      // vice versa): a user could lose access to the mode they were not even using. Each mode is
+      // therefore limited by exactly one counter, and neither can spend the other's.
+      let rateLimit: { allowed: boolean; retryAfterSeconds: number } = { allowed: true, retryAfterSeconds: 0 };
       try {
-        rateLimit = await dependencies.consumeChatStreamRequestQuota(user.id, CHAT_STREAM_RATE_LIMIT, CHAT_STREAM_RATE_WINDOW_MS);
+        if (!input.myApi) rateLimit = await dependencies.consumeChatStreamRequestQuota(user.id, CHAT_STREAM_RATE_LIMIT, CHAT_STREAM_RATE_WINDOW_MS);
       } catch {
         chatStreamRuntimeGauges.quotaUnavailable += 1;
         res.status(503).json({ error: "Проверка лимита временно недоступна. Повторите попытку позже." });

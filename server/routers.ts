@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, deleteUserProviderConfig, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserProviderConfig, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, listUserProviderConfigs, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, setActiveUserProvider, setUserProviderActiveModel, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserName, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag, upsertUserProviderConfig } from "./db";
+import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, deleteOwnedFailedUserMessage, deleteUserProviderConfig, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserProviderConfig, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, listUserProviderConfigs, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, setActiveUserProvider, setUserProviderActiveModel, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserName, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag, upsertUserProviderConfig } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { clearStytchLinkIntentCookie, clearStytchOtpEmailIdCookie, clearStytchPasswordRecoveryEmailCookie, clearStytchPasswordSessionCookie, clearStytchResetCookie, clearStytchSessionCookie, getSafeStytchDeliveryFailure, getStytchCallbackUrl, getStytchClient, getStytchOtpEmailId, getStytchPasswordRecoveryEmail, getStytchPasswordSessionToken, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, logSafeStytchDiagnostic, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchOtpEmailIdCookie, setStytchPasswordRecoveryEmailCookie, setStytchPasswordSessionCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
 import Stytch, { StytchError } from "stytch";
@@ -897,8 +897,26 @@ export const appRouter = router({
           throw new TRPCError({ code: "NOT_FOUND", message: storageError(error) });
         }
       }),
-    historyPage: userOrGuestProcedure
-      .input(z.object({ sessionId: z.string().uuid(), before: z.string().min(1).max(512).optional(), limit: z.number().int().min(1).max(100).default(60) }))
+    /**
+     * Removes the question of a turn that produced no answer, from the stored transcript.
+     *
+     * The client hides a failed question for a short grace period so it can be read and copied, and
+     * this is what makes the removal real rather than cosmetic: without it the question comes back
+     * on the next page load and is visible to the user from any other client. Ownership is enforced
+     * by the caller id in the delete itself, so a session or client id belonging to someone else
+     * simply removes nothing. Only the named user message goes — never the session, never the
+     * messages around it, and never an assistant reply.
+     */
+    discardFailedTurn: userOrGuestProcedure
+      .input(z.object({ sessionId: z.string().uuid(), clientMessageId: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        try {
+          return { removed: await deleteOwnedFailedUserMessage(ctx.user.id, input.sessionId, input.clientMessageId) };
+        } catch (error) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: storageError(error) });
+        }
+      }),
+    historyPage: userOrGuestProcedure      .input(z.object({ sessionId: z.string().uuid(), before: z.string().min(1).max(512).optional(), limit: z.number().int().min(1).max(100).default(60) }))
       .query(async ({ ctx, input }) => {
         try {
           console.error("[HISTORY_PAGE]", {
