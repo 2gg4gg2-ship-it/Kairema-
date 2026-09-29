@@ -550,6 +550,17 @@ export async function chatWithUserProviderStream(options: {
   const MAX_ATTEMPTS = budget.remaining + budget.used;
 
   /**
+   * How many attempts one provider may spend before the chain moves on.
+   *
+   * Two is the point where a retry still has a chance (the first failure may be a blip) but a
+   * third attempt is not worth the latency: a provider that has throttled the key twice in a row
+   * will throttle the third call too. Whatever is left of the shared budget is handed to the next
+   * provider the user connected, so the total is still bounded by MAX_ATTEMPTS — this caps how
+   * long any single provider can hold the request, it never adds attempts to the request.
+   */
+  const MAX_ATTEMPTS_PER_PROVIDER = 2;
+
+  /**
    * One real upstream call. Reports the status and the provider's own retry hint so the shared
    * retry policy can decide, without this function deciding anything about retrying itself.
    */
@@ -589,7 +600,9 @@ export async function chatWithUserProviderStream(options: {
   };
 
   // Primary first, then the user's own other providers. A provider that is throttled gives up its
-  // remaining budget to the next one rather than to a provider the user did not connect.
+  // remaining budget to the next one rather than to a provider the user did not connect. Every
+  // entry is one the user connected themselves, so the chain walks their own accounts and stops at
+  // the last one rather than reaching for a Kairema provider.
   const candidates: Array<{ target: UserProviderTarget; provider: string; model: string; apiKey: string; modelLabel?: string }> = [
     { target, provider: primaryProviderId, model: options.model, apiKey: options.apiKey, modelLabel: options.modelLabel },
     ...(options.fallbacks ?? []).map((entry) => ({ target: toTarget(entry.provider), provider: entry.provider as string, model: entry.model, apiKey: entry.apiKey, modelLabel: entry.modelLabel })),
@@ -599,9 +612,18 @@ export async function chatWithUserProviderStream(options: {
   let lastError: unknown;
   try {
     for (const candidate of candidates) {
+      // Per-provider cap, and never more than what is left of the one shared budget. This is what
+      // makes the chain reachable: a provider that is throttled gives up its remaining budget to
+      // the next one rather than to a provider the user did not connect, so the total across every
+      // provider is still bounded by MAX_ATTEMPTS and no retry can push the request past it.
+      const providerAttemptCap = Math.min(MAX_ATTEMPTS_PER_PROVIDER, MAX_ATTEMPTS - budget.used);
+      if (providerAttemptCap <= 0) break;
       const outcome = await retryUpstream<{ response: Response }>({
-        maxAttempts: MAX_ATTEMPTS,
-        attemptsUsed: budget.used,
+        maxAttempts: providerAttemptCap,
+        // Counts this provider's own attempts, not the request's. The request-wide total is
+        // budget.used, which providerAttemptCap has already been clipped against, so a candidate
+        // late in the chain gets a smaller cap rather than a loop that starts already spent.
+        attemptsUsed: 0,
         run: async () => {
           const result = await invokeOnce(candidate, budget.used + 1);
           return result.ok ? { ok: true as const, value: { response: result.value } } : result;

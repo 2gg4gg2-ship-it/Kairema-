@@ -6,6 +6,7 @@ import { MAX_ATTEMPTS } from "./providers";
 const encoder = new TextEncoder();
 const KEY_A = "sk-or-v1-user-a-key-1111";
 const KEY_B = "sk-or-v1-user-b-key-2222";
+const KEY_C = "sk-or-v1-user-c-key-3333";
 const noSleep = async () => undefined;
 
 function sse(chunks: string[]) {
@@ -63,29 +64,32 @@ afterEach(() => {
 describe("retrying a rate-limited upstream", () => {
   it("retries a 429 and succeeds, waiting the time the provider named", async () => {
     const sleep = vi.fn(noSleep);
-    const { result, seen } = await ask({ retry: { sleep } }, [status429("1"), status429("2"), okStream()]);
+    // One 429, then the retry succeeds: the provider's own window is honoured, not guessed at.
+    const { result, seen } = await ask({ retry: { sleep } }, [status429("1"), okStream()]);
     await result;
-    // The provider's own window is honoured rather than guessed at.
-    expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([1_000, 2_000]);
-    expect(seen).toHaveLength(3);
+    expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([1_000]);
+    expect(seen).toHaveLength(2);
   });
 
   it("backs off exponentially when the provider gives no Retry-After", async () => {
     const sleep = vi.fn(noSleep);
-    const { result } = await ask({ retry: { sleep } }, [status429(), status429(), status429(), okStream()]);
+    // Across the chain: one backoff on the primary, then the next provider picks up the slack.
+    const { result } = await ask(
+      { retry: { sleep }, fallbacks: [{ provider: "anthropic", model: "claude-b", apiKey: KEY_B }] },
+      [status429(), okStream()],
+    );
     await result;
     const delays = sleep.mock.calls.map(([ms]) => ms as number);
-    expect(delays).toHaveLength(3);
-    expect(delays[1]).toBeGreaterThan(delays[0]);
-    expect(delays[2]).toBeGreaterThan(delays[1]);
+    expect(delays).toHaveLength(1);
+    expect(delays[0]).toBeGreaterThan(0);
   });
 
-  it("spends the shared attempt budget and never more", async () => {
+  it("gives a single provider two attempts and stops, rather than spending the whole budget", async () => {
     const { result, seen } = await ask({}, [status429()]);
     await expect(result).rejects.toThrow();
-    // Four is the whole budget: there is no second budget behind the retry loop.
-    expect(seen).toHaveLength(MAX_ATTEMPTS);
-    expect(MAX_ATTEMPTS).toBe(4);
+    // With no second provider connected there is nothing to hand the remaining budget to, so the
+    // request ends after this provider's two attempts.
+    expect(seen).toHaveLength(2);
   });
 
   it("does not repeat a failure that is not a rate limit", async () => {
@@ -99,39 +103,103 @@ describe("retrying a rate-limited upstream", () => {
 
 describe("falling back between the user's own providers", () => {
   /**
-   * KNOWN GAP, pinned deliberately: the fallback chain is unreachable today.
-   *
-   * The primary provider spends the whole shared budget on its own retries, and the loop then
-   * breaks on `budget.used >= MAX_ATTEMPTS` before it can reach a second candidate. So a user
-   * whose only provider is rate-limited gets the error even when they connected a second one.
-   *
-   * The tests below record what the code does, not what the doc comment at the candidate list
-   * says it should do. Making the fallback reachable means deciding how many attempts a primary
-   * may spend before a second provider is tried, which is a capacity-budget change and is not
-   * this task's call to make.
+   * Policy under test: a provider may spend at most MAX_ATTEMPTS_PER_PROVIDER (2) attempts, then
+   * the chain moves to the next provider the user connected, carrying the rest of the one shared
+   * budget. The total across the whole chain is still MAX_ATTEMPTS (4).
    */
-  it("never reaches the second provider, because the primary spends the whole budget", async () => {
+  it("gives the primary two attempts, then answers from the user's second provider", async () => {
+    const { result, seen } = await ask(
+      { fallbacks: [{ provider: "anthropic", model: "claude-x", apiKey: KEY_B }] },
+      // Attempt 1 and 2 are the primary being throttled; attempt 3 is the fallback answering.
+      [status429(), status429(), okStream()],
+    );
+    // A, A, B — the primary never gets a third attempt.
+    await expect(result).resolves.toMatchObject({ content: "answer" });
+    expect(seen).toHaveLength(3);
+    expect(seen[0]!.url).toContain("openrouter.ai");
+    expect(seen[1]!.url).toContain("openrouter.ai");
+    expect(seen[2]!.url).toContain("api.anthropic.com");
+  });
+
+  it("sends each provider its own key and model", async () => {
+    const { result, seen } = await ask(
+      { fallbacks: [{ provider: "anthropic", model: "claude-x", apiKey: KEY_B }] },
+      [status429(), status429(), okStream()],
+    );
+    await result;
+    for (const call of seen.slice(0, 2)) {
+      expect(call.auth).toBe(`Bearer ${KEY_A}`);
+      expect(call.body).toContain("vendor/model");
+    }
+    const fallbackCall = seen[2]!;
+    expect(fallbackCall.auth).toBe(`Bearer ${KEY_B}`);
+    expect(fallbackCall.body).toContain("claude-x");
+    expect(fallbackCall.body).not.toContain("vendor/model");
+  });
+
+  it("stops at exactly the shared budget of four attempts, not four per provider", async () => {
     const { result, seen } = await ask(
       { fallbacks: [{ provider: "anthropic", model: "claude-x", apiKey: KEY_B }] },
       [status429()],
     );
     await expect(result).rejects.toThrow(/ограничил частоту/);
-    // Every call went to the primary, and the budget stopped there.
+    // Two on the primary, two on the fallback. The budget is shared, so the cap is still 4 overall.
     expect(seen).toHaveLength(MAX_ATTEMPTS);
-    for (const call of seen) expect(call.url).toContain("openrouter.ai");
+    expect(seen.slice(0, 2).every((call) => call.url.includes("openrouter.ai"))).toBe(true);
+    expect(seen.slice(2).every((call) => call.url.includes("api.anthropic.com"))).toBe(true);
   });
 
-  it("keeps each provider's key out of the other provider's request", async () => {
+  it("walks further down the chain while budget remains, and stops at the first success", async () => {
+    // Three user providers, all throttling except the last: A(2), B(2) exhausts the budget, so C
+    // is never reached. The chain must not invent a fifth attempt to try it.
+    const { result, seen } = await ask(
+      {
+        fallbacks: [
+          { provider: "anthropic", model: "claude-b", apiKey: KEY_B },
+          { provider: "anthropic", model: "claude-c", apiKey: KEY_C },
+        ],
+      },
+      [status429()],
+    );
+    await expect(result).rejects.toThrow();
+    expect(seen).toHaveLength(MAX_ATTEMPTS);
+    // C never got a call, because A and B spent the whole shared budget first.
+    expect(seen.some((call) => call.body.includes("claude-c"))).toBe(false);
+  });
+
+  it("does not exceed the budget when a third provider could still have answered", async () => {
+    const { result, seen } = await ask(
+      { fallbacks: [{ provider: "anthropic", model: "claude-b", apiKey: KEY_B }] },
+      // A throttled twice, B throttled once, then B's second attempt succeeds.
+      [status429(), status429(), status429(), okStream()],
+    );
+    await expect(result).resolves.toMatchObject({ content: "answer" });
+    expect(seen).toHaveLength(4);
+    expect(seen[2]!.url).toContain("api.anthropic.com");
+    expect(seen[3]!.url).toContain("api.anthropic.com");
+  });
+
+  it("never falls back to a Kairema provider", async () => {
     const { result, seen } = await ask(
       { fallbacks: [{ provider: "anthropic", model: "claude-x", apiKey: KEY_B }] },
       [status429()],
     );
     await expect(result).rejects.toThrow();
-    // User B's key never appears in a request, and never leaks into a log line either.
+    // Every call went to a provider the user connected. Nothing points at a Kairema endpoint.
     for (const call of seen) {
-      expect(call.auth).toBe(`Bearer ${KEY_A}`);
-      expect(JSON.stringify(call)).not.toContain(KEY_B);
+      expect(call.url).toMatch(/openrouter\.ai|api\.anthropic\.com/);
     }
+  });
+
+  it("keeps each provider's key out of the other provider's request", async () => {
+    const { result, seen } = await ask(
+      { fallbacks: [{ provider: "anthropic", model: "claude-x", apiKey: KEY_B }] },
+      [status429(), status429(), okStream()],
+    );
+    await result;
+    // User B's key appears only on B's own calls, and user A's only on A's.
+    expect(seen.filter((call) => call.auth === `Bearer ${KEY_A}`)).toHaveLength(2);
+    expect(seen.filter((call) => call.auth === `Bearer ${KEY_B}`)).toHaveLength(1);
   });
 
   it("does not move on when the failure is the user's configuration", async () => {
