@@ -59,7 +59,8 @@ const fixtures = vi.hoisted(() => ({
   isAuthenticated: true,
   authLoading: false,
   language: "ru" as "ru" | "en",
-  authUser: { id: 42, name: "Тест", email: "", loginMethod: "stytch-password", isGuest: 0 } as { id: number; name: string | null; email: string | null; loginMethod: string | null; isGuest: number },
+  authUser: { id: 42, name: "Тест", preferredName: null, personalPreferences: null, "email": "", loginMethod: "stytch-password", isGuest: 0 } as { id: number; name: string | null; preferredName?: string | null; personalPreferences?: string | null; email: string | null; loginMethod: string | null; isGuest: number },
+  updateProfileDetails: vi.fn(async (input: Record<string, unknown>) => input),
   logout: vi.fn(async () => undefined),
   sessionsLoading: false,
   sessionsRefetching: false,
@@ -96,7 +97,7 @@ vi.mock("@/lib/trpc", async () => {
   const react = await import("react");
   return ({
   trpc: {
-    auth: { beginLink: { useMutation: () => ({ mutateAsync: fixtures.beginStytchLink, isPending: false }) }, updateName: { useMutation: () => ({ mutateAsync: fixtures.updateName, isPending: false }) } },
+    auth: { beginLink: { useMutation: () => ({ mutateAsync: fixtures.beginStytchLink, isPending: false }) }, updateName: { useMutation: () => ({ mutateAsync: fixtures.updateName, isPending: false }) }, updateProfileDetails: { useMutation: () => ({ mutateAsync: fixtures.updateProfileDetails, isPending: false }) } },
     models: { list: { useQuery: () => ({ data: [
       { key: "fast", modelId: "fast", label: "Kairema Flash", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, runtime: { state: "ready", provider: "OpenRouter", modelUsed: "Fast", checkedAt: "2026-08-19T00:00:00.000Z" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
       { key: "smart", modelId: "smart", label: "Kairema Think", role: "Тест", status: { state: "ready", badge: "Готов", category: null, http: 200, checkedAt: "2026-08-19T00:00:00.000Z", confirmed: "Проверено" }, limits: { candidate: "primary", provider: "OpenRouter", quota: "ready", nextFallback: "OrcaRouter", lastFallback: false } },
@@ -196,7 +197,7 @@ function resetFixtures() {
   fixtures.isAuthenticated = true;
   fixtures.authLoading = false;
   fixtures.language = "ru";
-  fixtures.authUser = { id: 42, name: "Тест", email: "", loginMethod: "stytch-password", isGuest: 0 };
+  fixtures.authUser = { id: 42, name: "Тест", preferredName: null, personalPreferences: null, "email": "", loginMethod: "stytch-password", isGuest: 0 };
   fixtures.logout.mockClear();
   fixtures.sessionsLoading = false;
   fixtures.startLogin.mockReset();
@@ -877,7 +878,7 @@ describe("Home integration flows", () => {
 
   it("shows the signed-in email account and a logout control instead of the linking form", async () => {
     const user = userEvent.setup();
-    fixtures.authUser = { id: 42, name: "Тест", email: "owner@example.com", loginMethod: "stytch-password", isGuest: 0 };
+    fixtures.authUser = { id: 42, name: "Тест", preferredName: null, personalPreferences: null, "email": "owner@example.com", loginMethod: "stytch-password", isGuest: 0 };
     render(<Home />);
 
     await user.click(screen.getByRole("button", { name: "Открыть настройки" }));
@@ -914,7 +915,7 @@ describe("Home integration flows", () => {
   it("clears the authenticated session on logout without deleting the chat data", async () => {
     const user = userEvent.setup();
     const sessionId = "44444444-4444-4444-8444-444444444444";
-    fixtures.authUser = { id: 42, name: "Тест", email: "owner@example.com", loginMethod: "stytch-password", isGuest: 0 };
+    fixtures.authUser = { id: 42, name: "Тест", preferredName: null, personalPreferences: null, "email": "owner@example.com", loginMethod: "stytch-password", isGuest: 0 };
     fixtures.sessions = [{ id: sessionId, modelId: fixtures.modelId, title: "Чат до выхода" }];
     fixtures.logout.mockImplementationOnce(async () => {
       fixtures.isAuthenticated = false;
@@ -943,7 +944,7 @@ describe("Home integration flows", () => {
     expect(screen.getByText("Привязать email-вход")).toBeTruthy();
     await user.keyboard("{Escape}");
 
-    fixtures.authUser = { id: 42, name: "Тест", email: "owner@example.com", loginMethod: "stytch-password", isGuest: 0 };
+    fixtures.authUser = { id: 42, name: "Тест", preferredName: null, personalPreferences: null, "email": "owner@example.com", loginMethod: "stytch-password", isGuest: 0 };
     rerender(<Home />);
     await user.click(screen.getByRole("button", { name: "Открыть настройки" }));
 
@@ -1830,18 +1831,50 @@ describe("Profile", () => {
     expect(fixtures.updatedSettings.at(-1)).toEqual({ askClarifyingQuestions: true });
   });
 
-  it("offers exactly one editable name field, with no duplicate label", async () => {
+  it("offers three separate profile fields, each with one label of its own", async () => {
     await openProfile();
 
-    // The name used to be announced twice: once by a heading and once by a second, differently
-    // worded label on the same input, so "Full name" and "What should we call you?" both described
-    // one field. It is one editable field now, and the section heading that shadowed it is gone.
-    const fields = screen.getAllByRole("textbox", { name: /Полное имя|Full name/ });
-    expect(fields).toHaveLength(1);
-    expect(screen.queryByText("Как к вам обращаться?")).toBeNull();
-    expect(screen.queryByText("What should we call you?")).toBeNull();
-    // The single field is the one bound to users.name, and it is editable rather than read-only.
-    expect((fields[0] as HTMLInputElement).readOnly).toBe(false);
+    // The profile answers three separate questions, so it has three separate inputs. The form of
+    // address used to be a second label sitting on the full-name field, which meant one value
+    // wearing two names; it is now its own column and its own field.
+    const fullName = screen.getAllByRole("textbox", { name: /Полное имя/ });
+    const preferred = screen.getAllByRole("textbox", { name: /Как нам следует тебя называть/ });
+    const preferences = screen.getAllByRole("textbox", { name: /Ваши предпочтения/ });
+
+    expect(fullName, "exactly one Full name field").toHaveLength(1);
+    expect(preferred, "exactly one form-of-address field").toHaveLength(1);
+    expect(preferences, "exactly one personal-preferences field").toHaveLength(1);
+    // Three distinct elements, not one element reached three ways.
+    expect(new Set([fullName[0], preferred[0], preferences[0]]).size).toBe(3);
+    for (const field of [fullName[0], preferred[0], preferences[0]]) {
+      expect((field as HTMLInputElement).readOnly).toBe(false);
+    }
+    // Preferences are free text and get a real multi-line box.
+    expect(preferences[0]!.tagName).toBe("TEXTAREA");
+  });
+
+  it("saves all three profile values together and restores them on reopen", async () => {
+    const user = await openProfile();
+
+    await user.clear(screen.getByRole("textbox", { name: /Полное имя/ }));
+    await user.type(screen.getByRole("textbox", { name: /Полное имя/ }), "Ада Лавлейс");
+    await user.type(screen.getByRole("textbox", { name: /Как нам следует тебя называть/ }), "Ада");
+    await user.type(screen.getByRole("textbox", { name: /Ваши предпочтения/ }), "Коротко и по делу");
+    await user.click(screen.getByRole("button", { name: /Обновить профиль/ }));
+
+    // One save writes the name through auth.updateName and the other two through their own
+    // mutation, so neither pair can be updated without the other being cleared.
+    await waitFor(() => expect(fixtures.updateName).toHaveBeenCalledWith({ name: "Ада Лавлейс" }));
+    await waitFor(() => expect(fixtures.updateProfileDetails).toHaveBeenCalledWith({
+      preferredName: "Ада",
+      personalPreferences: "Коротко и по делу",
+    }));
+
+    // Reopening shows the stored row again, not the empty defaults.
+    fixtures.authUser = { id: 42, name: "Ада Лавлейс", preferredName: "Ада", personalPreferences: "Коротко и по делу", email: "", loginMethod: "stytch-password", isGuest: 0 };
+    await user.click(screen.getByRole("button", { name: /Открыть профиль/ }));
+    await waitFor(() => expect((screen.getByRole("textbox", { name: /Как нам следует тебя называть/ }) as HTMLInputElement).value).toBe("Ада"));
+    expect((screen.getByRole("textbox", { name: /Ваши предпочтения/ }) as HTMLTextAreaElement).value).toBe("Коротко и по делу");
   });
 
   it("never writes the display name into any chat request", async () => {

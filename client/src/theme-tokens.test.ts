@@ -202,3 +202,58 @@ describe("hover states are real", () => {
     }
   });
 });
+
+/**
+ * Two contrast defects that source review found, both of which only show up in the dark theme
+ * because the token ladder is not symmetric: `--k-invert` is dark there, and `--k-panel` is only a
+ * hair away from `--k-bg`. jsdom computes no colours, so these assert on the stylesheet.
+ */
+describe("filled and enabled controls read as active in both themes", () => {
+  it("never pairs an inverted foreground with a --k-strong background", () => {
+    // --k-invert is #fff on the light --k-strong but #121212 on the dark one, so the same pairing
+    // is 17:1 in one theme and about 1.4:1 in the other. Only --k-text inverts correctly.
+    expect(css).not.toMatch(/background:\s*var\(--k-strong\)\s*!?\s*;\s*color:\s*var\(--k-invert\)/);
+  });
+
+  it("gives the filled buttons a --k-text background so both themes invert correctly", () => {
+    for (const selector of [".kairema-new-chat", ".kairema-providers-btn-primary"]) {
+      expect(bodies(selector), selector).toMatch(/background:\s*var\(--k-text\)/);
+      expect(bodies(selector), selector).toMatch(/color:\s*var\(--k-invert\)/);
+    }
+  });
+
+  it("separates the plain button from the page in the dark theme", () => {
+    // --k-panel is #131313 on a #0c0c0c page, roughly 1.13:1, while on the light page it is white on
+    // near-white and reads fine. --k-panel-3 steps away from the page in both directions.
+    expect(bodies(".kairema-providers-btn")).toMatch(/background:\s*var\(--k-panel-3\)/);
+  });
+
+  it("leaves the disabled treatment exactly as it was", () => {
+    // A disabled control must keep reading as disabled; an enabled one is not allowed to borrow
+    // the disabled opacity to look more active.
+    expect(body(".kairema-providers-btn:disabled")).toMatch(/opacity:\.4/);
+    expect(body(".kairema-providers-btn-primary:disabled")).toMatch(/opacity:\.4/);
+  });
+});
+
+describe("the collapsed controls row leaves no painted band", () => {
+  it("stops the sticky row painting itself once the panel is closed", () => {
+    // The panel's own contents were already unmounted on collapse; the row they sat in kept its
+    // --k-panel background and bottom border, so an empty horizontal strip stayed on screen with
+    // the controls gone. Only the arrow is meant to remain, so the row must not paint.
+    const collapsed = body('.kairema-chat-sticky:has(.kairema-chat-controls[data-controls-open="false"])');
+    expect(collapsed).toMatch(/background:\s*transparent/);
+    expect(collapsed).toMatch(/border-bottom-color:\s*transparent/);
+  });
+
+  it("keeps the sticky background and border while the panel is open", () => {
+    // `bodies` rather than `body`: the first rule mentioning the class is the toggle's own inset.
+    expect(bodies(".kairema-chat-sticky")).toMatch(/background:\s*var\(--k-panel\)/);
+    expect(bodies(".kairema-chat-sticky")).toMatch(/border-bottom:1px solid var\(--k-line\)/);
+  });
+
+  it("leaves the arrow itself a real, bordered target", () => {
+    // The arrow is the only thing left, so it has to stay visible and clickable against the chat.
+    expect(bodies(".kairema-chat-tools-toggle")).toMatch(/border:1px solid var\(--k-line\)/);
+  });
+});

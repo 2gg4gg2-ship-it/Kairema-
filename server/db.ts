@@ -1324,6 +1324,22 @@ export async function updateUserName(userId: number, name: string | null): Promi
   await db.update(users).set({ name }).where(eq(users.id, userId));
 }
 
+/**
+ * The two profile fields that live beside the name. Written through their own mutation rather than
+ * folded into `updateUserName`, so saving one never silently clears the other.
+ */
+export async function updateUserProfileDetails(
+  userId: number,
+  details: { preferredName?: string | null; personalPreferences?: string | null },
+): Promise<void> {
+  const db = requireDatabase(await getDb());
+  const values: { preferredName?: string | null; personalPreferences?: string | null } = {};
+  if (details.preferredName !== undefined) values.preferredName = details.preferredName;
+  if (details.personalPreferences !== undefined) values.personalPreferences = details.personalPreferences;
+  if (Object.keys(values).length === 0) return;
+  await db.update(users).set(values).where(eq(users.id, userId));
+}
+
 async function ensureMemoryProfile(userId: number): Promise<void> {
   const db = requireDatabase(await getDb());
   await db.insert(memoryProfiles).values({ userId, profile: "", summary: "" }).onDuplicateKeyUpdate({ set: { userId } });
