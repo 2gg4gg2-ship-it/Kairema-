@@ -857,44 +857,63 @@ describe("where the model menu is placed", () => {
 });
 
 describe("the model menu's colours", () => {
-  it("is a black panel with neutral borders", () => {
+  // These assert theme-awareness rather than literal colours. An earlier version of this file
+  // pinned the exact dark values (#0a0a0c, #17171b, #7d8496), which is precisely why the menu
+  // stayed dark in light mode: the tests were green and the light theme was unreachable. The
+  // invariant worth protecting is "reads from the --k-* tokens the theme toggle repaints", not a
+  // particular hex value.
+  it("takes its panel and border from the theme tokens, not literals", () => {
     const rule = ruleFor(".kairema-model-menu {");
-    expect(rule).toContain("background:#0a0a0c");
-    expect(rule).toContain("border:1px solid rgba(255,255,255,.14)");
+    expect(rule).toContain("background:var(--k-panel)");
+    expect(rule).toContain("var(--k-text)");
+    // A literal hex here is what pinned the panel to dark.
+    expect(rule).not.toMatch(/#[0-9a-f]{3,6}\b/i);
   });
 
   it("marks the active model with neutral contrast instead of a coloured accent", () => {
     const rule = ruleFor(".kairema-model-menu-item-active {");
-    expect(rule).toContain("rgba(255,255,255");
+    expect(rule).toContain("var(--k-text)");
     expect(rule).not.toMatch(/255,\s*134,\s*255|#9386ff|147,\s*134,\s*255/i);
   });
 
   it("keeps the free badge monochrome", () => {
     const rule = ruleFor(".kairema-model-menu-badge {");
-    expect(rule).toMatch(/rgba\(255,255,255/);
+    expect(rule).toContain("var(--k-text)");
     expect(rule).not.toMatch(/147,\s*134,\s*255|#c7bfff/i);
   });
 
   it("keeps the Settings trigger itself free of a coloured accent", () => {
     // The panel was already neutral, but the trigger that opens it kept a violet hover and focus
     // ring, so hovering the field in Settings still showed a purple border.
-    expect(ruleFor(".kairema-settings-model-trigger:hover:not(:disabled) {")).toMatch(/rgba\(255,255,255/);
-    expect(ruleFor(".kairema-settings-model-trigger:focus-visible {")).toMatch(/rgba\(255,255,255/);
+    expect(ruleFor(".kairema-settings-model-trigger:hover:not(:disabled) {")).toContain("var(--k-text)");
+    expect(ruleFor(".kairema-settings-model-trigger:focus-visible {")).toContain("var(--k-text)");
     for (const selector of [".kairema-settings-model-trigger:hover:not(:disabled) {", ".kairema-settings-model-trigger:focus-visible {"]) {
       expect(ruleFor(selector), `violet accent left in ${selector}`).not.toMatch(/#8b5cf6|#a78bfa|139,\s*92,\s*246/i);
     }
   });
 
-  it("uses a near-black panel with white and grey text", () => {
-    expect(ruleFor(".kairema-model-menu-item {")).toContain("color:#e8eaf0");
-    expect(ruleFor(".kairema-model-menu-item-id {")).toContain("color:#7d8496");
-    expect(ruleFor(".kairema-model-menu-group-title {")).toContain("color:#8b94a7");
+  it("takes its text from the tokens, so contrast holds in both themes", () => {
+    expect(ruleFor(".kairema-model-menu-item {")).toContain("color:var(--k-text)");
+    expect(ruleFor(".kairema-model-menu-item-id {")).toContain("color:var(--k-muted)");
+    expect(ruleFor(".kairema-model-menu-group-title {")).toContain("color:var(--k-muted)");
   });
 
   it("gives hover a neutral grey rather than a tint", () => {
     const hover = ruleFor(".kairema-model-menu-item:hover,.kairema-model-menu-item:focus-visible {");
-    expect(hover).toContain("background:#17171b");
+    expect(hover).toContain("background:var(--k-panel-2)");
     expect(hover).not.toMatch(/147,\s*134,\s*255|#9386ff/i);
+  });
+
+  it("defines the tokens it uses in both the light and dark blocks", () => {
+    // A var() with no definition in one of the two blocks is invisible in that theme, which is
+    // how a themed rule silently ends up colourless rather than wrong.
+    const text = readFileSync(resolve(process.cwd(), "client/src/index.css"), "utf8");
+    const lightLines = text.split("\n").filter((line) => /^:root\b/.test(line)).join("\n");
+    const darkLines = text.split("\n").filter((line) => /^\.dark\b/.test(line)).join("\n");
+    for (const token of ["--k-bg", "--k-panel", "--k-panel-2", "--k-text", "--k-muted", "--k-line"]) {
+      expect(lightLines, `${token} missing from the light block`).toContain(`${token}:`);
+      expect(darkLines, `${token} missing from the dark block`).toContain(`${token}:`);
+    }
   });
 
   it("scrolls inside the panel instead of growing past the window", () => {
@@ -910,5 +929,64 @@ describe("the model menu's colours", () => {
     for (const rule of menuRules) {
       expect(rule, `violet accent left in: ${rule.slice(0, 80)}`).not.toMatch(/147,\s*134,\s*255|#9386ff|#b9b1ff|#c7bfff|#8b5cf6|#a78bfa/i);
     }
+  });
+});
+
+/**
+ * Regression cover for the reported bug: the whole /settings/providers page stayed dark after the
+ * app switched to the light theme, because it was the one screen built from literal Tailwind dark
+ * utilities (bg-slate-950, bg-slate-900/60, border-slate-700, text-slate-200) and had no dark:
+ * variant anywhere. The .dark class the toggle puts on <html> had nothing to act on.
+ *
+ * These assert the page reads the --k-* tokens, so it follows the one existing theme system.
+ */
+describe("the providers page follows the theme", () => {
+  const pageSource = () => readFileSync(resolve(process.cwd(), "client/src/pages/AIProviders.tsx"), "utf8");
+
+  it("leaves no dark-only Tailwind colour utility anywhere in the page", () => {
+    const source = pageSource();
+    const offenders = source.match(/slate-\d{3}|bg-black|#[0-9a-f]{6}\b/gi) ?? [];
+    // A literal colour here is a surface the theme toggle cannot reach.
+    expect(offenders, `dark-only values left in the page: ${Array.from(new Set(offenders)).join(", ")}`).toEqual([]);
+  });
+
+  it("roots the page in the themed background rather than a hardcoded near-black", () => {
+    const rule = ruleFor(".kairema-providers-page {");
+    expect(rule).toContain("background:var(--k-bg)");
+    expect(rule).toContain("color:var(--k-text)");
+    // The reported symptom: the page painted itself #020617 / slate-950 in both themes.
+    expect(rule).not.toMatch(/#020617|#0[0-9a-f]{5}|slate-950/i);
+  });
+
+  it("themes the page's own surfaces through tokens", () => {
+    for (const [selector, token] of [
+      [".kairema-providers-card {", "var(--k-panel)"],
+      [".kairema-providers-field {", "var(--k-line)"],
+      [".kairema-providers-keyfield {", "var(--k-panel)"],
+      [".kairema-providers-btn-primary {", "var(--k-strong)"],
+      [".kairema-providers-hint {", "var(--k-muted)"],
+    ] as const) {
+      expect(ruleFor(selector), `${selector} is not themed`).toContain(token);
+    }
+  });
+
+  it("gives the status notices their own themed steps in both blocks", () => {
+    // A status colour is carrying meaning, but its light-theme contrast step cannot be the dark
+    // tint: the same red that reads correctly on #131313 goes muddy on #ffffff. The tokens live
+    // in their own :root/.dark lines, so they are matched per line rather than as one range.
+    const css = readFileSync(resolve(process.cwd(), "client/src/index.css"), "utf8");
+    const lightLines = css.split("\n").filter((line) => /^:root\b/.test(line)).join("\n");
+    const darkLines = css.split("\n").filter((line) => /^\.dark\b/.test(line)).join("\n");
+    for (const token of ["--k-danger", "--k-warn", "--k-ok"]) {
+      expect(lightLines, `${token} missing from light`).toContain(`${token}:`);
+      expect(darkLines, `${token} missing from dark`).toContain(`${token}:`);
+    }
+  });
+
+  it("renders the page through the themed class rather than a dark utility", async () => {
+    render(<Harness />);
+    const main = await screen.findByRole("main");
+    expect(main.className).toContain("kairema-providers-page");
+    expect(main.className).not.toMatch(/slate-/);
   });
 });

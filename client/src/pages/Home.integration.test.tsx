@@ -1748,7 +1748,9 @@ describe("My API model picker", () => {
     expect(panel.slice(0, 400)).toContain("position:fixed");
     expect(panel.slice(0, 400)).toContain("max-height");
     expect(panel.slice(0, 400)).toContain("overflow:hidden");
-    expect(panel.slice(0, 400)).toContain("#0a0a0c");
+    // The panel takes its colour from the theme tokens, so the shared menu follows the app's
+    // light/dark setting instead of being pinned to a near-black literal.
+    expect(panel.slice(0, 400)).toContain("var(--k-panel)");
     const list = css.slice(css.indexOf(".kairema-model-menu-list {"));
     expect(list.slice(0, 300)).toContain("overflow-y:auto");
     expect(list.slice(0, 300)).toContain("min-height:0");
