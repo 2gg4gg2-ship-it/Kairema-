@@ -702,7 +702,7 @@ describe("Home integration flows", () => {
 
     await user.click(screen.getByRole("button", { name: "Открыть профиль" }));
 
-    const nameField = screen.getByRole("textbox", { name: /Как к вам обращаться/ });
+    const nameField = screen.getByRole("textbox", { name: /Полное имя/ });
     expect((nameField as HTMLInputElement).value).toBe("Тест");
     expect(screen.getByText("Ваши предпочтения применяются ко всем разговорам.")).toBeTruthy();
 
@@ -1777,7 +1777,7 @@ describe("Profile", () => {
     const user = userEvent.setup();
     render(<Home />);
     await user.click(await screen.findByRole("button", { name: fixtures.language === "en" ? "Open profile" : "Открыть профиль" }));
-    await screen.findByRole("textbox", { name: /Как к вам обращаться|What should we call you/ });
+    await screen.findByRole("textbox", { name: /Полное имя|Full name/ });
     return user;
   }
 
@@ -1790,7 +1790,7 @@ describe("Profile", () => {
     expect(screen.getByText("Полное имя")).not.toBeNull();
     expect(screen.getByText("Персональные предпочтения")).not.toBeNull();
     expect(screen.getByText("Ваши предпочтения применяются ко всем разговорам.")).not.toBeNull();
-    const nameField = screen.getByRole("textbox", { name: /Как к вам обращаться/ }) as HTMLInputElement;
+    const nameField = screen.getByRole("textbox", { name: /Полное имя/ }) as HTMLInputElement;
     expect(nameField.maxLength).toBe(120);
     expect(nameField.getAttribute("autocomplete")).toBe("name");
     // Default preference is OFF on a fresh account.
@@ -1803,7 +1803,7 @@ describe("Profile", () => {
     await openProfile();
 
     expect(screen.getByText("Full name")).not.toBeNull();
-    expect(screen.getByRole("textbox", { name: "What should we call you?" })).not.toBeNull();
+    expect(screen.getByRole("textbox", { name: "Full name" })).not.toBeNull();
     expect(screen.getByRole("button", { name: /Update Profile/ })).not.toBeNull();
     expect(screen.getByText("Personal preferences")).not.toBeNull();
     expect(screen.getByText("What personal preferences should Kairema consider in responses?")).not.toBeNull();
@@ -1821,7 +1821,7 @@ describe("Profile", () => {
     await user.click(screen.getByRole("button", { name: /Сохранить предпочтения/ }));
     expect(fixtures.updatedSettings.at(-1)).toEqual({ askClarifyingQuestions: true });
 
-    const nameInput = screen.getByRole("textbox", { name: /Как к вам обращаться/ });
+    const nameInput = screen.getByRole("textbox", { name: /Полное имя/ });
     await user.clear(nameInput);
     await user.type(nameInput, "Kazea");
     await user.click(screen.getByRole("button", { name: /Обновить профиль/ }));
@@ -1830,9 +1830,23 @@ describe("Profile", () => {
     expect(fixtures.updatedSettings.at(-1)).toEqual({ askClarifyingQuestions: true });
   });
 
+  it("offers exactly one editable name field, with no duplicate label", async () => {
+    await openProfile();
+
+    // The name used to be announced twice: once by a heading and once by a second, differently
+    // worded label on the same input, so "Full name" and "What should we call you?" both described
+    // one field. It is one editable field now, and the section heading that shadowed it is gone.
+    const fields = screen.getAllByRole("textbox", { name: /Полное имя|Full name/ });
+    expect(fields).toHaveLength(1);
+    expect(screen.queryByText("Как к вам обращаться?")).toBeNull();
+    expect(screen.queryByText("What should we call you?")).toBeNull();
+    // The single field is the one bound to users.name, and it is editable rather than read-only.
+    expect((fields[0] as HTMLInputElement).readOnly).toBe(false);
+  });
+
   it("never writes the display name into any chat request", async () => {
     const user = await openProfile();
-    const nameInput = screen.getByRole("textbox", { name: /Как к вам обращаться/ });
+    const nameInput = screen.getByRole("textbox", { name: /Полное имя/ });
     await user.clear(nameInput);
     await user.type(nameInput, "Kazea");
     await user.click(screen.getByRole("button", { name: /Обновить профиль/ }));
