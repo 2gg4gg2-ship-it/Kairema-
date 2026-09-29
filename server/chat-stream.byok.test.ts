@@ -55,6 +55,7 @@ function handlerWith(overrides: Record<string, unknown>, options: { isGuest?: bo
     chatWithRoleStream: vi.fn(),
     chatWithUserProviderStream: vi.fn(),
     getActiveUserProviderBinding: vi.fn().mockResolvedValue(binding),
+    listUserProviderConfigs: vi.fn().mockResolvedValue([]),
     decryptUserProviderSecret: vi.fn().mockReturnValue(KEY),
     auditChatStream: vi.fn(),
     ...overrides,

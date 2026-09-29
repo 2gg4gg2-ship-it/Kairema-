@@ -1,12 +1,12 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
-import { appendChatMessage, consumeChatStreamRequestQuota, consumeMyApiRequestQuota, deleteOwnedSessionUserMessage, enqueueMemoryExtractionJob, getActiveUserProviderBinding, getOwnedChatSession, getOwnedSessionMessage, getStoredAssistantForClientMessage, listSessionTranscriptWindow, updateChatTitle } from "./db";
+import { appendChatMessage, consumeChatStreamRequestQuota, consumeMyApiRequestQuota, deleteOwnedSessionUserMessage, listUserProviderConfigs, enqueueMemoryExtractionJob, getActiveUserProviderBinding, getOwnedChatSession, getOwnedSessionMessage, getStoredAssistantForClientMessage, listSessionTranscriptWindow, updateChatTitle } from "./db";
 import { resolveRequestUser } from "./_core/context";
 import { MODEL_IDS, chatWithRoleStream, publicChatError, type ChatMessage, type ChatSettings, type Provider, type RoleId } from "./providers";
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
 import { getOrCreateGuestUser } from "./_core/guest-session";
 import type { CapacityActor } from "./capacity-controller";
-import { chatWithUserProviderStream, customUserProviderTarget, publicUserProviderError, UserProviderGuestNotAllowedError, UserProviderNotConfiguredError } from "./user-providers";
+import { chatWithUserProviderStream, customUserProviderTarget, isSupportedUserProvider, publicUserProviderError, UserProviderGuestNotAllowedError, UserProviderNotConfiguredError } from "./user-providers";
 import { decryptUserProviderSecret } from "./user-provider-secrets";
 
 export const CHAT_STREAM_RATE_LIMIT = 60;
@@ -177,11 +177,17 @@ async function generateWithUserProvider(options: {
     ? customUserProviderTarget({ id: binding.provider, displayName: binding.displayName ?? "Мой провайдер", baseUrl: binding.baseUrl, modelsEndpoint: binding.modelsEndpoint })
     : binding.provider;
   const apiKey = options.dependencies.decryptUserProviderSecret(binding.encryptedApiKey);
+
+  // The user's own other connected providers, used only if this one is rate-limited. Every entry
+  // comes from this user's own saved configurations; a Kairema provider is never added here, so a
+  // failed BYOK turn can never be answered by the platform on the user's behalf.
+  const fallbacks = await loadUserProviderFallbacks(options.dependencies, options.userId, binding.provider, binding.model);
   return await options.dependencies.chatWithUserProviderStream({
     provider: target,
     model: binding.model,
     modelLabel: binding.model,
     apiKey,
+    fallbacks,
     history: options.history,
     settings: options.settings,
     roleId: options.roleId,
@@ -190,6 +196,40 @@ async function generateWithUserProvider(options: {
     actor: options.actor,
   });
 }
+
+/**
+ * The user's other connected providers, in the order they saved them, each with its own key.
+ *
+ * A provider whose key cannot be decrypted right now is skipped rather than allowed to fail the
+ * whole request, and a provider the client does not know how to serve is left out entirely.
+ */
+async function loadUserProviderFallbacks(
+  dependencies: StreamDependencies,
+  userId: number,
+  activeProvider: string,
+  activeModel: string,
+): Promise<Array<{ provider: string; model: string; apiKey: string; modelLabel?: string }>> {
+  let configs: Awaited<ReturnType<StreamDependencies["listUserProviderConfigs"]>>;
+  try {
+    configs = await dependencies.listUserProviderConfigs(userId);
+  } catch {
+    return [];
+  }
+  const fallbacks: Array<{ provider: string; model: string; apiKey: string; modelLabel?: string }> = [];
+  for (const config of configs) {
+    if (config.provider === activeProvider || config.baseUrl) continue;
+    if (!isSupportedUserProvider(config.provider)) continue;
+    let apiKey: string;
+    try {
+      apiKey = dependencies.decryptUserProviderSecret(config.encryptedApiKey);
+    } catch {
+      continue;
+    }
+    fallbacks.push({ provider: config.provider, model: config.activeModel || activeModel, apiKey, modelLabel: config.activeModel });
+  }
+  return fallbacks;
+}
+
 function getCompletedReplay(key: string, now = Date.now()): StreamResult | undefined {
   const item = completedChatStreamReplays.get(key);
   if (!item) return undefined;
@@ -343,6 +383,7 @@ type StreamDependencies = {
   chatWithRoleStream: typeof chatWithRoleStream;
   chatWithUserProviderStream: typeof chatWithUserProviderStream;
   getActiveUserProviderBinding: typeof getActiveUserProviderBinding;
+  listUserProviderConfigs: typeof listUserProviderConfigs;
   decryptUserProviderSecret: typeof decryptUserProviderSecret;
   buildChatContext: typeof buildChatContext;
   enqueueMemoryExtractionJob: typeof enqueueMemoryExtractionJob;
@@ -375,6 +416,7 @@ const defaultDependencies: StreamDependencies = {
   chatWithRoleStream,
   chatWithUserProviderStream,
   getActiveUserProviderBinding,
+  listUserProviderConfigs,
   decryptUserProviderSecret,
   buildChatContext,
   enqueueMemoryExtractionJob,
