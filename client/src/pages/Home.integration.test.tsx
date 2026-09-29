@@ -30,6 +30,7 @@ const fixtures = vi.hoisted(() => ({
   invalidateMessages: vi.fn(),
   historyPageFetch: vi.fn(),
   discardFailedTurn: vi.fn(),
+  persistDirectTurn: vi.fn(),
   invalidateSessions: vi.fn(),
   invalidateUserProviders: () => {},
   createChat: vi.fn(),
@@ -121,6 +122,7 @@ vi.mock("@/lib/trpc", async () => {
       saveDraft: { useMutation: () => ({ mutateAsync: fixtures.saveDraft, isPending: false }) },
       clearDraft: { useMutation: () => ({ mutateAsync: fixtures.clearDraft, isPending: false }) },
       discardFailedTurn: { useMutation: () => ({ mutateAsync: fixtures.discardFailedTurn, isPending: false }) },
+      persistDirectTurn: { useMutation: () => ({ mutateAsync: fixtures.persistDirectTurn, isPending: false }) },
     },
     userProviders: {
       // The list is a live read, and an invalidate re-renders it: that is what a provider switch

@@ -781,3 +781,29 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-providers-notice-warn { border-color:color-mix(in srgb, var(--k-warn) 45%, transparent); background:color-mix(in srgb, var(--k-warn) 10%, transparent); color:var(--k-warn-text); }
 .kairema-providers-notice-ok { border-color:color-mix(in srgb, var(--k-ok) 45%, transparent); background:color-mix(in srgb, var(--k-ok) 10%, transparent); color:var(--k-ok-text); }
 .kairema-providers-notice-error { border-color:color-mix(in srgb, var(--k-danger) 45%, transparent); background:color-mix(in srgb, var(--k-danger) 10%, transparent); color:var(--k-danger-text); }
+
+/* Provider-unavailable notice. Compact and non-blocking: it overlays the conversation near the
+   vertical centre and never covers the page, so the composer, sidebar and history stay usable
+   while a fallback runs or after the turn has stopped. `width:max-content` with a capped
+   `max-width` is what keeps the long Russian sentence from stretching across a wide monitor, and
+   the same max-width stops it overflowing a ~430px phone. */
+.kairema-provider-notice { position:fixed; top:62%; left:50%; transform:translate(-50%,-50%); z-index:60; display:flex; align-items:flex-start; gap:10px; width:max-content; max-width:min(440px,calc(100vw - 32px)); padding:12px 14px; border:1px solid color-mix(in srgb, var(--k-warn) 45%, transparent); border-radius:12px; background:var(--k-panel); color:var(--k-warn-text); box-shadow:0 8px 24px color-mix(in srgb, var(--k-text) 12%, transparent); }
+.kairema-provider-notice-icon { flex:0 0 auto; width:16px; height:16px; margin-top:1px; color:var(--k-warn); }
+.kairema-provider-notice-body { min-width:0; }
+.kairema-provider-notice-text { margin:0; font-size:13px; font-weight:700; line-height:1.45; overflow-wrap:anywhere; }
+.kairema-provider-notice-reason { margin:4px 0 0; color:var(--k-muted); font-size:12px; line-height:1.45; overflow-wrap:anywhere; }
+@media (max-width:520px) { .kairema-provider-notice { top:60%; max-width:calc(100vw - 24px); padding:10px 12px; border-radius:11px; } .kairema-provider-notice-text { font-size:12.5px; } .kairema-provider-notice-reason { font-size:11.5px; } }
+
+/* Direct browser-connection panel on the providers page. Uses the same tokens as the rest of the
+   page so the theme toggle repaints it; the reserved warn/danger hues are not involved here. */
+.kairema-providers-direct { display:grid; gap:10px; margin-bottom:18px; padding:14px; border:1px solid var(--k-line); border-radius:12px; background:var(--k-panel-2); }
+.kairema-providers-direct-row { padding:10px; }
+.kairema-providers-direct-main { display:grid; gap:8px; }
+.kairema-providers-direct .kairema-providers-h { margin:0; font-size:14px; }
+.kairema-providers-btn-quiet { display:inline-flex; align-items:center; justify-content:center; padding:6px; }
+.kairema-providers-btn-quiet svg { width:15px; height:15px; }
+
+/* The blocked Send button is aria-disabled rather than natively disabled, so a press still reaches
+   the handler and can re-state the reason. It must still read as unavailable, which is what the
+   reserved muted tone is for. */
+.kairema-send[aria-disabled="true"] { cursor:not-allowed; opacity:.45; }

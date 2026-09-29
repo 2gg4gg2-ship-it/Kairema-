@@ -3,6 +3,8 @@ import { ArrowLeft, CheckCircle2, Eye, EyeOff, KeyRound, Plug, Plus, Power, Refr
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { ModelMenu, MODEL_MENU_LABELS } from "@/components/ModelMenu";
+import { usesDirectExecution } from "@shared/provider-capabilities";
+import { clearDirectKey, hasDirectKey, setDirectKey } from "@/lib/direct-key-store";
 
 type ProviderView =
   | { id: string; displayName: string; available: true; keyUrl: string; keyEndpoint: string; modelsEndpoint: string; chatEndpoint: string }
@@ -176,6 +178,22 @@ export default function AIProviders() {
   const [modelId, setModelId] = useState("");
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [customDraft, setCustomDraft] = useState<CustomDraft | null>(null);
+  // Typed-but-unsaved direct keys. Held in component state so the value never outlives the form
+  // and never reaches any persistence layer; only the button below puts one in the memory store.
+  const [directKeys, setDirectKeys] = useState<Record<string, string>>({});
+  const [directKeyVisible, setDirectKeyVisible] = useState<string | null>(null);
+  const directKeyPresent = (providerId: string) => hasDirectKey(providerId);
+  const storeDirectKey = (providerId: string, value: string) => {
+    // Storing a key is itself a recovery action: the user has just supplied a credential, so any
+    // "no provider can answer" state from before is stale.
+    setDirectKey(providerId, value.trim());
+    setDirectKeys((current) => ({ ...current, [providerId]: "" }));
+    setDirectKeyVisible(null);
+  };
+  const forgetDirectKey = (providerId: string) => {
+    clearDirectKey(providerId);
+    setDirectKeys((current) => ({ ...current, [providerId]: "" }));
+  };
 
   const listQuery = trpc.userProviders.list.useQuery(undefined, { staleTime: 30_000 });
   const providers = (listQuery.data?.providers ?? []) as ProviderView[];
@@ -192,6 +210,9 @@ export default function AIProviders() {
   const unavailable = providers.filter((provider) => !provider.available);
   const selected = providers.find((provider) => provider.id === editingProvider) ?? null;
   const selectedConfig = configs.find((config) => config.provider === editingProvider) ?? null;
+  // The registry is the only thing that decides this list, so a provider whose CORS policy is not
+  // established as allowed never gets a direct key field at all.
+  const directProviders = providers.filter((provider) => provider.available && usesDirectExecution(provider.id, true));
 
 
   // The catalog is fetched explicitly, never as a declarative query: a query would carry the
@@ -423,6 +444,71 @@ export default function AIProviders() {
             {notice.tone === "ok" ? <CheckCircle2 className="mt-0.5 size-4 shrink-0" /> : <XCircle className="mt-0.5 size-4 shrink-0" />}
             <span>{notice.text}</span>
           </p>
+        )}
+
+        {directProviders.length > 0 && (
+          <section className="kairema-providers-direct" aria-labelledby="kairema-direct-heading">
+            <h2 id="kairema-direct-heading" className="kairema-providers-h">
+              Прямое подключение из браузера
+            </h2>
+            <p className="kairema-providers-hint">
+              Ключ хранится только в памяти этой вкладки и не отправляется на сервер Kairema. Он исчезает
+              при переключении провайдера и при выходе из аккаунта. Остальные провайдеры всегда
+              выполняются на сервере.
+            </p>
+            {directProviders.map((entry) => {
+              const present = directKeyPresent(entry.id);
+              return (
+                <div key={entry.id} className="kairema-providers-row kairema-providers-direct-row">
+                  <div className="kairema-providers-direct-main">
+                    <label className="kairema-providers-label" htmlFor={`direct-key-${entry.id}`}>
+                      {entry.displayName} — ключ для прямых запросов
+                    </label>
+                    <div className="kairema-providers-keyfield">
+                      <KeyRound className="kairema-providers-keyfield-icon" aria-hidden="true" />
+                      <input
+                        id={`direct-key-${entry.id}`}
+                        className="kairema-providers-keyfield-input"
+                        type={directKeyVisible === entry.id ? "text" : "password"}
+                        autoComplete="off"
+                        spellCheck={false}
+                        placeholder={present ? "Ключ сохранён в памяти вкладки" : "Вставьте API-ключ"}
+                        value={directKeys[entry.id] ?? ""}
+                        onChange={(event) => setDirectKeys((current) => ({ ...current, [entry.id]: event.target.value }))}
+                      />
+                      <button
+                        type="button"
+                        className="kairema-providers-btn kairema-providers-btn-quiet"
+                        onClick={() => setDirectKeyVisible((current) => (current === entry.id ? null : entry.id))}
+                      >
+                        {directKeyVisible === entry.id ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+                      </button>
+                    </div>
+                    <div className="kairema-providers-actions">
+                      <button
+                        type="button"
+                        className="kairema-providers-btn kairema-providers-btn-primary"
+                        disabled={(directKeys[entry.id] ?? "").trim().length < 8}
+                        onClick={() => storeDirectKey(entry.id, directKeys[entry.id] ?? "")}
+                      >
+                        Держать ключ в браузере
+                      </button>
+                      {present && (
+                        <button
+                          type="button"
+                          className="kairema-providers-btn"
+                          onClick={() => forgetDirectKey(entry.id)}
+                        >
+                          Забыть ключ
+                        </button>
+                      )}
+                    </div>
+                    {present && <span className="kairema-providers-hint">ключ в памяти вкладки · отправки идут напрямую провайдеру</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </section>
         )}
 
         {openrouter && (
