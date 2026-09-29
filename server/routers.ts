@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, deleteOwnedFailedUserMessage, deleteUserProviderConfig, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserProviderConfig, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, listUserProviderConfigs, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, setActiveUserProvider, setUserProviderActiveModel, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserName, updateUserProfileDetails, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag, upsertUserProviderConfig } from "./db";
+import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, deleteOwnedFailedUserMessage, deleteUserProviderConfig, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerDashboardSummary, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserProviderConfig, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, listUserProviderConfigs, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, setActiveUserProvider, setUserProviderActiveModel, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserName, updateUserProfileDetails, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag, upsertUserProviderConfig } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { clearStytchLinkIntentCookie, clearStytchOtpEmailIdCookie, clearStytchPasswordRecoveryEmailCookie, clearStytchPasswordSessionCookie, clearStytchResetCookie, clearStytchSessionCookie, getSafeStytchDeliveryFailure, getStytchCallbackUrl, getStytchClient, getStytchOtpEmailId, getStytchPasswordRecoveryEmail, getStytchPasswordSessionToken, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, logSafeStytchDiagnostic, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchOtpEmailIdCookie, setStytchPasswordRecoveryEmailCookie, setStytchPasswordSessionCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
 import Stytch, { StytchError } from "stytch";
@@ -9,14 +9,14 @@ import { resolveOrCreateProviderUser } from "./db";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router, guestProcedure, userOrGuestProcedure } from "./_core/trpc";
 import { ENV } from "./_core/env";
-import { MODEL_IDS, OWNER_CONTROL_TARGETS, PUBLIC_DASHBOARD_PROVIDERS, chatWithRole, getModelViews, getPublicProviderDashboard, isOwnerControlTarget, publicChatError } from "./providers";
+import { MODEL_IDS, MODEL_ROLES, OWNER_CONTROL_TARGETS, PUBLIC_DASHBOARD_PROVIDERS, chatWithRole, getModelViews, getPublicProviderDashboard, isOwnerControlTarget, publicChatError } from "./providers";
 import { getOwnedAttachmentDownload, uploadOwnedChatAttachment } from "./attachments";
 import { createPersistentChatExport, getOwnedChatExportDownload } from "./chat-exports";
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
 import { getWebGroundedRuntimeGaugeSnapshot, getWebSearchStatus, probeWebSearchStatus } from "./web-search";
 import { getKnowledgeAudit, getKnowledgeStatus, refreshKnowledgeBase } from "./knowledge";
-import { ownerClaimFingerprint } from "./owner-claim";
-import { getChatStreamRuntimeGaugeSnapshot } from "./chat-stream";
+import { ownerClaimFingerprint, isOwnerAccount, isOwnerConfigured } from "./owner-access";
+import { CHAT_STREAM_RATE_LIMIT, CHAT_STREAM_RATE_WINDOW_SECONDS, getChatStreamRuntimeGaugeSnapshot } from "./chat-stream";
 import { getCapacityControllerSnapshot, getCapacityPolicy, listCapacityProviderBudgets, updateCapacityPolicy, updateCapacityProviderBudget } from "./capacity-controller";
 import { promoteGuest, clearGuestCookie } from "./_core/guest-session";
 import { GUEST_COOKIE_NAME } from "@shared/const";
@@ -83,11 +83,21 @@ const capacityProviderBudgetSchema = z.object({
   quotaState: z.enum(["unknown", "operator_configured"]).optional(),
 }).strict();
 
-function requireOwner(ctx: { user: { id: number; openId: string } }) {
-  if (!ENV.ownerOpenId || ctx.user.openId !== ENV.ownerOpenId) {
+/**
+ * The single server-side owner gate.
+ *
+ * Every owner route funnels through here, and the decision itself lives in `isOwnerAccount`, which
+ * is also what grants the `admin` role on sign-in. The two therefore cannot disagree: an account
+ * that reaches the owner dashboard is exactly the account that satisfies `adminProcedure`.
+ *
+ * It reads only the authenticated context user and server-side configuration. A guest, an
+ * unauthenticated caller, a different email, or a deployment with no `OWNER_EMAIL` all fail here.
+ */
+function requireOwner<T extends { id: number; openId: string; email?: string | null }>(ctx: { user: T | null | undefined }): T {
+  if (!isOwnerAccount(ctx.user ?? undefined)) {
     throw new TRPCError({ code: "FORBIDDEN", message: "Инструменты владельца доступны только владельцу." });
   }
-  return ctx.user;
+  return ctx.user as T;
 }
 
 const userSettingsSchema = z.object({
@@ -484,24 +494,48 @@ export const appRouter = router({
     dashboard: protectedProcedure.query(() => getPublicProviderDashboard()),
   }),
   owner: router({
-    isOwner: protectedProcedure.query(({ ctx }) => Boolean(ENV.ownerOpenId && ctx.user.openId === ENV.ownerOpenId)),
+    isOwner: protectedProcedure.query(({ ctx }) => isOwnerAccount(ctx.user ?? undefined)),
+    /**
+     * Minimal operational summary for the owner.
+     *
+     * `protectedProcedure` already rejects guests and unauthenticated callers, and `requireOwner`
+     * rejects every account that is not the single configured owner, so this is a server-side gate
+     * independent of anything the frontend does. The payload is aggregate counts only: no emails,
+     * no openIds, no API keys, no BYOK secrets, no session or database credentials, and no owner
+     * configuration is echoed back to the client.
+     */
+    dashboard: protectedProcedure.query(async ({ ctx }) => {
+      requireOwner(ctx);
+      const summary = await getOwnerDashboardSummary();
+      return {
+        ...summary,
+        quota: {
+          limitPerRole: CHAT_STREAM_RATE_LIMIT,
+          windowSeconds: CHAT_STREAM_RATE_WINDOW_SECONDS,
+          roles: MODEL_IDS.map((roleId) => {
+            const role = MODEL_ROLES.find((item) => item.key === roleId);
+            return { roleId, label: role?.label ?? roleId };
+          }),
+        },
+      };
+    }),
     claimDiagnostic: protectedProcedure.query(({ ctx }) => ({
-      comparedClaim: "openId" as const,
-      configured: Boolean(ENV.ownerOpenId),
-      expectedFingerprint: ownerClaimFingerprint(ENV.ownerOpenId),
-      sessionFingerprint: ownerClaimFingerprint(ctx.user.openId),
-      matches: Boolean(ENV.ownerOpenId && ctx.user.openId === ENV.ownerOpenId),
+      comparedClaim: "email" as const,
+      configured: isOwnerConfigured(),
+      expectedFingerprint: ownerClaimFingerprint(ENV.ownerEmail),
+      sessionFingerprint: ownerClaimFingerprint(ctx.user.email),
+      matches: isOwnerAccount(ctx.user ?? undefined),
     })),
     flashTtft: protectedProcedure.query(async ({ ctx }) => {
-      if (!ENV.ownerOpenId || ctx.user.openId !== ENV.ownerOpenId) throw new TRPCError({ code: "FORBIDDEN", message: "Панель производительности доступна только владельцу." });
+      requireOwner(ctx);
       return getFlashTtftStats();
     }),
     flashTtftTrend: protectedProcedure.input(z.object({ days: z.union([z.literal(7), z.literal(30)]) })).query(async ({ ctx, input }) => {
-      if (!ENV.ownerOpenId || ctx.user.openId !== ENV.ownerOpenId) throw new TRPCError({ code: "FORBIDDEN", message: "Панель производительности доступна только владельцу." });
+      requireOwner(ctx);
       return getFlashTtftTrend(input.days);
     }),
     searchOutages: protectedProcedure.query(async ({ ctx }) => {
-      if (!ENV.ownerOpenId || ctx.user.openId !== ENV.ownerOpenId) throw new TRPCError({ code: "FORBIDDEN", message: "Журнал поиска доступен только владельцу." });
+      requireOwner(ctx);
       return getSearchOutageSummary();
     }),
     observability: protectedProcedure.query(async ({ ctx }) => {
@@ -806,11 +840,11 @@ export const appRouter = router({
   search: router({
     query: protectedProcedure.input(z.object({ query: z.string().trim().min(2).max(120) })).query(({ ctx, input }) => searchUserContent(ctx.user.id, input.query)),
     qualityPanel: protectedProcedure.query(async ({ ctx }) => {
-      if (!ENV.ownerOpenId || ctx.user.openId !== ENV.ownerOpenId) throw new TRPCError({ code: "FORBIDDEN", message: "Панель качества поиска доступна только владельцу." });
+      requireOwner(ctx);
       return getSearchQualityPanel();
     }),
     qualityChart: protectedProcedure.query(async ({ ctx }) => {
-      if (!ENV.ownerOpenId || ctx.user.openId !== ENV.ownerOpenId) throw new TRPCError({ code: "FORBIDDEN", message: "График качества поиска доступен только владельцу." });
+      requireOwner(ctx);
       return getSearchQualityChart();
     }),
   }),
@@ -823,7 +857,7 @@ export const appRouter = router({
   }),
   knowledge: router({
     status: protectedProcedure.query(async () => getKnowledgeStatus()),
-    audit: protectedProcedure.query(async ({ ctx }) => getKnowledgeAudit(Boolean(ENV.ownerOpenId && ctx.user.openId === ENV.ownerOpenId))),
+    audit: protectedProcedure.query(async ({ ctx }) => getKnowledgeAudit(isOwnerAccount(ctx.user ?? undefined))),
     refresh: protectedProcedure.mutation(async ({ ctx }) => {
       requireOwner(ctx);
       const current = await getKnowledgeStatus();

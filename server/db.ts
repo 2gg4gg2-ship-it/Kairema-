@@ -5,6 +5,7 @@ import { ChatAttachment, ChatExport, ChatMessageRecord, ChatSession, DevApiAudit
 import { providerHealthHistory } from "../drizzle/schema";
 import { stytchLinkIntents } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { isOwnerAccount } from "./owner-access";
 import { GUEST_MAX_LIFETIME_MS, GUEST_TTL_MS } from "@shared/const";
 import { decodeHistoryPageCursor, encodeHistoryPageCursor, normalizeHistoryPageLimit } from "./history-pagination";
 import { selectTranscriptWindow, TRANSCRIPT_WINDOW_BUDGETS, type TranscriptRole } from "./transcript-window";
@@ -51,7 +52,11 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   if (user.role !== undefined) {
     values.role = user.role;
     updateSet.role = user.role;
-  } else if (user.openId === ENV.ownerOpenId) {
+  } else if (isOwnerAccount({ openId: user.openId, email: user.email ?? values.email ?? null })) {
+    // The `admin` role is granted only by the same unified owner check the owner routes use, so the
+    // owner can reach both the dashboard and `adminProcedure` and no one else can reach either.
+    // The check is server-side and reads only configuration plus this authenticated row, so it
+    // cannot be triggered by a first-user rule, a request parameter or anything the client sends.
     values.role = "admin";
     updateSet.role = "admin";
   }
@@ -648,6 +653,60 @@ export async function getOwnerObservabilitySnapshot() {
   return { providers, events, memory: { facts: Number(factRows[0]?.count ?? 0), topics: Number(topicRows[0]?.count ?? 0), profiles: Number(profileRows[0]?.count ?? 0) }, search: { samples24h: Number(searchRows[0]?.count ?? 0), outages24h: Number(outageRows[0]?.count ?? 0) } };
 }
 
+/**
+ * Operational counters for the owner dashboard.
+ *
+ * Every number here is a plain aggregate over a table the project already keeps; nothing is
+ * inferred, sampled or estimated, and no new tracking is introduced. Where a metric has no reliable
+ * source it is reported as `null` rather than filled with a guess.
+ *
+ * "Users active in the last 30 days" is a count of real accounts whose `lastActivityAt` falls in
+ * that window, a column the app already maintains on every authenticated request. Guests are
+ * excluded so a burst of anonymous sessions cannot inflate the number.
+ *
+ * Per-role request counts come from stored chat messages grouped by the role slug that produced
+ * them, so they follow the same stable role identity the quota uses rather than a model id.
+ */
+export async function getOwnerDashboardSummary() {
+  const db = await getDb();
+  if (!db) {
+    return {
+      users: { total: 0, activeLast30d: null },
+      requestsByRole: [] as Array<{ roleId: string; count: number }>,
+      fallbackEvents: 0,
+      providerEvents: 0,
+    };
+  }
+
+  const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000);
+  const [totalRows, activeRows, roleRows, fallbackRows, providerRows] = await Promise.all([
+    db.select({ count: sql<number>`count(*)` }).from(users).where(eq(users.isGuest, 0)),
+    db.select({ count: sql<number>`count(*)` }).from(users).where(and(eq(users.isGuest, 0), gt(users.lastActivityAt, since30d))),
+    db
+      .select({ modelId: messages.modelId, count: sql<number>`count(*)` })
+      .from(messages)
+      .where(eq(messages.role, "assistant"))
+      .groupBy(messages.modelId),
+    db.select({ count: sql<number>`count(*)` }).from(technicalEvents).where(eq(technicalEvents.kind, "fallback")),
+    db.select({ count: sql<number>`count(*)` }).from(technicalEvents).where(eq(technicalEvents.kind, "provider")),
+  ]);
+
+  return {
+    users: {
+      total: Number(totalRows[0]?.count ?? 0),
+      activeLast30d: Number(activeRows[0]?.count ?? 0),
+    },
+    // Only role slugs are meaningful here; an unknown or absent model id is not a Kairema role and
+    // is dropped rather than shown as a bogus fifth role.
+    requestsByRole: roleRows
+      .map((row) => ({ roleId: String(row.modelId ?? ""), count: Number(row.count ?? 0) }))
+      .filter((row) => CHAT_QUOTA_ROLE_IDS.has(row.roleId))
+      .sort((a, b) => a.roleId.localeCompare(b.roleId)),
+    fallbackEvents: Number(fallbackRows[0]?.count ?? 0),
+    providerEvents: Number(providerRows[0]?.count ?? 0),
+  };
+}
+
 type PublicAvailabilityState = "ready" | "cooldown" | "auth_failed" | "unavailable" | "not_configured";
 type PublicAvailabilityAggregate = { samples: number; ready: number; uptime: number };
 
@@ -1140,6 +1199,13 @@ export async function listKnowledgeRuns(limit = 8): Promise<KnowledgeIngestionRu
 
 export type DevApiAuditInput = Pick<DevApiAuditRecord, "outcome" | "status"> & { userId?: number };
 
+/**
+ * The only role slugs a chat ingress bucket may be stored under. This is duplicated from
+ * `ROLE_IDS` on purpose: `db.ts` must not import the provider module, and a literal set that is
+ * asserted against `ROLE_IDS` in a test is what keeps the two from drifting apart silently.
+ */
+export const CHAT_QUOTA_ROLE_IDS: ReadonlySet<string> = new Set(["fast", "smart", "context", "flagship"]);
+
 /** Atomically increments a user's current fixed-minute bucket and returns whether it remains within the quota. */
 export async function consumeDevApiRequestQuota(userId: number, limit = 30, windowMs = 60_000): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
   const db = requireDatabase(await getDb());
@@ -1156,16 +1222,32 @@ export async function consumeDevApiRequestQuota(userId: number, limit = 30, wind
   return { allowed: current.requestCount <= limit, retryAfterSeconds: Math.max(1, Math.ceil((windowMs - elapsed) / 1_000)) };
 }
 
-/** Atomically increments a user's ordinary chat ingress bucket without sharing admin Dev API quota state. */
-export async function consumeChatStreamRequestQuota(userId: number, limit = 60, windowMs = 60_000): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+/**
+ * Atomically increments one (user, role) bucket of the ordinary chat ingress budget without
+ * sharing admin Dev API quota state or the My API budget.
+ *
+ * The row is keyed by the stable role slug rather than the model behind it, so each Kairema role
+ * carries its own allowance: exhausting Flash leaves Think, Context and Apex untouched. An
+ * unrecognised role is refused rather than stored, so a typo or a client-supplied string cannot
+ * quietly mint a fresh unlimited bucket.
+ *
+ * The increment and the window rollover happen in one atomic upsert keyed by the primary key, so
+ * MySQL serialises simultaneous requests on the same row and two of them cannot both read a
+ * pre-increment count and both be admitted past the limit. The read-back afterwards is what turns
+ * the stored counter into a verdict; the upsert is what makes that verdict trustworthy.
+ */
+export async function consumeChatStreamRequestQuota(userId: number, roleId: string, limit = 60, windowMs = 60_000): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+  if (!CHAT_QUOTA_ROLE_IDS.has(roleId)) {
+    throw new Error("Не удалось проверить лимит chat stream.");
+  }
   const db = requireDatabase(await getDb());
   const now = new Date();
   const cutoff = new Date(now.getTime() - windowMs);
-  await db.insert(chatStreamRateWindows).values({ userId, windowStarted: now, requestCount: 1 }).onDuplicateKeyUpdate({ set: {
+  await db.insert(chatStreamRateWindows).values({ userId, roleId, windowStarted: now, requestCount: 1 }).onDuplicateKeyUpdate({ set: {
     requestCount: sql`if(${chatStreamRateWindows.windowStarted} <= ${cutoff}, 1, ${chatStreamRateWindows.requestCount} + 1)`,
     windowStarted: sql`if(${chatStreamRateWindows.windowStarted} <= ${cutoff}, ${now}, ${chatStreamRateWindows.windowStarted})`,
   } });
-  const rows = await db.select().from(chatStreamRateWindows).where(eq(chatStreamRateWindows.userId, userId)).limit(1);
+  const rows = await db.select().from(chatStreamRateWindows).where(and(eq(chatStreamRateWindows.userId, userId), eq(chatStreamRateWindows.roleId, roleId))).limit(1);
   const current = rows[0];
   if (!current) throw new Error("Не удалось проверить лимит chat stream.");
   const elapsed = Math.max(0, now.getTime() - current.windowStarted.getTime());
