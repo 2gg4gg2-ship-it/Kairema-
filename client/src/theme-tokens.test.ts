@@ -158,3 +158,47 @@ describe("theme tokens cover the Kairema surface", () => {
     expect(css).toMatch(/\.kairema-auth-gate\{[^}]*background:#f3f2ed/);
   });
 });
+
+/**
+ * A hover state that resolves to the same value as its base rule is invisible: the control is
+ * there, the cursor is over it, and nothing changes. Migrating a hardcoded dark hover onto a token
+ * is exactly how that happens — both states end up naming the one token, and the feedback is lost
+ * without anything looking broken.
+ */
+describe("hover states are real", () => {
+  const rest = (selector: string, property: string) => declaration(body(selector), property);
+  const hovered = (selector: string, property: string) => declaration(body(`${selector}:hover`), property);
+
+  it("changes the model pill background, one step further from the text", () => {
+    const base = rest(".kairema-model-pill", "background");
+    const hover = hovered(".kairema-model-pill", "background");
+    expect(base).toBe("var(--k-panel-2)");
+    expect(hover).toBe("var(--k-panel-3)");
+    expect(hover, "the model pill hover must not restate its base background").not.toBe(base);
+  });
+
+  it("changes the mode hint link colour", () => {
+    const base = rest(".kairema-mode-hint-link", "color");
+    const hover = hovered(".kairema-mode-hint-link", "color");
+    expect(base).toBe("var(--k-muted)");
+    expect(hover).toBe("var(--k-text)");
+    expect(hover, "the hint link hover must not restate its base colour").not.toBe(base);
+  });
+
+  it("declares the hover step in both themes, with a different value in each", () => {
+    // One --k-panel-3 shared between themes cannot work: the same grey either vanishes against a
+    // near-white surface or is too loud against a near-black one.
+    const { light, dark } = palettes();
+    expect(declaration(light, "--k-panel-3"), "--k-panel-3 in light").toBeDefined();
+    expect(declaration(dark, "--k-panel-3"), "--k-panel-3 in dark").toBeDefined();
+    expect(declaration(light, "--k-panel-3")).not.toBe(declaration(dark, "--k-panel-3"));
+  });
+
+  it("keeps the hover step neutral, and away from the old dark-only literals", () => {
+    // A neutral grey follows the monochrome product system; the violet it replaces did not.
+    for (const selector of [".kairema-model-pill:hover", ".kairema-mode-hint-link:hover"]) {
+      expect(body(selector), selector).not.toMatch(/#2D2E33|#c7bfff|#a096ff|#8e7dff|#4c49d7/i);
+      expect(body(selector), selector).not.toMatch(/rgba\(\s*(1[0-9]{2}|2[0-5][0-9]),\s*(9[0-9]|1[0-4][0-9]),\s*2[0-9]{2}\)/);
+    }
+  });
+});
