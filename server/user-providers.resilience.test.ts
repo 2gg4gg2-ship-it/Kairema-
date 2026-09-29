@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { chatWithUserProviderStream, isClientDirectProvider, upstreamRateLimitDiagnostics, USER_PROVIDERS } from "./user-providers";
+import { isBrowserDirectCapable, providerCapability } from "@shared/provider-capabilities";
+import { chatWithUserProviderStream, upstreamRateLimitDiagnostics, USER_PROVIDERS } from "./user-providers";
 import { MAX_ATTEMPTS } from "./providers";
 
 const encoder = new TextEncoder();
@@ -246,21 +247,20 @@ describe("keys never mix between users", () => {
 });
 
 describe("which providers run where", () => {
-  it("sends OpenRouter and Anthropic straight from the browser", () => {
-    expect(isClientDirectProvider("openrouter")).toBe(true);
-    expect(isClientDirectProvider("anthropic")).toBe(true);
-  });
-
-  it("keeps every other provider on the server path", () => {
-    for (const provider of ["openai", "google", "custom-abc", "groq", ""]) {
-      expect(isClientDirectProvider(provider), provider).toBe(false);
+  it("completes every provider on the server, and has no browser path at all", () => {
+    // There is no client-direct execution path in this product. A test that claims one exists
+    // would be asserting a behaviour the server does not implement, and would hide the fact that
+    // both keys travel to the provider through our backend.
+    for (const entry of USER_PROVIDERS.filter((e) => e.available)) {
+      const status = providerCapability(entry.id)!;
+      expect(status.execution, entry.id).toBe("server");
     }
+    expect(isBrowserDirectCapable("anthropic")).toBe(false);
   });
 
-  it("covers exactly the two providers the task allows", () => {
+  it("has no entry point that would run a completion in the browser", () => {
     expect(USER_PROVIDERS.filter((entry) => entry.available).map((entry) => entry.id).sort()).toEqual(["anthropic", "openrouter"]);
   });
-
 });
 
 describe("rate limit diagnostics", () => {

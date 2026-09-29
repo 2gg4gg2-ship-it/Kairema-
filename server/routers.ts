@@ -982,6 +982,49 @@ export const appRouter = router({
         const deletedCount = await deleteAllOwnedChatSessions(ctx.user.id);
         return { success: true, deletedCount } as const;
       }),
+    /**
+     * Stores a turn that was answered in the page rather than by the server.
+     *
+     * A browser-direct call never passes through this process, so nothing would otherwise be
+     * written to the transcript and the answer would disappear on the next history load. Only the
+     * finished text is accepted — never a key, never a provider response body — and both messages
+     * are written to the caller's own session, so this cannot be used to plant content in someone
+     * else's conversation.
+     */
+    persistDirectTurn: userOrGuestProcedure
+      .input(z.object({
+        sessionId: z.string().uuid(),
+        clientMessageId: z.string().uuid(),
+        content: z.string().trim().min(1).max(16_000),
+        answer: z.string().trim().min(1).max(64_000),
+        modelId: z.string().min(1).max(120),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        try {
+          const session = await getOwnedChatSession(ctx.user.id, input.sessionId);
+          if (!session) throw new Error("Чат не найден или недоступен.");
+          // `modelId` here is the user's own model ("vendor/model"), not a Kairema role. Memory
+          // extraction is keyed by role, so the session's own role is what it is filed under.
+          const role = session.modelId as "fast" | "smart" | "context" | "flagship";
+          const savedUser = await appendChatMessage(ctx.user.id, input.sessionId, "user", input.content, input.modelId, undefined, input.clientMessageId);
+          if (session.title === "Новый разговор") await updateChatTitle(ctx.user.id, input.sessionId, input.content.slice(0, 72));
+          // A direct answer is attributed to the model the user actually selected, so the history
+          // reads the same as a server-rendered one instead of claiming a Kairema role produced it.
+          const savedAssistant = await appendChatMessage(ctx.user.id, input.sessionId, "assistant", input.answer, input.modelId, JSON.stringify({ direct: true }));
+          try {
+            await enqueueMemoryExtractionJob({ userId: ctx.user.id, sessionId: input.sessionId, userMessageId: savedUser.id, assistantMessageId: savedAssistant.id, role });
+            await processMemoryExtractionJob(ctx.user.id, savedAssistant.id);
+          } catch {
+            // A completed answer must remain usable when optional extraction fails.
+          }
+          return { saved: true };
+        } catch (error) {
+          if (error instanceof Error && /чат|хранилище/i.test(error.message)) {
+            throw new TRPCError({ code: "NOT_FOUND", message: storageError(error) });
+          }
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Не удалось сохранить ответ." });
+        }
+      }),
     send: userOrGuestProcedure
       .input(z.object({
         sessionId: z.string().uuid(),

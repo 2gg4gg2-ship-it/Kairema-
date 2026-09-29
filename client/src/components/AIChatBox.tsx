@@ -68,6 +68,17 @@ type AIChatBoxProps = {
   onLoadOlderHistory?: () => void;
   /** Bumped by the host whenever a navigation surface outside the composer opens or the active chat changes. */
   navigationCloseSignal?: number;
+  /**
+   * Stops the turn from being issued at all: the Send button is disabled, Enter does nothing, and
+   * the typed text stays in the box.
+   *
+   * This is the state for "no provider can answer right now". It is deliberately not an error on an
+   * existing message — nothing was sent, so there is no turn to fail — which is why it blocks the
+   * composer instead of producing a message that would need cleaning up.
+   */
+  sendDisabled?: boolean;
+  /** Called when the user tries to send while blocked, so the reason can be shown again. */
+  onBlockedSendAttempt?: () => void;
 };
 
 const copy = {
@@ -260,7 +271,7 @@ export function AIChatBox({
   messages, onSendMessage, onUploadFiles, isLoading = false, placeholder, className, height, emptyStateMessage,
   guestLoginAction, aboveMessages,
   onExportMarkdown, onExportPdf, canExport = false, exportBusy = null, exportError = "",
-  onCopyAssistant, onCopyUser, onCancelStream, composerValue, onComposerValueChange, onOpenTemplates, uploadStatus = "", composerSessionId = "new-composer", language = "ru", onRemoveAttachment, hasOlderHistory = false, isLoadingOlderHistory = false,   onLoadOlderHistory, navigationCloseSignal = 0,
+  onCopyAssistant, onCopyUser, onCancelStream, composerValue, onComposerValueChange, onOpenTemplates, uploadStatus = "", composerSessionId = "new-composer", language = "ru", onRemoveAttachment, hasOlderHistory = false, isLoadingOlderHistory = false,   onLoadOlderHistory, navigationCloseSignal = 0, sendDisabled = false, onBlockedSendAttempt,
 }: AIChatBoxProps) {
   const t = copy[language];
   const attachmentInputLabel = language === "ru" ? "Выбрать файл для вложения" : "Choose a file to attach";
@@ -412,6 +423,11 @@ export function AIChatBox({
   const submit = async (event?: React.FormEvent) => {
     event?.preventDefault();
     const value = currentInput.trim();
+    // Checked before anything is read or cleared, so a blocked send leaves the typed text exactly
+    // where it was, creates no message, and issues no request. The callback re-shows the reason
+    // rather than failing silently, because a dead-looking button with no explanation is the one
+    // outcome a user cannot act on.
+    if (sendDisabled) { onBlockedSendAttempt?.(); return; }
     if (!value || isLoading || isUploading || pendingLocalAttachments.length > 0) return;
     const typedValue = currentInput;
     setComposerInput("");
@@ -523,10 +539,10 @@ export function AIChatBox({
             <input ref={photoInputRef} className="sr-only" type="file" aria-label={t.attachPhoto} multiple accept="image/png,image/jpeg,image/webp" onChange={(event) => void addFiles(event.target.files)} />
             {onOpenTemplates && <button type="button" onClick={onOpenTemplates} disabled={isLoading} className="kairema-composer-tool" title={language === "ru" ? "Шаблоны промптов" : "Prompt templates"} aria-label={language === "ru" ? "Шаблоны промптов" : "Prompt templates"}><Sparkles className="size-4" /></button>}
             <details className="kairema-attachment-menu" ref={attachmentMenuRef} open={attachmentMenuOpen} onToggle={(event) => setAttachmentMenuOpen(event.currentTarget.open)}><summary className="kairema-composer-tool" title={t.attach} aria-label={t.attach}>{isUploading || isPreparingAttachments ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}</summary><div className="kairema-attachment-menu-popover"><button type="button" onClick={() => photoInputRef.current?.click()} disabled={!onUploadFiles || isLoading || isUploading || isPreparingAttachments}>{t.attachPhoto}</button><button type="button" onClick={() => fileInputRef.current?.click()} disabled={!onUploadFiles || isLoading || isUploading || isPreparingAttachments}>{t.attachFile}</button></div></details>
-            <Textarea ref={textareaRef} value={currentInput} onChange={(event) => setComposerInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={effectivePlaceholder} className="kairema-textarea" rows={1} />
+            <Textarea ref={textareaRef} value={currentInput} onChange={(event) => setComposerInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} onKeyDownCapture={(event) => { if (sendDisabled && event.key === "Enter" && !event.shiftKey) event.preventDefault(); }} placeholder={effectivePlaceholder} className="kairema-textarea" rows={1} />
           </div>
         </div>
-        {isLoading ? <Button type="button" size="icon" onClick={onCancelStream} className="kairema-cancel" aria-label={t.stop}><Square className="size-3.5 fill-current" /></Button> : <Button type="submit" size="icon" disabled={!currentInput.trim() || isUploading || pendingLocalAttachments.length > 0} className="kairema-send" aria-label={t.send}>{isUploading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}</Button>}
+        {isLoading ? <Button type="button" size="icon" onClick={onCancelStream} className="kairema-cancel" aria-label={t.stop}><Square className="size-3.5 fill-current" /></Button> : <Button type="submit" size="icon" aria-disabled={sendDisabled || undefined} disabled={!sendDisabled && (!currentInput.trim() || isUploading || pendingLocalAttachments.length > 0)} className="kairema-send" aria-label={t.send}>{isUploading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}</Button>}
       </form>
       <p className="px-5 pb-4 text-center text-[11px] text-muted-foreground">{t.disclaimer}</p>
       <SourcesSheet message={sourcesSheetIndex === null ? null : displayMessages[sourcesSheetIndex] ?? null} language={language} t={t} onClose={closeSourcesSheet} />

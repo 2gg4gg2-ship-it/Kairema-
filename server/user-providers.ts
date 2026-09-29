@@ -2,6 +2,7 @@ import { beginCapacityGeneration, settleCapacityReservation, type CapacityActor,
 import { KAIREMA_SYSTEM_PROMPT, createReasoningStreamFilter, dataFromSseBlock, openRouterStreamDelta, sanitizeAssistantContent, userPreferenceRules, type ChatMessage, type ChatSettings, type ModelStatus, type Provider, type StatusCategory } from "./providers";
 import { createRequestBudget } from "./providers";
 import { keyFingerprint, parseRetryAfter, retryUpstream } from "./upstream-retry";
+import { classifyProviderFailure, type ProviderFailure } from "@shared/provider-failures";
 import { UserProviderKeyConfigurationError, UserProviderKeyDecryptionError } from "./user-provider-secrets";
 import { MAX_PROVIDER_NAME_LENGTH, UserProviderEndpointError, buildUserProviderChatEndpoint, buildUserProviderModelsEndpoint, normalizeUserProviderDisplayName } from "./user-provider-endpoints";
 
@@ -35,9 +36,10 @@ export const USER_PROVIDERS: readonly UserProviderDescriptor[] = [
     modelsEndpoint: "https://openrouter.ai/api/v1/models",
     chatEndpoint: "https://openrouter.ai/api/v1/chat/completions",
   },
-  // Anthropic is reached from the browser (see CLIENT_DIRECT_PROVIDERS): its API answers direct
-  // browser calls when the caller opts in with the opt-in header, so a BYOK turn with an Anthropic
-  // key never leaves the user's machine. The server keeps no Anthropic completion path.
+  // Anthropic is completed by the server, like every other provider here. Its API *can* answer a
+  // direct browser call when the caller opts in with `anthropic-dangerous-direct-browser-access`,
+  // but that opt-in is per-organization and CORS is frequently disabled, so it is not a capability
+  // this product can promise. See `shared/provider-capabilities.ts` for what is actually verified.
   {
     id: "anthropic",
     displayName: "Anthropic",
@@ -51,23 +53,9 @@ export const USER_PROVIDERS: readonly UserProviderDescriptor[] = [
   { id: "google", displayName: "Google", available: false, note: "Адаптер ещё не реализован на сервере." },
 ] as const;
 
-/** Providers the server can serve a completion for. Everything else is client-direct or unsupported. */
+/** Providers the server can serve a completion for. Everything else is unimplemented or unknown. */
 export function isSupportedUserProvider(provider: string): boolean {
   return USER_PROVIDERS.some((entry) => entry.id === provider && entry.available);
-}
-
-/**
- * Providers whose completion runs in the browser rather than on the server.
- *
- * Both answer direct browser requests under their own CORS rules, so a user who connected one of
- * them never has their prompt leave the server at all. Anthropic additionally requires an explicit
- * opt-in header, which is set for Anthropic alone and is never sent to anyone else.
- */
-export const CLIENT_DIRECT_PROVIDERS = ["openrouter", "anthropic"] as const;
-export type ClientDirectProvider = (typeof CLIENT_DIRECT_PROVIDERS)[number];
-
-export function isClientDirectProvider(provider: string): provider is ClientDirectProvider {
-  return (CLIENT_DIRECT_PROVIDERS as readonly string[]).includes(provider);
 }
 
 export class UserProviderError extends Error {
@@ -161,8 +149,22 @@ export class UserProviderNotConfiguredError extends Error {
   }
 }
 
-/** A guest row may never own a permanent credential, so My API is refused server-side. */
-export class UserProviderGuestNotAllowedError extends Error {
+/**
+ * Every provider the client asked to skip is unavailable, so this server has nothing left to try.
+ *
+ * Raised when a browser-direct turn failed and handed over with the provider it already tried
+ * marked as skipped, and no other connected provider remains. It is deliberately its own error
+ * rather than a generic failure so the client can enter the unavailable state instead of showing
+ * a message about a provider the user never selected.
+ */
+export class UserProviderSkipRequestedError extends Error {
+  constructor() {
+    super("Все подключённые провайдеры уже были попробованы для этого запроса.");
+    this.name = "UserProviderSkipRequestedError";
+  }
+}
+
+/** A guest row may never own a permanent credential, so My API is refused server-side. */export class UserProviderGuestNotAllowedError extends Error {
   constructor() {
     super("Режим «Мой API» доступен только после входа в аккаунт: гостевые сессии не могут хранить API-ключи.");
     this.name = "UserProviderGuestNotAllowedError";
@@ -180,32 +182,40 @@ export type UserProviderErrorCategory =
 
 const USER_CATEGORY: UserProviderErrorCategory = "UNKNOWN";
 
-/** Every user-facing text is a fixed literal. No upstream body, header or URL ever reaches it. */
-function classifyUserProviderFailure(http: number | null, upstream: unknown): { category: UserProviderErrorCategory; message: string } {
+/**
+ * Every user-facing text is a fixed literal. No upstream body, header or URL ever reaches it.
+ *
+ * The user-facing wording stays local, because these strings are what users already see. The
+ * *decision* — what kind of failure this is, and whether spending another attempt could change it
+ * — is delegated to the shared classifier, so the browser-direct path and this one cannot drift
+ * apart on what a 429 or a 503 means.
+ */
+function classifyUserProviderFailure(http: number | null, upstream: unknown): { category: UserProviderErrorCategory; message: string; shared: ProviderFailure } {
+  const shared = classifyProviderFailure({ http, body: upstream });
   const body = JSON.stringify(upstream ?? "").toLowerCase();
   if (http === 401 || http === 403 || /invalid_api_key|invalid api key|incorrect api key|api_key_invalid|permission denied|unauthorized|authentication/.test(body)) {
-    return { category: "AUTH", message: "Провайдер отклонил API-ключ. Проверьте ключ и его статус в аккаунте провайдера." };
+    return { shared, category: "AUTH", message: "Провайдер отклонил API-ключ. Проверьте ключ и его статус в аккаунте провайдера." };
   }
   if (http === 402 || /insufficient_quota|insufficient credits|credit balance|billing|quota exceeded|not enough balance/.test(body)) {
-    return { category: "CREDITS", message: "На счёте провайдера недостаточно средств или квоты. Пополните баланс в аккаунте провайдера." };
+    return { shared, category: "CREDITS", message: "На счёте провайдера недостаточно средств или квоты. Пополните баланс в аккаунте провайдера." };
   }
   if (http === 429) {
     // This is the provider refusing the request, not Kairema's own per-user budget being spent.
     // The two are told apart in the wording on purpose: a user whose own key is being throttled
     // must not be told to wait out a Kairema limit that was never reached.
-    return { category: "RATE_LIMIT", message: "Ваш провайдер ограничил частоту запросов по вашему API-ключу. Это ограничение на стороне провайдера, лимит Kairema не исчерпан. Повторите попытку позже или смените модель." };
+    return { shared, category: "RATE_LIMIT", message: "Ваш провайдер ограничил частоту запросов по вашему API-ключу. Это ограничение на стороне провайдера, лимит Kairema не исчерпан. Повторите попытку позже или смените модель." };
   }
   if (http === 404 || /no endpoints found|model_not_found|model not found|unknown model|not available/.test(body)) {
-    return { category: "MODEL", message: "Провайдер не предлагает выбранную модель. Выберите другую модель из списка." };
+    return { shared, category: "MODEL", message: "Провайдер не предлагает выбранную модель. Выберите другую модель из списка." };
   }
   // Any server-side upstream status is a provider availability problem, not a user mistake.
   if ((http !== null && http >= 500) || /overloaded|service unavailable|capacity|upstream error/.test(body)) {
-    return { category: "PROVIDER_UNAVAILABLE", message: "Провайдер временно недоступен. Повторите попытку позже." };
+    return { shared, category: "PROVIDER_UNAVAILABLE", message: "Провайдер временно недоступен. Повторите попытку позже." };
   }
   if (http === 400 || http === 422) {
-    return { category: "INVALID_REQUEST", message: "Провайдер отклонил запрос. Проверьте модель и попробуйте снова." };
+    return { shared, category: "INVALID_REQUEST", message: "Провайдер отклонил запрос. Проверьте модель и попробуйте снова." };
   }
-  return { category: USER_CATEGORY, message: "Провайдер вернул неожиданный ответ. Повторите попытку позже." };
+  return { shared, category: USER_CATEGORY, message: "Провайдер вернул неожиданный ответ. Повторите попытку позже." };
 }
 
 const USER_PROVIDER_TIMEOUT_MS = 25_000;
@@ -594,7 +604,18 @@ export async function chatWithUserProviderStream(options: {
         requestId: budget.requestId, provider: candidate.provider, model: candidate.model, keyFingerprint: keyFingerprint(candidate.apiKey),
         httpStatus: response.status, errorCategory: failure.category, retryAttempt: attempt - 1, ...upstreamRateLimitDiagnostics(response),
       });
-      return { ok: false as const, status: response.status, error: new UserProviderError(failure.category, failure.message, response.status), retryAfterMs };
+      // The shared verdict travels with the error so the retry loop and the fallback decision both
+      // read one classification instead of re-deciding from the status on their own.
+      return {
+        ok: false as const,
+        status: response.status,
+        error: new UserProviderError(failure.category, failure.message, response.status),
+        retryAfterMs,
+        retryable: failure.shared.retryable,
+        // A busy or throttled provider is worth leaving; a rejected key is not, because the next
+        // provider the user connected would reject it for the same reason.
+        fallbackEligible: failure.shared.retryable,
+      };
     }
     return { ok: true as const, value: response };
   };
@@ -637,9 +658,10 @@ export async function chatWithUserProviderStream(options: {
       });
       if (outcome.value !== undefined) { response = outcome.value.response; lastError = undefined; break; }
       lastError = outcome.error;
-      // Only a rate limit moves on to another provider. An invalid key or an unknown model is the
-      // user's configuration, and repeating it on a second provider would just fail there too.
-      if (!outcome.rateLimited) break;
+      // Only a failure another provider might not share moves on: a throttled key, a busy
+      // provider, a dropped connection. An invalid key or an unknown model is the user's own
+      // configuration, and the next provider they connected would reject it for the same reason.
+      if (!outcome.fallbackEligible) break;
       if (budget.used >= MAX_ATTEMPTS) break;
     }
     if (lastError) throw lastError;
@@ -758,6 +780,7 @@ export function publicUserProviderError(error: unknown): string {
   if (error instanceof UserProviderGuestNotAllowedError) return `Что произошло: «Мой API» недоступен для гостевой сессии | Что делать: войдите в аккаунт и настройте провайдера в Настройках → AI Providers.`;
   if (error instanceof UserProviderKeyDecryptionError) return `Что произошло: сохранённый API-ключ не удалось расшифровать | Что делать: сохраните ключ заново в Настройках → AI Providers.`;
   if (error instanceof UserProviderKeyConfigurationError) return `Что произошло: на сервере не настроено шифрование пользовательских API-ключей | Что делать: обратитесь к администратору сервиса.`;
+  if (error instanceof UserProviderSkipRequestedError) return `Что произошло: подключённые провайдеры временно недоступны | Что делать: выберите другого провайдера или модель в «Мой API» и повторите попытку.`;
   if (error instanceof UserProviderError) {
     const category: StatusCategory = error.category === "CREDITS" ? "QUOTA" : error.category as StatusCategory;
     // A provider 429 names the provider as the party that is throttling, and says plainly that

@@ -6,7 +6,7 @@ import { MODEL_IDS, chatWithRoleStream, publicChatError, type ChatMessage, type 
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
 import { getOrCreateGuestUser } from "./_core/guest-session";
 import type { CapacityActor } from "./capacity-controller";
-import { chatWithUserProviderStream, customUserProviderTarget, isSupportedUserProvider, publicUserProviderError, UserProviderGuestNotAllowedError, UserProviderNotConfiguredError } from "./user-providers";
+import { chatWithUserProviderStream, customUserProviderTarget, isSupportedUserProvider, publicUserProviderError, UserProviderGuestNotAllowedError, UserProviderNotConfiguredError, UserProviderSkipRequestedError } from "./user-providers";
 import { decryptUserProviderSecret } from "./user-provider-secrets";
 
 export const CHAT_STREAM_RATE_LIMIT = 60;
@@ -167,10 +167,16 @@ async function generateWithUserProvider(options: {
   onDelta: (delta: string) => void;
   signal: AbortSignal;
   actor: CapacityActor;
+  /** Providers the page already tried for this turn; see `skipProviders` in the input schema. */
+  skipProviders?: readonly string[];
 }): Promise<StreamResult> {
   if (options.isGuest) throw new UserProviderGuestNotAllowedError();
   const binding = await options.dependencies.getActiveUserProviderBinding(options.userId);
   if (!binding) throw new UserProviderNotConfiguredError();
+  // Every provider the page already tried is dropped, the active one included. A Kairema provider
+  // is still never substituted for it: the turn fails visibly rather than being answered from a
+  // provider the user did not choose and is not paying for.
+  if (options.skipProviders?.includes(binding.provider)) throw new UserProviderSkipRequestedError();
   // A custom provider is served from the configuration that was validated when it was saved;
   // the endpoint is re-checked here rather than taken from the request being answered.
   const target = binding.baseUrl
@@ -181,7 +187,7 @@ async function generateWithUserProvider(options: {
   // The user's own other connected providers, used only if this one is rate-limited. Every entry
   // comes from this user's own saved configurations; a Kairema provider is never added here, so a
   // failed BYOK turn can never be answered by the platform on the user's behalf.
-  const fallbacks = await loadUserProviderFallbacks(options.dependencies, options.userId, binding.provider, binding.model);
+  const fallbacks = await loadUserProviderFallbacks(options.dependencies, options.userId, binding.provider, binding.model, options.skipProviders ?? []);
   return await options.dependencies.chatWithUserProviderStream({
     provider: target,
     model: binding.model,
@@ -208,6 +214,7 @@ async function loadUserProviderFallbacks(
   userId: number,
   activeProvider: string,
   activeModel: string,
+  skipProviders: readonly string[],
 ): Promise<Array<{ provider: string; model: string; apiKey: string; modelLabel?: string }>> {
   let configs: Awaited<ReturnType<StreamDependencies["listUserProviderConfigs"]>>;
   try {
@@ -218,6 +225,9 @@ async function loadUserProviderFallbacks(
   const fallbacks: Array<{ provider: string; model: string; apiKey: string; modelLabel?: string }> = [];
   for (const config of configs) {
     if (config.provider === activeProvider || config.baseUrl) continue;
+    // A provider the page already tried for this turn is not offered again, so a handover does not
+    // repeat the failure the user was just shown.
+    if (skipProviders.includes(config.provider)) continue;
     if (!isSupportedUserProvider(config.provider)) continue;
     let apiKey: string;
     try {
@@ -274,6 +284,16 @@ const streamInputSchema = z.object({
   attachmentIds: z.array(z.string().uuid()).max(4).optional(),
   /** Routes this request to the caller's own provider instead of the Kairema roles. */
   myApi: z.boolean().optional(),
+  /**
+   * Providers the client has already tried for this turn and does not want tried again.
+   *
+   * A browser-direct turn runs in the page, so the server learns about its failures only when the
+   * client hands the turn over. Without this, a turn that already spent two attempts on OpenRouter
+   * directly would be handed to a server that starts again from the same provider, and the user
+   * would see the same failure twice for one question. Only the caller's own provider ids are
+   * accepted, and they only ever remove candidates — they can never add one.
+   */
+  skipProviders: z.array(z.string().min(1).max(64)).max(16).optional(),
 });
 
 export function writeEvent(res: Response, event: string, payload: unknown) {
@@ -608,7 +628,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
         // The two modes differ only here: myApi runs the caller's own provider, the default
         // keeps the existing Kairema role chain untouched.
         const result = input.myApi
-          ? await generateWithUserProvider({ dependencies, userId: user.id, isGuest, roleId: input.modelId, history, settings: effectiveSettings, onDelta, signal: controller.signal, actor })
+          ? await generateWithUserProvider({ dependencies, userId: user.id, isGuest, roleId: input.modelId, history, settings: effectiveSettings, onDelta, signal: controller.signal, actor, skipProviders: input.skipProviders })
           : await dependencies.chatWithRoleStream(
             input.modelId,
             history,

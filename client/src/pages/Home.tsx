@@ -11,6 +11,10 @@ import { startLogin } from "@/const";
 import { memorySearchMatches } from "@/lib/memory-search";
 import { runtimeAuthHeaders } from "@/lib/runtime-auth";
 import { consumeChatStream, type StreamLiveValue } from "@/lib/chat-stream";
+import { ProviderUnavailableNotice } from "@/components/ProviderUnavailableNotice";
+import { clearDirectKey } from "@/lib/direct-key-store";
+import { buildCandidateChain, ProviderUnavailableError, runMyApiTurn, type TurnCandidate } from "@/lib/my-api-turn";
+import { resolveExecution } from "@shared/provider-capabilities";
 import { trpc } from "@/lib/trpc";
 import { Archive, Bot, Check, ChevronDown, CircleDot, Clock3, Copy, FileImage, Gauge, Globe2, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Repeat, Search, Settings2, SlidersHorizontal, Sparkles, Trash2, TriangleAlert, UserIcon, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -301,6 +305,10 @@ export default function Home() {
   const { theme, toggleTheme, setHighContrast } = useTheme();
   const [activeId, setActiveId] = useState(""); const [newConversation, setNewConversation] = useState(false); const [modelId, setModelId] = useState<ModelId>("fast"); const [chatMode, setChatMode] = useState<"chat" | "myApi">("chat"); const [search, setSearch] = useState(""); const [uploadStatus, setUploadStatus] = useState<{ sessionId: string; message: string } | null>(null);   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === "undefined" ? true : window.innerWidth >= SIDEBAR_DESKTOP_BREAKPOINT); const [settingsOpen, setSettingsOpen] = useState(false); const [profileOpen, setProfileOpen] = useState(false); const [memoryOpen, setMemoryOpen] = useState(false); const [exportHistoryOpen, setExportHistoryOpen] = useState(false); const [templatesOpen, setTemplatesOpen] = useState(false); const [pendingChatDeletionId, setPendingChatDeletionId] = useState<string | null>(null); const [isChatDeletionConfirming, setIsChatDeletionConfirming] = useState(false); const [pendingHistoryClear, setPendingHistoryClear] = useState(false); const [isHistoryClearConfirming, setIsHistoryClearConfirming] = useState(false); const [composerDraft, setComposerDraft] = useState(""); const [draftHydratedSessionId, setDraftHydratedSessionId] = useState(""); const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]); const [sentAttachmentFallbacks, setSentAttachmentFallbacks] = useState<ChatAttachment[]>([]); const [isStreaming, setIsStreaming] = useState(false); const [isExporting, setIsExporting] = useState<"markdown" | "pdf" | null>(null); const [notice, setNotice] = useState(""); const [settingsOverride, setSettingsOverride] = useState<Record<string, unknown>>({});
   const streamAbortRef = useRef<AbortController | null>(null); const failedTurnTimersRef = useRef(new Map<string, FailedTurnTimer>()); const activeSessionRef = useRef(""); const pagedHistorySessionRef = useRef(""); const deleteConfirmationInFlightRef = useRef(false); const historyClearInFlightRef = useRef(false); const defaultRoleApplied = useRef(false); const themeApplied = useRef(false); const persistedDraftRef = useRef(""); const activeChatHydrated = useRef(false);
+  // Why sending is blocked, or null when it is not. Set only when every connected provider has
+  // been spent for a turn, and cleared by any action that could make a provider usable again.
+  // It is separate from `notice`, which reports things that already happened to a sent turn.
+  const [providerBlocked, setProviderBlocked] = useState<{ reason: string; switching: boolean } | null>(null);
   const [olderHistoryMessages, setOlderHistoryMessages] = useState<any[]>([]); const [olderHistoryCursor, setOlderHistoryCursor] = useState<string | null | undefined>(undefined); const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
   const modelsQuery = trpc.models.list.useQuery(undefined, { refetchInterval: 60_000, refetchOnWindowFocus: true }); const settingsQuery = trpc.settings.get.useQuery(undefined, { enabled: isAuthenticated }); const healthRefreshSeconds = Number(settingsQuery.data?.healthRefreshSeconds ?? 30); const memoryQuery = trpc.memory.get.useQuery(undefined, { enabled: isAuthenticated }); const webStatusQuery = trpc.webSearch.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const knowledgeStatusQuery = trpc.knowledge.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const providerDashboardQuery = trpc.providers.dashboard.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: healthRefreshSeconds > 0 ? healthRefreshSeconds * 1_000 : false, refetchOnWindowFocus: true }); const knowledgeAuditQuery = trpc.knowledge.audit.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const sessionsQuery = trpc.chats.list.useQuery(undefined, { enabled: isAuthenticated, refetchOnWindowFocus: true }); const messagesQuery = trpc.chats.historyPage.useQuery({ sessionId: activeId, limit: 60 }, { enabled: isAuthenticated && Boolean(activeId) }); const attachmentsQuery = trpc.attachments.list.useQuery({ sessionId: activeId }, { enabled: isAuthenticated && Boolean(activeId) }); const draftQuery = trpc.chats.draft.useQuery({ sessionId: activeId }, { enabled: isAuthenticated && Boolean(activeId), refetchOnWindowFocus: false }); const exportsQuery = trpc.exports.list.useQuery(undefined, { enabled: isAuthenticated && exportHistoryOpen }); const searchQuery = trpc.search.query.useQuery({ query: search }, { enabled: isAuthenticated && search.trim().length >= 2 }); const ownerQuery = trpc.owner.isOwner.useQuery(undefined, { enabled: isAuthenticated, staleTime: 300_000 });
   const createMutation = trpc.chats.create.useMutation(); const deleteChatMutation = trpc.chats.delete.useMutation(); const clearHistoryMutation = trpc.chats.clearAll.useMutation(); const draftSaveMutation = trpc.chats.saveDraft.useMutation(); const draftClearMutation = trpc.chats.clearDraft.useMutation(); const discardFailedTurn = trpc.chats.discardFailedTurn.useMutation(); const settingMutation = trpc.settings.update.useMutation(); const updateNameMutation = trpc.auth.updateName.useMutation(); const memoryUpdateMutation = trpc.memory.update.useMutation(); const memoryAddMutation = trpc.memory.addFact.useMutation(); const memoryDeleteMutation = trpc.memory.deleteEntry.useMutation(); const memoryClearMutation = trpc.memory.clear.useMutation(); const attachmentDeleteMutation = trpc.attachments.delete.useMutation(); const exportCreateMutation = trpc.exports.create.useMutation(); const exportDeleteMutation = trpc.exports.delete.useMutation(); const knowledgeRefreshMutation = trpc.knowledge.refresh.useMutation(); const utils = trpc.useUtils();
@@ -348,9 +356,14 @@ export default function Home() {
   const selectMyApiProvider = async (provider: string) => {
     if (provider === myApiCatalogProvider) return;
     setMyApiSwitchError("");
+    // A provider the user did not choose must not be signed with the previous one's key, so the
+    // direct key is dropped on every switch. The server-routed path is unaffected: that credential
+    // lives encrypted against its own provider row.
+    clearDirectKey(myApiCatalogProvider ?? "");
     try {
       await setActiveProviderMutation.mutateAsync({ provider });
       await utils.userProviders.list.invalidate();
+      setProviderBlocked(null);
     } catch (error) {
       // The server rejected the switch, so the previous provider and its model stay exactly as
       // they were and the reason is shown instead of a menu that silently reverts.
@@ -364,6 +377,7 @@ export default function Home() {
     try {
       await setActiveModelMutation.mutateAsync({ provider: myApiCatalogProvider, activeModel });
       await utils.userProviders.list.invalidate();
+      setProviderBlocked(null);
     } catch (error) {
       // The provider is asked to validate the model, so a refusal has to be visible; otherwise
       // the picker would silently snap back to the previous model.
@@ -605,9 +619,27 @@ export default function Home() {
       return undefined;
     }
   };
+  // The connected providers for a My API turn, each carrying only its own provider, model and
+  // whether the server holds a credential for it. The direct key is not part of this shape: it is
+  // read from the in-memory store at the moment that provider is actually called, so it can never
+  // be picked up by another candidate in the chain.
+  const myApiTurnCandidates = (): TurnCandidate[] => {
+    const configs = userProvidersQuery.data?.configs ?? [];
+    const active = userProvidersQuery.data?.activeProvider ?? myApiCatalogProvider;
+    if (!active) return [];
+    return buildCandidateChain(configs, active);
+  };
+  // Writes a finished direct turn into the caller's own transcript. Only the answer text crosses
+  // the wire; the key that produced it never does.
+  const persistDirectTurnMutation = trpc.chats.persistDirectTurn.useMutation();
+  const persistDirectTurn = (input: { sessionId: string; content: string; modelId: string; clientMessageId: string; answer: string }) =>
+    persistDirectTurnMutation.mutateAsync(input);
   const selectSession = (id: string, sessionModel?: string) => { activeSessionRef.current = id; setActiveId(id); setUploadStatus(null); setNewConversation(false); if (sessionModel && modelById.has(sessionModel as ModelId)) setModelId(sessionModel as ModelId); setSidebarOpen(false); };
   const send = async (content: string, options?: { attachmentIds?: string[]; attachments?: ChatAttachment[]; clientMessageId?: string }): Promise<boolean> => {
     if (!isAuthenticated) { startLogin(); return false; }
+    // A blocked turn creates no message, issues no request and starts no failed-turn timer: there
+    // is nothing to clean up because nothing was sent. The typed text stays in the composer.
+    if (providerBlocked) { setProviderBlocked((current) => (current ? { ...current } : current)); return false; }
     const sessionId = activeId || await createChat();
     if (!sessionId) return false;
     setComposerDraft(""); persistedDraftRef.current = `${sessionId}\u0000`;
@@ -623,6 +655,32 @@ export default function Home() {
     const controller = new AbortController();
     streamAbortRef.current = controller;
     try {
+      // A My API turn whose selected provider the registry says may run in the page is executed
+      // there, from the key in this tab's memory. The decision is the registry's, not a provider
+      // id compared here, so a provider whose CORS is only conditionally allowed can never be
+      // routed into a browser call by accident.
+      const myApiCandidates = myApiTurnCandidates();
+      const directFirst = chatMode === "myApi" && myApiCandidates.length > 0 && resolveExecution(myApiCandidates[0].provider, { preferDirect: true }).mode === "direct";
+      if (directFirst) {
+        const result = await runMyApiTurn({
+          sessionId, content, modelId: selectedId,
+          clientMessageId: turnId,
+          settings: { style: settings.responseStyle, responseLength: settings.responseLength, effort: settings.effort, thinking: Boolean(settings.thinking) },
+          attachmentIds: options?.attachmentIds,
+          primary: myApiCandidates[0],
+          others: myApiCandidates.slice(1),
+          preferDirect: true,
+          signal: controller.signal,
+          onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)),
+          onProviderSwitch: ({ from, to }) => setProviderBlocked({ reason: `${from.displayName} недоступен, переключаемся на ${to.displayName}.`, switching: true }),
+        });
+        // A direct answer is not stored by the server, so the pair is persisted here before the
+        // optimistic copy is dropped; without it the turn would vanish on the next history load.
+        setProviderBlocked(null);
+        setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: result.content, model: result.model, providerLabel: result.label, modelLabel: result.label } : message));
+        try { await persistDirectTurn({ sessionId, content, modelId: result.model, clientMessageId: turnId, answer: result.content }); await utils.chats.historyPage.fetch({ sessionId, limit: 60 }); setOptimisticMessages([]); } catch { /* keep the streamed answer visible */ }
+        return true;
+      }
       const response = await fetch("/api/chat/stream", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...runtimeAuthHeaders() }, signal: controller.signal, body: JSON.stringify({ sessionId, modelId: selectedId, content, ...(chatMode === "myApi" ? { myApi: true } : {}), settings: { style: settings.responseStyle, responseLength: settings.responseLength, effort: settings.effort, thinking: Boolean(settings.thinking) }, attachmentIds: options?.attachmentIds, clientMessageId: turnId }) });
       if (!response.ok || !response.body) throw new Error(await streamStartErrorMessage(response, language === "ru" ? "Не удалось начать потоковый ответ." : "Could not start the stream."));
       await consumeChatStream(response, { onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)), onDone: (data) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: typeof data.content === "string" ? data.content : message.content, model: typeof data.modelUsed === "string" ? data.modelUsed : message.model, providerLabel: typeof data.label === "string" ? data.label : message.providerLabel, modelLabel: typeof data.label === "string" ? data.label : message.modelLabel, searchStatus: safeSearchStatus(data.searchStatus), sources: safeSourceEvidence(data.sources), webGrounding: safeWebGrounding(data.webGrounding) } : message)) });
@@ -638,6 +696,17 @@ export default function Home() {
       return true;
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") { setOptimisticMessages([]); await Promise.all([utils.chats.historyPage.invalidate({ sessionId, limit: 60 }), utils.attachments.list.invalidate({ sessionId })]); return true; }
+      // Every connected provider was spent for this turn. The question is removed immediately and
+      // no failed-turn timer is started: the ten-second grace period exists for a message that was
+      // actually sent and then failed, and this turn was never sent, so there is nothing stored to
+      // delete and no reason to leave a question in the conversation that will never be answered.
+      if (error instanceof ProviderUnavailableError) {
+        setOptimisticMessages([]);
+        setProviderBlocked({ reason: error.failure.message, switching: false });
+        try { await discardFailedTurn.mutateAsync({ sessionId, clientMessageId: turnId }); } catch { setNotice(language === "ru" ? "Не удалось удалить вопрос из истории. Обновите историю вручную." : "Could not remove the question from history. Refresh it manually."); }
+        await Promise.all([utils.chats.historyPage.invalidate({ sessionId, limit: 60 }), utils.attachments.list.invalidate({ sessionId })]);
+        return false;
+      }
       const errorMessage = error instanceof Error ? error.message : "Stream error";
       // The question is kept for a grace period instead of vanishing or staying forever: long
       // enough to read and copy, short enough that a dead turn does not silently become part of
@@ -744,13 +813,15 @@ export default function Home() {
           <div className="kairema-topbar-left"><button className="kairema-icon-btn md:hidden" onClick={() => setSidebarOpen(true)} aria-label="Menu"><Menu className="size-5" /></button><span className="kairema-topbar-title sr-only">{activeSession?.title ?? t.newConversation}</span>{chatMode === "chat" ? (<div className="kairema-model-pill"><Sparkles className="kairema-model-sparkle" aria-hidden="true" /><div className="kairema-select-wrap" data-kairema-role-select="true"><select value={modelId} onChange={(event) => setModelId(event.target.value as ModelId)} aria-label={t.models}>{modelViews.map((model) => <option key={model.modelId} value={model.modelId}>{model.label[language]}</option>)}</select></div><ChevronDown className="kairema-model-chevron" aria-hidden="true" /></div>) : (<div className="kairema-model-pill" role="group" aria-label={t.activeUserBinding}><Sparkles className="kairema-model-sparkle" aria-hidden="true" />{myApiActiveConfig ? <ModelMenu value={myApiActiveConfig.activeModel} models={myApiModels} disabled={myApiCatalogMutation.isPending || setActiveModelMutation.isPending || !myApiModels.length} ariaLabel={t.myApiModelPicker} labels={MODEL_MENU_LABELS[language]} onSelect={(modelId) => void selectMyApiModel(modelId)} /> : <span className="kairema-binding-name">{t.myApiNotConfigured}</span>}</div>)}{!isAuthenticated && <button type="button" className="kairema-guest-login" onClick={() => startLogin()}><LogIn className="size-4" /><span>{t.loginHistory}</span></button>}</div>
           <div className="kairema-topbar-controls"><span className="kairema-topbar-chip"><button type="button" className="kairema-header-button" onClick={() => setSettingsOpen(true)} title={t.openSettings} aria-label={t.openSettings}><Settings2 className="size-3.5" /><span>{t.settings}</span></button></span>{!isGuestUser && <span className="kairema-topbar-chip"><button type="button" className="kairema-header-button" onClick={() => setProfileOpen(true)} title={t.openProfile} aria-label={t.openProfile}><UserIcon className="size-3.5" /><span>{t.profileTitle}</span></button></span>}</div>
         </header>
+        {/* Non-blocking: the page stays usable while a fallback runs or after the turn has stopped. */}
+        {providerBlocked && <ProviderUnavailableNotice switching={providerBlocked.switching} reason={providerBlocked.reason} />}
         <AIChatBox aboveMessages={<div className="kairema-mode-switch" role="group" aria-label={t.modeSwitch}><button type="button" className="kairema-mode-option" aria-pressed={chatMode === "chat"} onClick={() => setChatMode("chat")}><MessageSquare className="size-4" /><span>{t.modeChat}</span></button><button type="button" className="kairema-mode-option" aria-pressed={chatMode === "myApi"} onClick={() => setChatMode("myApi")}><Repeat className="size-4" /><span>{t.modeMyApi}</span></button>{chatMode === "myApi" && <span className="kairema-mode-hint" role="status">{myApiActiveConfig ? (<>
         <MyApiProviderMenu value={myApiCatalogProvider ?? myApiActiveConfig.provider} providers={myApiProviderOptions} disabled={setActiveProviderMutation.isPending || !myApiProviderOptions.length} ariaLabel={t.myApiProviderPicker} labels={{ connected: t.myApiProviderConnected, empty: t.myApiProviderEmpty }} onSelect={(provider) => void selectMyApiProvider(provider)} />
         {myApiCatalogMutation.isPending ? <span className="kairema-mode-hint-state"> · {t.myApiLoadingModels}…</span> : null}
         {myApiCatalogMutation.isError ? <span className="kairema-mode-hint-state"> · {myApiCatalogMutation.error?.message ?? t.myApiNoModels} <button type="button" className="kairema-mode-hint-link" onClick={() => void loadMyApiCatalog({ force: true })}>{t.myApiModelsRetry}</button></span> : null}
         {myApiCatalogMutation.isSuccess && !myApiModels.length ? <span className="kairema-mode-hint-state"> · {t.myApiNoModels}</span> : null}
         {myApiSwitchError ? <span className="kairema-mode-hint-state"> · {myApiSwitchError}</span> : null}
-      </>) : (<>{t.myApiNotConfigured}{" "}<Link href="/settings/providers" className="kairema-mode-hint-link">{t.configureProvider}</Link></>)}</span>}</div>} messages={visibleMessages} onSendMessage={send} onUploadFiles={uploadFiles} onRemoveAttachment={removeTemporaryAttachment} isLoading={isStreaming} onExportMarkdown={() => void exportCurrentChat("markdown")} onExportPdf={() => void exportCurrentChat("pdf")} canExport={Boolean(activeSession && dbMessages.length)} exportBusy={isExporting} exportError={notice} onCopyAssistant={(message) => void copyMessage(message)} onCopyUser={(message) => void copyMessage(message)} onCancelStream={cancelStream} composerValue={composerDraft} onComposerValueChange={setComposerDraft} onOpenTemplates={() => setTemplatesOpen(true)} composerSessionId={activeId || "new-composer"} uploadStatus={uploadStatus?.sessionId === activeId ? uploadStatus.message : ""} language={language} emptyStateMessage={isAuthenticated ? (chatMode === "myApi" ? (myApiActiveConfig ? `${t.start} ${myApiActiveConfig.displayName || myApiActiveConfig.provider} · ${myApiActiveConfig.activeModel}` : t.myApiNotConfigured) : `${t.start} ${selectedModel.label[language]}`) : t.loginChat} guestLoginAction={!isAuthenticated ? { label: t.loginHistory, onClick: () => startLogin() } : undefined} hasOlderHistory={Boolean(olderHistoryCursor === undefined ? messagesQuery.data?.nextCursor : olderHistoryCursor)} isLoadingOlderHistory={isLoadingOlderHistory} onLoadOlderHistory={() => void loadOlderHistory()} navigationCloseSignal={navigationCloseSignal} />
+      </>) : (<>{t.myApiNotConfigured}{" "}<Link href="/settings/providers" className="kairema-mode-hint-link">{t.configureProvider}</Link></>)}</span>}</div>} messages={visibleMessages} onSendMessage={send} onUploadFiles={uploadFiles} onRemoveAttachment={removeTemporaryAttachment} isLoading={isStreaming} onExportMarkdown={() => void exportCurrentChat("markdown")} onExportPdf={() => void exportCurrentChat("pdf")} canExport={Boolean(activeSession && dbMessages.length)} exportBusy={isExporting} exportError={notice} onCopyAssistant={(message) => void copyMessage(message)} onCopyUser={(message) => void copyMessage(message)} onCancelStream={cancelStream} composerValue={composerDraft} onComposerValueChange={setComposerDraft} onOpenTemplates={() => setTemplatesOpen(true)} composerSessionId={activeId || "new-composer"} uploadStatus={uploadStatus?.sessionId === activeId ? uploadStatus.message : ""} language={language} emptyStateMessage={isAuthenticated ? (chatMode === "myApi" ? (myApiActiveConfig ? `${t.start} ${myApiActiveConfig.displayName || myApiActiveConfig.provider} · ${myApiActiveConfig.activeModel}` : t.myApiNotConfigured) : `${t.start} ${selectedModel.label[language]}`) : t.loginChat} guestLoginAction={!isAuthenticated ? { label: t.loginHistory, onClick: () => startLogin() } : undefined} hasOlderHistory={Boolean(olderHistoryCursor === undefined ? messagesQuery.data?.nextCursor : olderHistoryCursor)} isLoadingOlderHistory={isLoadingOlderHistory} onLoadOlderHistory={() => void loadOlderHistory()} navigationCloseSignal={navigationCloseSignal} sendDisabled={Boolean(providerBlocked) && !isStreaming} onBlockedSendAttempt={() => setProviderBlocked((current) => (current ? { ...current } : current))} />
       </section>
       <CleanSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} models={modelViews} settings={settings} language={language} labels={t} onUpdate={persistSettings} accountEmail={accountEmail} onLogout={logout} theme={theme} onToggleTheme={() => toggleTheme?.()} onOpenAiProviders={() => { setSettingsOpen(false); navigate("/settings/providers"); }} />
       <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} language={language} labels={t} name={profileName} onNameChange={setProfileName} onSaveName={() => { void updateNameMutation.mutateAsync({ name: profileName.trim() }).then(() => utils.auth.me.invalidate()).catch((error) => setNotice(publicErrorMessage(error, language === "ru" ? "Не удалось обновить профиль." : "Could not update the profile."))); }} namePending={updateNameMutation.isPending} askClarifyingQuestions={Boolean(settings.askClarifyingQuestions)} onAskClarifyingChange={(value) => void persistSettings({ askClarifyingQuestions: value })} preferencesPending={settingMutation.isPending} onSavePreferences={() => void persistSettings({ askClarifyingQuestions: Boolean(settings.askClarifyingQuestions) })} onToast={setNotice} />
