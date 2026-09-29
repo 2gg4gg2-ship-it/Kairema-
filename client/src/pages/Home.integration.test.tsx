@@ -4,6 +4,7 @@ import path from "node:path";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearDirectKeys, setDirectKey } from "@/lib/direct-key-store";
 
 const fixtures = vi.hoisted(() => ({
   userProviders: { providers: [{ id: "openrouter", displayName: "OpenRouter", available: true }], configs: [], activeProvider: null, storageReady: true } as Record<string, unknown>,
@@ -701,7 +702,7 @@ describe("Home integration flows", () => {
 
     await user.click(screen.getByRole("button", { name: "Открыть профиль" }));
 
-    const nameField = screen.getByRole("textbox", { name: /Как к вам обращаться/ });
+    const nameField = screen.getByRole("textbox", { name: /Полное имя/ });
     expect((nameField as HTMLInputElement).value).toBe("Тест");
     expect(screen.getByText("Ваши предпочтения применяются ко всем разговорам.")).toBeTruthy();
 
@@ -1776,7 +1777,7 @@ describe("Profile", () => {
     const user = userEvent.setup();
     render(<Home />);
     await user.click(await screen.findByRole("button", { name: fixtures.language === "en" ? "Open profile" : "Открыть профиль" }));
-    await screen.findByRole("textbox", { name: /Как к вам обращаться|What should we call you/ });
+    await screen.findByRole("textbox", { name: /Полное имя|Full name/ });
     return user;
   }
 
@@ -1789,7 +1790,7 @@ describe("Profile", () => {
     expect(screen.getByText("Полное имя")).not.toBeNull();
     expect(screen.getByText("Персональные предпочтения")).not.toBeNull();
     expect(screen.getByText("Ваши предпочтения применяются ко всем разговорам.")).not.toBeNull();
-    const nameField = screen.getByRole("textbox", { name: /Как к вам обращаться/ }) as HTMLInputElement;
+    const nameField = screen.getByRole("textbox", { name: /Полное имя/ }) as HTMLInputElement;
     expect(nameField.maxLength).toBe(120);
     expect(nameField.getAttribute("autocomplete")).toBe("name");
     // Default preference is OFF on a fresh account.
@@ -1802,7 +1803,7 @@ describe("Profile", () => {
     await openProfile();
 
     expect(screen.getByText("Full name")).not.toBeNull();
-    expect(screen.getByRole("textbox", { name: "What should we call you?" })).not.toBeNull();
+    expect(screen.getByRole("textbox", { name: "Full name" })).not.toBeNull();
     expect(screen.getByRole("button", { name: /Update Profile/ })).not.toBeNull();
     expect(screen.getByText("Personal preferences")).not.toBeNull();
     expect(screen.getByText("What personal preferences should Kairema consider in responses?")).not.toBeNull();
@@ -1820,7 +1821,7 @@ describe("Profile", () => {
     await user.click(screen.getByRole("button", { name: /Сохранить предпочтения/ }));
     expect(fixtures.updatedSettings.at(-1)).toEqual({ askClarifyingQuestions: true });
 
-    const nameInput = screen.getByRole("textbox", { name: /Как к вам обращаться/ });
+    const nameInput = screen.getByRole("textbox", { name: /Полное имя/ });
     await user.clear(nameInput);
     await user.type(nameInput, "Kazea");
     await user.click(screen.getByRole("button", { name: /Обновить профиль/ }));
@@ -1829,9 +1830,23 @@ describe("Profile", () => {
     expect(fixtures.updatedSettings.at(-1)).toEqual({ askClarifyingQuestions: true });
   });
 
+  it("offers exactly one editable name field, with no duplicate label", async () => {
+    await openProfile();
+
+    // The name used to be announced twice: once by a heading and once by a second, differently
+    // worded label on the same input, so "Full name" and "What should we call you?" both described
+    // one field. It is one editable field now, and the section heading that shadowed it is gone.
+    const fields = screen.getAllByRole("textbox", { name: /Полное имя|Full name/ });
+    expect(fields).toHaveLength(1);
+    expect(screen.queryByText("Как к вам обращаться?")).toBeNull();
+    expect(screen.queryByText("What should we call you?")).toBeNull();
+    // The single field is the one bound to users.name, and it is editable rather than read-only.
+    expect((fields[0] as HTMLInputElement).readOnly).toBe(false);
+  });
+
   it("never writes the display name into any chat request", async () => {
     const user = await openProfile();
-    const nameInput = screen.getByRole("textbox", { name: /Как к вам обращаться/ });
+    const nameInput = screen.getByRole("textbox", { name: /Полное имя/ });
     await user.clear(nameInput);
     await user.type(nameInput, "Kazea");
     await user.click(screen.getByRole("button", { name: /Обновить профиль/ }));
@@ -2218,5 +2233,134 @@ describe("a failed turn is removed for good, not just on screen", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("a My API provider that stopped answering is scoped, not a global lock", () => {
+  beforeEach(() => { window.localStorage.clear(); resetFixtures(); });
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); clearDirectKeys(); });
+
+  // openrouter is the one provider whose execution resolves to "direct", so it is the only way to
+  // reach the browser-side turn that raises ProviderUnavailableError. A 401 is terminal: it is not
+  // retried, so the failure arrives without spending the 2-per-provider / 4-total budget.
+  const openrouterConfig = { provider: "openrouter", displayName: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", modelsEndpoint: null, activeModel: "vendor/fast-1", keyHint: "••••4321", updatedAt: new Date(0).toISOString() };
+
+  const unauthorised = () => new Response(JSON.stringify({ error: { message: "Invalid API key" } }), { status: 401, headers: { "content-type": "application/json" } });
+
+  /**
+   * `/api/v1/chat/completions` is the direct provider call and is always rejected; `/api/chat/stream`
+   * is the Kairema system path and succeeds, so a test can prove that the blocked state did not
+   * follow the user out of My API and into Chat.
+   */
+  const stubDirectFailure = () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes("/chat/completions")) return unauthorised();
+      if (url === "/api/chat/stream") {
+        const encoder = new TextEncoder();
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ delta: "Ответ Kairema" })}\n\n`));
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+          },
+        }));
+      }
+      return new Response("{}", { status: 200 });
+    }));
+    return calls;
+  };
+
+  async function enterMyApiWithBadKey(user: ReturnType<typeof userEvent.setup>, models = 2) {
+    fixtures.myApiModels = Array.from({ length: models }, (_, index) => ({ id: `vendor/model-${index + 1}`, name: `Модель ${index + 1}` }));
+    fixtures.myApiModelsLoaded = true;
+    fixtures.userProviders = { providers: [{ id: "openrouter", displayName: "OpenRouter", available: true }], configs: [openrouterConfig], activeProvider: "openrouter", storageReady: true };
+    setDirectKey("openrouter", "sk-rejected-key");
+    render(<Home />);
+    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await waitFor(() => expect(screen.getAllByText(/OpenRouter/).length).toBeGreaterThan(0));
+  }
+
+  const composer = () => screen.findByPlaceholderText("Напишите сообщение…");
+
+  const ask = async (user: ReturnType<typeof userEvent.setup>, text: string) => {
+    const box = await composer();
+    await user.type(box, text);
+    await user.keyboard("{Enter}");
+  };
+
+  /** The unavailable banner, which is only allowed to appear for the provider that actually failed. */
+  const unavailableNotice = () => screen.queryByTestId("provider-unavailable-reason");
+
+  it("keeps the draft and stores no message when the failed provider blocks the next send", async () => {
+    const user = userEvent.setup();
+    stubDirectFailure();
+    await enterMyApiWithBadKey(user);
+
+    await ask(user, "первый вопрос");
+    await waitFor(() => expect(unavailableNotice()).toBeTruthy());
+
+    // The next question is refused before anything is sent, so it stays in the composer and adds
+    // no bubble: a blocked turn is not a failed turn, so there is no orphan question to clean up
+    // and the ten-second removal timer is never started for it.
+    await ask(user, "второй вопрос");
+    const box = (await composer()) as HTMLTextAreaElement;
+    // A failed turn gives the question back, and a blocked one is never taken out of the composer
+    // at all, so the refused text is still here — readable, unsent, and safe to edit.
+    await waitFor(() => expect(box.value).toContain("второй вопрос"));
+    const bubbles = Array.from(document.querySelectorAll(".kairema-message")).map((node) => node.textContent ?? "");
+    expect(bubbles).not.toContain("второй вопрос");
+    // Exactly one removal: the first question was really sent and really failed, so its transcript
+    // row is deleted. The blocked one was never stored, so it adds no second removal.
+    expect(fixtures.discardFailedTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears the notice and lets the user send again after switching back to Kairema Chat", async () => {
+    const user = userEvent.setup();
+    const calls = stubDirectFailure();
+    await enterMyApiWithBadKey(user);
+
+    await ask(user, "вопрос");
+    await waitFor(() => expect(unavailableNotice()).toBeTruthy());
+
+    await user.click((await screen.findAllByRole("button", { name: "Чат" }))[0]!);
+    await waitFor(() => expect(unavailableNotice()).toBeNull());
+
+    await ask(user, "вопрос в чате");
+    // The system path is actually reached, which is the whole point: a user provider's rejected key
+    // must not keep a Kairema model from answering.
+    await waitFor(() => expect(calls.some((url) => url === "/api/chat/stream")).toBe(true));
+  });
+
+  it("does not disable a Kairema system model in Chat mode", async () => {
+    const user = userEvent.setup();
+    stubDirectFailure();
+    await enterMyApiWithBadKey(user);
+
+    await ask(user, "вопрос");
+    await waitFor(() => expect(unavailableNotice()).toBeTruthy());
+
+    await user.click((await screen.findAllByRole("button", { name: "Чат" }))[0]!);
+    // Not just the banner: the composer itself is usable again, because sendDisabled is scoped the
+    // same way the send gate is.
+    const box = await composer();
+    expect((box as HTMLTextAreaElement).disabled).toBe(false);
+  });
+
+  it("bounds the failed turn instead of retrying or polling", async () => {
+    const user = userEvent.setup();
+    const calls = stubDirectFailure();
+    await enterMyApiWithBadKey(user);
+
+    await ask(user, "вопрос");
+    await waitFor(() => expect(unavailableNotice()).toBeTruthy());
+
+    // A 401 is not a retryable status, so the single direct attempt is the only one made. The
+    // budget caps (2 per provider, 4 in total) are untouched and are not reached here.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const directCalls = calls.filter((url) => url.includes("/chat/completions"));
+    expect(directCalls).toHaveLength(1);
   });
 });
