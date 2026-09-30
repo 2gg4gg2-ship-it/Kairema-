@@ -1,0 +1,521 @@
+package im.kairema.app.loopback;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.URL;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * Temporary HTTP transport for the loopback origin.
+ *
+ * <p>Proven end to end by the transport spike: static serving, POST body integrity, chunked request
+ * bodies, incremental SSE, multi {@code Set-Cookie} passthrough and the security boundaries. It is
+ * isolated here, free of any Android type, so it runs unchanged both inside the APK and on a plain
+ * JVM where the spike drives it. It can later be replaced by a Ktor CIO implementation of
+ * {@link LoopbackServer} without touching the WebView wiring.
+ *
+ * <p>Scope is fixed and narrow: it serves the bundled web files and forwards only
+ * {@link LoopbackRoutes#PROXY_ALLOWLIST} to one upstream supplied at construction, which is never
+ * read from a request.
+ */
+public final class LoopbackHttpCore implements LoopbackServer {
+
+    /** Cookie the WebView presents to prove it is this app's own WebView. */
+    static final String ACCESS_COOKIE_NAME = "kairema_loopback";
+
+    /** Headers that must never be copied across a proxy hop. */
+    private static final List<String> HOP_BY_HOP = List.of(
+            "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+            "te", "trailer", "transfer-encoding", "upgrade", "host", "content-length",
+            "accept-encoding");
+
+    /** HttpURLConnection mangles header casing ("Set-cookie"); these are restored to canonical form. */
+    private static final Map<String, String> CANONICAL_HEADERS = Map.of(
+            "set-cookie", "Set-Cookie",
+            "content-type", "Content-Type",
+            "content-length", "Content-Length",
+            "cache-control", "Cache-Control",
+            "location", "Location",
+            "etag", "ETag",
+            "content-disposition", "Content-Disposition");
+
+    private static final int MAX_BODY_BYTES = 64 * 1024 * 1024;
+
+    private final LoopbackStaticSource staticSource;
+    private final URL upstream;
+
+    private String accessSecret;
+    private ServerSocket serverSocket;
+    private ExecutorService workers;
+
+    public LoopbackHttpCore(LoopbackStaticSource staticSource, URL upstream) {
+        this.staticSource = staticSource;
+        this.upstream = upstream;
+    }
+
+    @Override
+    public synchronized void start() throws IOException {
+        accessSecret = newAccessSecret();
+        // Loopback only, ephemeral port. There is deliberately no way to bind 0.0.0.0 or a fixed port.
+        serverSocket = new ServerSocket(0, 64, InetAddress.getLoopbackAddress());
+        workers = Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r, "kairema-loopback");
+            t.setDaemon(true);
+            return t;
+        });
+        Thread accept = new Thread(this::acceptLoop, "kairema-loopback-accept");
+        accept.setDaemon(true);
+        accept.start();
+    }
+
+    @Override
+    public synchronized void stop() {
+        if (serverSocket != null) {
+            try {
+                serverSocket.close();
+            } catch (IOException ignored) {
+                // Listener already gone.
+            }
+            serverSocket = null;
+        }
+        if (workers != null) {
+            workers.shutdownNow();
+            workers = null;
+        }
+        accessSecret = null;
+    }
+
+    @Override
+    public int getPort() {
+        return serverSocket == null ? -1 : serverSocket.getLocalPort();
+    }
+
+    @Override
+    public String getOrigin() {
+        int port = getPort();
+        return port < 0 ? "" : "http://127.0.0.1:" + port;
+    }
+
+    @Override
+    public String getAccessCookie() {
+        return ACCESS_COOKIE_NAME + "=" + accessSecret + "; Path=/; HttpOnly";
+    }
+
+    private static String newAccessSecret() {
+        byte[] bytes = new byte[32];
+        new SecureRandom().nextBytes(bytes);
+        StringBuilder hex = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            hex.append(Character.forDigit((b >> 4) & 0xF, 16));
+            hex.append(Character.forDigit(b & 0xF, 16));
+        }
+        return hex.toString();
+    }
+
+    // ---------------------------------------------------------------- listener
+
+    private void acceptLoop() {
+        while (serverSocket != null && !serverSocket.isClosed()) {
+            Socket socket;
+            try {
+                socket = serverSocket.accept();
+            } catch (IOException e) {
+                return;
+            }
+            ExecutorService pool = workers;
+            if (pool == null) {
+                closeQuietly(socket);
+                return;
+            }
+            try {
+                pool.execute(() -> handleQuietly(socket));
+            } catch (RuntimeException rejected) {
+                closeQuietly(socket);
+            }
+        }
+    }
+
+    private void handleQuietly(Socket socket) {
+        try {
+            socket.setTcpNoDelay(true);
+            handle(socket);
+        } catch (IOException ignored) {
+            // A dropped client must not take the listener down.
+        } finally {
+            closeQuietly(socket);
+        }
+    }
+
+    private static void closeQuietly(Socket socket) {
+        try {
+            socket.close();
+        } catch (IOException ignored) {
+            // Nothing useful to do while tearing down.
+        }
+    }
+
+    // ---------------------------------------------------------------- request
+
+    private static final class Request {
+        String method = "";
+        String path = "";
+        String query;
+        final Map<String, String> headers = new LinkedHashMap<>();
+        byte[] body = new byte[0];
+    }
+
+    private void handle(Socket socket) throws IOException {
+        InputStream in = socket.getInputStream();
+        OutputStream out = socket.getOutputStream();
+
+        Request request = readRequest(in);
+        if (request == null) {
+            writeSimple(out, 400, "malformed or disallowed request");
+            return;
+        }
+        if (LoopbackRoutes.isProxyable(request.path)) {
+            if (!isAuthorised(request)) {
+                writeSimple(out, 403, "loopback access denied");
+                return;
+            }
+            proxy(request, out);
+        } else {
+            serveAsset(request, out);
+        }
+        out.flush();
+    }
+
+    /**
+     * The credential is presented as a cookie by this app's own WebView. Other apps on the device
+     * cannot read another app's cookie jar, and {@code HttpOnly} keeps it away from page scripts.
+     */
+    private boolean isAuthorised(Request request) {
+        String cookie = request.headers.get("cookie");
+        if (cookie == null) {
+            return false;
+        }
+        String expected = ACCESS_COOKIE_NAME + "=" + accessSecret;
+        for (String part : cookie.split(";")) {
+            if (part.trim().equals(expected)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Request readRequest(InputStream in) throws IOException {
+        String requestLine = readLine(in, 8192);
+        if (requestLine == null || requestLine.isEmpty()) {
+            return null;
+        }
+        String[] parts = requestLine.split(" ");
+        if (parts.length != 3) {
+            return null;
+        }
+
+        Request request = new Request();
+        request.method = parts[0];
+
+        // Only origin-form targets are accepted. Absolute-form ("GET http://host/x") and
+        // authority-form are refused, so a client can never name the upstream.
+        String target = parts[1];
+        if (!target.startsWith("/") || target.startsWith("//")) {
+            return null;
+        }
+        String rawPath = target;
+        int q = target.indexOf('?');
+        if (q >= 0) {
+            rawPath = target.substring(0, q);
+            request.query = target.substring(q + 1);
+        }
+
+        String decoded;
+        try {
+            decoded = URLDecoder.decode(rawPath, "UTF-8");
+        } catch (Exception e) {
+            return null;
+        }
+        // Traversal guard applied after decoding, so %2e%2e cannot slip through.
+        if (decoded.contains("..") || decoded.indexOf('\0') >= 0) {
+            return null;
+        }
+        request.path = decoded;
+
+        int headerCount = 0;
+        String header;
+        while (true) {
+            header = readLine(in, 8192);
+            if (header == null) {
+                return null;
+            }
+            if (header.isEmpty()) {
+                break;
+            }
+            if (++headerCount > 100) {
+                return null;
+            }
+            int colon = header.indexOf(':');
+            if (colon <= 0) {
+                continue;
+            }
+            request.headers.put(
+                    header.substring(0, colon).trim().toLowerCase(Locale.ROOT),
+                    header.substring(colon + 1).trim());
+        }
+
+        String transferEncoding = request.headers.get("transfer-encoding");
+        if (transferEncoding != null && transferEncoding.toLowerCase(Locale.ROOT).contains("chunked")) {
+            request.body = readChunkedBody(in);
+        } else {
+            String contentLength = request.headers.get("content-length");
+            if (contentLength != null) {
+                int length;
+                try {
+                    length = Integer.parseInt(contentLength.trim());
+                } catch (NumberFormatException e) {
+                    return null;
+                }
+                if (length < 0 || length > MAX_BODY_BYTES) {
+                    return null;
+                }
+                request.body = readFully(in, length);
+            }
+        }
+        return request;
+    }
+
+    private static byte[] readChunkedBody(InputStream in) throws IOException {
+        ByteArrayOutputStream body = new ByteArrayOutputStream();
+        while (true) {
+            String sizeLine = readLine(in, 1024);
+            if (sizeLine == null) {
+                throw new IOException("truncated chunked body");
+            }
+            int semicolon = sizeLine.indexOf(';');
+            if (semicolon >= 0) {
+                sizeLine = sizeLine.substring(0, semicolon);
+            }
+            int size;
+            try {
+                size = Integer.parseInt(sizeLine.trim(), 16);
+            } catch (NumberFormatException e) {
+                throw new IOException("bad chunk size");
+            }
+            if (size == 0) {
+                String trailer;
+                while ((trailer = readLine(in, 1024)) != null && !trailer.isEmpty()) {
+                    // discard trailers
+                }
+                return body.toByteArray();
+            }
+            if (body.size() + size > MAX_BODY_BYTES) {
+                throw new IOException("chunked body too large");
+            }
+            body.write(readFully(in, size));
+            readLine(in, 8); // CRLF that terminates the chunk data
+        }
+    }
+
+    private static byte[] readFully(InputStream in, int length) throws IOException {
+        byte[] buffer = new byte[length];
+        int read = 0;
+        while (read < length) {
+            int n = in.read(buffer, read, length - read);
+            if (n < 0) {
+                throw new IOException("unexpected end of body");
+            }
+            read += n;
+        }
+        return buffer;
+    }
+
+    private static String readLine(InputStream in, int limit) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        int b;
+        while ((b = in.read()) != -1) {
+            if (b == '\n') {
+                byte[] bytes = buffer.toByteArray();
+                int length = bytes.length;
+                if (length > 0 && bytes[length - 1] == '\r') {
+                    length--;
+                }
+                return new String(bytes, 0, length, StandardCharsets.ISO_8859_1);
+            }
+            if (buffer.size() >= limit) {
+                throw new IOException("header line too long");
+            }
+            buffer.write(b);
+        }
+        return buffer.size() == 0 ? null : new String(buffer.toByteArray(), StandardCharsets.ISO_8859_1);
+    }
+
+    // ---------------------------------------------------------------- proxy
+
+    private void proxy(Request request, OutputStream out) throws IOException {
+        // The upstream is fixed at construction; only path and query come from the request.
+        String base = upstream.toString();
+        StringBuilder target = new StringBuilder(base);
+        if (base.endsWith("/") && request.path.startsWith("/")) {
+            target.setLength(target.length() - 1);
+        }
+        target.append(request.path);
+        if (request.query != null) {
+            target.append('?').append(request.query);
+        }
+
+        HttpURLConnection connection = (HttpURLConnection) new URL(target.toString()).openConnection();
+        try {
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestMethod(request.method);
+            connection.setConnectTimeout(15_000);
+            connection.setUseCaches(false);
+
+            // The backend derives cookie attributes from the protocol it believes it is serving. Over a
+            // plaintext loopback hop req.protocol would be "http", making it emit SameSite=None without
+            // Secure - a combination Chromium rejects. The upstream hop really is https, so declaring it
+            // is accurate rather than a spoof, and it leaves the existing auth model untouched.
+            connection.setRequestProperty("X-Forwarded-Proto", "https");
+            connection.setRequestProperty("X-Forwarded-Host", upstream.getHost());
+
+            for (Map.Entry<String, String> header : request.headers.entrySet()) {
+                if (!HOP_BY_HOP.contains(header.getKey())) {
+                    connection.setRequestProperty(header.getKey(), header.getValue());
+                }
+            }
+
+            if (request.body.length > 0) {
+                connection.setDoOutput(true);
+                connection.setRequestProperty("Content-Length", String.valueOf(request.body.length));
+                try (OutputStream upstreamOut = connection.getOutputStream()) {
+                    upstreamOut.write(request.body);
+                }
+            }
+
+            int status = connection.getResponseCode();
+            writeStatusLine(out, status, connection.getResponseMessage());
+
+            for (Map.Entry<String, List<String>> header : connection.getHeaderFields().entrySet()) {
+                String name = header.getKey();
+                if (name == null) {
+                    continue; // status line pseudo-header
+                }
+                String lower = name.toLowerCase(Locale.ROOT);
+                if (HOP_BY_HOP.contains(lower)) {
+                    continue;
+                }
+                // Forwarded one by one so repeated headers - notably multiple Set-Cookie - survive as
+                // separate lines instead of being collapsed into one.
+                String canonical = CANONICAL_HEADERS.getOrDefault(lower, name);
+                for (String value : header.getValue()) {
+                    writeHeader(out, canonical, value);
+                }
+            }
+            // No Content-Length for streamed bodies, so the client reads until close.
+            writeHeader(out, "Connection", "close");
+            out.write("\r\n".getBytes(StandardCharsets.ISO_8859_1));
+
+            InputStream source = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            if (source != null) {
+                pump(source, out);
+            }
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    /**
+     * Copies upstream bytes to the client as they arrive, flushing per chunk. This is what keeps
+     * {@code /api/chat/stream} a real stream rather than one buffered blob delivered at the end.
+     */
+    private void pump(InputStream source, OutputStream out) throws IOException {
+        byte[] buffer = new byte[8192];
+        int read;
+        while ((read = source.read(buffer)) != -1) {
+            out.write(buffer, 0, read);
+            out.flush();
+        }
+    }
+
+    // ---------------------------------------------------------------- static files
+
+    private void serveAsset(Request request, OutputStream out) throws IOException {
+        String relative = request.path.startsWith("/") ? request.path.substring(1) : request.path;
+        byte[] content = relative.isEmpty() ? null : readSafely(relative);
+        if (content == null) {
+            // SPA fallback, matching server/_core/vite.ts serveStatic behaviour.
+            content = readSafely("index.html");
+        }
+        if (content == null) {
+            writeSimple(out, 404, "not found");
+            return;
+        }
+        String name = relative.isEmpty() ? "index.html" : relative;
+        writeStatusLine(out, 200, "OK");
+        writeHeader(out, "Content-Type", contentType(name));
+        // Bundled assets are replaced wholesale by OTA; never let the WebView reuse a stale one.
+        writeHeader(out, "Cache-Control", "no-store");
+        writeHeader(out, "Content-Length", String.valueOf(content.length));
+        writeHeader(out, "Connection", "close");
+        out.write("\r\n".getBytes(StandardCharsets.ISO_8859_1));
+        out.write(content);
+        out.flush();
+    }
+
+    private byte[] readSafely(String relativePath) {
+        if (relativePath.contains("..") || relativePath.startsWith("/")) {
+            return null;
+        }
+        return staticSource.read(relativePath);
+    }
+
+    private static String contentType(String name) {
+        String lower = name.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".html")) return "text/html; charset=utf-8";
+        if (lower.endsWith(".js") || lower.endsWith(".mjs")) return "text/javascript; charset=utf-8";
+        if (lower.endsWith(".css")) return "text/css; charset=utf-8";
+        if (lower.endsWith(".json")) return "application/json; charset=utf-8";
+        if (lower.endsWith(".svg")) return "image/svg+xml";
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+        if (lower.endsWith(".woff2")) return "font/woff2";
+        if (lower.endsWith(".woff")) return "font/woff";
+        if (lower.endsWith(".ttf")) return "font/ttf";
+        return "application/octet-stream";
+    }
+
+    // ---------------------------------------------------------------- helpers
+
+    private static void writeStatusLine(OutputStream out, int status, String reason) throws IOException {
+        writeHeader(out, null, "HTTP/1.1 " + status + " " + (reason == null ? "" : reason) + "\r\n");
+    }
+
+    private static void writeHeader(OutputStream out, String name, String value) throws IOException {
+        String line = name == null ? value : name + ": " + value + "\r\n";
+        out.write(line.getBytes(StandardCharsets.ISO_8859_1));
+    }
+
+    private void writeSimple(OutputStream out, int status, String message) throws IOException {
+        byte[] body = message.getBytes(StandardCharsets.UTF_8);
+        writeStatusLine(out, status, status == 404 ? "Not Found" : status == 403 ? "Forbidden" : "Bad Request");
+        writeHeader(out, "Content-Type", "text/plain; charset=utf-8");
+        writeHeader(out, "Content-Length", String.valueOf(body.length));
+        writeHeader(out, "Connection", "close");
+        out.write("\r\n".getBytes(StandardCharsets.ISO_8859_1));
+        out.write(body);
+        out.flush();
+    }
+}

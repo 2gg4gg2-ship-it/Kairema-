@@ -150,7 +150,23 @@ function vitePluginManusDebugCollector(): Plugin {
   };
 }
 
-const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector()];
+/**
+ * The Manus plugins inject Manus host-runtime behaviour into the page: an inline runtime script that
+ * only reacts to postMessage traffic from a Manus host, and a debug collector that writes browser
+ * logs to a host filesystem path. Neither has any meaning inside the Android WebView, which serves
+ * the bundled build over a loopback origin and talks to the Kairema backend through that proxy.
+ *
+ * They are excluded only for the Android bundle, so the browser build keeps behaving exactly as
+ * before and the web deployment is untouched.
+ */
+const isAndroidBundle = process.env.KAIREMA_ANDROID === "1";
+
+const plugins = [
+  react(),
+  tailwindcss(),
+  jsxLocPlugin(),
+  ...(isAndroidBundle ? [] : [vitePluginManusRuntime(), vitePluginManusDebugCollector()]),
+];
 
 export default defineConfig({
   plugins,
