@@ -23,6 +23,8 @@ export const users = mysqlTable("users", {
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 }, (table) => [
   index("users_guest_expires_idx").on(table.isGuest, table.expiresAt),
+  // Online presence counts rows by heartbeat recency, which is a range scan on this column only.
+  index("users_last_activity_idx").on(table.lastActivityAt),
 ]);
 
 /**

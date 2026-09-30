@@ -6,7 +6,7 @@ import { providerHealthHistory } from "../drizzle/schema";
 import { stytchLinkIntents } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { isOwnerAccount } from "./owner-access";
-import { GUEST_MAX_LIFETIME_MS, GUEST_TTL_MS } from "@shared/const";
+import { GUEST_MAX_LIFETIME_MS, GUEST_TTL_MS, PRESENCE_TTL_SECONDS } from "@shared/const";
 import { decodeHistoryPageCursor, encodeHistoryPageCursor, normalizeHistoryPageLimit } from "./history-pagination";
 import { selectTranscriptWindow, TRANSCRIPT_WINDOW_BUDGETS, type TranscriptRole } from "./transcript-window";
 import type { SearchTaskKind } from "./web-search-value";
@@ -705,6 +705,41 @@ export async function getOwnerDashboardSummary() {
     fallbackEvents: Number(fallbackRows[0]?.count ?? 0),
     providerEvents: Number(providerRows[0]?.count ?? 0),
   };
+}
+
+/**
+ * Marks a user as currently present in the app.
+ *
+ * Only `lastActivityAt` is written. `updateUserActivity` must not be reused here: it recomputes
+ * `expiresAt` from the guest sliding/absolute TTL, which is guest-specific and would be wrong for
+ * a permanent user.
+ *
+ * `users.lastActivityAt` is the presence record itself, so one person with five open tabs is one
+ * row and therefore one person, and a guest presence costs exactly the same single UPDATE as an
+ * authenticated one.
+ */
+export async function touchUserPresence(userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.update(users).set({ lastActivityAt: new Date() }).where(eq(users.id, userId));
+}
+
+/**
+ * Number of distinct users whose presence heartbeat is newer than `PRESENCE_TTL_SECONDS`.
+ *
+ * Expired rows are filtered at read time rather than deleted: these are `users` rows, not a
+ * throwaway log, so there is nothing to prune and no scheduled job to run. Returns only a count —
+ * never an id, email, name or token.
+ */
+export async function countUsersPresentNow(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+
+  const since = new Date(Date.now() - PRESENCE_TTL_SECONDS * 1_000);
+  const rows = await db.select({ count: sql<number>`count(*)` }).from(users).where(gt(users.lastActivityAt, since));
+
+  return Number(rows[0]?.count ?? 0);
 }
 
 type PublicAvailabilityState = "ready" | "cooldown" | "auth_failed" | "unavailable" | "not_configured";

@@ -938,6 +938,67 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-providers-notice-ok { border-color:color-mix(in srgb, var(--k-ok) 45%, transparent); background:color-mix(in srgb, var(--k-ok) 10%, transparent); color:var(--k-ok-text); }
 .kairema-providers-notice-error { border-color:color-mix(in srgb, var(--k-danger) 45%, transparent); background:color-mix(in srgb, var(--k-danger) 10%, transparent); color:var(--k-danger-text); }
 
+/* ── Owner panel (/owner-analytics) ───────────────────────────────────────────────────────────
+   The second screen that never joined the --k-* system, and the last one: every card, field, badge
+   and chart stroke was a literal Tailwind dark utility (bg-slate-950, border-slate-800,
+   text-cyan-300) with no light counterpart, so the .dark class the theme toggle puts on <html> had
+   nothing to switch and the panel stayed dark-blue-black in light mode.
+
+   These classes read the same --k-* tokens the rest of the product uses, so the toggle is inherited
+   for free. Nothing here introduces a second palette: the accent system is neutral, and the only
+   coloured elements are status pills and the two charts, which use the reserved --k-ok / --k-warn /
+   --k-danger tokens because those carry meaning rather than decoration. That is also what removes
+   the old cyan/violet accents without replacing them with another brand hue. */
+.kairema-owner-page { min-height:100vh; min-height:100dvh; padding:16px; background:var(--k-bg); color:var(--k-text); }
+@media (min-width:640px) { .kairema-owner-page { padding:20px 24px; } }
+.kairema-owner-section { margin-top:22px; }
+.kairema-owner-section-title { color:var(--k-muted); font-size:12px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; }
+.kairema-owner-card { border:1px solid var(--k-line); border-radius:12px; background:var(--k-panel); }
+.kairema-owner-card-head { display:flex; align-items:flex-start; gap:10px; padding:12px 14px; border-bottom:1px solid var(--k-line); }
+.kairema-owner-card-body { padding:12px 14px; }
+.kairema-owner-title { min-width:0; color:var(--k-text); font-size:14px; font-weight:600; }
+.kairema-owner-sub { margin-top:2px; color:var(--k-muted); font-size:12px; line-height:1.45; }
+.kairema-owner-label { display:block; color:var(--k-muted); font-size:12px; font-weight:500; }
+.kairema-owner-field { margin-top:6px; width:100%; height:38px; border:1px solid var(--k-line); border-radius:8px; background:var(--k-panel); color:var(--k-text); padding:0 10px; font-size:14px; outline:none; }
+.kairema-owner-field::placeholder { color:var(--k-muted); opacity:.75; }
+.kairema-owner-field:focus { border-color:color-mix(in srgb, var(--k-text) 55%, transparent); }
+.kairema-owner-check { display:flex; align-items:center; gap:8px; color:var(--k-text); font-size:13px; }
+.kairema-owner-btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; border:1px solid var(--k-line); border-radius:8px; background:var(--k-panel-3); color:var(--k-text); font-size:13px; transition:background .15s ease,border-color .15s ease; }
+.kairema-owner-btn:hover:not(:disabled) { background:var(--k-line); }
+.kairema-owner-btn:disabled { opacity:.4; }
+.kairema-owner-btn-primary { display:inline-flex; align-items:center; justify-content:center; gap:8px; border:1px solid var(--k-text); border-radius:8px; background:var(--k-text); color:var(--k-invert); font-weight:500; transition:opacity .15s ease; }
+.kairema-owner-btn-primary:hover:not(:disabled) { opacity:.86; }
+.kairema-owner-btn-primary:disabled { opacity:.4; }
+.kairema-owner-metric { border:1px solid var(--k-line); border-radius:12px; background:var(--k-panel); padding:12px 14px; }
+.kairema-owner-metric-head { display:flex; align-items:center; gap:6px; color:var(--k-muted); }
+.kairema-owner-metric-label { font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; }
+.kairema-owner-metric-value { margin-top:6px; color:var(--k-text); font-size:22px; font-weight:600; line-height:1.15; }
+.kairema-owner-metric-detail { margin-top:3px; color:var(--k-muted); font-size:12px; line-height:1.4; }
+/* The live presence block is the one thing on the page that is allowed to be larger than a metric:
+   it answers "is anyone in the app right now", which is the question the owner opens the page for. */
+.kairema-owner-online { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 14px; border:1px solid var(--k-line); border-radius:12px; background:var(--k-panel); padding:16px; }
+.kairema-owner-online-value { color:var(--k-text); font-size:40px; font-weight:700; line-height:1; }
+.kairema-owner-online-side { min-width:0; flex:1 1 220px; }
+.kairema-owner-row { display:flex; align-items:center; justify-content:space-between; gap:10px; border-radius:8px; background:var(--k-panel-2); padding:8px 10px; }
+.kairema-owner-row-text { min-width:0; overflow:hidden; color:var(--k-text); font-size:13px; }
+.kairema-owner-row-meta { color:var(--k-muted); font-size:12px; text-align:right; }
+.kairema-owner-pill { display:inline-flex; align-items:center; border:1px solid var(--k-line); border-radius:999px; padding:1px 8px; font-size:11px; font-weight:600; }
+.kairema-owner-pill-ok { border-color:color-mix(in srgb, var(--k-ok) 45%, transparent); background:color-mix(in srgb, var(--k-ok) 12%, transparent); color:var(--k-ok-text); }
+.kairema-owner-pill-warn { border-color:color-mix(in srgb, var(--k-warn) 45%, transparent); background:color-mix(in srgb, var(--k-warn) 12%, transparent); color:var(--k-warn-text); }
+.kairema-owner-pill-danger { border-color:color-mix(in srgb, var(--k-danger) 45%, transparent); background:color-mix(in srgb, var(--k-danger) 12%, transparent); color:var(--k-danger-text); }
+.kairema-owner-pill-muted { background:var(--k-panel-2); color:var(--k-muted); }
+.kairema-owner-chart { margin-top:12px; width:100%; height:132px; color:var(--k-line); }
+.kairema-owner-legend { display:flex; flex-wrap:wrap; gap:12px; margin-top:10px; color:var(--k-muted); font-size:11px; }
+.kairema-owner-legend-swatch { display:inline-block; width:9px; height:9px; margin-right:5px; border-radius:2px; vertical-align:middle; }
+.kairema-owner-bars { display:flex; height:96px; align-items:flex-end; gap:1px; }
+.kairema-owner-bar { display:flex; min-width:0; flex:1; flex-direction:column-reverse; overflow:hidden; border-radius:2px; background:var(--k-panel-2); }
+.kairema-owner-empty { border-radius:8px; background:var(--k-panel-2); padding:12px; color:var(--k-muted); font-size:13px; }
+.kairema-owner-alert { border:1px solid; border-radius:8px; padding:8px 10px; font-size:13px; }
+.kairema-owner-alert-error { border-color:color-mix(in srgb, var(--k-danger) 45%, transparent); background:color-mix(in srgb, var(--k-danger) 10%, transparent); color:var(--k-danger-text); }
+.kairema-owner-alert-warn { border-color:color-mix(in srgb, var(--k-warn) 45%, transparent); background:color-mix(in srgb, var(--k-warn) 10%, transparent); color:var(--k-warn-text); }
+.kairema-owner-details { margin-top:12px; border:1px solid var(--k-line); border-radius:10px; background:var(--k-panel-2); padding:12px; }
+.kairema-owner-summary { cursor:pointer; color:var(--k-text); font-size:13px; font-weight:500; }
+
 /* Provider-unavailable notice. Compact and non-blocking: it overlays the conversation near the
    vertical centre and never covers the page, so the composer, sidebar and history stay usable
    while a fallback runs or after the turn has stopped. `width:max-content` with a capped

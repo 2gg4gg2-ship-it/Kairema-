@@ -358,6 +358,13 @@
       "when": 1791000000000,
       "tag": "0050_per_role_chat_rate_windows",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1791000100000,
+      "tag": "0051_presence_last_activity_index",
+      "breakpoints": true
     }
   ]
 }

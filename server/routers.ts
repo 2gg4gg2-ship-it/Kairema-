@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { COOKIE_NAME } from "@shared/const";
-import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, deleteOwnedFailedUserMessage, deleteUserProviderConfig, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerDashboardSummary, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserProviderConfig, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, listUserProviderConfigs, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, setActiveUserProvider, setUserProviderActiveModel, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserName, updateUserProfileDetails, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag, upsertUserProviderConfig } from "./db";
+import { COOKIE_NAME, PRESENCE_TTL_SECONDS } from "@shared/const";
+import { appendChatMessage, clearAllMemory, clearMemory, clearMemoryByCategory, clearOwnedChatDraft, countUsersPresentNow, createChatSession, createStytchLinkIntent, deleteAllOwnedChatSessions, deleteMemoryEntry, deleteOwnedChatAttachment, deleteOwnedChatExport, deleteOwnedChatSession, deleteOwnedFailedUserMessage, deleteUserProviderConfig, enqueueMemoryExtractionJob, getFlashTtftStats, getFlashTtftTrend, getMemoryProfile, getMemorySettings, getOwnedChatDraft, getOwnedChatSession, getOwnerDashboardSummary, getOwnerObservabilitySnapshot, getSearchOutageSummary, getSearchQualityChart, getSearchQualityPanel, getUserProviderConfig, getUserSettings, listChatSessions, listMemoryEntries, listOwnedChatExports, listProviderControlFlags, listSessionAttachments, listSessionMessages, listSessionMessagesPage, listSessionTranscriptWindow, listUserProviderConfigs, recordTechnicalEvent, saveOwnedChatDraft, searchUserContent, setActiveUserProvider, setUserProviderActiveModel, touchUserPresence, updateChatTitle, updateMemoryProfile, updateMemorySettings, updateUserName, updateUserProfileDetails, updateUserSettings, upsertMemoryEntry, upsertProviderControlFlag, upsertUserProviderConfig } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { clearStytchLinkIntentCookie, clearStytchOtpEmailIdCookie, clearStytchPasswordRecoveryEmailCookie, clearStytchPasswordSessionCookie, clearStytchResetCookie, clearStytchSessionCookie, getSafeStytchDeliveryFailure, getStytchCallbackUrl, getStytchClient, getStytchOtpEmailId, getStytchPasswordRecoveryEmail, getStytchPasswordSessionToken, getStytchResetToken, getStytchSessionToken, getVerifiedStytchEmail, logSafeStytchDiagnostic, revokeStytchSessionToken, setStytchLinkIntentCookie, setStytchOtpEmailIdCookie, setStytchPasswordRecoveryEmailCookie, setStytchPasswordSessionCookie, setStytchSessionCookie, STYTCH_PROVIDER, STYTCH_SESSION_DURATION_MINUTES, stytchCanonicalOpenId, toSafeStytchError } from "./stytch";
 import Stytch, { StytchError } from "stytch";
@@ -493,6 +493,20 @@ export const appRouter = router({
   providers: router({
     dashboard: protectedProcedure.query(() => getPublicProviderDashboard()),
   }),
+  /**
+   * Lightweight presence heartbeat for every caller that currently has a session.
+   *
+   * `userOrGuestProcedure` already resolves an authenticated user or a validated guest session and
+   * refreshes the sliding guest cookie, so this reuses the existing session resolution instead of
+   * introducing a second notion of identity. It is a mutation purely so React Query never caches
+   * or refetches it on its own; the client drives the cadence. The response carries nothing.
+   */
+  presence: router({
+    heartbeat: userOrGuestProcedure.mutation(async ({ ctx }) => {
+      await touchUserPresence(ctx.user.id);
+      return { ok: true as const };
+    }),
+  }),
   owner: router({
     isOwner: protectedProcedure.query(({ ctx }) => isOwnerAccount(ctx.user ?? undefined)),
     /**
@@ -517,6 +531,22 @@ export const appRouter = router({
             return { roleId, label: role?.label ?? roleId };
           }),
         },
+      };
+    }),
+    /**
+     * Owner-only aggregate presence count.
+     *
+     * `protectedProcedure` rejects guests and unauthenticated callers and `requireOwner` rejects
+     * every account that is not the single configured owner, so this is a server-side gate that
+     * does not depend on anything the frontend does. The payload is a single number plus the TTL
+     * and a timestamp: no user ids, emails, names, guest tokens or openIds.
+     */
+    getOnlineUsersCount: protectedProcedure.query(async ({ ctx }) => {
+      requireOwner(ctx);
+      return {
+        onlineUsers: await countUsersPresentNow(),
+        ttlSeconds: PRESENCE_TTL_SECONDS,
+        updatedAt: new Date().toISOString(),
       };
     }),
     claimDiagnostic: protectedProcedure.query(({ ctx }) => ({
