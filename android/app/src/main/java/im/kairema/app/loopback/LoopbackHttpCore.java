@@ -77,6 +77,10 @@ public final class LoopbackHttpCore implements LoopbackServer {
     private String accessSecret;
     private ServerSocket serverSocket;
     private ExecutorService workers;
+    private volatile boolean acceptLoopAlive;
+    private volatile boolean acceptLoopFailed;
+    private final java.util.concurrent.atomic.AtomicInteger acceptedSockets =
+            new java.util.concurrent.atomic.AtomicInteger();
 
     public LoopbackHttpCore(LoopbackStaticSource staticSource, URL upstream) {
         this(staticSource, upstream, LoopbackLog.NO_OP);
@@ -100,8 +104,11 @@ public final class LoopbackHttpCore implements LoopbackServer {
         });
         Thread accept = new Thread(this::acceptLoop, "kairema-loopback-accept");
         accept.setDaemon(true);
+        acceptLoopAlive = true;
+        acceptLoopFailed = false;
+        acceptedSockets.set(0);
         accept.start();
-        log.info("Loopback listener bound to 127.0.0.1:" + getPort());
+        log.info("Loopback listener bound to 127.0.0.1:" + getPort() + "; accept loop started");
     }
 
     @Override
@@ -138,6 +145,21 @@ public final class LoopbackHttpCore implements LoopbackServer {
         return ACCESS_COOKIE_NAME + "=" + accessSecret + "; Path=/; HttpOnly";
     }
 
+    @Override
+    public boolean isAcceptLoopAlive() {
+        return acceptLoopAlive && serverSocket != null && !serverSocket.isClosed();
+    }
+
+    @Override
+    public boolean didAcceptLoopFail() {
+        return acceptLoopFailed;
+    }
+
+    @Override
+    public int getAcceptedSocketCount() {
+        return acceptedSockets.get();
+    }
+
     private static String newAccessSecret() {
         byte[] bytes = new byte[32];
         new SecureRandom().nextBytes(bytes);
@@ -162,10 +184,16 @@ public final class LoopbackHttpCore implements LoopbackServer {
                 // than swallowed: the WebView would otherwise be pointed at a dead origin and fail
                 // with ERR_CONNECTION_REFUSED with nothing in logcat to explain it.
                 if (serverSocket != null && !serverSocket.isClosed()) {
-                    log.warn("Loopback accept loop stopped unexpectedly", e);
+                    acceptLoopFailed = true;
+                    log.warn("Loopback accept loop stopped unexpectedly: "
+                            + e.getClass().getSimpleName(), e);
+                } else {
+                    log.info("Loopback accept loop exited after the listener was closed");
                 }
+                acceptLoopAlive = false;
                 return;
             }
+            acceptLoopAlive = true;
             ExecutorService pool = workers;
             if (pool == null) {
                 closeQuietly(socket);
@@ -173,10 +201,12 @@ public final class LoopbackHttpCore implements LoopbackServer {
             }
             try {
                 pool.execute(() -> handleQuietly(socket));
+                acceptedSockets.incrementAndGet();
             } catch (RuntimeException rejected) {
                 closeQuietly(socket);
             }
         }
+        acceptLoopAlive = false;
     }
 
     private void handleQuietly(Socket socket) {

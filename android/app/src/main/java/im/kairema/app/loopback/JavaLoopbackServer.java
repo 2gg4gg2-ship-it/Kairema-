@@ -36,11 +36,13 @@ public final class JavaLoopbackServer implements LoopbackServer {
             @Override
             public void info(String message) {
                 Log.i(TAG, message);
+                DebugLog.event(message);
             }
 
             @Override
             public void warn(String message, Throwable error) {
                 Log.w(TAG, message, error);
+                DebugLog.failure(message, error);
             }
         };
     }
@@ -70,6 +72,21 @@ public final class JavaLoopbackServer implements LoopbackServer {
     @Override
     public String getAccessCookie() {
         return core.getAccessCookie();
+    }
+
+    @Override
+    public boolean isAcceptLoopAlive() {
+        return core.isAcceptLoopAlive();
+    }
+
+    @Override
+    public boolean didAcceptLoopFail() {
+        return core.didAcceptLoopFail();
+    }
+
+    @Override
+    public int getAcceptedSocketCount() {
+        return core.getAcceptedSocketCount();
     }
 
     /** Reads bundled web files out of the APK's assets. */

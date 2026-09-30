@@ -84,6 +84,38 @@ public final class LoopbackServerFactory {
     }
 
     /**
+     * Whether the build asked for on-device diagnostics.
+     *
+     * <p>Read from the generated config rather than from a manifest or a debuggable flag, so the
+     * value is fixed at build time by {@code KAIREMA_ANDROID_DEBUG=1} and cannot be switched on from
+     * the device.
+     */
+    public static boolean isDebugDiagnosticsEnabled(AssetManager assets) {
+        try {
+            byte[] raw;
+            try (InputStream in = assets.open(CONFIG_ASSET)) {
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                byte[] chunk = new byte[4096];
+                int read;
+                while ((read = in.read(chunk)) != -1) {
+                    buffer.write(chunk, 0, read);
+                }
+                raw = buffer.toByteArray();
+            }
+            JSONObject root = new JSONObject(new String(raw, StandardCharsets.UTF_8));
+            JSONObject plugins = root.optJSONObject("plugins");
+            if (plugins == null) {
+                return false;
+            }
+            JSONObject loopback = plugins.optJSONObject(PLUGIN_ID);
+            return loopback != null && loopback.optBoolean("debugDiagnostics", false);
+        } catch (IOException | JSONException unreadable) {
+            // Diagnostics must never be the reason startup fails; default to off.
+            return false;
+        }
+    }
+
+    /**
      * Logs a startup failure without ever echoing the configured host into the log.
      *
      * <p>Only the exception type and message are logged. The throwable itself is deliberately not

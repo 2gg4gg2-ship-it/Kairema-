@@ -41,4 +41,19 @@ public interface LoopbackServer {
      * {@code HttpOnly} the page's JavaScript cannot read it either.
      */
     String getAccessCookie();
+
+    /**
+     * Whether the accept loop is currently able to take connections.
+     *
+     * <p>A bound {@link ServerSocket} alone does not prove the origin is reachable: if the accept
+     * loop has exited, the port still reports as valid while every connection is refused. This is
+     * what lets the debug screen tell those two states apart.
+     */
+    boolean isAcceptLoopAlive();
+
+    /** Whether the accept loop exited because of a failure rather than a normal {@link #stop()}. */
+    boolean didAcceptLoopFail();
+
+    /** Count of connections accepted so far. A counter only; no request content is retained. */
+    int getAcceptedSocketCount();
 }

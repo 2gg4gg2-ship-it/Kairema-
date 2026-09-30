@@ -14,17 +14,27 @@ import type { CapacitorConfig } from "@capacitor/cli";
  */
 const apiBaseUrl = process.env.KAIREMA_API_BASE_URL?.trim();
 
+/**
+ * Debug-only switches. Both are driven by the single KAIREMA_ANDROID_DEBUG=1 build variable so a
+ * release build can never turn them on: there is no way to reach them from the device.
+ *
+ * debugDiagnostics additionally gates the on-device diagnostics log and fallback screen, which exist
+ * because the user has no PC, adb or logcat and the loopback failure must be readable on the phone.
+ */
+const androidDebug = process.env.KAIREMA_ANDROID_DEBUG === "1";
+
 const config: CapacitorConfig = {
   appId: process.env.KAIREMA_ANDROID_APP_ID?.trim() || "im.kairema.app",
   appName: "Kairema",
   webDir: "dist/public",
   android: {
     allowMixedContent: false,
-    webContentsDebuggingEnabled: process.env.KAIREMA_ANDROID_DEBUG === "1",
+    webContentsDebuggingEnabled: androidDebug,
   },
   plugins: {
     KairemaLoopback: {
       apiBaseUrl: apiBaseUrl || "",
+      debugDiagnostics: androidDebug,
     },
   },
 };
