@@ -35,17 +35,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Reads the *repository variable* through the `vars` context on purpose. This must never
+      # become `secrets.KAIREMA_API_BASE_URL`: the upstream is a public service URL, not a
+      # credential, and a repository variable is the correct scope for it.
+      #
+      # `${FROM_REPO:-}` matters: `set -u` would otherwise abort with an "unbound variable"
+      # failure whenever the vars context resolves to nothing, which hides the real diagnosis.
+      # VISIBLE_VAR_NAMES lists variable NAMES only (never values) so a failed run immediately
+      # shows whether this repository exposes any Actions variables at all.
       - name: Resolve KAIREMA_API_BASE_URL
         id: api_base_url
         env:
           FROM_REPO: ${{ vars.KAIREMA_API_BASE_URL }}
+          VISIBLE_VAR_NAMES: ${{ join(vars.*, ', ') }}
         run: |
           set -euo pipefail
-          value="${FROM_REPO}"
+          value="${FROM_REPO:-}"
           value="$(printf '%s' "$value" | tr -d '[:space:]')"
           if [ -z "$value" ]; then
-            echo "::error::Repository variable KAIREMA_API_BASE_URL is not set."
-            echo "Add it under Settings -> Secrets and variables -> Actions -> Variables."
+            echo "::error::Repository variable KAIREMA_API_BASE_URL resolved to an empty value."
+            echo "::error::repository=${{ github.repository }}"
+            echo "::error::ref=${{ github.ref }}"
+            echo "::error::actions variables visible to this run: '${VISIBLE_VAR_NAMES:-<none>}'"
+            echo "::error::If that list is empty, the variable is not defined on this repository,"
+            echo "::error::or it is scoped to an Environment, which a job must declare to see."
+            echo "::error::If the list is not empty, the variable name must match exactly."
             exit 1
           fi
           case "$value" in
