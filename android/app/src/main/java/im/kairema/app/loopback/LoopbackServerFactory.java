@@ -3,6 +3,7 @@ package im.kairema.app.loopback;
 import android.content.res.AssetManager;
 import android.util.Log;
 
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -54,7 +55,17 @@ public final class LoopbackServerFactory {
             }
             raw = buffer.toByteArray();
         }
-        JSONObject root = new JSONObject(new String(raw, StandardCharsets.UTF_8));
+        JSONObject root;
+        try {
+            root = new JSONObject(new String(raw, StandardCharsets.UTF_8));
+        } catch (JSONException malformed) {
+            // The generated config is supposed to be valid JSON. If it is not, the build or the
+            // sync step went wrong, and there is no upstream to recover, so refuse to start the
+            // loopback server exactly as an unset apiBaseUrl would.
+            throw new IOException(
+                    CONFIG_ASSET + " is not valid JSON; the Capacitor config was not generated correctly.",
+                    malformed);
+        }
         JSONObject plugins = root.optJSONObject("plugins");
         if (plugins == null) {
             return null;
