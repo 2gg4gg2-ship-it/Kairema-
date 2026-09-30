@@ -51,6 +51,7 @@ public class MainActivity extends BridgeActivity {
         try {
             loopbackServer = LoopbackServerFactory.create(getAssets());
             loopbackServer.start();
+            Log.i(TAG, "Loopback server started on port " + loopbackServer.getPort());
         } catch (IOException failure) {
             // The upstream host is intentionally never logged.
             loopbackServer = null;
@@ -80,6 +81,7 @@ public class MainActivity extends BridgeActivity {
         cookies.setAcceptCookie(true);
         cookies.setCookie(origin, loopbackServer.getAccessCookie(), value -> {
             if (bridge != null && bridge.getWebView() != null) {
+                Log.i(TAG, "Loading WebView from loopback origin " + origin);
                 bridge.getWebView().loadUrl(origin + "/");
             }
         });

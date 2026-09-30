@@ -1,6 +1,7 @@
 package im.kairema.app.loopback;
 
 import android.content.res.AssetManager;
+import android.util.Log;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -16,14 +17,38 @@ import java.net.URL;
  */
 public final class JavaLoopbackServer implements LoopbackServer {
 
+    private static final String TAG = "KairemaLoopback";
+
     private final LoopbackHttpCore core;
 
     public JavaLoopbackServer(AssetManager assets, String assetsPrefix, URL upstream) {
-        this.core = new LoopbackHttpCore(new AssetSource(assets, assetsPrefix), upstream);
+        this.core = new LoopbackHttpCore(new AssetSource(assets, assetsPrefix), upstream, androidLog());
+    }
+
+    /**
+     * Bridges the core's Android-free logging seam onto logcat.
+     *
+     * <p>Only the loopback port and lifecycle state are ever logged. The upstream host, the access
+     * credential and request contents never reach this logger.
+     */
+    private static LoopbackLog androidLog() {
+        return new LoopbackLog() {
+            @Override
+            public void info(String message) {
+                Log.i(TAG, message);
+            }
+
+            @Override
+            public void warn(String message, Throwable error) {
+                Log.w(TAG, message, error);
+            }
+        };
     }
 
     @Override
     public void start() throws IOException {
+        // Bind failures are reported by the caller, which logs them without the upstream. Nothing is
+        // logged here so that a malformed upstream URL cannot reach logcat through this message.
         core.start();
     }
 

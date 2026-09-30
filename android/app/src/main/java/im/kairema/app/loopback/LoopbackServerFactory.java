@@ -9,6 +9,7 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
@@ -35,7 +36,15 @@ public final class LoopbackServerFactory {
             throw new IOException(
                     "Loopback upstream is not configured. Build the APK with KAIREMA_API_BASE_URL set.");
         }
-        URL upstream = new URL(apiBaseUrl.trim());
+        Log.i(TAG, "Read apiBaseUrl from " + CONFIG_ASSET + " (value not logged)");
+        URL upstream;
+        try {
+            upstream = new URL(apiBaseUrl.trim());
+        } catch (MalformedURLException malformed) {
+            // MalformedURLException embeds the offending string in its message, so the cause is not
+            // propagated: this message is safe to log and does not reveal the configured host.
+            throw new IOException("Loopback upstream is not a valid URL.", malformed);
+        }
         // The upstream carries session cookies and chat traffic, so it must be TLS. Plaintext here
         // would also change the SameSite/Secure attributes the backend issues.
         if (!"https".equalsIgnoreCase(upstream.getProtocol())) {
@@ -74,8 +83,15 @@ public final class LoopbackServerFactory {
         return loopback == null ? null : loopback.optString("apiBaseUrl", null);
     }
 
-    /** Logs a startup failure without ever echoing the configured host into the log. */
+    /**
+     * Logs a startup failure without ever echoing the configured host into the log.
+     *
+     * <p>Only the exception type and message are logged. The throwable itself is deliberately not
+     * attached: {@code MalformedURLException} from parsing the upstream includes the offending string
+     * in its own message, and a stack trace would print that into logcat.
+     */
     public static void logStartupFailure(IOException failure) {
-        Log.e(TAG, "Loopback origin could not start: " + failure.getMessage());
+        Log.e(TAG, "Loopback origin could not start: " + failure.getClass().getSimpleName()
+                + ": " + failure.getMessage());
     }
 }

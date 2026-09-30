@@ -55,23 +55,44 @@ public final class LoopbackHttpCore implements LoopbackServer {
 
     private static final int MAX_BODY_BYTES = 64 * 1024 * 1024;
 
+    /**
+     * The loopback origin is always IPv4, so it is bound as IPv4. {@link InetAddress#getLoopbackAddress()}
+     * may hand back {@code ::1} when IPv6 is preferred, and the WebView is always pointed at
+     * {@code http://127.0.0.1:<port>}: a socket listening on the IPv6 loopback would leave nothing on
+     * the IPv4 address, which surfaces in the WebView as {@code ERR_CONNECTION_REFUSED} even though
+     * {@link #getPort()} reports a perfectly valid port.
+     *
+     * <p>Resolved lazily because {@code getByName} declares a checked exception, which a static
+     * field initialiser cannot propagate.
+     */
+    private static InetAddress loopbackV4() throws IOException {
+        // UnknownHostException is an IOException, so a numeric literal cannot fail in practice.
+        return InetAddress.getByName("127.0.0.1");
+    }
+
     private final LoopbackStaticSource staticSource;
     private final URL upstream;
+    private final LoopbackLog log;
 
     private String accessSecret;
     private ServerSocket serverSocket;
     private ExecutorService workers;
 
     public LoopbackHttpCore(LoopbackStaticSource staticSource, URL upstream) {
+        this(staticSource, upstream, LoopbackLog.NO_OP);
+    }
+
+    public LoopbackHttpCore(LoopbackStaticSource staticSource, URL upstream, LoopbackLog log) {
         this.staticSource = staticSource;
         this.upstream = upstream;
+        this.log = log;
     }
 
     @Override
     public synchronized void start() throws IOException {
         accessSecret = newAccessSecret();
         // Loopback only, ephemeral port. There is deliberately no way to bind 0.0.0.0 or a fixed port.
-        serverSocket = new ServerSocket(0, 64, InetAddress.getLoopbackAddress());
+        serverSocket = new ServerSocket(0, 64, loopbackV4());
         workers = Executors.newCachedThreadPool(r -> {
             Thread t = new Thread(r, "kairema-loopback");
             t.setDaemon(true);
@@ -80,6 +101,7 @@ public final class LoopbackHttpCore implements LoopbackServer {
         Thread accept = new Thread(this::acceptLoop, "kairema-loopback-accept");
         accept.setDaemon(true);
         accept.start();
+        log.info("Loopback listener bound to 127.0.0.1:" + getPort());
     }
 
     @Override
@@ -91,6 +113,7 @@ public final class LoopbackHttpCore implements LoopbackServer {
                 // Listener already gone.
             }
             serverSocket = null;
+            log.info("Loopback listener stopped");
         }
         if (workers != null) {
             workers.shutdownNow();
@@ -134,6 +157,13 @@ public final class LoopbackHttpCore implements LoopbackServer {
             try {
                 socket = serverSocket.accept();
             } catch (IOException e) {
+                // stop() closes the socket, which is the normal way out of this loop. Anything else
+                // means the listener died while still advertising a port, so it is logged rather
+                // than swallowed: the WebView would otherwise be pointed at a dead origin and fail
+                // with ERR_CONNECTION_REFUSED with nothing in logcat to explain it.
+                if (serverSocket != null && !serverSocket.isClosed()) {
+                    log.warn("Loopback accept loop stopped unexpectedly", e);
+                }
                 return;
             }
             ExecutorService pool = workers;
