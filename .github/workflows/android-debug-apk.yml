@@ -21,7 +21,6 @@ concurrency:
 
 env:
   NODE_VERSION: "24"
-  PNPM_VERSION: "10.4.1"
   JAVA_VERSION: "21"
   ANDROID_COMPILE_SDK: "36"
 
@@ -72,10 +71,11 @@ jobs:
           echo "Resolved an https:// upstream from the repository variable."
           echo "value=$value" >> "$GITHUB_OUTPUT"
 
+      # No `with: version` here on purpose. package.json already pins the package manager via
+      # "packageManager": "pnpm@10.4.1+...", and pnpm/action-setup reads it. Passing `version` as
+      # well makes the action reject the run with "Multiple versions of pnpm specified".
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
