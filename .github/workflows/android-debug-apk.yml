@@ -1,0 +1,140 @@
+name: Android debug APK
+
+# Builds the Phase 1 Capacitor shell and publishes the debug APK as a workflow artifact so it can be
+# downloaded straight onto a phone. This workflow is intentionally limited to the debug shell: no
+# signing material, no release variant, and no Phase 2+ functionality.
+#
+# The upstream backend is NOT hardcoded anywhere. It is read from the repository variable
+# KAIREMA_API_BASE_URL (Settings -> Secrets and variables -> Actions -> Variables). That variable is
+# not treated as a secret: it is a public service URL. It must be set or this workflow stops before
+# building, because a shell without an upstream would ship with no API at all.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/android-capacitor-shell
+
+concurrency:
+  group: android-debug-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "24"
+  PNPM_VERSION: "10.4.1"
+  JAVA_VERSION: "21"
+  ANDROID_COMPILE_SDK: "36"
+
+jobs:
+  build-debug-apk:
+    name: Build debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve KAIREMA_API_BASE_URL
+        id: api_base_url
+        env:
+          FROM_REPO: ${{ vars.KAIREMA_API_BASE_URL }}
+        run: |
+          set -euo pipefail
+          value="${FROM_REPO}"
+          value="$(printf '%s' "$value" | tr -d '[:space:]')"
+          if [ -z "$value" ]; then
+            echo "::error::Repository variable KAIREMA_API_BASE_URL is not set."
+            echo "Add it under Settings -> Secrets and variables -> Actions -> Variables."
+            exit 1
+          fi
+          case "$value" in
+            https://*) ;;
+            *)
+              echo "::error::KAIREMA_API_BASE_URL must start with https://"
+              exit 1
+              ;;
+          esac
+          echo "Resolved an https:// upstream from the repository variable."
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          set -euo pipefail
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-${ANDROID_COMPILE_SDK}" \
+            "build-tools;36.0.0"
+
+      - name: Cache Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # KAIREMA_ANDROID_DEBUG=1 turns on WebView contents debugging so the shell can be inspected from
+      # the phone via chrome://inspect. KAIREMA_API_BASE_URL must be in the environment here, because
+      # `cap sync` is what writes apiBaseUrl into assets/capacitor.config.json.
+      - name: Build the debug APK
+        env:
+          KAIREMA_API_BASE_URL: ${{ steps.api_base_url.outputs.value }}
+          KAIREMA_ANDROID_DEBUG: "1"
+        run: pnpm android:build
+
+      - name: Verify generated Capacitor config
+        env:
+          KAIREMA_API_BASE_URL: ${{ steps.api_base_url.outputs.value }}
+        run: |
+          set -euo pipefail
+          config="android/app/src/main/assets/capacitor.config.json"
+          test -f "$config" || { echo "::error::missing $config"; exit 1; }
+
+          value="$(node -e "const c=require('./'+process.argv[1]);const p=(c.plugins&&c.plugins.KairemaLoopback)||{};process.stdout.write(String(p.apiBaseUrl||''));" "$config")"
+          if [ -z "$value" ]; then
+            echo "::error::apiBaseUrl is empty in $config; the shell would have no API."
+            exit 1
+          fi
+          if [ "$value" != "$KAIREMA_API_BASE_URL" ]; then
+            echo "::error::apiBaseUrl in $config does not match the configured upstream."
+            exit 1
+          fi
+          if node -e "const c=require('./'+process.argv[1]);process.exit(c.server&&c.server.url?0:1);" "$config"; then
+            echo "::error::$config sets server.url; the shell must bundle the web app locally."
+            exit 1
+          fi
+          echo "Capacitor config verified: non-empty apiBaseUrl, no server.url."
+
+      - name: Verify APK exists
+        run: |
+          set -euo pipefail
+          apk="android/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$apk" || { echo "::error::missing $apk"; exit 1; }
+          echo "Found $apk ($(stat -c%s "$apk") bytes)"
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairema-debug-apk-${{ github.run_number }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
