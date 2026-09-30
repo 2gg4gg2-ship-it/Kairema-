@@ -248,6 +248,7 @@ public final class LoopbackHttpCore implements LoopbackServer {
             return;
         }
         if (LoopbackRoutes.isProxyable(request.path)) {
+            log.info("proxy request " + request.method + " " + safeRouteLabel(request.path));
             if (!isAuthorised(request)) {
                 writeSimple(out, 403, "loopback access denied");
                 return;
@@ -257,6 +258,33 @@ public final class LoopbackHttpCore implements LoopbackServer {
             serveAsset(request, out);
         }
         out.flush();
+    }
+
+    /**
+     * A request line reduced to what is safe and useful to log: the method and which route it hit.
+     *
+     * <p>For tRPC the second segment is kept, because the procedure name is what identifies an auth
+     * call ({@code auth.stytch.login}, {@code auth.me}). Everything after that is dropped so storage
+     * keys and attachment paths never reach the log, and the query string is never included.
+     */
+    private static String safeRouteLabel(String path) {
+        for (String prefix : LoopbackRoutes.PROXY_ALLOWLIST) {
+            String base = prefix.endsWith("/") ? prefix.substring(0, prefix.length() - 1) : prefix;
+            if (path.equals(base) || path.startsWith(base + "/")) {
+                if (LoopbackRoutes.TRPC.equals(base)) {
+                    String rest = path.substring(base.length());
+                    if (rest.startsWith("/")) {
+                        int slash = rest.indexOf('/', 1);
+                        String procedure = slash < 0 ? rest.substring(1) : rest.substring(1, slash);
+                        if (!procedure.isEmpty()) {
+                            return base + "/" + procedure;
+                        }
+                    }
+                }
+                return base;
+            }
+        }
+        return "unlisted";
     }
 
     /**

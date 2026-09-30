@@ -113,14 +113,30 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # KAIREMA_ANDROID_DEBUG=1 turns on WebView contents debugging so the shell can be inspected from
-      # the phone via chrome://inspect. KAIREMA_API_BASE_URL must be in the environment here, because
-      # `cap sync` is what writes apiBaseUrl into assets/capacitor.config.json.
+      # The OAuth portal values are build-time Vite variables baked into the bundle. Without them the
+      # bundle contains `new URL("undefined/app-auth")`, which throws the moment "Continue with
+      # Google" is tapped, so sign-in silently does nothing. They are passed through rather than
+      # hardcoded, and their absence is reported loudly instead of failing the build: the APK is
+      # still worth producing because email sign-in and the loopback diagnostics do not need them.
       - name: Build the debug APK
         env:
           KAIREMA_API_BASE_URL: ${{ steps.api_base_url.outputs.value }}
           KAIREMA_ANDROID_DEBUG: "1"
+          VITE_OAUTH_PORTAL_URL: ${{ vars.VITE_OAUTH_PORTAL_URL }}
+          VITE_APP_ID: ${{ vars.VITE_APP_ID }}
         run: pnpm android:build
+
+      - name: Warn about missing OAuth build variables
+        env:
+          VITE_OAUTH_PORTAL_URL: ${{ vars.VITE_OAUTH_PORTAL_URL }}
+          VITE_APP_ID: ${{ vars.VITE_APP_ID }}
+        run: |
+          if [ -z "$VITE_OAUTH_PORTAL_URL" ] || [ -z "$VITE_APP_ID" ]; then
+            echo "::warning::VITE_OAUTH_PORTAL_URL and/or VITE_APP_ID are not set as repository"
+            echo "::warning::variables, so 'Continue with Google' is broken in this APK: the bundle"
+            echo "::warning::will contain new URL(\"undefined/app-auth\"). Set both under"
+            echo "::warning::Settings -> Secrets and variables -> Actions -> Variables."
+          fi
 
       - name: Verify generated Capacitor config
         env:

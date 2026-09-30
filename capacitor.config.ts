@@ -27,6 +27,18 @@ const config: CapacitorConfig = {
   appId: process.env.KAIREMA_ANDROID_APP_ID?.trim() || "im.kairema.app",
   appName: "Kairema",
   webDir: "dist/public",
+  // `url` is deliberately left unset: the app serves itself from the in-process loopback origin.
+  server: {
+    // Capacitor decides, per navigation, whether the WebView may follow it or whether it must be
+    // handed to the system browser. It compares the host against `appUrl`, which without `server.url`
+    // is Capacitor's own default `https://localhost`. The shell actually runs on
+    // `http://127.0.0.1:<port>`, so every in-page navigation to our own origin - the post-login
+    // `window.location.assign("/")`, an OAuth landing, any client-side route change - was treated as
+    // external and fired an ACTION_VIEW intent, leaving the session cookie in another app.
+    // Listing the loopback host keeps those navigations inside this WebView. This is navigation
+    // policy only: no remote URL is introduced and `server.url` stays unset.
+    allowNavigation: ["127.0.0.1"],
+  },
   android: {
     allowMixedContent: false,
     webContentsDebuggingEnabled: androidDebug,

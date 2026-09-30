@@ -1,14 +1,19 @@
 package im.kairema.app;
 
 import android.graphics.Bitmap;
+import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
+import android.widget.Button;
+import android.widget.FrameLayout;
 
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebViewClient;
@@ -37,6 +42,7 @@ public class MainActivity extends BridgeActivity {
 
     private LoopbackServer loopbackServer;
     private DiagnosticsScreen diagnosticsScreen;
+    private View diagnosticsButton;
     private boolean diagnosticsEnabled;
 
     @Override
@@ -57,6 +63,9 @@ public class MainActivity extends BridgeActivity {
     protected void load() {
         super.load();
         installDiagnosticWebViewClient();
+        if (diagnosticsEnabled) {
+            installDiagnosticsButton();
+        }
         pointWebViewAtLoopback();
     }
 
@@ -136,14 +145,28 @@ public class MainActivity extends BridgeActivity {
         webView.setWebViewClient(new BridgeWebViewClient(bridge) {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
-                DebugLog.event("WebView onPageStarted (main frame)");
+                DebugLog.event("main-frame navigation -> " + safeUrl(url));
                 super.onPageStarted(view, url, favicon);
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                DebugLog.event("WebView onPageFinished");
+                DebugLog.event("WebView onPageFinished; sessionCookiePresent="
+                        + hasSessionCookie());
                 super.onPageFinished(view, url);
+            }
+
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                // Whether Capacitor keeps this navigation or hands it to the system browser decides
+                // where the session cookie ends up, so record which host was asked for. Only the host
+                // is logged: query strings carry state, code and token.
+                Uri uri = request.getUrl();
+                String host = uri.getHost();
+                DebugLog.event("navigation request host=" + (host == null ? "(none)" : host)
+                        + " path=" + (uri.getPath() == null ? "/" : uri.getPath())
+                        + "; isLoopback=" + isLoopbackHost(host));
+                return super.shouldOverrideUrlLoading(view, request);
             }
 
             @Override
@@ -172,6 +195,92 @@ public class MainActivity extends BridgeActivity {
 
     private static String describe(CharSequence description) {
         return description == null ? "none" : description.toString();
+    }
+
+    /**
+     * Host and path only.
+     *
+     * <p>Query strings are dropped on purpose: an OAuth landing carries {@code state}, {@code code}
+     * and the session token, and none of that belongs in a file the user is asked to share. A path
+     * alone is enough to tell which origin the app was on.
+     */
+    private static String safeUrl(String rawUrl) {
+        if (rawUrl == null) {
+            return "none";
+        }
+        try {
+            Uri uri = Uri.parse(rawUrl);
+            String host = uri.getHost();
+            String path = uri.getPath();
+            return (host == null ? "(no host)" : host) + (path == null || path.isEmpty() ? "/" : path);
+        } catch (RuntimeException unparseable) {
+            return "(unparseable url)";
+        }
+    }
+
+    private static boolean isLoopbackHost(String host) {
+        return "127.0.0.1".equals(host) || "localhost".equals(host);
+    }
+
+    /**
+     * Whether any session cookie is present for the loopback origin, as a boolean.
+     *
+     * <p>The value is never read, logged or stored: the cookie jar is only asked whether it holds
+     * anything, which is enough to tell "the callback never set a session" apart from "the session
+     * exists but the frontend did not pick it up".
+     */
+    private boolean hasSessionCookie() {
+        if (loopbackServer == null) {
+            return false;
+        }
+        try {
+            CookieManager cookies = CookieManager.getInstance();
+            String header = cookies.getCookie(loopbackServer.getOrigin());
+            if (header == null || header.isEmpty()) {
+                return false;
+            }
+            for (String part : header.split(";")) {
+                String name = part.trim();
+                if (name.startsWith("app_session_id=") || name.startsWith("__Host-kairema-")) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (RuntimeException unavailable) {
+            return false;
+        }
+    }
+
+    /**
+     * Adds a permanent diagnostics button in debug builds.
+     *
+     * <p>The automatic screen only appears when the WebView reports a load error. An auth flow that
+     * never navigates, or that silently hands the session to another app, produces no error at all -
+     * which is exactly the case that has to be diagnosable, and the user has no adb to fall back on.
+     */
+    private void installDiagnosticsButton() {
+        try {
+            ViewGroup container = (ViewGroup) findViewById(android.R.id.content);
+            if (container == null || diagnosticsButton != null) {
+                return;
+            }
+            Button button = new Button(this);
+            button.setText("Diag");
+            button.setAllCaps(false);
+            button.setTextSize(11);
+            button.setOnClickListener(ignored -> showDiagnostics("opened manually"));
+            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+            params.gravity = Gravity.TOP | Gravity.END;
+            params.topMargin = 48;
+            params.rightMargin = 8;
+            button.setLayoutParams(params);
+            container.addView(button);
+            diagnosticsButton = button;
+            DebugLog.event("diagnostics button installed");
+        } catch (RuntimeException failure) {
+            DebugLog.failure("could not install diagnostics button", failure);
+        }
     }
 
     /** Shows the native screen over the WebView, which is useless while it is the thing that failed. */
