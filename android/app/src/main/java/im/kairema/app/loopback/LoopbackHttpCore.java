@@ -248,7 +248,8 @@ public final class LoopbackHttpCore implements LoopbackServer {
             return;
         }
         if (LoopbackRoutes.isProxyable(request.path)) {
-            log.info("proxy request " + request.method + " " + safeRouteLabel(request.path));
+            log.info("proxy request " + request.method + " " + safeRouteLabel(request.path)
+                    + safeRequestShape(request));
             if (!isAuthorised(request)) {
                 writeSimple(out, 403, "loopback access denied");
                 return;
@@ -285,6 +286,42 @@ public final class LoopbackHttpCore implements LoopbackServer {
             }
         }
         return "unlisted";
+    }
+
+    /**
+     * Request metadata that is safe to show a human: the media type, how many body bytes were read,
+     * and whether that is exactly what the client declared.
+     *
+     * <p>Nothing here is derived from a credential. Only {@code Content-Type}, {@code Content-Length}
+     * and {@code Transfer-Encoding} are named, no other header value is read, and not one body byte is
+     * included or hashed. Together with the tRPC route label this is what proves, from the phone
+     * alone, that the backend received the payload the client built - a body the proxy read short or
+     * dropped shows up as a mismatch or as {@code bodyBytes=0} on a POST.
+     */
+    private static String safeRequestShape(Request request) {
+        String declared = request.headers.get("content-length");
+        String transferEncoding = request.headers.get("transfer-encoding");
+        StringBuilder shape = new StringBuilder();
+        shape.append(" contentType=").append(valueOrAbsent(request.headers.get("content-type")));
+        shape.append(" bodyBytes=").append(request.body.length);
+        shape.append(" declaredContentLength=").append(valueOrAbsent(declared));
+        shape.append(" transferEncoding=").append(valueOrAbsent(transferEncoding));
+        shape.append(" bodyMatchesDeclared=").append(declared == null
+                ? "n/a"
+                : String.valueOf(request.body.length == parseLengthOrMinusOne(declared)));
+        return shape.toString();
+    }
+
+    private static String valueOrAbsent(String value) {
+        return value == null ? "(absent)" : value;
+    }
+
+    private static int parseLengthOrMinusOne(String raw) {
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException notANumber) {
+            return -1;
+        }
     }
 
     /**
@@ -500,6 +537,7 @@ public final class LoopbackHttpCore implements LoopbackServer {
             // and whether a session cookie was set is the difference between "the backend refused"
             // and "the cookie never reached the jar".
             int setCookieCount = 0;
+            String responseContentType = null;
             for (Map.Entry<String, List<String>> header : connection.getHeaderFields().entrySet()) {
                 String name = header.getKey();
                 if (name == null) {
@@ -508,6 +546,9 @@ public final class LoopbackHttpCore implements LoopbackServer {
                 String lower = name.toLowerCase(Locale.ROOT);
                 if (HOP_BY_HOP.contains(lower)) {
                     continue;
+                }
+                if ("content-type".equals(lower) && header.getValue() != null && !header.getValue().isEmpty()) {
+                    responseContentType = header.getValue().get(0);
                 }
                 // Forwarded one by one so repeated headers - notably multiple Set-Cookie - survive as
                 // separate lines instead of being collapsed into one.
@@ -520,6 +561,8 @@ public final class LoopbackHttpCore implements LoopbackServer {
                 }
             }
             log.info("proxy response " + status + " setCookieCount=" + setCookieCount
+                    + " responseContentType=" + valueOrAbsent(responseContentType)
+                    + " forwardedBodyBytes=" + request.body.length
                     + " for " + safeRouteLabel(request.path));
             // No Content-Length for streamed bodies, so the client reads until close.
             writeHeader(out, "Connection", "close");

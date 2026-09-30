@@ -18,6 +18,7 @@
     "benchmark:capacity-calibration": "tsx scripts/capacity-calibration.ts",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
     "build:android:web": "KAIREMA_ANDROID=1 vite build",
+    "check:loopback-payload": "node scripts/loopback-payload-check.mjs",
     "android:sync": "pnpm build:android:web && cap sync android",
     "android:build": "pnpm android:sync && cd android && ./gradlew assembleDebug"
   },
