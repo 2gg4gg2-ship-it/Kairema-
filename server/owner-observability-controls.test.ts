@@ -8,7 +8,8 @@ const { getOwnerObservabilitySnapshot, listProviderControlFlags, recordTechnical
   upsertProviderControlFlag: vi.fn(),
 }));
 
-vi.mock("./_core/env", () => ({ ENV: { ownerOpenId: "owner-open-id" } }));
+// The owner is identified by email; the openId narrows the match to the same account.
+vi.mock("./_core/env", () => ({ ENV: { ownerEmail: "owner@example.com", ownerOpenId: "owner-open-id" } }));
 vi.mock("./db", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./db")>()),
   getOwnerObservabilitySnapshot,
@@ -21,7 +22,7 @@ import { appRouter } from "./routers";
 
 function callerFor(openId: string, id = 42) {
   return appRouter.createCaller({
-    user: { id, openId, email: "user@example.com", name: "User", loginMethod: "manus", role: "user", createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date(), isGuest: 0 },
+    user: { id, openId, email: openId === "owner-open-id" ? "owner@example.com" : "user@example.com", name: "User", loginMethod: "manus", role: "user", createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date(), isGuest: 0 },
     req: { headers: {} } as TrpcContext["req"],
     res: {} as TrpcContext["res"],
   });

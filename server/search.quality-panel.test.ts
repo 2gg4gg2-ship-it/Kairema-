@@ -6,7 +6,8 @@ const { getSearchQualityChart, getSearchQualityPanel } = vi.hoisted(() => ({
   getSearchQualityPanel: vi.fn(),
 }));
 
-vi.mock("./_core/env", () => ({ ENV: { ownerOpenId: "owner-open-id" } }));
+// The owner is identified by email; the openId narrows the match to the same account.
+vi.mock("./_core/env", () => ({ ENV: { ownerEmail: "owner@example.com", ownerOpenId: "owner-open-id" } }));
 vi.mock("./db", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./db")>()),
   getSearchQualityChart,
@@ -20,7 +21,7 @@ function callerFor(openId: string) {
     user: {
       id: 1,
       openId,
-      email: "user@example.com",
+      email: openId === "owner-open-id" ? "owner@example.com" : "user@example.com",
       name: "User",
       loginMethod: "manus",
       role: "user",

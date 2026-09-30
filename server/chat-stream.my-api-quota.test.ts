@@ -185,7 +185,7 @@ describe("the My API per-user quota", () => {
     const myApiQuota = vi.fn().mockImplementation((userId: number, limit: number, windowMs: number) => consumeWindow(userId, limit, windowMs));
     const { stream } = handler({ consumeChatStreamRequestQuota: chatQuota, consumeMyApiRequestQuota: myApiQuota });
     await stream({ body: { ...baseBody, myApi: false } } as Request, response(), vi.fn());
-    expect(chatQuota).toHaveBeenCalledWith(42, expect.any(Number), expect.any(Number));
+    expect(chatQuota).toHaveBeenCalledWith(42, "fast", expect.any(Number), expect.any(Number));
     expect(myApiQuota).not.toHaveBeenCalled();
   });
 

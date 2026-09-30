@@ -2,17 +2,39 @@ import type { Express, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import { appendChatMessage, consumeChatStreamRequestQuota, consumeMyApiRequestQuota, deleteOwnedSessionUserMessage, listUserProviderConfigs, enqueueMemoryExtractionJob, getActiveUserProviderBinding, getOwnedChatSession, getOwnedSessionMessage, getStoredAssistantForClientMessage, listSessionTranscriptWindow, updateChatTitle } from "./db";
 import { resolveRequestUser } from "./_core/context";
-import { MODEL_IDS, chatWithRoleStream, publicChatError, type ChatMessage, type ChatSettings, type Provider, type RoleId } from "./providers";
+import { MODEL_IDS, MODEL_ROLES, chatWithRoleStream, publicChatError, type ChatMessage, type ChatSettings, type Provider, type RoleId } from "./providers";
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
 import { getOrCreateGuestUser } from "./_core/guest-session";
 import type { CapacityActor } from "./capacity-controller";
 import { chatWithUserProviderStream, customUserProviderTarget, isSupportedUserProvider, publicUserProviderError, UserProviderGuestNotAllowedError, UserProviderNotConfiguredError, UserProviderSkipRequestedError } from "./user-providers";
 import { decryptUserProviderSecret } from "./user-provider-secrets";
 
-export const CHAT_STREAM_RATE_LIMIT = 60;
+/**
+ * Per-role allowance for ordinary Kairema Chat, counted per (user, role) in
+ * `chat_stream_rate_windows`. Each of the four public roles carries its own budget, so a user who
+ * spends their Flash minute still has an untouched Think, Context and Apex minute. The counter is
+ * keyed by the stable role slug, so re-pointing a role at a different LLM keeps the same bucket.
+ *
+ * This is a per-role throttle, not a cap on the four roles combined: 15 × 4 roles is the maximum a
+ * user can send inside one window. It is separate from the My API budget below, which is charged
+ * only for BYOK turns.
+ */
+export const CHAT_STREAM_RATE_LIMIT = 15;
 export const CHAT_STREAM_MAX_ACTIVE_PER_INSTANCE = 12;
 export const CHAT_STREAM_MAX_ACTIVE_PER_USER = 2;
 const CHAT_STREAM_RATE_WINDOW_MS = 60_000;
+/** The owner dashboard reports the live quota window, so it is published rather than kept private. */
+export const CHAT_STREAM_RATE_WINDOW_SECONDS = CHAT_STREAM_RATE_WINDOW_MS / 1_000;
+
+/**
+ * The sentence a user sees once their allowance for *this* role is spent. It names the role so the
+ * limit is not mistaken for a whole-account block, and it says plainly that the other roles are
+ * untouched. No internal detail (table names, counters, user ids) is disclosed.
+ */
+export function chatStreamRateLimitMessage(roleId: string): string {
+  const label = MODEL_ROLES.find((role) => role.key === roleId)?.label ?? "Kairema";
+  return `Лимит роли «${label}»: ${CHAT_STREAM_RATE_LIMIT} запросов в минуту. Другие роли Kairema не затронуты. Подождите немного и попробуйте снова.`;
+}
 
 /**
  * My API (BYOK) turns are capped much lower than ordinary chat: each one spends the user's own
@@ -516,7 +538,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
       // therefore limited by exactly one counter, and neither can spend the other's.
       let rateLimit: { allowed: boolean; retryAfterSeconds: number } = { allowed: true, retryAfterSeconds: 0 };
       try {
-        if (!input.myApi) rateLimit = await dependencies.consumeChatStreamRequestQuota(user.id, CHAT_STREAM_RATE_LIMIT, CHAT_STREAM_RATE_WINDOW_MS);
+        if (!input.myApi) rateLimit = await dependencies.consumeChatStreamRequestQuota(user.id, input.modelId, CHAT_STREAM_RATE_LIMIT, CHAT_STREAM_RATE_WINDOW_MS);
       } catch {
         chatStreamRuntimeGauges.quotaUnavailable += 1;
         res.status(503).json({ error: "Проверка лимита временно недоступна. Повторите попытку позже." });
@@ -525,7 +547,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
       if (!rateLimit.allowed) {
         chatStreamRuntimeGauges.rateLimited += 1;
         void Promise.resolve(dependencies.auditChatStream({ event: "chat_stream.rate_limited", userId: user.id, timestamp: new Date().toISOString(), retryAfterSeconds: rateLimit.retryAfterSeconds })).catch(() => undefined);
-        res.set("Retry-After", String(rateLimit.retryAfterSeconds)).status(429).json({ error: "Слишком много запросов. Подождите минуту." });
+        res.set("Retry-After", String(rateLimit.retryAfterSeconds)).status(429).json({ error: chatStreamRateLimitMessage(input.modelId) });
         return;
       }
       // My API turns spend the caller's own provider key, so they carry their own budget. This runs

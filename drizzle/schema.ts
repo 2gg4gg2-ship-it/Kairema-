@@ -271,13 +271,24 @@ export const devApiRateWindows = mysqlTable("dev_api_rate_windows", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
-/** Per-user fixed-minute quota state for ordinary chat-stream ingress; intentionally separate from Dev API quota. */
+/**
+ * Per-user, per-role fixed-minute quota state for ordinary chat-stream ingress; intentionally
+ * separate from Dev API quota and from the My API (BYOK) budget.
+ *
+ * The role is part of the primary key because each Kairema role carries its own allowance: a user
+ * who spends a full window on Flash must still find Think, Context and Apex untouched. The key is
+ * the stable role slug (`fast`/`smart`/`context`/`flagship`), never the model behind it, so
+ * re-pointing a role at a different LLM does not silently merge or reset a counter.
+ */
 export const chatStreamRateWindows = mysqlTable("chat_stream_rate_windows", {
-  userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  roleId: varchar("roleId", { length: 24 }).notNull(),
   windowStarted: timestamp("windowStarted").defaultNow().notNull(),
   requestCount: int("requestCount").notNull().default(0),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (table) => [
+  primaryKey({ columns: [table.userId, table.roleId] }),
+]);
 
 /**
  * Per-user fixed-minute quota state for My API (BYOK) ingress.
