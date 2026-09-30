@@ -1,0 +1,17 @@
+-- Online presence index.
+--
+-- Presence is derived from `users.lastActivityAt` rather than from a separate table: one person is
+-- one `users` row, so multiple tabs collapse into a single presence record and guests are covered
+-- without any extra bookkeeping. The "who is in the app right now" question is therefore a range
+-- count on `lastActivityAt`, which without this index degrades into a full table scan once the
+-- user table grows.
+--
+-- `users_guest_expires_idx` does not help: it leads with `isGuest`, so a recency range would still
+-- have to read every row of the table.
+--
+-- Index only — no column, key or row is added, removed or rewritten, so this is safe to apply
+-- online and re-running the migration framework keeps `lastActivityAt` exactly as it is.
+--
+-- One statement only: this migrator hands the file to the driver as a single statement, and
+-- stacked ALTER TABLEs were rejected by MySQL with ER_PARSE_ERROR in 0049.
+ALTER TABLE `users` ADD INDEX `users_last_activity_idx` (`lastActivityAt`);
