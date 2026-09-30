@@ -496,6 +496,10 @@ public final class LoopbackHttpCore implements LoopbackServer {
             int status = connection.getResponseCode();
             writeStatusLine(out, status, connection.getResponseMessage());
 
+            // Counted, never read: the WebView has to accept these for the email sign-in to work,
+            // and whether a session cookie was set is the difference between "the backend refused"
+            // and "the cookie never reached the jar".
+            int setCookieCount = 0;
             for (Map.Entry<String, List<String>> header : connection.getHeaderFields().entrySet()) {
                 String name = header.getKey();
                 if (name == null) {
@@ -510,8 +514,13 @@ public final class LoopbackHttpCore implements LoopbackServer {
                 String canonical = CANONICAL_HEADERS.getOrDefault(lower, name);
                 for (String value : header.getValue()) {
                     writeHeader(out, canonical, value);
+                    if ("set-cookie".equals(lower)) {
+                        setCookieCount++;
+                    }
                 }
             }
+            log.info("proxy response " + status + " setCookieCount=" + setCookieCount
+                    + " for " + safeRouteLabel(request.path));
             // No Content-Length for streamed bodies, so the client reads until close.
             writeHeader(out, "Connection", "close");
             out.write("\r\n".getBytes(StandardCharsets.ISO_8859_1));
