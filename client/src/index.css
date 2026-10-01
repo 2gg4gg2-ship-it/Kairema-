@@ -465,6 +465,15 @@ body { margin: 0; min-width: 320px; background: var(--k-bg); color: var(--k-text
    (see .kairema-chat-scroll) so it pins against that scroller, not the document.
    The toggle sits outside .kairema-chat-controls so it survives the collapsed state. */
 .kairema-chat-scroll { min-height:0; flex:1 1 auto; overflow-y:auto; overscroll-behavior:contain; }
+/* "Go to the bottom" control. It is the last child of .kairema-chat-scroll and sticks to that
+   scrollport, so it floats over the messages and can never cover the composer below. The wrapper is
+   deliberately zero-height and the pointer-events opt-out keeps the strip of chat behind the button
+   fully usable; the button itself stays clickable with mouse, touch and Android WebView. */
+.kairema-chat-jump { position:sticky; bottom:calc(12px + env(safe-area-inset-bottom, 0px)); z-index:5; display:flex; align-items:flex-end; justify-content:center; height:0; pointer-events:none; }
+.kairema-chat-jump-button { pointer-events:auto; display:inline-grid; place-items:center; width:44px; height:44px; border:1px solid var(--k-line); border-radius:999px; color:var(--k-text); background:var(--k-panel); box-shadow:0 6px 18px var(--k-shadow); touch-action:manipulation; transition:transform .16s cubic-bezier(.23,1,.32,1),background .16s ease; }
+.kairema-chat-jump-button:hover { background:var(--k-panel-2); }
+.kairema-chat-jump-button:focus-visible { outline:none; box-shadow:0 0 0 3px var(--k-focus); }
+.kairema-chat-jump-button:active { transform:scale(.96); }
 .kairema-chat-sticky { position:sticky; top:0; z-index:6; display:flex; align-items:flex-start; gap:6px; background:var(--k-panel); border-bottom:1px solid var(--k-line); }
 .kairema-chat-controls { flex:1 1 auto; min-width:0; }
 .kairema-mode-bar { display:flex; justify-content:flex-start; padding:3px 12px; }
