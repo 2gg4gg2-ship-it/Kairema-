@@ -37,6 +37,23 @@ public final class LoopbackRoutes {
     public static final List<String> PROXY_ALLOWLIST = List.of(
             TRPC, CHAT_STREAM, ATTACHMENTS_UPLOAD, OAUTH_CALLBACK, STYTCH_CALLBACK, STORAGE);
 
+    /**
+     * Root of the on-device terminal API.
+     *
+     * <p>These routes are served inside the app process and are deliberately absent from
+     * {@link #PROXY_ALLOWLIST}: the backend has no terminal, and a request that reached it would be
+     * answered by the wrong server. They share the {@code /api/local/} prefix rather than
+     * {@code /api/*} so no future upstream route can be swallowed by the local handler, and the
+     * allowlist stays exactly the six entries above.
+     */
+    public static final String LOCAL_TERMINAL = "/api/local/terminal";
+
+    /**
+     * Local route prefixes, for logging only. Ownership is decided by the local service itself, not
+     * by this list, so adding a route cannot silently widen what is forwarded upstream.
+     */
+    public static final List<String> LOCAL_PREFIXES = List.of(LOCAL_TERMINAL);
+
     private LoopbackRoutes() {
     }
 
@@ -54,6 +71,25 @@ public final class LoopbackRoutes {
                 }
             } else if (path.equals(prefix) || path.startsWith(prefix + "/")) {
                 return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * True when a path under the local terminal prefix could be mistaken for an upstream route.
+     *
+     * <p>Exists so the separation is asserted rather than assumed: no local prefix may overlap
+     * {@link #PROXY_ALLOWLIST}, in either direction.
+     */
+    public static boolean localPrefixesOverlapProxyAllowlist() {
+        for (String local : LOCAL_PREFIXES) {
+            for (String remote : PROXY_ALLOWLIST) {
+                String localBase = local.endsWith("/") ? local : local + "/";
+                String remoteBase = remote.endsWith("/") ? remote : remote + "/";
+                if (localBase.startsWith(remoteBase) || remoteBase.startsWith(localBase)) {
+                    return true;
+                }
             }
         }
         return false;

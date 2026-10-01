@@ -22,7 +22,13 @@ public final class JavaLoopbackServer implements LoopbackServer {
     private final LoopbackHttpCore core;
 
     public JavaLoopbackServer(AssetManager assets, String assetsPrefix, URL upstream) {
-        this.core = new LoopbackHttpCore(new AssetSource(assets, assetsPrefix), upstream, androidLog());
+        this(assets, assetsPrefix, upstream, null);
+    }
+
+    public JavaLoopbackServer(AssetManager assets, String assetsPrefix, URL upstream,
+            LoopbackLocalService localService) {
+        this.core = new LoopbackHttpCore(new AssetSource(assets, assetsPrefix), upstream, androidLog(),
+                localService);
     }
 
     /**

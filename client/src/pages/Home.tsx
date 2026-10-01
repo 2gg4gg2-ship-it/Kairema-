@@ -16,7 +16,8 @@ import { clearDirectKey } from "@/lib/direct-key-store";
 import { buildCandidateChain, ProviderUnavailableError, runMyApiTurn, type TurnCandidate } from "@/lib/my-api-turn";
 import { resolveExecution } from "@shared/provider-capabilities";
 import { trpc } from "@/lib/trpc";
-import { Archive, Bot, Check, ChevronDown, CircleDot, Clock3, Copy, FileImage, Gauge, Globe2, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Repeat, Search, Settings2, SlidersHorizontal, Sparkles, Trash2, TriangleAlert, UserIcon, X } from "lucide-react";
+import { Archive, Bot, Check, ChevronDown, CircleDot, Clock3, Copy, FileImage, Gauge, Globe2, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Repeat, Search, Settings2, SlidersHorizontal, Sparkles, SquareTerminal, Trash2, TriangleAlert, UserIcon, X } from "lucide-react";
+import { Capacitor } from "@capacitor/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { createPortal } from "react-dom";
@@ -292,6 +293,10 @@ async function streamStartErrorMessage(response: Response, fallback: string): Pr
 
 export default function Home() {
   const { isAuthenticated, loading: authLoading, user, logout } = useAuth();
+  // The Terminal is an on-device feature: it only exists inside the Android shell, where the native
+  // loopback serves it. On the web there is nothing behind /api/local/terminal, so the entry is not
+  // rendered at all rather than shown and failing. Capacitor reports platform "web" everywhere else.
+  const isNativeAndroid = Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
   // The address always comes from the authenticated server context, never from
   // localStorage or anything the visitor typed.
   const accountEmail = typeof user?.email === "string" ? user.email.trim() : "";
@@ -837,7 +842,7 @@ export default function Home() {
         <div className="kairema-history-head"><span>{t.history}</span><div className="flex items-center gap-1"><button type="button" onClick={() => setPendingHistoryClear(true)} className="kairema-icon-btn" aria-label={language === "ru" ? "Очистить всю историю" : "Clear all history"} title={language === "ru" ? "Очистить всю историю" : "Clear all history"} disabled={!isAuthenticated || !sessions.length || clearHistoryMutation.isPending}><Trash2 className="size-3.5" /></button><button onClick={() => void createChat()} className="kairema-icon-btn" aria-label={t.newChat}><MessageSquarePlus className="size-4" /></button></div></div>
         <label className="kairema-search"><Search className="size-4" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t.search} aria-label={t.search} /></label>
         <div className="kairema-history-list">{!isAuthenticated && <button className="kairema-history-item text-left" onClick={startLogin}><LogIn className="mr-2 inline size-3" />{t.loginHistory}</button>}{search.trim().length >= 2 ? <SearchResults results={results} labels={t} onSelect={(item) => item.sessionId && selectSession(item.sessionId)} /> : sessionMatches.map((session) => <div key={session.id} className={`kairema-history-row ${session.id === activeId ? "kairema-history-active" : ""}`}><button onClick={() => selectSession(session.id, session.modelId)} className="kairema-history-item">{session.title}</button><button type="button" onClick={() => setPendingChatDeletionId(session.id)} className="kairema-history-delete" title={t.delete} aria-label={`${t.delete}: ${session.title}`} disabled={deleteChatMutation.isPending}><Trash2 className="size-3.5" /></button></div>)}{isAuthenticated && !sessionsQuery.isLoading && !search.trim() && !sessions.length && <p className="kairema-empty">{t.noHistory}</p>}</div>
-        <div className="kairema-sidebar-footer"><button className="kairema-footer-link" onClick={() => setMemoryOpen(true)}><Sparkles className="size-4" />{t.memory}</button><button className="kairema-footer-link" onClick={() => setExportHistoryOpen(true)} disabled={!isAuthenticated}><Archive className="size-4" />{language === "ru" ? "Экспорты" : "Exports"}</button><button className="kairema-footer-link" onClick={() => setSettingsOpen(true)}><SlidersHorizontal className="size-4" />{t.settings}</button>{ownerQuery.data && <button className="kairema-footer-link" onClick={() => navigate("/owner-analytics")}><Gauge className="size-4" />{language === "ru" ? "Аналитика владельца" : "Owner analytics"}</button>}<p>{t.secure}</p></div>
+        <div className="kairema-sidebar-footer"><button className="kairema-footer-link" onClick={() => setMemoryOpen(true)}><Sparkles className="size-4" />{t.memory}</button><button className="kairema-footer-link" onClick={() => setExportHistoryOpen(true)} disabled={!isAuthenticated}><Archive className="size-4" />{language === "ru" ? "Экспорты" : "Exports"}</button>{isNativeAndroid && <button className="kairema-footer-link" onClick={() => navigate("/terminal")} data-testid="terminal-nav"><SquareTerminal className="size-4" />{language === "ru" ? "Терминал" : "Terminal"}</button>}<button className="kairema-footer-link" onClick={() => setSettingsOpen(true)}><SlidersHorizontal className="size-4" />{t.settings}</button>{ownerQuery.data && <button className="kairema-footer-link" onClick={() => navigate("/owner-analytics")}><Gauge className="size-4" />{language === "ru" ? "Аналитика владельца" : "Owner analytics"}</button>}<p>{t.secure}</p></div>
       </aside>
       {sidebarOpen && <button className="kairema-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Close" />}
       <section className="kairema-main">

@@ -18,6 +18,9 @@ import java.io.IOException;
 import im.kairema.app.loopback.DebugLog;
 import im.kairema.app.loopback.LoopbackServer;
 import im.kairema.app.loopback.LoopbackServerFactory;
+import im.kairema.app.terminal.TerminalRoutes;
+import im.kairema.app.terminal.TerminalRuntime;
+import im.kairema.app.terminal.TerminalSessions;
 
 /**
  * Serves the bundled Kairema web app from an in-process loopback origin and points the WebView at it.
@@ -38,6 +41,7 @@ public class MainActivity extends BridgeActivity {
 
     private LoopbackServer loopbackServer;
     private boolean diagnosticsEnabled;
+    private TerminalSessions terminalSessions;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -67,13 +71,24 @@ public class MainActivity extends BridgeActivity {
             loopbackServer.stop();
             loopbackServer = null;
         }
+        // Stops every proot process. Without this a session would outlive the activity and leave an
+        // orphan process holding the guest filesystem open.
+        if (terminalSessions != null) {
+            terminalSessions.shutdownAll();
+            terminalSessions = null;
+        }
         super.onDestroy();
     }
 
     private void startLoopbackServer() {
         DebugLog.event("about to create LoopbackServer");
         try {
-            loopbackServer = LoopbackServerFactory.create(getAssets());
+            // The terminal runtime is installed lazily, off the startup path, so a slow first-run
+            // extraction never delays the WebView. The routes report "unavailable" until it is done.
+            terminalSessions = new TerminalSessions(this);
+            loopbackServer = LoopbackServerFactory.create(getAssets(),
+                    new TerminalRoutes(terminalSessions));
+            TerminalRuntime.get(this).ensureInstalled();
             DebugLog.event("LoopbackServer created");
             loopbackServer.start();
             DebugLog.event("start() returned; port=" + loopbackServer.getPort()

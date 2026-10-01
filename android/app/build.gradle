@@ -15,11 +15,31 @@ android {
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
+
+        // Only arm64-v8a is shipped. proot and its talloc dependency are prebuilt aarch64 binaries
+        // that are not produced from source here, so there is nothing to build for any other ABI and
+        // including one would only produce an APK that cannot run on a 32-bit device.
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
     }
+
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // proot is exec()ed, not dlopen()ed. A binary that is only stored inside the APK
+            // (extractNativeLibs=false, the AGP default) cannot be executed, so the platform has to
+            // extract lib/ to nativeLibraryDir with its execute bit intact. useLegacyPackaging=true
+            // is what selects extractNativeLibs=true; the name refers to the pre-API-23 packaging
+            // model, not to the .so files themselves.
+            useLegacyPackaging true
         }
     }
 }

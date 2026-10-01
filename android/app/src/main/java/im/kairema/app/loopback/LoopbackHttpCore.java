@@ -73,6 +73,7 @@ public final class LoopbackHttpCore implements LoopbackServer {
     private final LoopbackStaticSource staticSource;
     private final URL upstream;
     private final LoopbackLog log;
+    private final LoopbackLocalService localService;
 
     private String accessSecret;
     private ServerSocket serverSocket;
@@ -83,13 +84,19 @@ public final class LoopbackHttpCore implements LoopbackServer {
             new java.util.concurrent.atomic.AtomicInteger();
 
     public LoopbackHttpCore(LoopbackStaticSource staticSource, URL upstream) {
-        this(staticSource, upstream, LoopbackLog.NO_OP);
+        this(staticSource, upstream, LoopbackLog.NO_OP, null);
     }
 
     public LoopbackHttpCore(LoopbackStaticSource staticSource, URL upstream, LoopbackLog log) {
+        this(staticSource, upstream, log, null);
+    }
+
+    public LoopbackHttpCore(LoopbackStaticSource staticSource, URL upstream, LoopbackLog log,
+            LoopbackLocalService localService) {
         this.staticSource = staticSource;
         this.upstream = upstream;
         this.log = log;
+        this.localService = localService;
     }
 
     @Override
@@ -247,7 +254,18 @@ public final class LoopbackHttpCore implements LoopbackServer {
             writeSimple(out, 400, "malformed or disallowed request");
             return;
         }
-        if (LoopbackRoutes.isProxyable(request.path)) {
+        if (localService != null && localService.handles(request.path)) {
+            // Local routes run in this process and are never forwarded upstream. They are checked
+            // against the same cookie as the proxy, so there is still exactly one credential: the
+            // session id in the path is a lookup key, not authorisation.
+            if (!isAuthorised(request)) {
+                writeSimple(out, 403, "loopback access denied");
+                return;
+            }
+            log.info("local request " + request.method + " " + safeLocalRouteLabel(request.path));
+            localService.handle(request.method, request.path, request.query, request.headers,
+                    request.body, out);
+        } else if (LoopbackRoutes.isProxyable(request.path)) {
             log.info("proxy request " + request.method + " " + safeRouteLabel(request.path)
                     + safeRequestShape(request));
             if (!isAuthorised(request)) {
@@ -259,6 +277,22 @@ public final class LoopbackHttpCore implements LoopbackServer {
             serveAsset(request, out);
         }
         out.flush();
+    }
+
+    /**
+     * A local route label that is safe to log.
+     *
+     * <p>Only the fixed route prefix and the action are kept. The terminal session id is deliberately
+     * dropped: it is a capability-shaped lookup key, and nothing here needs it to identify the
+     * request. No body byte, header value or stream content is ever included.
+     */
+    private static String safeLocalRouteLabel(String path) {
+        for (String prefix : LoopbackRoutes.LOCAL_PREFIXES) {
+            if (path.equals(prefix) || path.startsWith(prefix + "/")) {
+                return prefix;
+            }
+        }
+        return "unlisted";
     }
 
     /**

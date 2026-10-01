@@ -31,6 +31,18 @@ public final class LoopbackServerFactory {
     }
 
     public static LoopbackServer create(AssetManager assets) throws IOException {
+        return create(assets, null);
+    }
+
+    /**
+     * Builds the loopback server, optionally with a local service.
+     *
+     * <p>The local service is passed straight into the transport as a routing seam. It is created by
+     * the caller rather than here so the terminal runtime can be started and shut down with the
+     * activity, and so the upstream configuration path above is not entangled with it.
+     */
+    public static LoopbackServer create(AssetManager assets, LoopbackLocalService localService)
+            throws IOException {
         String apiBaseUrl = readApiBaseUrl(assets);
         if (apiBaseUrl == null || apiBaseUrl.trim().isEmpty()) {
             throw new IOException(
@@ -50,7 +62,7 @@ public final class LoopbackServerFactory {
         if (!"https".equalsIgnoreCase(upstream.getProtocol())) {
             throw new IOException("Loopback upstream must be https, got: " + upstream.getProtocol());
         }
-        return new JavaLoopbackServer(assets, "public", upstream);
+        return new JavaLoopbackServer(assets, "public", upstream, localService);
     }
 
     private static String readApiBaseUrl(AssetManager assets) throws IOException {
