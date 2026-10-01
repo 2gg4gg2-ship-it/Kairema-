@@ -353,12 +353,24 @@ export const appRouter = router({
         }
       }),
       login: publicProcedure.input(stytchCredentialsSchema).mutation(async ({ ctx, input }) => {
+        // Which provider call is in flight. A sign-in that fails can fail on the password check or on
+        // sending the code, and the two are indistinguishable from the 401 the client sees: this
+        // procedure answers UNAUTHORIZED for every Stytch rejection. The stage label is the only way to
+        // tell "the password was refused" from "the code could not be sent", e.g. a provider rate
+        // limit after repeated attempts with credentials that are perfectly correct.
+        let stage = "passwords.authenticate";
+        // Shape only, never the values: proves a complete payload reached the handler without ever
+        // writing an email address, a password, a token or a cookie to the log.
+        console.error(`[login] input emailPresent=${input.email.length > 0}`
+          + ` passwordPresent=${input.password.length > 0}`
+          + ` inputBytes=${Buffer.byteLength(JSON.stringify(input), "utf8")}`);
         try {
           const result = await getStytchClient().passwords.authenticate({
             email: input.email,
             password: input.password,
             session_duration_minutes: STYTCH_SESSION_DURATION_MINUTES,
           });
+          stage = "otps.email.send";
           const otpResult = await getStytchClient().otps.email.send({
             email: input.email,
             expiration_minutes: 10,
@@ -369,7 +381,7 @@ export const appRouter = router({
           console.error(`[login] otp_sent emailIdPrefix=${otpResult.email_id?.slice(0,8) ?? "none"} sessionPrefix=${result.session_token?.slice(0,8) ?? "none"}`);
           return { state: "OTP_REQUIRED" as const };
         } catch (error) {
-          logSafeStytchDiagnostic(error, "login");
+          logSafeStytchDiagnostic(error, `login.${stage}`);
           throw stytchErrorToTrpc(error);
         }
       }),

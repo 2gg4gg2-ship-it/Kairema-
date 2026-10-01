@@ -13,6 +13,7 @@ vi.mock("@/lib/trpc", () => ({
       stytch: {
         register: { useMutation: () => mutation },
         login: { useMutation: () => mutation },
+        verifyOtp: { useMutation: () => mutation },
         resendVerification: { useMutation: () => mutation },
         requestPasswordReset: { useMutation: () => mutation },
         completePasswordReset: { useMutation: () => mutation },

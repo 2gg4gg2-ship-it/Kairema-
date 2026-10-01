@@ -6,6 +6,29 @@ import { InputOTP, InputOTPSlot } from "@/components/ui/input-otp";
 
 type EmailAuthView = "start" | "login" | "register" | "verify" | "recovery" | "reset";
 
+/** Every state the provider-backed `auth.stytch.login` procedure can answer with. */
+type LoginState = "OTP_REQUIRED" | "SIGNED_IN" | "VERIFICATION_REQUIRED";
+
+/**
+ * Attributes every credential field must carry.
+ *
+ * A desktop browser never rewrites what was typed into a field, so these are no-ops there. A WebView
+ * is not a desktop browser: the soft keyboard applies its own capitalisation and autocorrect to a
+ * text field, and the platform autofill service may replace a credential the user just typed. Either
+ * one silently changes the bytes that leave the form, and the provider then rejects a password the
+ * user is certain they entered. Forcing the field to behave pins the request body to what was typed.
+ */
+const CREDENTIAL_FIELD = {
+  autoCapitalize: "none",
+  autoCorrect: "off",
+  spellCheck: false,
+} as const;
+
+/** The single place a completed sign-in hands control back to the app router. */
+function enterApp() {
+  window.location.assign("/");
+}
+
 function initialAuthView(): EmailAuthView {
   if (typeof window === "undefined") return "start";
   return new URLSearchParams(window.location.search).get("reset") === "1" ? "reset" : "start";
@@ -62,18 +85,39 @@ export default function Welcome() {
     }
   };
 
+  /**
+   * Applies whatever the provider actually answered.
+   *
+   * The login procedure is not obliged to demand a code: it returns `OTP_REQUIRED` when it sent one,
+   * `SIGNED_IN` when a verified session already exists, and `VERIFICATION_REQUIRED` when the address
+   * still has to be confirmed. Treating every non-`OTP_REQUIRED` answer as a rejected password is
+   * what made a successful sign-in look like a failure, so each state is handled on its own terms.
+   * An unknown state stays a failure: an unrecognised answer is never treated as a session.
+   */
+  const applyLoginState = (state: LoginState | string) => {
+    if (state === "SIGNED_IN") {
+      enterApp();
+      return;
+    }
+    setEmailView("verify");
+    if (state === "OTP_REQUIRED") {
+      setNotice("Мы отправили 6-значный код на email. Введите его для входа.");
+      return;
+    }
+    if (state === "VERIFICATION_REQUIRED") {
+      setNotice("Подтвердите email по ссылке из письма, затем войдите снова.");
+      return;
+    }
+    setNotice("Не удалось подтвердить email или пароль. Попробуйте снова либо восстановите пароль.");
+  };
+
   const submitLogin = async (event: React.FormEvent) => {
     event.preventDefault();
     try {
       const result = await loginMutation.mutateAsync({ email, password });
       setPassword("");
       setOtpCode("");
-      if (result.state === "OTP_REQUIRED") {
-        setEmailView("verify");
-        setNotice("Мы отправили 6-значный код на email. Введите его для входа.");
-        return;
-      }
-      setNotice("Не удалось подтвердить email или пароль. Попробуйте снова либо восстановите пароль.");
+      applyLoginState(result.state);
     } catch {
       setNotice("Не удалось подтвердить email или пароль. Попробуйте снова либо восстановите пароль.");
     }
@@ -81,8 +125,15 @@ export default function Welcome() {
 
   const resendVerification = async () => {
     try {
-      await loginMutation.mutateAsync({ email, password });
-      setNotice("Новый код отправлен. Проверьте почту.");
+      const result = await loginMutation.mutateAsync({ email, password });
+      setOtpCode("");
+      // A repeat of the same call re-sends a code, or signs the user straight in when no code is
+      // needed. It is never assumed that a code went out.
+      if (result.state === "OTP_REQUIRED") {
+        setNotice("Новый код отправлен. Проверьте почту.");
+        return;
+      }
+      applyLoginState(result.state);
     } catch {
       setNotice("Отправка кода временно недоступна. Повторите попытку позже.");
     }
@@ -93,8 +144,10 @@ export default function Welcome() {
       const result = await verifyOtpMutation.mutateAsync({ code: otpCode });
       if (result.state === "SIGNED_IN") {
         setOtpCode("");
-        window.location.assign("/");
+        enterApp();
+        return;
       }
+      setNotice("Сессия не завершена. Повторите попытку.");
     } catch {
       setNotice("Неверный код. Попробуйте снова.");
     }
@@ -121,7 +174,7 @@ export default function Welcome() {
       await resetCompleteMutation.mutateAsync({ password });
       setPassword("");
       setPasswordConfirm("");
-      window.location.assign("/");
+      enterApp();
     } catch {
       setNotice("Ссылка для восстановления истекла или пароль не принят. Запросите новую ссылку.");
     }
@@ -133,7 +186,7 @@ export default function Welcome() {
       return <section className="kairema-auth-gate__email" aria-labelledby="email-verify-title">
         <div className="kairema-auth-gate__email-heading"><Mail className="size-4" aria-hidden="true" /><h2 id="email-verify-title">Подтвердите email</h2></div>
         <p>Введите 6-значный код из письма. Kairema не создаёт и не хранит токены подтверждения.</p>
-        <InputOTP maxLength={6} value={otpCode} onChange={setOtpCode} disabled={verifyOtpMutation.isPending}>
+        <InputOTP maxLength={6} value={otpCode} onChange={setOtpCode} disabled={verifyOtpMutation.isPending} inputMode="numeric" autoComplete="one-time-code" autoCapitalize="none" autoCorrect="off" spellCheck={false}>
           <InputOTPSlot index={0} /><InputOTPSlot index={1} /><InputOTPSlot index={2} /><InputOTPSlot index={3} /><InputOTPSlot index={4} /><InputOTPSlot index={5} />
         </InputOTP>
         <button type="button" className="kairema-auth-gate__google" disabled={pending || !email || otpCode.length < 6} onClick={() => void submitOtp()}>Подтвердить код</button>
@@ -145,7 +198,7 @@ export default function Welcome() {
       return <form className="kairema-auth-gate__email" onSubmit={submitRecovery} aria-labelledby="email-recovery-title">
         <div className="kairema-auth-gate__email-heading"><KeyRound className="size-4" aria-hidden="true" /><h2 id="email-recovery-title">Восстановление пароля</h2></div>
         <p>Введите email. Если адрес доступен для восстановления, провайдер отправит защищённую ссылку.</p>
-        <label>Email<input aria-label="Email для восстановления" type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} required /></label>
+        <label>Email<input aria-label="Email для восстановления" type="email" autoComplete="email" {...CREDENTIAL_FIELD} value={email} onChange={event => setEmail(event.target.value)} required /></label>
         <button type="submit" className="kairema-auth-gate__google" disabled={pending}>Отправить ссылку</button>
         <button type="button" className="kairema-auth-gate__text-button" onClick={() => setEmailView("login")}>Вернуться ко входу</button>
       </form>;
@@ -154,17 +207,17 @@ export default function Welcome() {
       return <form className="kairema-auth-gate__email" onSubmit={submitReset} aria-labelledby="email-reset-title">
         <div className="kairema-auth-gate__email-heading"><KeyRound className="size-4" aria-hidden="true" /><h2 id="email-reset-title">Новый пароль</h2></div>
         <p>Новая комбинация отправляется только защищённому провайдеру. Ссылка действует ограниченное время.</p>
-        <label>Новый пароль<input aria-label="Новый пароль" type="password" autoComplete="new-password" value={password} onChange={event => setPassword(event.target.value)} minLength={8} required /></label>
-        <label>Повторите пароль<input aria-label="Повторите новый пароль" type="password" autoComplete="new-password" value={passwordConfirm} onChange={event => setPasswordConfirm(event.target.value)} minLength={8} required /></label>
+        <label>Новый пароль<input aria-label="Новый пароль" type="password" autoComplete="new-password" {...CREDENTIAL_FIELD} value={password} onChange={event => setPassword(event.target.value)} minLength={8} required /></label>
+        <label>Повторите пароль<input aria-label="Повторите новый пароль" type="password" autoComplete="new-password" {...CREDENTIAL_FIELD} value={passwordConfirm} onChange={event => setPasswordConfirm(event.target.value)} minLength={8} required /></label>
         <button type="submit" className="kairema-auth-gate__google" disabled={pending}>Сохранить пароль</button>
       </form>;
     }
     const isRegister = emailView === "register";
     return <form className="kairema-auth-gate__email" onSubmit={isRegister ? submitRegister : submitLogin} aria-labelledby="email-auth-title">
       <div className="kairema-auth-gate__email-heading"><Mail className="size-4" aria-hidden="true" /><h2 id="email-auth-title">{isRegister ? "Создать аккаунт" : "Войти по email"}</h2></div>
-      <label>Email<input aria-label="Email" type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} required /></label>
-      <label>Пароль<input aria-label="Пароль" type="password" autoComplete={isRegister ? "new-password" : "current-password"} value={password} onChange={event => setPassword(event.target.value)} minLength={8} required /></label>
-      {isRegister && <label>Повторите пароль<input aria-label="Повторите пароль" type="password" autoComplete="new-password" value={passwordConfirm} onChange={event => setPasswordConfirm(event.target.value)} minLength={8} required /></label>}
+      <label>Email<input aria-label="Email" type="email" autoComplete="email" {...CREDENTIAL_FIELD} value={email} onChange={event => setEmail(event.target.value)} required /></label>
+      <label>Пароль<input aria-label="Пароль" type="password" autoComplete={isRegister ? "new-password" : "current-password"} {...CREDENTIAL_FIELD} value={password} onChange={event => setPassword(event.target.value)} minLength={8} required /></label>
+      {isRegister && <label>Повторите пароль<input aria-label="Повторите пароль" type="password" autoComplete="new-password" {...CREDENTIAL_FIELD} value={passwordConfirm} onChange={event => setPasswordConfirm(event.target.value)} minLength={8} required /></label>}
       <button type="submit" className="kairema-auth-gate__google" disabled={pending}>{isRegister ? "Создать и подтвердить email" : "Войти"}</button>
       {isRegister ? <button type="button" className="kairema-auth-gate__text-button" onClick={() => setEmailView("login")}>Уже есть аккаунт? Войти</button> : <><button type="button" className="kairema-auth-gate__text-button" onClick={() => setEmailView("recovery")}>Забыли пароль?</button><button type="button" className="kairema-auth-gate__text-button" onClick={() => setEmailView("register")}>Создать аккаунт</button></>}
       <button type="button" className="kairema-auth-gate__text-button" onClick={showStart}><ArrowLeft className="size-3" aria-hidden="true" /> Другой способ входа</button>
