@@ -196,10 +196,6 @@ jobs:
           KAIREMA_ANDROID_VERSION_NAME: ${{ steps.version.outputs.name }}
         run: pnpm android:build
 
-      - name: Delete the keystore
-        if: always()
-        run: rm -rf "${{ runner.temp }}/kairema-signing"
-
       - name: Warn about missing OAuth build variables
         env:
           VITE_OAUTH_PORTAL_URL: ${{ vars.VITE_OAUTH_PORTAL_URL }}
@@ -282,9 +278,15 @@ jobs:
           cp "$apk" "$RUNNER_TEMP/previous.apk"
 
           # Same key, lower versionCode: stands in for the APK already on the phone.
-          KAIREMA_ANDROID_VERSION_CODE=$((99 + GITHUB_RUN_NUMBER)) \
-          KAIREMA_ANDROID_VERSION_NAME=1.0.0-ci.previous \
-            (cd android && ./gradlew assembleDebug --quiet)
+          # The two overrides are exported inside a subshell rather than used as an assignment
+          # prefix. Bash cannot parse `VAR=value (command)`: `(` is only a command starter at the
+          # start of a command, never after an assignment prefix, so that form was a syntax error.
+          (
+            export KAIREMA_ANDROID_VERSION_CODE=$((99 + GITHUB_RUN_NUMBER))
+            export KAIREMA_ANDROID_VERSION_NAME=1.0.0-ci.previous
+            cd android
+            ./gradlew assembleDebug --quiet
+          )
 
           cp android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/next.apk"
           cp "$RUNNER_TEMP/previous.apk" "$apk"
@@ -297,3 +299,10 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
+
+      # Cleanup runs last, and only here. Both the debug APK build and the in-place update
+      # verification sign with this keystore, so it has to outlive them; `if: always()` keeps the
+      # removal running when an earlier step has already failed the job.
+      - name: Delete the keystore
+        if: always()
+        run: rm -rf "${{ runner.temp }}/kairema-signing"
