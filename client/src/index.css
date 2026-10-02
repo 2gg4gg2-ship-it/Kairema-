@@ -1055,3 +1055,20 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-terminal-input input:focus { border-color:var(--k-text); box-shadow:0 0 0 3px var(--k-focus); }
 .kairema-terminal-input input:disabled { opacity:.55; }
 .kairema-terminal-hint { margin:0; padding:0 13px 12px; color:var(--k-muted); background:var(--k-panel); font-size:11px; line-height:1.45; }
+
+/* Chat <-> Terminal surface switch (Android only; the segment is not rendered elsewhere).
+   The mode option base rule sets min-width:100px for the two existing chat modes. A third
+   segment at that width would overflow a phone, so the surface segment drops the floor and
+   keeps only the icon plus a short label. Height is inherited unchanged, so the mode bar does
+   not grow: the switch sits in the row that already exists next to «Чат». */
+.kairema-mode-option-surface { min-width:0; padding:0 10px; }
+.kairema-mode-switch-surface { flex:0 0 auto; }
+
+/* The terminal fills the main column instead of the whole viewport. .kairema-terminal is
+   100dvh for its standalone /terminal route, which would overflow under the sticky topbar, so
+   the embedded case takes its height from the flex parent (.kairema-main is a column with
+   min-height:0) instead. */
+.kairema-terminal-embedded { display:flex; flex:1; flex-direction:column; min-height:0; }
+.kairema-terminal-surface { display:flex; flex:1; flex-direction:column; min-height:0; }
+.kairema-terminal-surface > .kairema-mode-switch { margin:3px 12px; }
+.kairema-terminal-surface > .kairema-terminal { flex:1; min-height:0; height:auto; }

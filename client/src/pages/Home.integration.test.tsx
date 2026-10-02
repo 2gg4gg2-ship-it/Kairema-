@@ -77,6 +77,15 @@ Object.defineProperties(HTMLElement.prototype, {
   scrollIntoView: { configurable: true, value: () => undefined },
 });
 
+const capacitorPlatform = vi.hoisted(() => ({ native: false, platform: "web" }));
+vi.mock("@capacitor/core", () => ({
+  // Mutable so a single test can present the page as the Android shell. Every other test stays on
+  // the default web platform, where the on-device terminal must not appear at all.
+  Capacitor: {
+    isNativePlatform: () => capacitorPlatform.native,
+    getPlatform: () => capacitorPlatform.platform,
+  },
+}));
 vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ isAuthenticated: fixtures.isAuthenticated, loading: fixtures.authLoading, user: fixtures.isAuthenticated ? fixtures.authUser : null, logout: fixtures.logout }) }));
 vi.mock("@/const", () => ({ startLogin: fixtures.startLogin }));
 vi.mock("@/lib/runtime-auth", () => ({ runtimeAuthHeaders: () => ({ Authorization: "Bearer test-session" }) }));
@@ -2395,5 +2404,60 @@ describe("a My API provider that stopped answering is scoped, not a global lock"
     await new Promise((resolve) => setTimeout(resolve, 250));
     const directCalls = calls.filter((url) => url.includes("/chat/completions"));
     expect(directCalls).toHaveLength(1);
+  });
+});
+
+describe("on the Chat / Terminal surface switch", () => {
+  afterEach(() => {
+    // This block sits outside the main describe, so it does not inherit that block's cleanup and
+    // would otherwise match against the previous test's still-mounted tree.
+    cleanup();
+    // Every test in this file runs on the web platform unless it opts in, so the switch is absent.
+    capacitorPlatform.native = false;
+    capacitorPlatform.platform = "web";
+  });
+
+  it("offers no Terminal switch in the web build", async () => {
+    render(<Home />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Чат" })).toBeTruthy());
+    expect(screen.queryByTestId("chat-surface-terminal")).toBeNull();
+  });
+
+  it("puts a Terminal switch next to «Чат» on native Android", async () => {
+    capacitorPlatform.native = true;
+    capacitorPlatform.platform = "android";
+
+    render(<Home />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Чат" })).toBeTruthy());
+    const terminal = await screen.findByTestId("chat-surface-terminal");
+    expect(terminal.textContent).toContain("Терминал");
+
+    // Same mode bar, immediately beside the existing «Чат» segment, and the chat modes survive.
+    const chat = screen.getByRole("button", { name: "Чат" });
+    expect(chat.parentElement).toBe(terminal.parentElement);
+    // The My API segment is untouched: «Мой API» also labels a sidebar entry, so match loosely.
+    expect(screen.getAllByRole("button", { name: /My API|Мой API/ }).length).toBeGreaterThan(0);
+  });
+
+  it("opens the existing terminal and comes back to the chat without navigating", async () => {
+    capacitorPlatform.native = true;
+    capacitorPlatform.platform = "android";
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.click(await screen.findByTestId("chat-surface-terminal"));
+
+    // The shipped Terminal screen, not a second implementation.
+    expect(await screen.findByTestId("terminal-screen")).toBeTruthy();
+    expect(screen.getByTestId("terminal-surface")).toBeTruthy();
+
+    await user.click(screen.getByTestId("terminal-surface-chat"));
+
+    // Chat is back in place and no route change was requested.
+    expect(fixtures.navigate).not.toHaveBeenCalledWith("/terminal");
+    expect(screen.queryByTestId("terminal-screen")).toBeNull();
+    expect(await screen.findByRole("button", { name: "Чат" })).toBeTruthy();
   });
 });
