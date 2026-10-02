@@ -99,3 +99,12 @@ app/src/main/assets/public
 app/src/main/assets/capacitor.config.json
 app/src/main/assets/capacitor.plugins.json
 app/src/main/res/xml/config.xml
+
+# Signing material must never be committed. The CI debug keystore is supplied as a GitHub secret
+# and materialised outside the checkout; these entries are a safety net so that a keystore
+# generated locally by accident is ignored rather than staged. A committed private key would let
+# anyone publish an update that Android accepts as this app.
+*.jks
+*.keystore
+*.p12
+*.pfx

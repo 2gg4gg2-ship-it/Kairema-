@@ -113,6 +113,70 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The debug signing key, supplied as secrets so no private key is ever committed and the
+      # user's personal key is never reused. Without it AGP falls back to a throwaway
+      # ~/.android/debug.keystore generated per runner, so every run produced a different signer
+      # and Android refused the update with INSTALL_FAILED_UPDATE_INCOMPATIBLE.
+      #
+      # Required repository secrets (Settings -> Secrets and variables -> Actions -> Secrets):
+      #   KAIREMA_ANDROID_DEBUG_KEYSTORE_BASE64  base64 of a PKCS12 keystore, CI use only
+      #   KAIREMA_ANDROID_DEBUG_KEYSTORE_PASSWORD keystore password
+      #   KAIREMA_ANDROID_DEBUG_KEY_ALIAS        key alias inside the keystore
+      #   KAIREMA_ANDROID_DEBUG_KEY_PASSWORD     key password
+      # Generate the keystore with keytool; never commit it. This is still a *debug* key: nothing
+      # here is a release-signing path.
+      #
+      # The keystore is written to a path outside the checkout so it cannot be captured by a stray
+      # `git add`, and the file is removed at the end of the job.
+      - name: Materialise the CI debug keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${KEYSTORE_B64:-}" ] || missing+=(KAIREMA_ANDROID_DEBUG_KEYSTORE_BASE64)
+          [ -n "${STORE_PASSWORD:-}" ] || missing+=(KAIREMA_ANDROID_DEBUG_KEYSTORE_PASSWORD)
+          [ -n "${KEY_ALIAS:-}" ] || missing+=(KAIREMA_ANDROID_DEBUG_KEY_ALIAS)
+          [ -n "${KEY_PASSWORD:-}" ] || missing+=(KAIREMA_ANDROID_DEBUG_KEY_PASSWORD)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing required secret(s): ${missing[*]}"
+            echo "::error::These supply the CI debug signing key. Without them every run signs with a"
+            echo "::error::fresh throwaway key and no APK can replace the previously installed one."
+            exit 1
+          fi
+
+          mkdir -p "$RUNNER_TEMP/kairema-signing"
+          keyfile="$RUNNER_TEMP/kairema-signing/ci-debug.p12"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$keyfile"
+          if [ ! -s "$keyfile" ]; then
+            echo "::error::KAIREMA_ANDROID_DEBUG_KEYSTORE_BASE64 decoded to an empty file."
+            exit 1
+          fi
+          chmod 600 "$keyfile"
+          echo "::add-mask::$(printf '%s' "$KEYSTORE_B64")"
+          echo "CI debug keystore materialised outside the checkout."
+
+      # versionCode must strictly increase for every published APK, otherwise Android treats each
+      # one as the same version and refuses to install it over the last. GITHUB_RUN_NUMBER is
+      # monotonic per repository and already used in the artifact name, so 100 + run_number yields
+      # 101, 102, ... The 100 offset keeps it above the hardcoded versionCode 1 that every
+      # previously published APK carried, so these APKs supersede them.
+      - name: Resolve the version identity
+        id: version
+        run: |
+          set -euo pipefail
+          code=$((100 + GITHUB_RUN_NUMBER))
+          if [ "$code" -gt 2100000000 ]; then
+            echo "::error::Computed versionCode $code exceeds the Android maximum 2100000000."
+            exit 1
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "name=1.0.0-ci.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "versionCode=$code versionName=1.0.0-ci.${GITHUB_RUN_NUMBER}"
+
       # The OAuth portal values are build-time Vite variables baked into the bundle. Without them the
       # bundle contains `new URL("undefined/app-auth")`, which throws the moment "Continue with
       # Google" is tapped, so sign-in silently does nothing. They are passed through rather than
@@ -124,7 +188,17 @@ jobs:
           KAIREMA_ANDROID_DEBUG: "1"
           VITE_OAUTH_PORTAL_URL: ${{ vars.VITE_OAUTH_PORTAL_URL }}
           VITE_APP_ID: ${{ vars.VITE_APP_ID }}
+          KAIREMA_ANDROID_DEBUG_KEYSTORE: ${{ runner.temp }}/kairema-signing/ci-debug.p12
+          KAIREMA_ANDROID_DEBUG_KEYSTORE_PASSWORD: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEYSTORE_PASSWORD }}
+          KAIREMA_ANDROID_DEBUG_KEY_ALIAS: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEY_ALIAS }}
+          KAIREMA_ANDROID_DEBUG_KEY_PASSWORD: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEY_PASSWORD }}
+          KAIREMA_ANDROID_VERSION_CODE: ${{ steps.version.outputs.code }}
+          KAIREMA_ANDROID_VERSION_NAME: ${{ steps.version.outputs.name }}
         run: pnpm android:build
+
+      - name: Delete the keystore
+        if: always()
+        run: rm -rf "${{ runner.temp }}/kairema-signing"
 
       - name: Warn about missing OAuth build variables
         env:
@@ -167,6 +241,54 @@ jobs:
           apk="android/app/build/outputs/apk/debug/app-debug.apk"
           test -f "$apk" || { echo "::error::missing $apk"; exit 1; }
           echo "Found $apk ($(stat -c%s "$apk") bytes)"
+
+      # The on-device terminal: native binaries, rootfs, digests, extractNativeLibs, permissions.
+      - name: Verify terminal assets in the APK
+        run: pnpm android:verify-terminal
+
+      # applicationId, versionCode, versionName and the signing certificate. The expected
+      # fingerprint is a repository *variable*, not a secret: a certificate fingerprint is public,
+      # and comparing it is what makes a rotated or mis-picked keystore fail loudly here instead of
+      # surfacing on a phone as an update that silently refuses to install.
+      - name: Verify APK identity and signing certificate
+        env:
+          EXPECT_CERT_SHA256: ${{ vars.KAIREMA_ANDROID_DEBUG_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          apk="android/app/build/outputs/apk/debug/app-debug.apk"
+          if [ -z "${EXPECT_CERT_SHA256:-}" ]; then
+            echo "::warning::KAIREMA_ANDROID_DEBUG_CERT_SHA256 is not set as a repository variable,"
+            echo "::warning::so the certificate is reported but not pinned. Set it to the SHA-256"
+            echo "::warning::fingerprint of the CI keystore to catch signing drift automatically."
+            node scripts/verify-apk-identity.mjs "$apk"
+          else
+            node scripts/verify-apk-identity.mjs "$apk" --expect-cert "$EXPECT_CERT_SHA256"
+          fi
+
+      # Proves the two facts Android needs for an in-place update, across two independent Gradle
+      # invocations that each had to re-materialise the key from the secret: the same applicationId
+      # and the same certificate, with a strictly greater versionCode. A real install is not possible
+      # on a hosted runner, so this is cryptographic proof of the update path rather than a
+      # demonstration of Android actually performing it.
+      - name: Verify the in-place update path against a second build
+        env:
+          KAIREMA_ANDROID_DEBUG_KEYSTORE: ${{ runner.temp }}/kairema-signing/ci-debug.p12
+          KAIREMA_ANDROID_DEBUG_KEYSTORE_PASSWORD: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEYSTORE_PASSWORD }}
+          KAIREMA_ANDROID_DEBUG_KEY_ALIAS: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEY_ALIAS }}
+          KAIREMA_ANDROID_DEBUG_KEY_PASSWORD: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          apk="android/app/build/outputs/apk/debug/app-debug.apk"
+          cp "$apk" "$RUNNER_TEMP/previous.apk"
+
+          # Same key, lower versionCode: stands in for the APK already on the phone.
+          KAIREMA_ANDROID_VERSION_CODE=$((99 + GITHUB_RUN_NUMBER)) \
+          KAIREMA_ANDROID_VERSION_NAME=1.0.0-ci.previous \
+            (cd android && ./gradlew assembleDebug --quiet)
+
+          cp android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/next.apk"
+          cp "$RUNNER_TEMP/previous.apk" "$apk"
+          node scripts/verify-apk-identity.mjs "$RUNNER_TEMP/next.apk" --compare "$RUNNER_TEMP/previous.apk"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

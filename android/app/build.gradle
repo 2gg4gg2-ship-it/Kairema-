@@ -1,5 +1,64 @@
 apply plugin: 'com.android.application'
 
+// ---------------------------------------------------------------------------------------------
+// Version identity.
+//
+// Android decides whether an APK may replace an installed one from two facts and nothing else:
+// the applicationId must match exactly, and versionCode must be strictly greater than the one
+// already installed. Both were wrong for updates. versionCode was hardcoded to 1, so every build
+// produced the same code and Android treated each new APK as the *same* version and refused it.
+// They are now supplied per build so each APK is a genuine successor, and the values are validated
+// here rather than being allowed to reach the manifest unchecked.
+// ---------------------------------------------------------------------------------------------
+ext.versionCodeOverride = (findProperty("kairemaVersionCode")
+        ?: System.getenv("KAIREMA_ANDROID_VERSION_CODE")
+        ?: "").toString().trim()
+ext.versionNameOverride = (findProperty("kairemaVersionName")
+        ?: System.getenv("KAIREMA_ANDROID_VERSION_NAME")
+        ?: "").toString().trim()
+
+ext.resolvedVersionCode = versionCodeOverride.isEmpty() ? 1 : resolveVersionCode(versionCodeOverride)
+ext.resolvedVersionName = versionNameOverride.isEmpty() ? "1.0.0" : versionNameOverride
+
+static int resolveVersionCode(String raw) {
+    if (!(raw ==~ /\d+/)) {
+        throw new GradleException(
+            "KAIREMA_ANDROID_VERSION_CODE must be a positive integer, got '${raw}'. " +
+            "A non-numeric or non-positive value would produce an APK Android refuses to install.")
+    }
+    int value = raw.toInteger()
+    if (value < 1) {
+        throw new GradleException("KAIREMA_ANDROID_VERSION_CODE must be >= 1, got ${value}.")
+    }
+    // 2100000000 is the ceiling for an APK versionCode. Silently truncating would make two
+    // different builds collide on the same code, which is the exact failure being fixed here.
+    if (value > 2100000000) {
+        throw new GradleException(
+            "KAIREMA_ANDROID_VERSION_CODE ${value} exceeds the Android maximum of 2100000000.")
+    }
+    return value
+}
+
+// ---------------------------------------------------------------------------------------------
+// Debug signing.
+//
+// This is a *debug* key and deliberately stays one; nothing here is a release-signing path. The
+// problem it solves is narrower: with no signingConfig at all, AGP signs debug builds with a
+// throwaway ~/.android/debug.keystore, and that file is generated per machine. Two CI runs
+// therefore produced two unrelated keys, and Android rejects an update whose signer differs from
+// the installed app (INSTALL_FAILED_UPDATE_INCOMPATIBLE) even when the versionCode is higher.
+//
+// A stable key is supplied from outside the repository through the environment, so no private key
+// is ever committed and no personal key is reused. When those variables are absent - a plain local
+// `assembleDebug` - no signingConfig is set and Gradle falls back to its own throwaway debug key,
+// exactly as before. That keeps local work working while making CI reproducible.
+ext.debugKeystoreFile = (System.getenv("KAIREMA_ANDROID_DEBUG_KEYSTORE") ?: "").toString().trim()
+ext.debugKeystorePassword = System.getenv("KAIREMA_ANDROID_DEBUG_KEYSTORE_PASSWORD")
+ext.debugKeyAlias = (System.getenv("KAIREMA_ANDROID_DEBUG_KEY_ALIAS") ?: "").toString().trim()
+ext.debugKeyPassword = System.getenv("KAIREMA_ANDROID_DEBUG_KEY_PASSWORD")
+ext.hasSharedDebugKey = !debugKeystoreFile.isEmpty() && debugKeystorePassword != null
+        && !debugKeyAlias.isEmpty() && debugKeyPassword != null
+
 android {
     namespace = "im.kairema.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +66,8 @@ android {
         applicationId "im.kairema.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode resolvedVersionCode
+        versionName resolvedVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -25,7 +84,28 @@ android {
     }
 
 
+    signingConfigs {
+        if (hasSharedDebugKey) {
+            debug {
+                // Resolved eagerly so a missing or unreadable keystore fails the build with a clear
+                // message instead of silently falling back to a fresh per-machine key, which is the
+                // failure mode that makes updates mysteriously incompatible.
+                storeFile file(debugKeystoreFile)
+                storePassword debugKeystorePassword
+                keyAlias debugKeyAlias
+                keyPassword debugKeyPassword
+                enableV1Signing true
+                enableV2Signing true
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            if (hasSharedDebugKey) {
+                signingConfig signingConfigs.debug
+            }
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
@@ -71,4 +151,25 @@ try {
     }
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
+
+// Printed on every configuration so a CI log records exactly which identity and which signer a
+// given build used. Comparing that line between two runs is the quickest way to see why an update
+// was refused: a different SHA-256 means a different key, which Android always rejects.
+tasks.register('printApkIdentity') {
+    group = 'verification'
+    description = 'Prints the applicationId, versionCode, versionName and debug signing key this build uses.'
+    doLast {
+        println "Kairema APK identity"
+        println "  applicationId  im.kairema.app"
+        println "  versionCode    ${resolvedVersionCode}"
+        println "  versionName    ${resolvedVersionName}"
+        if (hasSharedDebugKey) {
+            println "  debugKey       shared, from KAIREMA_ANDROID_DEBUG_KEYSTORE"
+            println "  keyAlias       ${debugKeyAlias}"
+        } else {
+            println "  debugKey       NOT SET - falling back to this machine's throwaway debug key."
+            println "                 An APK built this way cannot be installed over one built by CI."
+        }
+    }
 }

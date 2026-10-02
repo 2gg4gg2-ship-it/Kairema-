@@ -21,7 +21,9 @@
     "check:loopback-payload": "node scripts/loopback-payload-check.mjs",
     "android:sync": "pnpm build:android:web && cap sync android",
     "android:build": "pnpm android:sync && cd android && ./gradlew assembleDebug",
-    "android:verify-apk": "node scripts/verify-terminal-apk.mjs",
+    "android:verify-terminal": "node scripts/verify-terminal-apk.mjs",
+    "android:verify-identity": "node scripts/verify-apk-identity.mjs",
+    "android:verify-apk": "pnpm android:verify-terminal && pnpm android:verify-identity",
     "android:release-check": "pnpm android:build && pnpm android:verify-apk"
   },
   "dependencies": {
