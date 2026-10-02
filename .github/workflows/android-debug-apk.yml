@@ -268,6 +268,7 @@ jobs:
       # demonstration of Android actually performing it.
       - name: Verify the in-place update path against a second build
         env:
+          CURRENT_VERSION_CODE: ${{ steps.version.outputs.code }}
           KAIREMA_ANDROID_DEBUG_KEYSTORE: ${{ runner.temp }}/kairema-signing/ci-debug.p12
           KAIREMA_ANDROID_DEBUG_KEYSTORE_PASSWORD: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEYSTORE_PASSWORD }}
           KAIREMA_ANDROID_DEBUG_KEY_ALIAS: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEY_ALIAS }}
@@ -277,13 +278,17 @@ jobs:
           apk="android/app/build/outputs/apk/debug/app-debug.apk"
           cp "$apk" "$RUNNER_TEMP/previous.apk"
 
-          # Same key, lower versionCode: stands in for the APK already on the phone.
+          # This second APK stands in for the update that would reach the phone: it must be the one with the
+          # strictly greater versionCode, since it is what verify-apk-identity compares as current
+          # against previous.apk. It is therefore derived from the resolved code as CURRENT + 1
+          # rather than from GITHUB_RUN_NUMBER again, which put it one below the APK under test and
+          # made the comparison unsatisfiable.
           # The two overrides are exported inside a subshell rather than used as an assignment
           # prefix. Bash cannot parse `VAR=value (command)`: `(` is only a command starter at the
           # start of a command, never after an assignment prefix, so that form was a syntax error.
           (
-            export KAIREMA_ANDROID_VERSION_CODE=$((99 + GITHUB_RUN_NUMBER))
-            export KAIREMA_ANDROID_VERSION_NAME=1.0.0-ci.previous
+            export KAIREMA_ANDROID_VERSION_CODE=$((CURRENT_VERSION_CODE + 1))
+            export KAIREMA_ANDROID_VERSION_NAME=1.0.0-ci.next
             cd android
             ./gradlew assembleDebug --quiet
           )
