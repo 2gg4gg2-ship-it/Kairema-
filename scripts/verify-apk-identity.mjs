@@ -24,7 +24,7 @@
  *
  * Exits non-zero and prints every failure, so it can gate a build.
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
@@ -48,7 +48,14 @@ const flag = (name) => {
 const positional = args.filter((a, i) => !a.startsWith("--") && !(i > 0 && args[i - 1].startsWith("--")));
 
 const apkPath = resolve(positional[0] ?? DEFAULT_APK);
-const expectCert = (flag("--expect-cert") ?? process.env.KAIREMA_ANDROID_DEBUG_CERT_SHA256 ?? "")
+// The workflow names the step variable EXPECT_CERT_SHA256; the documented repository variable is
+// KAIREMA_ANDROID_DEBUG_CERT_SHA256. Accept both so pinning works whichever is exported.
+const expectCert = (
+  flag("--expect-cert") ??
+  process.env.KAIREMA_ANDROID_DEBUG_CERT_SHA256 ??
+  process.env.EXPECT_CERT_SHA256 ??
+  ""
+)
   .replace(/[^0-9a-f]/gi, "")
   .toLowerCase();
 const comparePath = flag("--compare") ? resolve(flag("--compare")) : null;
@@ -95,11 +102,29 @@ function findTool(name) {
   if (!sdk) return null;
   const root = join(sdk, "build-tools");
   if (!existsSync(root)) return null;
-  for (const version of listDirs(root).sort().reverse()) {
+  // Numeric, not lexicographic: sorting "9.0.0" against "36.0.0" as strings picks 9.0.0, and an
+  // older apksigner may print the certificate block in a shape this parser does not recognise.
+  for (const version of listDirs(root).sort(compareBuildTools).reverse()) {
     const candidate = join(root, version, name);
     if (existsSync(candidate)) return candidate;
   }
   return null;
+}
+
+/** Orders build-tools versions by their numeric components, ignoring any -rc suffix. */
+function compareBuildTools(a, b) {
+  const parts = (v) =>
+    v
+      .split("-")[0]
+      .split(".")
+      .map((n) => Number.parseInt(n, 10) || 0);
+  const left = parts(a);
+  const right = parts(b);
+  for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
+    const diff = (left[i] ?? 0) - (right[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
 }
 
 const aapt2 = findTool("aapt2");
@@ -136,34 +161,113 @@ function readIdentity(path) {
 }
 
 function readCert(path) {
-  let out;
-  try {
-    out = execFileSync(apksigner, ["verify", "--print-certs", path], {
+  // apksigner writes the certificate block to stdout on some builds and to stderr on others, and
+  // exits non-zero either way when it emits a warning. execFileSync returns only stdout, so a
+  // stderr-only certificate block was captured as an empty string and reported as "could not read a
+  // signing certificate SHA-256" even though the APK was signed correctly. Both streams are read
+  // and searched together, so it does not matter which one carries the answer.
+  const attempts = [];
+  const apksignerRun = spawnSync(apksigner, ["verify", "--print-certs", path], {
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  const fromApksigner = parseCertOutput(
+    `${apksignerRun.stdout ?? ""}\n${apksignerRun.stderr ?? ""}`,
+    apksignerRun,
+    path,
+    "apksigner",
+  );
+  if (fromApksigner) return fromApksigner;
+  attempts.push(describeRun("apksigner", apksignerRun));
+
+  // Second, independent reader. `keytool -printcert -jarfile` reads the v1 signature straight out of
+  // the APK through the JDK, which the CI job already has for Gradle. It is a separate code path, so
+  // one tool changing its output cannot silently disable the check: the fingerprint is still read
+  // and still compared.
+  const keytool = findKeytool();
+  if (keytool) {
+    const keytoolRun = spawnSync(keytool, ["-printcert", "-jarfile", path], {
       encoding: "utf8",
       maxBuffer: 16 * 1024 * 1024,
     });
-  } catch (error) {
-    // apksigner exits non-zero for a valid-but-unsigned APK too, so parse whatever it printed.
-    out = `${error.stdout ?? ""}`;
-    if (!/certificate SHA-256 digest/i.test(out)) {
-      fail(`${path} is not signed, or apksigner could not verify it: ${error.message}`);
-      return null;
-    }
+    const fromKeytool = parseCertOutput(
+      `${keytoolRun.stdout ?? ""}\n${keytoolRun.stderr ?? ""}`,
+      keytoolRun,
+      path,
+      "keytool",
+    );
+    if (fromKeytool) return fromKeytool;
+    attempts.push(describeRun("keytool", keytoolRun));
+  } else {
+    attempts.push("keytool: not found on PATH or via JAVA_HOME");
   }
-  const sha256 = out.match(/Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]+)/i);
-  const dn = out.match(/Signer #1 certificate DN:\s*(.+)/i);
-  const all = [...out.matchAll(/Signer #\d+ certificate SHA-256 digest:\s*([0-9a-fA-F]+)/gi)];
-  if (!sha256) {
-    fail(`could not read a signing certificate SHA-256 from ${path}`);
-    return null;
+
+  // Only now is this a real failure, and the diagnostics say which tool produced what, so the next
+  // run identifies the cause instead of restating the symptom.
+  fail(
+    `could not read a signing certificate SHA-256 from ${path}\n` +
+      attempts.map((line) => `    ${line}`).join("\n"),
+  );
+  return null;
+}
+
+/**
+ * Parses the certificate fingerprint out of a tool's text output.
+ *
+ * <p>The patterns deliberately accept more than one shape. apksigner prints
+ * `Signer #1 certificate SHA-256 digest: <hex>` while keytool prints a bare `SHA256: <colons>`, and
+ * some apksigner builds omit the `Signer #1` prefix. Anchoring on one exact spelling made a cosmetic
+ * difference in a tool's output indistinguishable from an unsigned APK.
+ */
+function parseCertOutput(out, run, path, tool) {
+  const hex = "(?:[0-9a-fA-F]{2}:){31}[0-9a-fA-F]{2}|[0-9a-fA-F]{64}";
+  const patterns = [
+    new RegExp(`Signer #\\d+ certificate SHA-256 digest:?\\s*(${hex})`, "i"),
+    new RegExp(`certificate SHA-256 digest:?\\s*(${hex})`, "i"),
+    new RegExp(`^\\s*SHA256:?\\s*(${hex})`, "im"),
+  ];
+  for (const pattern of patterns) {
+    const match = out.match(pattern);
+    if (!match) continue;
+    const dn = out.match(/Signer #\d+ certificate DN:\s*(.+)/i);
+    const owner = out.match(/^\s*Owner:\s*(.+)$/m);
+    const all = [
+      ...out.matchAll(new RegExp(`Signer #\\d+ certificate SHA-256 digest:?\\s*${hex}`, "gi")),
+      ...out.matchAll(new RegExp(`^\\s*SHA256:?\\s*${hex}`, "gim")),
+    ];
+    return {
+      // Both tools print the fingerprint colon-separated or bare; compare it normalised.
+      sha256: match[1].replace(/:/g, "").toLowerCase(),
+      dn: (dn ? dn[1] : owner ? owner[1] : "(unknown)").trim(),
+      // A second signer means the APK is signed by more than one identity, which is a red flag for
+      // a debug build and makes "the" fingerprint ambiguous.
+      signers: new Set(all.map((m) => m[0].toLowerCase())).size,
+      tool,
+    };
   }
-  return {
-    sha256: sha256[1].toLowerCase(),
-    dn: dn ? dn[1].trim() : "(unknown)",
-    // A second signer means the APK is signed by more than one identity, which is a red flag for
-    // a debug build and makes "the" fingerprint ambiguous.
-    signers: all.length,
-  };
+  return null;
+}
+
+/** Condenses what a tool actually printed, so a failure explains itself. */
+function describeRun(tool, run) {
+  const firstLine = (text) => (text ?? "").trim().split("\n")[0] ?? "";
+  return [
+    `${tool}: exit=${run.error ? run.error.message : run.status}`,
+    `stdout=${JSON.stringify(firstLine(run.stdout).slice(0, 160))}`,
+    `stderr=${JSON.stringify(firstLine(run.stderr).slice(0, 160))}`,
+  ].join(" ");
+}
+
+/** keytool ships with the JDK, so it is found on PATH or via JAVA_HOME. */
+function findKeytool() {
+  const fromJavaHome = process.env.JAVA_HOME ? join(process.env.JAVA_HOME, "bin", "keytool") : null;
+  if (fromJavaHome && existsSync(fromJavaHome)) return fromJavaHome;
+  for (const dir of (process.env.PATH ?? "").split(":")) {
+    if (!dir) continue;
+    const candidate = join(dir, "keytool");
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------- current APK
