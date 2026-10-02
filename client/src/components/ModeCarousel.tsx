@@ -51,12 +51,6 @@ export default function ModeCarousel({
     onChange(modes[target].id);
   };
 
-  // The viewport is sized for the longest label rather than for the current one, so paging does not
-  // change the control's width and the provider and model controls beside it never reflow. `ch` is an
-  // approximation, which is acceptable because the viewport clips: an under-estimate shortens a label,
-  // it cannot push the surrounding layout around.
-  const widest = modes.reduce((max, mode) => Math.max(max, mode.label.length), 0);
-
   return (
     <div className="kairema-mode-carousel" role="group" aria-label={labels.group}>
       <button
@@ -76,13 +70,22 @@ export default function ModeCarousel({
         data-testid="mode-carousel-viewport"
         // The index drives the page offset. Reading it here keeps the transform a single source of
         // truth for both the settled position and the live drag, which combine in CSS.
-        style={
-          {
-            "--kairema-mode-index": index,
-            width: `${widest + 2}ch`,
-          } as React.CSSProperties
-        }
+        style={{ "--kairema-mode-index": index } as React.CSSProperties}
       >
+        {/* The control is sized by this hidden stack rather than by a `ch` estimate of the labels.
+            Every label is laid out here at its real width in the real font, one per line, so the box
+            is exactly as wide as the widest of them and no wider. A `ch` figure is only an
+            approximation of a digit's advance and has no relation to a Cyrillic label, which clipped
+            «Терминал» and left the shorter modes looking padded. The sizer sits in the same grid cell
+            as the track, so it sets the width and the track is laid over it rather than beside it. */}
+        <div className="kairema-mode-carousel-sizer" aria-hidden="true" data-testid="mode-carousel-sizer">
+          {modes.map((mode) => (
+            <span className="kairema-mode-page-label" key={mode.id}>
+              {mode.icon}
+              <span>{mode.label}</span>
+            </span>
+          ))}
+        </div>
         <div className="kairema-mode-carousel-track">
           {modes.map((mode, modeIndex) => {
             const current = modeIndex === index;

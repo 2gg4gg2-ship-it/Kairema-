@@ -1082,8 +1082,17 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-mode-arrow:hover:not(:disabled) { color:var(--k-text); background:var(--k-panel-2); }
 .kairema-mode-arrow:focus-visible { color:var(--k-text); outline:2px solid transparent; box-shadow:0 0 0 3px var(--k-focus); }
 .kairema-mode-arrow:disabled { opacity:.3; cursor:default; }
-.kairema-mode-carousel-viewport { position:relative; display:flex; align-items:center; justify-content:center; min-width:0; height:27px; overflow:hidden; padding:2px; border:1px solid var(--k-line); border-radius:8px; background:var(--k-panel-2); }
-.kairema-mode-carousel-track { display:flex; align-items:center; width:100%; transform:translateX(calc(-1 * var(--kairema-mode-index,0) * 100% + var(--kairema-mode-drag,0px))); transition:transform .22s cubic-bezier(.23,1,.32,1); }
+.kairema-mode-carousel-viewport { position:relative; display:grid; align-items:center; justify-items:center; min-width:0; height:27px; overflow:hidden; padding:2px; border:1px solid var(--k-line); border-radius:8px; background:var(--k-panel-2); }
+/* The sizer is what sets the width: every label is measured at its real advance width in the real
+   font, one per line, and the box ends up exactly as wide as the widest of them. It replaces a `ch`
+   estimate, which is the width of "0" and so bore no relation to a Cyrillic label: it clipped
+   «Терминал» against the viewport edge and left the shorter modes looking padded. visibility:hidden
+   still measures, and the box stays in flow because an out-of-flow element contributes nothing to the
+   grid column and the width would collapse. The track shares this one cell rather than being
+   absolutely positioned, so a page is exactly the content box and paging by 100% is exactly one
+   page; an absolutely positioned track would span the padding box instead and be 2px wider per side. */
+.kairema-mode-carousel-sizer { grid-area:1 / 1; display:flex; flex-direction:column; align-items:flex-start; width:max-content; visibility:hidden; pointer-events:none; }
+.kairema-mode-carousel-track { grid-area:1 / 1; display:flex; align-items:center; justify-content:center; min-width:0; width:100%; transform:translateX(calc(-1 * var(--kairema-mode-index,0) * 100% + var(--kairema-mode-drag,0px))); transition:transform .22s cubic-bezier(.23,1,.32,1); }
 /* While the finger is down the carousel must track it exactly, so the settle transition is off.
    The flag is set on the surface, which is the element that receives the gesture. */
 .kairema-surface[data-dragging="true"] .kairema-mode-carousel-track { transition:none; }

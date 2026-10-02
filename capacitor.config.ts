@@ -42,6 +42,26 @@ const config: CapacitorConfig = {
   android: {
     allowMixedContent: false,
     webContentsDebuggingEnabled: androidDebug,
+    // The native bridge must be reachable from the app-owned loopback origin, or nothing on the page
+    // can tell it is running inside the shell.
+    //
+    // On the default (modern) path Capacitor injects `window.androidBridge` with
+    // `WebViewCompat.addWebMessageListener`, which only fires for origins in its allowlist. That
+    // allowlist is built from `allowNavigation` above, and an entry that does not begin with "http"
+    // is prefixed with "https://". So the sole rule is `https://127.0.0.1`, while the page really
+    // runs on `http://127.0.0.1:<port>` - different scheme, and a port chosen at runtime. The two
+    // never match, the bridge is never injected, and `Capacitor.getPlatform()` reports "web".
+    // Every native-only affordance then disappears, which is why the on-device Terminal was not
+    // reachable at all: the client correctly hides it unless the platform is "android".
+    //
+    // This cannot be fixed from `allowNavigation` alone. Adding the scheme would still leave the
+    // ephemeral port out of the rule, and the port is not knowable when the config is written.
+    //
+    // The legacy path injects the same bridge through `addJavascriptInterface`, which is not
+    // origin-scoped, so it reaches the loopback origin whatever its port. The exposure is bounded
+    // here because this WebView only ever loads the app-owned loopback origin, `server.url` is
+    // unset and `allowNavigation` still confines in-app navigation to `127.0.0.1`.
+    useLegacyBridge: true,
   },
   plugins: {
     KairemaLoopback: {

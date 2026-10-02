@@ -28,8 +28,22 @@ const LABELS = {
 };
 
 function renderCarousel(value: string, onChange = vi.fn()) {
-  render(<ModeCarousel modes={MODES} value={value} onChange={onChange} labels={LABELS} />);
-  return { onChange };
+  const { container } = render(
+    <ModeCarousel modes={MODES} value={value} onChange={onChange} labels={LABELS} />,
+  );
+  return { onChange, container };
+}
+
+/**
+ * The labels on the track's own pages, ignoring the hidden width sizer.
+ *
+ * <p>The sizer repeats every label to measure the widest one, so a plain text query for a mode
+ * matches twice. The pages are the only labels that are actually shown.
+ */
+function pageLabels(container: HTMLElement): string[] {
+  return Array.from(
+    container.querySelectorAll(".kairema-mode-carousel-track .kairema-mode-page"),
+  ).map((page) => page.textContent ?? "");
 }
 
 /** The modes the carousel reports as current, in carousel order. */
@@ -45,12 +59,15 @@ afterEach(() => {
 
 describe("ModeCarousel", () => {
   it("shows only the current mode", () => {
-    renderCarousel("terminal");
+    const { container } = renderCarousel("terminal");
 
     expect(currentModes()).toEqual(["terminal"]);
     // The current label is on screen; the other two are present but not current.
     expect(screen.getByTestId("mode-current").textContent).toContain("Терминал");
-    expect(screen.queryByText("Мой API")).not.toBeNull(); // rendered as a page, but not selected
+    // Present as a page, but not selected. The width sizer repeats every label, so this counts the
+    // track's own copy and ignores the sizer's.
+    expect(pageLabels(container).length).toBe(3);
+    expect(pageLabels(container)).toContain("Мой API");
   });
 
   it("exposes exactly one control, not one button per mode", () => {
@@ -120,14 +137,31 @@ describe("ModeCarousel", () => {
       const { container, unmount } = render(
         <ModeCarousel modes={MODES} value={value} onChange={vi.fn()} labels={LABELS} />,
       );
-      const width = (container.querySelector(".kairema-mode-carousel-viewport") as HTMLElement).style.width;
+      const viewport = container.querySelector(".kairema-mode-carousel-viewport") as HTMLElement;
+      // No inline width any more: the box is sized by the measured sizer, not by a `ch` estimate.
+      const width = viewport.style.width;
+      // The sizer carries every label, so the width cannot depend on which one is showing.
+      const measured = Array.from(
+        container.querySelectorAll(".kairema-mode-carousel-sizer .kairema-mode-page-label"),
+      ).map((label) => label.textContent);
       unmount();
-      return width;
+      return { width, measured: measured.join("|") };
     });
 
-    // All three modes yield the same width, so the row around the carousel cannot reflow.
-    expect(new Set(widths).size).toBe(1);
-    expect(widths[0]).toBeTruthy();
+    // All three modes measure identically, so the row around the carousel cannot reflow.
+    expect(new Set(widths.map((entry) => entry.measured)).size).toBe(1);
+    expect(widths[0].measured).toBe("Чат|Терминал|Мой API");
+    // The estimate is gone, so nothing can clip a label against a character count.
+    expect(widths.every((entry) => entry.width === "")).toBe(true);
+  });
+
+  it("keeps the sizer out of the accessibility tree and off the pointer", () => {
+    renderCarousel("chat");
+
+    const sizer = screen.getByTestId("mode-carousel-sizer");
+    expect(sizer.getAttribute("aria-hidden")).toBe("true");
+    // The sizer repeats the labels, so it must not be reachable or readable twice.
+    expect(sizer.className).toContain("kairema-mode-carousel-sizer");
   });
 
   it("announces the position without adding visible chrome", () => {
