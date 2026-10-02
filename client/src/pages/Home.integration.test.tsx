@@ -256,6 +256,25 @@ function resetFixtures() {
   fixtures.memoryData = { settings: { enabled: 1, autoExtract: 1 }, profile: { profile: "", summary: "Автоматически извлечённый нейтральный факт" }, facts: [{ id: "11111111-1111-4111-8111-111111111112", value: "Предпочитает русский язык" }], topics: [{ id: "11111111-1111-4111-8111-111111111113", value: "2026-08-21 Flash: настройка профиля", role: "fast" }] };
 }
 
+  /**
+   * Pages the mode carousel to `target`.
+   *
+   * <p>Replaces the old direct clicks on the «Чат» / «Мой API» buttons: the modes are now one
+   * swipeable control that shows only the current label, so a mode is chosen by stepping the
+   * carousel rather than by pressing a button that is not on screen.
+   */
+  async function switchModeTo(user: ReturnType<typeof userEvent.setup>, target: string) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const pages = Array.from(document.querySelectorAll(".kairema-mode-page"));
+      const order = pages.map((page) => page.getAttribute("data-mode") ?? "");
+      const currentIndex = pages.findIndex((page) => page.getAttribute("data-current") === "true");
+      const wanted = order.indexOf(target);
+      if (wanted < 0) throw new Error(`no such mode: ${target}`);
+      if (currentIndex === wanted) return;
+      await user.click(screen.getByTestId(wanted > currentIndex ? "mode-next" : "mode-previous"));
+    }
+    throw new Error(`could not reach mode ${target}`);
+  }
 describe("Home integration flows", () => {
   beforeEach(() => { window.localStorage.clear(); resetFixtures(); });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -733,7 +752,7 @@ describe("Home integration flows", () => {
     const { container } = render(<Home />);
     const root = container;
 
-    const modeSwitch = screen.getByRole("group", { name: "Режим чата" });
+    const modeSwitch = screen.getByRole("group", { name: "Режим" });
     const sticky = modeSwitch.closest(".kairema-chat-sticky");
     const viewport = sticky?.closest(".kairema-chat-scroll");
     expect(sticky).not.toBeNull();
@@ -1224,7 +1243,7 @@ describe("My API mode hides the Kairema role selector", () => {
   async function enterMyApi() {
     const user = userEvent.setup();
     const view = render(<Home />);
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     return { user, view };
   }
 
@@ -1232,7 +1251,7 @@ describe("My API mode hides the Kairema role selector", () => {
     fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
     const { container } = render(<Home />);
     const user = userEvent.setup();
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
 
     // The header offers only this provider's own models: no system role is selectable, and none
     // of the four Kairema roles appears anywhere in it.
@@ -1268,7 +1287,7 @@ describe("My API mode hides the Kairema role selector", () => {
     fixtures.messages = [];
     const { container } = render(<Home />);
     const user = userEvent.setup();
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     await waitFor(() => expect(container.textContent).toContain("Начните разговор с Мой провайдер · vendor/model-b"));
     expect(container.textContent ?? "").not.toContain("Начните разговор с Kairema");
   });
@@ -1277,7 +1296,7 @@ describe("My API mode hides the Kairema role selector", () => {
     fixtures.userProviders = { providers: [], configs: [], activeProvider: null, storageReady: true };
     const { container } = render(<Home />);
     const user = userEvent.setup();
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
 
     // The header pill and the mode hint both state that nothing is configured yet.
     await waitFor(() => expect(screen.getAllByText("Мой API не настроен").length).toBeGreaterThan(0));
@@ -1299,7 +1318,7 @@ describe("My API provider and model are two independent controls", () => {
 
   async function enterMyApi(user: ReturnType<typeof userEvent.setup>) {
     render(<Home />);
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     return screen.findByLabelText("Модель «Мой API»");
   }
 
@@ -1309,7 +1328,7 @@ describe("My API provider and model are two independent controls", () => {
     fixtures.myApiModelsLoaded = true;
     const { container } = render(<Home />);
     const user = userEvent.setup();
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     await screen.findByLabelText("Модель «Мой API»");
 
     // The pill carries the model and nothing else.
@@ -1340,7 +1359,7 @@ describe("My API provider and model are two independent controls", () => {
     fixtures.myApiModelsLoaded = true;
     const { container } = render(<Home />);
     const user = userEvent.setup();
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     await screen.findByLabelText("Модель «Мой API»");
     await user.click(screen.getByLabelText("Провайдер «Мой API»"));
     await user.click(await screen.findByRole("option", { name: /Мой провайдер/ }));
@@ -1424,7 +1443,7 @@ describe("My API model picker", () => {
     fixtures.myApiModelsLoaded = true;
     const user = userEvent.setup();
     render(<Home />);
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
 
     const picker = await screen.findByLabelText("Модель «Мой API»");
     await user.click(picker);
@@ -1441,7 +1460,7 @@ describe("My API model picker", () => {
     fixtures.myApiModelsLoaded = true;
     const user = userEvent.setup();
     render(<Home />);
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     const picker = await screen.findByLabelText("Модель «Мой API»");
     await user.click(picker);
     await user.click(await screen.findByRole("option", { name: /vendor\/model-c/ }));
@@ -1452,7 +1471,7 @@ describe("My API model picker", () => {
     fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
     const user = userEvent.setup();
     render(<Home />);
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     // The picker reads the server's own stored credential, so no key travels in this request.
     expect(fixtures.myApiCatalogInputs.at(-1)).toEqual({ provider: "custom-abc" });
   });
@@ -1462,7 +1481,7 @@ describe("My API model picker", () => {
     fixtures.myApiCatalogError = "Что произошло: Провайдер ИИ ответил ошибкой (AUTH) | Что делать: Проверьте настройки в Настройках → AI Providers.";
     const { container } = render(<Home />);
     const user = userEvent.setup();
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
 
     await screen.findByText(/Провайдер ИИ ответил ошибкой \(AUTH\)/);
     // The provider is reachable but its catalog could not be read: that is not "no models".
@@ -1479,21 +1498,19 @@ describe("My API model picker", () => {
     fixtures.myApiModelsLoaded = true;
     const user = userEvent.setup();
     render(<Home />);
-    const myApi = (await screen.findAllByRole("button", { name: "Мой API" }))[0]!;
-    const chat = screen.getAllByRole("button", { name: "Чат" })[0]!;
-    await user.click(myApi);
+    await switchModeTo(user, "myApi");
     await screen.findByLabelText("Модель «Мой API»");
     const afterFirstEntry = fixtures.myApiCatalogInputs.length;
 
-    await user.click(chat);
-    await user.click(myApi);
+    await switchModeTo(user, "chat");
+    await switchModeTo(user, "myApi");
     await screen.findByLabelText("Модель «Мой API»");
     expect(fixtures.myApiCatalogInputs.length).toBe(afterFirstEntry);
 
     // A different provider, or an explicit retry, still reads it.
     fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-xyz", storageReady: true };
-    await user.click(chat);
-    await user.click(myApi);
+    await switchModeTo(user, "chat");
+    await switchModeTo(user, "myApi");
     await waitFor(() => expect(fixtures.myApiCatalogInputs.at(-1)).toEqual({ provider: "custom-xyz" }));
   });
 
@@ -1503,7 +1520,7 @@ describe("My API model picker", () => {
     fixtures.myApiModelsLoaded = true;
     const { container } = render(<Home />);
     const user = userEvent.setup();
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
 
     await screen.findByText(/провайдер не вернул список моделей/);
     expect(screen.queryByRole("button", { name: "Повторить" })).toBeNull();
@@ -1518,7 +1535,7 @@ describe("My API model picker", () => {
     fixtures.switchModelError = "Выбранная модель отсутствует в каталоге провайдера. Обновите список моделей.";
     const user = userEvent.setup();
     render(<Home />);
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     const picker = await screen.findByLabelText("Модель «Мой API»");
     await user.click(picker);
     await user.click(await screen.findByRole("option", { name: /vendor\/model-c/ }));
@@ -1532,7 +1549,7 @@ describe("My API model picker", () => {
     fixtures.userProviders = { providers: [], configs: [customConfig], activeProvider: "custom-abc", storageReady: true };
     const { container } = render(<Home />);
     const user = userEvent.setup();
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     await screen.findByLabelText("Модель «Мой API»");
     expect(container.textContent ?? "").not.toContain("••••");
   });
@@ -1544,7 +1561,7 @@ describe("My API model picker", () => {
     const sidebar = () => container.querySelector(".kairema-sidebar") as HTMLElement;
     expect(sidebar().textContent ?? "").toContain("Kairema Flash");
 
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     await screen.findByLabelText("Модель «Мой API»");
     for (const role of ["Kairema Flash", "Kairema Think", "Kairema Context", "Kairema Apex"]) {
       expect(sidebar().textContent ?? "").not.toContain(role);
@@ -1558,7 +1575,7 @@ describe("My API model picker", () => {
     fixtures.userProviders = { providers: [], configs: [], activeProvider: null, storageReady: true };
     const { container } = render(<Home />);
     const user = userEvent.setup();
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
 
     await waitFor(() => expect((container.querySelector(".kairema-sidebar") as HTMLElement).textContent ?? "").not.toContain("Kairema Flash"));
     const links = screen.getAllByRole("link", { name: "Настроить провайдера →" });
@@ -1579,7 +1596,7 @@ describe("My API model picker", () => {
     vi.stubGlobal("fetch", fetchSpy);
     const user = userEvent.setup();
     render(<Home />);
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     await user.type(await screen.findByPlaceholderText("Напишите сообщение…"), "Вопрос к своему провайдеру");
     await user.keyboard("{Enter}");
 
@@ -1618,7 +1635,7 @@ describe("My API model picker", () => {
     fixtures.myApiModelsLoaded = true;
     const { container } = render(<Home />);
     const user = userEvent.setup();
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     await screen.findByLabelText("Модель «Мой API»");
 
     // jsdom neither lays out nor loads the stylesheet, so the contract is asserted on the
@@ -1654,7 +1671,7 @@ describe("My API model picker", () => {
     fixtures.myApiModelsLoaded = true;
     const user = userEvent.setup();
     render(<Home />);
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     await user.click(await screen.findByLabelText("Модель «Мой API»"));
 
     const groups = within(await screen.findByRole("listbox")).getAllByRole("group");
@@ -1680,7 +1697,7 @@ describe("My API model picker", () => {
     fixtures.myApiModelsLoaded = true;
     const user = userEvent.setup();
     render(<Home />);
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     await user.click(await screen.findByLabelText("Модель «Мой API»"));
     const search = await screen.findByLabelText("Поиск моделей");
 
@@ -1704,7 +1721,7 @@ describe("My API model picker", () => {
     fixtures.myApiModelsLoaded = true;
     const user = userEvent.setup();
     render(<Home />);
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     await user.click(await screen.findByLabelText("Модель «Мой API»"));
     await user.type(await screen.findByLabelText("Поиск моделей"), "нет-такой-модели");
 
@@ -1720,7 +1737,7 @@ describe("My API model picker", () => {
     fixtures.myApiModelsLoaded = true;
     const user = userEvent.setup();
     render(<Home />);
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     const picker = await screen.findByLabelText("Модель «Мой API»");
     expect(picker.textContent).toBe("Model B");
 
@@ -1742,7 +1759,7 @@ describe("My API model picker", () => {
     fixtures.myApiModelsLoaded = true;
     const user = userEvent.setup();
     render(<Home />);
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     await user.click(await screen.findByLabelText("Модель «Мой API»"));
     await user.click(await screen.findByRole("option", { name: /vendor\/model-c/ }));
 
@@ -2321,7 +2338,7 @@ describe("a My API provider that stopped answering is scoped, not a global lock"
     fixtures.userProviders = { providers: [{ id: "openrouter", displayName: "OpenRouter", available: true }], configs: [openrouterConfig], activeProvider: "openrouter", storageReady: true };
     setDirectKey("openrouter", "sk-rejected-key");
     render(<Home />);
-    await user.click((await screen.findAllByRole("button", { name: "Мой API" }))[0]!);
+    await switchModeTo(user, "myApi");
     await waitFor(() => expect(screen.getAllByText(/OpenRouter/).length).toBeGreaterThan(0));
   }
 
@@ -2367,7 +2384,7 @@ describe("a My API provider that stopped answering is scoped, not a global lock"
     await ask(user, "вопрос");
     await waitFor(() => expect(unavailableNotice()).toBeTruthy());
 
-    await user.click((await screen.findAllByRole("button", { name: "Чат" }))[0]!);
+    await switchModeTo(user, "chat");
     await waitFor(() => expect(unavailableNotice()).toBeNull());
 
     await ask(user, "вопрос в чате");
@@ -2384,7 +2401,7 @@ describe("a My API provider that stopped answering is scoped, not a global lock"
     await ask(user, "вопрос");
     await waitFor(() => expect(unavailableNotice()).toBeTruthy());
 
-    await user.click((await screen.findAllByRole("button", { name: "Чат" }))[0]!);
+    await switchModeTo(user, "chat");
     // Not just the banner: the composer itself is usable again, because sendDisabled is scoped the
     // same way the send gate is.
     const box = await composer();
@@ -2407,57 +2424,180 @@ describe("a My API provider that stopped answering is scoped, not a global lock"
   });
 });
 
-describe("on the Chat / Terminal surface switch", () => {
+describe("the mode carousel", () => {
   afterEach(() => {
-    // This block sits outside the main describe, so it does not inherit that block's cleanup and
-    // would otherwise match against the previous test's still-mounted tree.
+    // Outside the main describe, so it inherits no cleanup of its own.
     cleanup();
-    // Every test in this file runs on the web platform unless it opts in, so the switch is absent.
     capacitorPlatform.native = false;
     capacitorPlatform.platform = "web";
   });
 
-  it("offers no Terminal switch in the web build", async () => {
+  /** The mode the carousel reports as current, read from the page marked current. */
+  const currentMode = () =>
+    document.querySelector('.kairema-mode-page[data-current="true"]')?.getAttribute("data-mode");
+
+  const setPlatform = (native: boolean, platform: string) => {
+    capacitorPlatform.native = native;
+    capacitorPlatform.platform = platform;
+  };
+
+  it("offers only Чат and Мой API in the web build", async () => {
     render(<Home />);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Чат" })).toBeTruthy());
-    expect(screen.queryByTestId("chat-surface-terminal")).toBeNull();
+    await waitFor(() => expect(screen.getByRole("group", { name: "Режим" })).toBeTruthy());
+    const modes = Array.from(document.querySelectorAll(".kairema-mode-page")).map((page) =>
+      page.getAttribute("data-mode"),
+    );
+    expect(modes).toEqual(["chat", "myApi"]);
+    expect(screen.getByTestId("mode-current").textContent).toContain("Чат");
   });
 
-  it("puts a Terminal switch next to «Чат» on native Android", async () => {
-    capacitorPlatform.native = true;
-    capacitorPlatform.platform = "android";
-
-    render(<Home />);
-
-    await waitFor(() => expect(screen.getByRole("button", { name: "Чат" })).toBeTruthy());
-    const terminal = await screen.findByTestId("chat-surface-terminal");
-    expect(terminal.textContent).toContain("Терминал");
-
-    // Same mode bar, immediately beside the existing «Чат» segment, and the chat modes survive.
-    const chat = screen.getByRole("button", { name: "Чат" });
-    expect(chat.parentElement).toBe(terminal.parentElement);
-    // The My API segment is untouched: «Мой API» also labels a sidebar entry, so match loosely.
-    expect(screen.getAllByRole("button", { name: /My API|Мой API/ }).length).toBeGreaterThan(0);
-  });
-
-  it("opens the existing terminal and comes back to the chat without navigating", async () => {
-    capacitorPlatform.native = true;
-    capacitorPlatform.platform = "android";
+  it("pages Чат, Терминал, Мой API on native Android", async () => {
+    setPlatform(true, "android");
     const user = userEvent.setup();
     render(<Home />);
 
-    await user.click(await screen.findByTestId("chat-surface-terminal"));
+    await waitFor(() => expect(screen.getByRole("group", { name: "Режим" })).toBeTruthy());
+    const modes = Array.from(document.querySelectorAll(".kairema-mode-page")).map((page) =>
+      page.getAttribute("data-mode"),
+    );
+    expect(modes).toEqual(["chat", "terminal", "myApi"]);
+
+    expect(currentMode()).toBe("chat");
+    await user.click(screen.getByTestId("mode-next"));
+    expect(currentMode()).toBe("terminal");
+    await user.click(screen.getByTestId("mode-next"));
+    expect(currentMode()).toBe("myApi");
+    // Clamped at the end rather than wrapping back to Чат.
+    expect(screen.getByTestId("mode-next")).toHaveProperty("disabled", true);
+  });
+
+  it("shows one mode at a time and renders one switcher, never a button per mode", async () => {
+    setPlatform(true, "android");
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await waitFor(() => expect(screen.getByRole("group", { name: "Режим" })).toBeTruthy());
+    // Exactly one switcher: the carousel, with two arrows and no per-mode buttons.
+    expect(screen.getAllByRole("group", { name: "Режим" })).toHaveLength(1);
+    expect(screen.getByTestId("mode-current").textContent).toContain("Чат");
+
+    await user.click(screen.getByTestId("mode-next"));
+    expect(screen.getByTestId("mode-current").textContent).toContain("Терминал");
+    // The other labels are off-page, not competing controls on the bar.
+    expect(screen.queryByRole("button", { name: "Чат" })).toBeNull();
+  });
+
+  it("opens the existing terminal for the Терминал mode and keeps the carousel to get back", async () => {
+    setPlatform(true, "android");
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.click(await screen.findByTestId("mode-next"));
 
     // The shipped Terminal screen, not a second implementation.
     expect(await screen.findByTestId("terminal-screen")).toBeTruthy();
-    expect(screen.getByTestId("terminal-surface")).toBeTruthy();
+    // The carousel is still on screen, in the terminal surface, so there is a way back.
+    expect(screen.getByRole("group", { name: "Режим" })).toBeTruthy();
+    expect(currentMode()).toBe("terminal");
 
-    await user.click(screen.getByTestId("terminal-surface-chat"));
-
-    // Chat is back in place and no route change was requested.
-    expect(fixtures.navigate).not.toHaveBeenCalledWith("/terminal");
+    await user.click(screen.getByTestId("mode-previous"));
     expect(screen.queryByTestId("terminal-screen")).toBeNull();
-    expect(await screen.findByRole("button", { name: "Чат" })).toBeTruthy();
+    expect(currentMode()).toBe("chat");
+    // Returning to the chat is a state change, not a navigation.
+    expect(fixtures.navigate).not.toHaveBeenCalledWith("/terminal");
+  });
+
+  it("keeps the chat mounted between Чат and Мой API so the conversation survives", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await switchModeTo(user, "myApi");
+    expect(currentMode()).toBe("myApi");
+    await switchModeTo(user, "chat");
+
+    expect(currentMode()).toBe("chat");
+    // The same composer, not a fresh screen.
+    expect(await screen.findByPlaceholderText("Напишите сообщение…")).toBeTruthy();
+  });
+
+  it("does not change mode when the chat is scrolled vertically", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Home />);
+    await waitFor(() => expect(screen.getByRole("group", { name: "Режим" })).toBeTruthy());
+
+    const surface = container.querySelector(".kairema-surface") as HTMLElement;
+    expect(surface).toBeTruthy();
+
+    // A vertical drag over the surface: the axis resolves to vertical, so the mode must not move.
+    await user.pointer([
+      { keys: "[MouseLeft>]", target: surface, coords: { clientX: 200, clientY: 300 } },
+      { target: surface, coords: { clientX: 203, clientY: 340 } },
+      { target: surface, coords: { clientX: 205, clientY: 380 } },
+      { keys: "[/MouseLeft]", target: surface, coords: { clientX: 205, clientY: 380 } },
+    ]);
+
+    expect(currentMode()).toBe("chat");
+  });
+
+  it("changes mode on a horizontal swipe across the surface", async () => {
+    setPlatform(true, "android");
+    const user = userEvent.setup();
+    const { container } = render(<Home />);
+    await waitFor(() => expect(screen.getByRole("group", { name: "Режим" })).toBeTruthy());
+
+    const surface = container.querySelector(".kairema-surface") as HTMLElement;
+
+    // Dragged well past the commit distance to the left: the next mode.
+    await user.pointer([
+      { keys: "[MouseLeft>]", target: surface, coords: { clientX: 300, clientY: 300 } },
+      { target: surface, coords: { clientX: 200, clientY: 302 } },
+      { target: surface, coords: { clientX: 100, clientY: 303 } },
+      { keys: "[/MouseLeft]", target: surface, coords: { clientX: 100, clientY: 303 } },
+    ]);
+    expect(currentMode()).toBe("terminal");
+
+    // And back the other way.
+    await user.pointer([
+      { keys: "[MouseLeft>]", target: surface, coords: { clientX: 100, clientY: 300 } },
+      { target: surface, coords: { clientX: 200, clientY: 301 } },
+      { target: surface, coords: { clientX: 300, clientY: 302 } },
+      { keys: "[/MouseLeft]", target: surface, coords: { clientX: 300, clientY: 302 } },
+    ]);
+    expect(currentMode()).toBe("chat");
+  });
+
+  it("snaps back on a swipe too short to commit", async () => {
+    setPlatform(true, "android");
+    const user = userEvent.setup();
+    const { container } = render(<Home />);
+    await waitFor(() => expect(screen.getByRole("group", { name: "Режим" })).toBeTruthy());
+
+    const surface = container.querySelector(".kairema-surface") as HTMLElement;
+    await user.pointer([
+      { keys: "[MouseLeft>]", target: surface, coords: { clientX: 300, clientY: 300 } },
+      { target: surface, coords: { clientX: 285, clientY: 301 } },
+      { keys: "[/MouseLeft]", target: surface, coords: { clientX: 285, clientY: 301 } },
+    ]);
+
+    expect(currentMode()).toBe("chat");
+  });
+
+  it("clears the drag offset so the carousel can settle", async () => {
+    setPlatform(true, "android");
+    const user = userEvent.setup();
+    const { container } = render(<Home />);
+    await waitFor(() => expect(screen.getByRole("group", { name: "Режим" })).toBeTruthy());
+
+    const surface = container.querySelector(".kairema-surface") as HTMLElement;
+    await user.pointer([
+      { keys: "[MouseLeft>]", target: surface, coords: { clientX: 300, clientY: 300 } },
+      { target: surface, coords: { clientX: 200, clientY: 301 } },
+      { keys: "[/MouseLeft]", target: surface, coords: { clientX: 200, clientY: 301 } },
+    ]);
+
+    // No leftover drag variable, so the next page transition animates from a clean position.
+    expect(surface.style.getPropertyValue("--kairema-mode-drag")).toBe("");
+    expect(surface.hasAttribute("data-dragging")).toBe(false);
   });
 });

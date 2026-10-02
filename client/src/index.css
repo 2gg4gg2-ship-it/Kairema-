@@ -1072,3 +1072,31 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-terminal-surface { display:flex; flex:1; flex-direction:column; min-height:0; }
 .kairema-terminal-surface > .kairema-mode-switch { margin:3px 12px; }
 .kairema-terminal-surface > .kairema-terminal { flex:1; min-height:0; height:auto; }
+
+/* One compact mode carousel: Чат -> Терминал -> Мой API, showing only the current mode.
+   Height is pinned to the same 23px the mode options already used, so the row it sits in does not
+   grow and nothing below it moves. The track is one viewport wide with the pages overflowing it, so
+   translateX by a percentage of the track is exactly one page; the viewport clips the rest. */
+.kairema-mode-carousel { display:inline-flex; flex:0 0 auto; align-items:center; gap:1px; min-width:0; }
+.kairema-mode-arrow { display:inline-grid; place-items:center; width:19px; height:23px; min-width:19px; min-height:23px; flex:0 0 auto; padding:0; border:0; border-radius:6px; color:var(--k-muted); background:transparent; transition:color .16s ease,background .16s ease; }
+.kairema-mode-arrow:hover:not(:disabled) { color:var(--k-text); background:var(--k-panel-2); }
+.kairema-mode-arrow:focus-visible { color:var(--k-text); outline:2px solid transparent; box-shadow:0 0 0 3px var(--k-focus); }
+.kairema-mode-arrow:disabled { opacity:.3; cursor:default; }
+.kairema-mode-carousel-viewport { position:relative; display:flex; align-items:center; justify-content:center; min-width:0; height:27px; overflow:hidden; padding:2px; border:1px solid var(--k-line); border-radius:8px; background:var(--k-panel-2); }
+.kairema-mode-carousel-track { display:flex; align-items:center; width:100%; transform:translateX(calc(-1 * var(--kairema-mode-index,0) * 100% + var(--kairema-mode-drag,0px))); transition:transform .22s cubic-bezier(.23,1,.32,1); }
+/* While the finger is down the carousel must track it exactly, so the settle transition is off.
+   The flag is set on the surface, which is the element that receives the gesture. */
+.kairema-surface[data-dragging="true"] .kairema-mode-carousel-track { transition:none; }
+.kairema-mode-page { display:flex; flex:0 0 100%; align-items:center; justify-content:center; min-width:0; }
+.kairema-mode-page-label { gap:5px; height:21px; min-height:21px; min-width:0; padding:0 4px; color:var(--k-text); font-size:12px; font-weight:700; }
+.kairema-mode-page-label > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* The surface hosts the chat and the terminal one at a time and owns the swipe gesture.
+   pan-y keeps vertical panning with the scroller, which is what stops a vertical chat scroll from
+   being read as a mode change; the horizontal axis is left to the gesture handler. */
+.kairema-surface { position:relative; display:flex; flex:1; flex-direction:column; min-height:0; touch-action:pan-y; }
+.kairema-surface-pane { display:flex; flex:1; flex-direction:column; min-height:0; }
+.kairema-surface-pane[hidden] { display:none; }
+
+/* The carousel sits at the same offset in the terminal as it does above the chat, so paging from the
+   chat into the terminal does not make the control jump. */
+.kairema-terminal-mode-row { display:flex; align-items:center; min-height:27px; padding:3px 12px; }
