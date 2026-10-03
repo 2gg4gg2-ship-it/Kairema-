@@ -82,6 +82,7 @@ public final class TarArchive {
 
             String name = readString(header, 0, 100);
             long size = readOctal(header, 124, 12);
+            long mode = readOctal(header, 100, 8);
             String typeFlag = readString(header, 156, 1);
             String linkName = readString(header, 157, 100);
             String prefix = readString(header, 345, 155);
@@ -126,14 +127,17 @@ public final class TarArchive {
                     if (totalBytes > MAX_TOTAL_BYTES) {
                         throw new InvalidArchiveException("archive exceeds the total size limit");
                     }
-                    writeFile(source, target, size, counter);
+                    writeFile(source, target, size, mode, counter);
                     break;
                 }
                 case "5": {
-                    // Directory. Created with a private mode; the process umask narrows it further.
+                    // Directory. The execute bit is restored as well as the file's own, because a
+                    // directory created under a restrictive umask is 0700 or 0755 and proot needs to
+                    // traverse every one of them to reach the shell.
                     if (!target.isDirectory() && !target.mkdirs()) {
                         throw new IOException("could not create directory in archive");
                     }
+                    applyExecutable(target, mode);
                     counter.directories++;
                     skipEntry(source, size);
                     break;
@@ -258,7 +262,7 @@ public final class TarArchive {
         }
     }
 
-    private static void writeFile(InputStream source, File target, long size, Counter counter)
+    private static void writeFile(InputStream source, File target, long size, long mode, Counter counter)
             throws IOException {
         File parent = target.getParentFile();
         if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
@@ -267,7 +271,30 @@ public final class TarArchive {
         try (OutputStream out = new FileOutputStream(target)) {
             copyExactly(source, out, size);
         }
+        applyExecutable(target, mode);
         counter.files++;
+    }
+
+    /**
+     * Restores the executable bit recorded in the tar header.
+     *
+     * <p>This is not cosmetic. {@link FileOutputStream} creates a file as {@code 0666} narrowed by
+     * the process umask, which is {@code 0644} on Android: nothing is executable. The Alpine rootfs
+     * ships 454 entries that carry an execute bit, including {@code bin/busybox}, which {@code
+     * bin/sh} and every other applet symlink to. Dropping the bit therefore produced a rootfs in
+     * which proot started successfully and then failed to exec the shell inside it, with a message
+     * the user could never see.
+     *
+     * <p>Only the execute bit is applied, and only when the archive asked for it: read and write
+     * permissions keep the values the JVM gave the file, and setuid, setgid and sticky bits are never
+     * set. A mode of zero means the field was absent, which older archives use, and leaves the file
+     * as it is rather than stripping a bit that was never there.
+     */
+    private static void applyExecutable(File target, long mode) {
+        boolean executable = (mode & 0111) != 0;
+        if (executable) {
+            target.setExecutable(true, true);
+        }
     }
 
     private static void copyExactly(InputStream in, OutputStream out, long size) throws IOException {

@@ -16,7 +16,8 @@ loopback origin inside this app.
 | Where | File | Why there |
 | --- | --- | --- |
 | `lib/arm64-v8a/` | `libandroid-shmem.so` | Its name ends in `.so`, so AGP packages it normally and the platform extracts it to `nativeLibraryDir`. |
-| `assets/terminal/native/arm64-v8a/` | `proot` | No `.so` extension, so AGP drops it from `lib/`. |
+| `lib/arm64-v8a/` | `libproot.so` | proot is `exec()`ed, so it must be in the directory the platform extracts `lib/` to. See "Where proot is executed". |
+| `assets/terminal/native/arm64-v8a/` | `proot` | Identical bytes, kept as the pinned-digest copy. AGP drops the extensionless name from `lib/`, and the name in `lib/` has to end in `.so`. |
 | `assets/terminal/native/arm64-v8a/` | `libtalloc.so.2` | Versioned SONAME, so AGP drops it from `lib/`. |
 | `assets/terminal/rootfs/` | `alpine-minirootfs-3.21.8-aarch64.tar.gz` | See "The .tar.gz problem". |
 
@@ -77,6 +78,29 @@ with its execute bit intact. `useLegacyPackaging=true` selects that behaviour; t
 pre-API-23 packaging model, not to the `.so` files themselves.
 
 `nativeLibraryDir` is app-private and per-app, so extraction there grants no other app access.
+
+### Where proot is executed
+
+`nativeLibraryDir` is not merely convenient, it is the only place an app may `exec()` from. Since API
+29, an app that targets the platform is denied `execve` of a file in its own data directory, so the
+copy of proot under `filesDir` can be marked executable and still fail to start with `error=13,
+Permission denied`. `targetSdk` here is 36, so the restriction applies.
+
+`TerminalRuntime.getProotLaunchBinary()` therefore executes the platform-extracted `libproot.so` and
+falls back to the `filesDir` copy only when the platform did not extract it, which keeps older devices
+working. The log records which one was used as `execSource=nativeLibDir|filesDir`.
+
+The digest is pinned on the asset copy only. AGP may strip symbols from a `jniLibs` entry, so
+re-checking those exact bytes would reject a binary that runs correctly; the bytes inside the APK are
+covered by the APK signature instead.
+
+### Permissions inside the rootfs
+
+The rootfs is extracted by `TarArchive`, which reads the mode field from each header and restores the
+executable bit. This is load-bearing, not decoration: `FileOutputStream` creates a file as `0644` on
+Android, and the archive has 454 entries that must be executable, including `bin/busybox`, which
+`bin/sh` and every other applet symlink to. Without the bit restored, proot starts and then fails to
+exec the shell. Only the execute bit is applied, never setuid, setgid or sticky.
 
 ## ABI and page size
 

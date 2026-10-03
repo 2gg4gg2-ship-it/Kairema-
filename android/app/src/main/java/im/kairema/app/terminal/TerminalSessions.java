@@ -90,11 +90,14 @@ public final class TerminalSessions {
         if (!runtime.awaitReady(30_000)) {
             // The reason is never propagated further than the log: the HTTP layer turns both this and
             // a launch failure into the same runtime_unavailable token, which is exactly why the log
-            // has to say which of the two happened.
-            DebugLog.event("terminal sessions: runtime unavailable; failureToken="
+            // has to say which of the two happened. install_failed means the installation itself
+            // stopped; runtime_not_ready means it never finished in time.
+            String reason = runtime.getFailureToken() == null
+                    ? "runtime_not_ready" : "install_failed";
+            DebugLog.event("terminal sessions: " + reason + "; failureToken="
                     + runtime.getFailureToken() + "; markerPresent="
                     + runtime.isInstallMarkerPresent());
-            outFailure[0] = "runtime_unavailable";
+            outFailure[0] = reason;
             return null;
         }
 
@@ -111,10 +114,12 @@ public final class TerminalSessions {
             try {
                 session = new TerminalSession(id, runtime);
             } catch (IOException | RuntimeException failed) {
-                // The reason is not propagated: it can contain a filesystem path.
-                DebugLog.failure("terminal sessions: launch failed", failed);
+                // The reason is not propagated: it can contain a filesystem path. PROOT_START_FAILED
+                // is the one case where the platform's own message is the diagnosis, so it goes to the
+                // log verbatim, sanitized, rather than into a shared token.
+                DebugLog.failure("terminal sessions: PROOT_START_FAILED", failed);
                 Log.w(TAG, "could not start a terminal process");
-                outFailure[0] = "launch_failed";
+                outFailure[0] = "proot_start_failed";
                 return null;
             }
             sessions.put(id, session);

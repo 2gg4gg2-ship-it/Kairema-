@@ -236,9 +236,50 @@ public final class TerminalRuntime {
         return tmpDir;
     }
 
-    /** The extracted proot binary. */
+    /** The extracted proot binary in the app's own files directory. */
     File getProotBinary() {
         return new File(binDir, "proot");
+    }
+
+    /** Name the platform extracts proot under from {@code lib/}. */
+    static final String PLATFORM_PROOT_NAME = "libproot.so";
+
+    /**
+     * The proot that is actually executed.
+     *
+     * <p>Two copies of the same bytes exist on disk, and the order matters.
+     *
+     * <p>The copy in {@code filesDir} is the one that cannot work on a modern Android. Since API 29
+     * an app that targets the platform is denied {@code execve} of a file in its own data directory,
+     * so a binary staged there and marked executable still fails to start. The only location an app
+     * may execute from is the directory the platform extracts {@code lib/} into, which is why proot
+     * is shipped there as well and why {@code useLegacyPackaging=true} is not optional.
+     *
+     * <p>The platform copy is preferred. The {@code filesDir} copy is still extracted and verified,
+     * because it is the one whose digest is pinned, and because it remains the only option on a device
+     * where the platform did not extract the library.
+     *
+     * <p>Integrity of the platform copy rests on the APK signature rather than on a digest: AGP may
+     * strip symbols from a {@code jniLibs} entry, so pinning bytes there would reject a binary that is
+     * perfectly runnable. The bytes inside the APK are covered by the signature the user already
+     * trusts, and the pinned digest is still enforced on the asset copy.
+     */
+    public File getProotLaunchBinary() {
+        File platform = platformProotBinary();
+        if (platform != null && platform.isFile() && platform.canExecute()) {
+            return platform;
+        }
+        return getProotBinary();
+    }
+
+    /** Whether the executable is taken from the platform-extracted library directory. */
+    public boolean usesPlatformProot() {
+        return getProotLaunchBinary() != getProotBinary();
+    }
+
+    private File platformProotBinary() {
+        String nativeDir = nativeLibraryDir();
+        return nativeDir == null ? null : new File(nativeDir, PLATFORM_PROOT_NAME);
     }
 
     /**
@@ -416,8 +457,11 @@ public final class TerminalRuntime {
     private boolean verifyInstalledFilesQuietly() {
         return getProotBinary().isFile()
                 && getProotBinary().canExecute()
+                && getProotLaunchBinary().isFile()
                 && new File(libDir, "libtalloc.so.2").isFile()
-                && new File(rootfsDir, "bin/busybox").isFile()
+                // The executable bit matters as much as the file: an Alpine rootfs extracted without
+                // it has a busybox that proot cannot run, and the failure looks like a broken proot.
+                && new File(rootfsDir, "bin/busybox").canExecute()
                 && new File(rootfsDir, "etc/alpine-release").isFile();
     }
 
@@ -450,6 +494,20 @@ public final class TerminalRuntime {
             throw new IOException("libandroid-shmem.so digest mismatch");
         }
         DebugLog.event("terminal runtime: libandroid-shmem verification completed");
+        DebugLog.event("terminal runtime: platform proot verification started");
+        // proot is exec()ed rather than dlopen()ed, so it has to live where the platform extracted
+        // lib/. The digest is deliberately not re-checked here; see getProotLaunchBinary.
+        File platformProot = platformProotBinary();
+        if (platformProot == null || !platformProot.isFile()) {
+            DebugLog.event("terminal runtime: platform proot missing, will exec the app files copy");
+        } else {
+            platformProot.setExecutable(true, true);
+            platformProot.setReadable(true, true);
+            DebugLog.event("terminal runtime: platform proot verification completed; bytes="
+                    + platformProot.length());
+        }
+        DebugLog.event("terminal runtime: execSource="
+                + (usesPlatformProot() ? "nativeLibDir" : "filesDir"));
         DebugLog.event("terminal runtime: installNatives completed");
     }
 

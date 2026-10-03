@@ -1,5 +1,6 @@
 package im.kairema.app.terminal;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -57,6 +58,23 @@ public final class TerminalSession {
     private volatile boolean exitReported;
     private volatile int exitCode = -1;
 
+    /** Bytes the caller has written to the shell. Zero means the user never typed anything. */
+    private final java.util.concurrent.atomic.AtomicLong stdinBytes =
+            new java.util.concurrent.atomic.AtomicLong();
+
+    /**
+     * The child's stderr, captured only while nothing had been written to its stdin yet.
+     *
+     * <p>That condition is what makes this safe to record. A shell that is starting has produced no
+     * user input, so its output can only be the loader, proot or the shell itself complaining, and
+     * those messages are the only way to tell "proot ran and could not exec the shell" apart from
+     * "proot never ran". Once anything is written to stdin the capture stops permanently, so no
+     * typed command and none of its output can ever reach the log.
+     */
+    private final StringBuilder startupStderr = new StringBuilder();
+
+    private static final int MAX_STARTUP_STDERR_CHARS = 400;
+
     TerminalSession(String id, TerminalRuntime runtime) throws IOException {
         this.id = id;
         this.process = launch(runtime);
@@ -73,7 +91,8 @@ public final class TerminalSession {
         }
 
         List<String> command = new ArrayList<>();
-        command.add(runtime.getProotBinary().getAbsolutePath());
+        File executable = runtime.getProotLaunchBinary();
+        command.add(executable.getAbsolutePath());
         // -r: the guest root. -w: the starting directory. -0: a new session, so a signal raised
         // inside the shell cannot reach the app process.
         command.add("-r");
@@ -84,7 +103,7 @@ public final class TerminalSession {
         command.add("/bin/sh");
 
         ProcessBuilder builder = new ProcessBuilder(command);
-        builder.directory(runtime.getProotBinary().getParentFile());
+        builder.directory(executable.getParentFile());
         builder.redirectErrorStream(false);
 
         // A cleared environment. Only what a shell needs is set, so no loopback secret, API key or
@@ -110,20 +129,36 @@ public final class TerminalSession {
             // calling it does not compile against this module's Android API level. The fact that
             // start() returned is the signal that matters; which pid the platform assigned is not
             // needed to tell a broken runtime from a shell that ran.
-            DebugLog.event("terminal session ProcessBuilder.start succeeded");
+            DebugLog.event("terminal session ProcessBuilder.start succeeded; execSource="
+                    + (runtime.usesPlatformProot() ? "nativeLibDir" : "filesDir"));
             return started;
         } catch (IOException failed) {
-            DebugLog.failure("terminal session ProcessBuilder.start failed", failed);
+            // PROOT_START_FAILED: the process was never created, so nothing about the guest was even
+            // attempted. The message carries the platform's own errno ("error=13, Permission denied"
+            // means the exec was refused, "Cannot run program" with a load failure means the linker
+            // rejected it), which is the whole diagnosis and cannot be reconstructed later.
+            DebugLog.failure("terminal session PROOT_START_FAILED", failed);
             throw failed;
         }
     }
 
     private void startReader(String name, InputStream source, String type) {
+        final boolean captureStartupStderr = "stderr".equals(type);
         Thread thread = new Thread(() -> {
             byte[] buffer = new byte[READ_BUFFER];
             try {
                 int read;
                 while ((read = source.read(buffer)) != -1) {
+                    if (captureStartupStderr && stdinBytes.get() == 0L) {
+                        synchronized (startupStderr) {
+                            int room = MAX_STARTUP_STDERR_CHARS - startupStderr.length();
+                            if (room > 0) {
+                                startupStderr.append(new String(buffer, 0,
+                                        Math.min(read, room),
+                                        java.nio.charset.StandardCharsets.UTF_8));
+                            }
+                        }
+                    }
                     if (!emit(Json.frame(type, new String(buffer, 0, read,
                             java.nio.charset.StandardCharsets.UTF_8)))) {
                         // Queue is full: the reader stops, the pipe fills and the child blocks.
@@ -174,6 +209,17 @@ public final class TerminalSession {
                 // shell the user typed exit into. No output and no command line is recorded.
                 DebugLog.event("terminal session process exited; exitCode=" + code
                         + "; ageMillis=" + getAgeMillis());
+                if (stdinBytes.get() == 0L) {
+                    // SHELL_START_FAILED. The process was created but died before the user typed
+                    // anything, so this is proot or /bin/sh refusing to start, not a session that ran.
+                    // Whatever is on stderr at that point is the loader or the shell's own complaint.
+                    String captured;
+                    synchronized (startupStderr) {
+                        captured = startupStderr.toString().trim();
+                    }
+                    DebugLog.failure("terminal session SHELL_START_FAILED; exitCode=" + code
+                            + "; stderr=" + oneLine(captured), null);
+                }
                 // The exit frame is emitted last and unconditionally, so a client that stops reading
                 // at exit still sees the status.
                 frames.offer(Json.exitFrame(code));
@@ -216,6 +262,15 @@ public final class TerminalSession {
         }
         stdin.write(data);
         stdin.flush();
+        // Counted before anything can be read back, and never reset: from this point on the startup
+        // capture is closed for good, which is what keeps typed input out of the diagnostics log.
+        stdinBytes.addAndGet(data.length);
+    }
+
+    /** Collapses a captured message to one line so a log entry stays readable. */
+    private static String oneLine(String text) {
+        String flattened = text.replaceAll("\\s+", " ").trim();
+        return flattened.isEmpty() ? "(empty)" : flattened;
     }
 
     // ---------------------------------------------------------------- output

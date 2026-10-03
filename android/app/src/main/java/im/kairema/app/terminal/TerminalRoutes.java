@@ -156,15 +156,17 @@ public final class TerminalRoutes implements LoopbackLocalService {
         TerminalSession session = sessions.start(failure);
         if (session == null) {
             // 503 for an unavailable runtime and 429 for the session cap: the client can tell a
-            // transient condition from "close one first", and neither leaks a path. Note that a
-            // launch failure is reported to the client as runtime_unavailable too: the page cannot
-            // act on the difference, so the log is where the difference is resolved.
+            // transient condition from "close one first", and neither leaks a path.
+            //
+            // The `error` token stays `runtime_unavailable` so the existing page keeps its message,
+            // but it no longer carries the whole truth: `reason` names which of the four distinct
+            // failures actually happened, and the same token is in the log next to the cause.
             String reason = failure[0] == null ? "unknown" : failure[0];
             DebugLog.event("terminal routes: createSession rejected; reason=" + reason);
             if ("session_limit".equals(reason)) {
-                writeError(out, 429, "session_limit");
+                writeError(out, 429, "session_limit", reason);
             } else {
-                writeError(out, 503, "runtime_unavailable");
+                writeError(out, 503, "runtime_unavailable", reason);
             }
             return;
         }
@@ -332,8 +334,22 @@ public final class TerminalRoutes implements LoopbackLocalService {
      * never describe the runtime's private directory layout to the page.
      */
     private static void writeError(OutputStream out, int status, String token) throws IOException {
+        writeError(out, status, token, null);
+    }
+
+    /**
+     * Writes an error body.
+     *
+     * <p>{@code reason} is a fixed token from a closed set, never a message from the platform, so it
+     * is safe to add to the response.
+     */
+    private static void writeError(OutputStream out, int status, String token, String reason)
+            throws IOException {
         Map<String, String> fields = new LinkedHashMap<>();
         fields.put("error", token);
+        if (reason != null && !reason.equals(token)) {
+            fields.put("reason", reason);
+        }
         writeJson(out, status, fields);
     }
 
