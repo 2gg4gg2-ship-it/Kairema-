@@ -21,6 +21,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
 
+import im.kairema.app.loopback.DebugLog;
+
 /**
  * Installs and owns the on-device Linux runtime: proot, its shared libraries and the Alpine
  * minirootfs.
@@ -447,10 +449,12 @@ public final class TerminalRuntime {
 
         // Second pass: extract. The digest above already proved these bytes, so this pass does not
         // re-hash; it only lays the verified archive out.
+        DebugLog.event("terminal runtime: rootfs extraction started");
         try (InputStream raw = context.getAssets().open(assetPath)) {
             InputStream data = looksGzipped(raw) ? new GZIPInputStream(raw) : raw;
             TarArchive.extract(data, rootfsDir);
         }
+        DebugLog.event("terminal runtime: rootfs extraction completed");
 
         if (!new File(rootfsDir, "etc/alpine-release").isFile()) {
             throw new IOException("extracted rootfs is not an Alpine minirootfs");
