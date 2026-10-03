@@ -106,7 +106,11 @@ public final class TerminalSession {
         // fixed argv and the environment holds absolute app-private paths.
         try {
             Process started = builder.start();
-            DebugLog.event("terminal session ProcessBuilder.start succeeded; pid=" + started.pid());
+            // The pid is not logged: java.lang.Process.pid() does not exist in android.jar, so
+            // calling it does not compile against this module's Android API level. The fact that
+            // start() returned is the signal that matters; which pid the platform assigned is not
+            // needed to tell a broken runtime from a shell that ran.
+            DebugLog.event("terminal session ProcessBuilder.start succeeded");
             return started;
         } catch (IOException failed) {
             DebugLog.failure("terminal session ProcessBuilder.start failed", failed);
