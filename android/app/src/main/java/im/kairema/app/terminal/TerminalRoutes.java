@@ -10,6 +10,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import im.kairema.app.loopback.DebugLog;
+
 /**
  * The on-device terminal API, served by the existing loopback origin.
  *
@@ -147,18 +149,26 @@ public final class TerminalRoutes implements LoopbackLocalService {
     // ---------------------------------------------------------------- routes
 
     private void createSession(OutputStream out) throws IOException {
+        // The request body is never read here and never logged: it can carry a command. Only the
+        // outcome and a fixed reason token reach the log.
+        DebugLog.event("terminal routes: createSession request accepted");
         String[] failure = new String[1];
         TerminalSession session = sessions.start(failure);
         if (session == null) {
             // 503 for an unavailable runtime and 429 for the session cap: the client can tell a
-            // transient condition from "close one first", and neither leaks a path.
-            if ("session_limit".equals(failure[0])) {
+            // transient condition from "close one first", and neither leaks a path. Note that a
+            // launch failure is reported to the client as runtime_unavailable too: the page cannot
+            // act on the difference, so the log is where the difference is resolved.
+            String reason = failure[0] == null ? "unknown" : failure[0];
+            DebugLog.event("terminal routes: createSession rejected; reason=" + reason);
+            if ("session_limit".equals(reason)) {
                 writeError(out, 429, "session_limit");
             } else {
                 writeError(out, 503, "runtime_unavailable");
             }
             return;
         }
+        DebugLog.event("terminal routes: createSession succeeded");
         Map<String, String> fields = new LinkedHashMap<>();
         fields.put("id", session.getId());
         fields.put("cwd", TerminalRuntime.GUEST_HOME);

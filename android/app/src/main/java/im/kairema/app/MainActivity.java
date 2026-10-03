@@ -1,9 +1,13 @@
 package im.kairema.app;
 
+import android.content.pm.ApplicationInfo;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.util.Log;
+import android.view.KeyEvent;
+import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -13,9 +17,11 @@ import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebViewClient;
 
+import java.io.File;
 import java.io.IOException;
 
 import im.kairema.app.loopback.DebugLog;
+import im.kairema.app.loopback.DiagnosticsScreen;
 import im.kairema.app.loopback.LoopbackServer;
 import im.kairema.app.loopback.LoopbackServerFactory;
 import im.kairema.app.terminal.TerminalRoutes;
@@ -31,9 +37,13 @@ import im.kairema.app.terminal.TerminalSessions;
  *
  * <p>Debug builds still record the loopback origin's behaviour into {@link DebugLog}, because the
  * shell has so far failed on a real device and there is no PC, adb or logcat to inspect it with. That
- * recording is gated on {@code KAIREMA_ANDROID_DEBUG=1} and is inert in a release build. Nothing in it
- * is shown to the user: the diagnostics screen that used to be installed here is no longer reachable
- * from the interface, so the app renders exactly the Kairema frontend and nothing else.
+ * recording is gated on {@code KAIREMA_ANDROID_DEBUG=1} and is inert in a release build.
+ *
+ * <p>The same debug builds carry a phone-only diagnostics screen for the terminal runtime, opened by
+ * holding Volume Up and Volume Down together for a second and a half. It is reachable only when the
+ * APK is debuggable <em>and</em> the build asked for diagnostics, it adds no control to the normal
+ * interface, and it never consumes the volume keys: a release build has no gesture at all, so the
+ * app renders exactly the Kairema frontend.
  */
 public class MainActivity extends BridgeActivity {
 
@@ -42,6 +52,11 @@ public class MainActivity extends BridgeActivity {
     private LoopbackServer loopbackServer;
     private boolean diagnosticsEnabled;
     private TerminalSessions terminalSessions;
+
+    /** Only ever armed in a debuggable build with diagnostics enabled. */
+    private final DiagnosticsGesture diagnosticsGesture = new DiagnosticsGesture();
+    private DiagnosticsScreen diagnosticsScreen;
+    private Runnable pendingGestureCheck;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -66,6 +81,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onDestroy() {
+        cancelGestureCheck();
         if (loopbackServer != null) {
             DebugLog.event("MainActivity onDestroy: stopping loopback server");
             loopbackServer.stop();
@@ -133,6 +149,180 @@ public class MainActivity extends BridgeActivity {
             }
         });
         Log.i(TAG, "WebView pointed at loopback origin on port " + loopbackServer.getPort());
+    }
+
+    // ---------------------------------------------------------------- phone-only diagnostics
+
+    /**
+     * Whether the diagnostics overlay may be opened at all.
+     *
+     * <p>Two independent conditions, both required. {@code KAIREMA_ANDROID_DEBUG=1} is a build-time
+     * decision fixed in the generated Capacitor config, and {@code FLAG_DEBUGGABLE} comes from the
+     * APK itself: a release build satisfies neither, so the gesture is not even armed there. There is
+     * no asset, setting or intent that can switch this on from the device.
+     */
+    private boolean diagnosticsAvailable() {
+        return diagnosticsEnabled && isDebuggable();
+    }
+
+    private boolean isDebuggable() {
+        try {
+            return (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+        } catch (RuntimeException unavailable) {
+            // Default to closed: a diagnostics surface is never worth guessing at.
+            return false;
+        }
+    }
+
+    /**
+     * Forwards the key to the platform, then feeds the gesture.
+     *
+     * <p>{@code super} is called first and its result is returned unchanged, so the volume keys keep
+     * adjusting the volume and still raise the system OSD while the gesture is being watched. The
+     * gesture observes; it never consumes. That is the whole reason it needs two keys held for a
+     * second and a half instead of a plain tap.
+     */
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        boolean handled = super.onKeyDown(keyCode, event);
+        if (!diagnosticsAvailable()) {
+            return handled;
+        }
+        long now = SystemClock.uptimeMillis();
+        if (diagnosticsGesture.onDown(keyCode == KeyEvent.KEYCODE_VOLUME_UP,
+                keyCode == KeyEvent.KEYCODE_VOLUME_DOWN, now)) {
+            openDiagnostics();
+            return handled;
+        }
+        scheduleGestureCheck(now);
+        return handled;
+    }
+
+    /**
+     * Forwards the key-up and lets the gesture know.
+     *
+     * <p>Once neither volume key is held, the gesture is reset so the next hold can fire again. The
+     * reset is what stops a stale armed state from turning one later key press into a trigger.
+     */
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        boolean handled = super.onKeyUp(keyCode, event);
+        if (!diagnosticsAvailable()) {
+            return handled;
+        }
+        diagnosticsGesture.onUp(keyCode == KeyEvent.KEYCODE_VOLUME_UP,
+                keyCode == KeyEvent.KEYCODE_VOLUME_DOWN, SystemClock.uptimeMillis());
+        if (!diagnosticsGesture.isArmed()) {
+            cancelGestureCheck();
+            diagnosticsGesture.reset();
+        }
+        return handled;
+    }
+
+    /**
+     * Arms one check for the moment the hold completes.
+     *
+     * <p>Android only repeats a key-down while a key is held, and the repeat rate is not something to
+     * depend on for timing. A single delayed runnable is posted for the remaining hold instead, so
+     * the screen opens when the user finishes the gesture rather than whenever the next event
+     * happens to arrive.
+     */
+    private void scheduleGestureCheck(long now) {
+        if (pendingGestureCheck != null || !diagnosticsGesture.isArmed()
+                || diagnosticsGesture.isTriggered()) {
+            return;
+        }
+        pendingGestureCheck = () -> {
+            pendingGestureCheck = null;
+            if (diagnosticsAvailable() && diagnosticsGesture.poll(SystemClock.uptimeMillis())) {
+                openDiagnostics();
+            }
+        };
+        getWindow().getDecorView().postDelayed(pendingGestureCheck,
+                Math.max(diagnosticsGesture.remainingMillis(now), 1L));
+    }
+
+    private void cancelGestureCheck() {
+        if (pendingGestureCheck != null) {
+            getWindow().getDecorView().removeCallbacks(pendingGestureCheck);
+            pendingGestureCheck = null;
+        }
+    }
+
+    /**
+     * Raises the diagnostics overlay over the current content.
+     *
+     * <p>Added to {@code android.R.id.content} rather than replacing it, so the Capacitor layout and
+     * the WebView stay attached underneath and the app is exactly as it was once the overlay is
+     * dismissed. No button, menu entry or route leads here: the gesture is the only way in.
+     */
+    private void openDiagnostics() {
+        ViewGroup container = findViewById(android.R.id.content);
+        if (container == null || !diagnosticsAvailable()) {
+            return;
+        }
+        if (diagnosticsScreen == null) {
+            diagnosticsScreen = new DiagnosticsScreen(this,
+                    "Terminal runtime diagnostics (debug build)", this::retryTerminalRuntime,
+                    this::terminalStatus);
+        }
+        DebugLog.event("main activity: diagnostics screen opened");
+        diagnosticsScreen.showIn(container);
+    }
+
+    /**
+     * What the Retry button does.
+     *
+     * <p>Re-runs the same installation path startup uses and reloads the local origin. It reaches
+     * nothing external: no URL is fetched from here and the upstream is not involved, so a retry can
+     * never mask the failure it was meant to expose.
+     */
+    private void retryTerminalRuntime() {
+        DebugLog.event("main activity: diagnostics retry requested");
+        TerminalRuntime.get(this).ensureInstalled();
+        if (loopbackServer != null && bridge != null && bridge.getWebView() != null) {
+            bridge.getWebView().loadUrl(loopbackServer.getOrigin() + "/");
+        }
+    }
+
+    /**
+     * The runtime status shown above the log.
+     *
+     * <p>Called on the diagnostics screen's background thread, so the rootfs size walk is allowed
+     * here and nowhere on the UI thread. Everything is derived from the runtime's own accessors and
+     * from {@link File} checks under the runtime directory: booleans, counts and a byte total. No
+     * path, digest, exception message or session id is included.
+     */
+    private String terminalStatus() {
+        TerminalRuntime runtime = TerminalRuntime.get(this);
+        File dir = runtime.getRuntimeDir();
+        StringBuilder out = new StringBuilder();
+        out.append("schema=").append(DebugLog.SCHEMA_VERSION).append('\n');
+        out.append("debuggable=").append(isDebuggable()).append('\n');
+        out.append("runtime.ready=").append(runtime.isReady()).append('\n');
+        out.append("runtime.failureToken=").append(runtime.getFailureToken()).append('\n');
+        out.append("runtime.markerPresent=").append(runtime.isInstallMarkerPresent()).append('\n');
+        out.append("runtime.dirExists=").append(dir.isDirectory()).append('\n');
+        File proot = new File(dir, "bin/proot");
+        out.append("runtime.prootPresent=").append(proot.isFile()).append('\n');
+        out.append("runtime.prootExecutable=").append(proot.canExecute()).append('\n');
+        out.append("runtime.libtallocPresent=")
+                .append(new File(dir, "lib/libtalloc.so.2").isFile()).append('\n');
+        out.append("runtime.rootfsExists=").append(runtime.getRootfsDir().isDirectory())
+                .append('\n');
+        out.append("runtime.alpineReleasePresent=")
+                .append(new File(runtime.getRootfsDir(), "etc/alpine-release").isFile()).append('\n');
+        out.append("runtime.busyboxPresent=")
+                .append(new File(runtime.getRootfsDir(), "bin/busybox").isFile()).append('\n');
+        out.append("runtime.rootfsBytes=").append(runtime.getRootfsSizeBytes()).append('\n');
+        out.append("loopback.port=")
+                .append(loopbackServer == null ? "none" : loopbackServer.getPort()).append('\n');
+        out.append("loopback.acceptLoopAlive=").append(loopbackServer != null
+                && loopbackServer.isAcceptLoopAlive()).append('\n');
+        out.append("sessions.live=")
+                .append(terminalSessions == null ? 0 : terminalSessions.count())
+                .append('/').append(TerminalSessions.MAX_SESSIONS).append('\n');
+        return out.toString();
     }
 
     /**

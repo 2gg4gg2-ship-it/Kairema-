@@ -173,9 +173,59 @@ public final class TerminalRuntime {
         return failure;
     }
 
-    /** Root of the guest filesystem. Used only to build proot arguments inside this package. */
-    File getRootfsDir() {
+    /** Root of the guest filesystem. Used to build proot arguments inside this package. */
+    public File getRootfsDir() {
         return rootfsDir;
+    }
+
+    /**
+     * The app-private directory holding the whole runtime.
+     *
+     * <p>Exposed for the debug diagnostics screen, which reports whether the directory exists and
+     * how much of it is present. Returns the {@link File} and never its path as a string, so a
+     * caller that logs what it gets still cannot publish the app's private layout.
+     */
+    public File getRuntimeDir() {
+        return runtimeDir;
+    }
+
+    /**
+     * Whether the installation marker exists, meaning a previous installation finished.
+     *
+     * <p>The marker is written only after every file verified, so its absence with {@link #isReady()}
+     * false is the normal state before the first use, not a fault.
+     */
+    public boolean isInstallMarkerPresent() {
+        return isMarkedComplete();
+    }
+
+    /**
+     * Total size of the extracted guest filesystem in bytes, or -1 when it cannot be read.
+     *
+     * <p>A number and nothing else. The traversal here is the reason the diagnostics screen must not
+     * do this on the UI thread: it walks the whole rootfs, which is tens of thousands of entries the
+     * first time.
+     */
+    public long getRootfsSizeBytes() {
+        if (!rootfsDir.isDirectory()) {
+            return -1L;
+        }
+        return sizeOfTree(rootfsDir);
+    }
+
+    private static long sizeOfTree(File file) {
+        long total = 0L;
+        File[] children = file.listFiles();
+        if (children == null) {
+            // Unreadable directory: the size of this one entry is all that can be said.
+            return file.length();
+        }
+        for (File child : children) {
+            total += child.isDirectory() && !isSymbolicLink(child)
+                    ? sizeOfTree(child)
+                    : child.length();
+        }
+        return total;
     }
 
     File getHomeDir() {
@@ -226,29 +276,44 @@ public final class TerminalRuntime {
      * attempt rather than racing to write the same files.
      */
     public void ensureInstalled() {
+        DebugLog.event("terminal runtime: ensureInstalled called; ready=" + ready
+                + "; markerPresent=" + isMarkedComplete() + "; installInFlight=" + hasPendingInstall());
         if (ready) {
+            DebugLog.event("terminal runtime: ensureInstalled fast path, already ready");
             return;
         }
         synchronized (this) {
             if (ready) {
+                DebugLog.event("terminal runtime: ensureInstalled fast path, became ready");
                 return;
             }
             if (pendingInstall != null) {
+                DebugLog.event("terminal runtime: installation already in progress, joining it");
                 return;
             }
             if (isMarkedComplete() && verifyInstalledFilesQuietly()) {
+                DebugLog.event("terminal runtime: marker present and files verified, adopting install");
                 ready = true;
+                DebugLog.event("terminal runtime: ready=true (adopted existing installation)");
                 return;
             }
+            DebugLog.event("terminal runtime: install started");
             pendingInstall = installer.submit(this::installBlocking);
         }
     }
 
+    private synchronized boolean hasPendingInstall() {
+        return pendingInstall != null;
+    }
+
     /** Waits for any in-flight installation. Used by tests and by the first session. */
     public boolean awaitReady(long timeoutMillis) {
+        DebugLog.event("terminal runtime: awaitReady started; timeoutMillis=" + timeoutMillis
+                + "; ready=" + ready + "; markerPresent=" + isMarkedComplete());
         long deadline = System.currentTimeMillis() + timeoutMillis;
         while (System.currentTimeMillis() < deadline) {
             if (ready) {
+                DebugLog.event("terminal runtime: awaitReady completed; ready=true");
                 return true;
             }
             Future<?> pending = pendingInstall;
@@ -262,7 +327,10 @@ public final class TerminalRuntime {
                 sleepBriefly();
             }
         }
-        return ready;
+        boolean outcome = ready;
+        DebugLog.event("terminal runtime: awaitReady " + (outcome ? "completed" : "timed out")
+                + "; ready=" + outcome + "; markerPresent=" + isMarkedComplete());
+        return outcome;
     }
 
     private static void sleepBriefly() {
@@ -274,30 +342,39 @@ public final class TerminalRuntime {
     }
 
     private void installBlocking() {
+        DebugLog.event("terminal runtime: installBlocking started");
         try {
             // A partial installation is never reused. Removing the whole directory first means an
             // interrupted run cannot leave a half-extracted rootfs that a later run would accept.
+            DebugLog.event("terminal runtime: install phase remove_previous");
             deleteRecursively(runtimeDir);
             if (!runtimeDir.mkdirs()) {
-                fail("install_root");
+                fail("install_root", "mkdir_runtime_dir", null);
                 return;
             }
+            DebugLog.event("terminal runtime: install phase runtime_dir_ready");
 
             installNatives();
+            DebugLog.event("terminal runtime: install phase natives_complete");
             installRootfs();
+            DebugLog.event("terminal runtime: install phase rootfs_complete");
 
             // The marker is written only after every file verified, so its presence means the
             // installation is complete.
+            DebugLog.event("terminal runtime: marker being written");
             try (FileOutputStream marker = new FileOutputStream(markerFile())) {
                 marker.write("1".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
             }
+            DebugLog.event("terminal runtime: marker written");
             ready = true;
+            DebugLog.event("terminal runtime: ready=true");
             Log.i(TAG, "terminal runtime installed and verified");
-        } catch (IOException failure) {
-            // Nothing about the failure detail is propagated: it can contain paths.
-            fail("install_failed");
+        } catch (IOException installFailure) {
+            // Nothing about the failure detail is propagated: it can contain paths. DebugLog still
+            // sanitizes, and only the phase token reaches the file.
+            fail("install_failed", "install_io", installFailure);
         } catch (RuntimeException unexpected) {
-            fail("install_failed");
+            fail("install_failed", "install_runtime_exception", unexpected);
         } finally {
             synchronized (this) {
                 pendingInstall = null;
@@ -305,9 +382,19 @@ public final class TerminalRuntime {
         }
     }
 
-    private void fail(String token) {
+    /**
+     * Records a failure.
+     *
+     * <p>The phase is a fixed token chosen at the call site, never an exception message: it says
+     * which step stopped, and it cannot carry a path or a digest. The throwable goes to
+     * {@link DebugLog#failure(String, Throwable)}, which sanitizes its message and writes no stack
+     * trace, so it is useful without ever being able to leak the runtime's layout.
+     */
+    private void fail(String token, String phase, Throwable error) {
         failure = token;
         ready = false;
+        DebugLog.failure("terminal runtime: install failure; phase=" + phase
+                + "; failureToken=" + token, error);
         Log.w(TAG, "terminal runtime unavailable: " + token);
     }
 
@@ -335,16 +422,22 @@ public final class TerminalRuntime {
     }
 
     private void installNatives() throws IOException {
+        DebugLog.event("terminal runtime: installNatives started");
         if (!binDir.mkdirs() || !libDir.mkdirs()) {
             throw new IOException("could not create runtime bin/lib");
         }
+        DebugLog.event("terminal runtime: proot verification started");
         // proot and libtalloc.so.2: verified, then made executable.
         extractVerifiedAsset(NATIVE_ASSET_DIR + "proot", PROOT_SHA256, getProotBinary(), true);
+        DebugLog.event("terminal runtime: proot verification completed");
+        DebugLog.event("terminal runtime: libtalloc verification started");
         extractVerifiedAsset(NATIVE_ASSET_DIR + "libtalloc.so.2", LIBTALLOC_SHA256,
                 new File(libDir, "libtalloc.so.2"), false);
+        DebugLog.event("terminal runtime: libtalloc verification completed");
 
         // libandroid-shmem.so is packaged in lib/ by AGP, so the platform has already extracted it
         // to nativeLibraryDir. It is only verified here, to keep the digest guarantee complete.
+        DebugLog.event("terminal runtime: libandroid-shmem verification started");
         String nativeDir = nativeLibraryDir();
         if (nativeDir == null) {
             throw new IOException("nativeLibraryDir is unavailable");
@@ -356,6 +449,8 @@ public final class TerminalRuntime {
         if (!LIBANDROID_SHMEM_SHA256.equalsIgnoreCase(sha256Of(shmem))) {
             throw new IOException("libandroid-shmem.so digest mismatch");
         }
+        DebugLog.event("terminal runtime: libandroid-shmem verification completed");
+        DebugLog.event("terminal runtime: installNatives completed");
     }
 
     /**
@@ -409,6 +504,7 @@ public final class TerminalRuntime {
      * unpacked into a directory that is about to be discarded.
      */
     private void installRootfs() throws IOException {
+        DebugLog.event("terminal runtime: installRootfs started");
         String assetPath = null;
         for (String candidate : ROOTFS_ASSET_NAMES) {
             try (InputStream probe = context.getAssets().open(candidate)) {
@@ -427,6 +523,7 @@ public final class TerminalRuntime {
 
         // Digest of the archive as it will be read, and of the payload after any transparent
         // decompression. Both are pinned, so both are checked.
+        DebugLog.event("terminal runtime: rootfs digest pass started");
         try (InputStream raw = context.getAssets().open(assetPath)) {
             boolean gzipped = looksGzipped(raw);
             MessageDigest payloadDigest = newDigest();
@@ -446,6 +543,7 @@ public final class TerminalRuntime {
                 throw new IOException("rootfs archive digest mismatch");
             }
         }
+        DebugLog.event("terminal runtime: rootfs digest pass completed");
 
         // Second pass: extract. The digest above already proved these bytes, so this pass does not
         // re-hash; it only lays the verified archive out.
@@ -465,6 +563,7 @@ public final class TerminalRuntime {
         if (!tmpDir.isDirectory() && !tmpDir.mkdirs()) {
             throw new IOException("could not create the guest temporary directory");
         }
+        DebugLog.event("terminal runtime: installRootfs completed");
     }
 
     /**

@@ -11,6 +11,8 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import im.kairema.app.loopback.DebugLog;
+
 /**
  * One {@code proot} process: a shell, its stdin, and a stream of output frames.
  *
@@ -65,6 +67,7 @@ public final class TerminalSession {
     }
 
     private static Process launch(TerminalRuntime runtime) throws IOException {
+        DebugLog.event("terminal session launch started; runtimeReady=" + runtime.isReady());
         if (!runtime.isReady()) {
             throw new IOException("terminal runtime is not installed");
         }
@@ -99,7 +102,16 @@ public final class TerminalSession {
             environment.put("LD_LIBRARY_PATH", libraryPath);
         }
 
-        return builder.start();
+        // The argument vector and the environment are deliberately not logged: the command is a
+        // fixed argv and the environment holds absolute app-private paths.
+        try {
+            Process started = builder.start();
+            DebugLog.event("terminal session ProcessBuilder.start succeeded; pid=" + started.pid());
+            return started;
+        } catch (IOException failed) {
+            DebugLog.failure("terminal session ProcessBuilder.start failed", failed);
+            throw failed;
+        }
     }
 
     private void startReader(String name, InputStream source, String type) {
@@ -153,6 +165,11 @@ public final class TerminalSession {
                 drainRemaining();
                 exitCode = code;
                 exitReported = true;
+                // The exit code and the age of the session: enough to tell "the shell ran and exited"
+                // from "proot died at once", which is the difference between a broken runtime and a
+                // shell the user typed exit into. No output and no command line is recorded.
+                DebugLog.event("terminal session process exited; exitCode=" + code
+                        + "; ageMillis=" + getAgeMillis());
                 // The exit frame is emitted last and unconditionally, so a client that stops reading
                 // at exit still sees the status.
                 frames.offer(Json.exitFrame(code));

@@ -12,6 +12,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
+import im.kairema.app.loopback.DebugLog;
+
 /**
  * Owns every live terminal session.
  *
@@ -82,8 +84,16 @@ public final class TerminalSessions {
      * observe a free slot and exceed the cap.
      */
     public TerminalSession start(String[] outFailure) {
+        DebugLog.event("terminal sessions: start entered; ready=" + runtime.isReady()
+                + "; live=" + sessions.size() + "/" + MAX_SESSIONS);
         runtime.ensureInstalled();
         if (!runtime.awaitReady(30_000)) {
+            // The reason is never propagated further than the log: the HTTP layer turns both this and
+            // a launch failure into the same runtime_unavailable token, which is exactly why the log
+            // has to say which of the two happened.
+            DebugLog.event("terminal sessions: runtime unavailable; failureToken="
+                    + runtime.getFailureToken() + "; markerPresent="
+                    + runtime.isInstallMarkerPresent());
             outFailure[0] = "runtime_unavailable";
             return null;
         }
@@ -91,6 +101,8 @@ public final class TerminalSessions {
         synchronized (sessions) {
             reapExpiredLocked();
             if (sessions.size() >= MAX_SESSIONS) {
+                DebugLog.event("terminal sessions: rejected, session limit reached; live="
+                        + sessions.size());
                 outFailure[0] = "session_limit";
                 return null;
             }
@@ -100,11 +112,16 @@ public final class TerminalSessions {
                 session = new TerminalSession(id, runtime);
             } catch (IOException | RuntimeException failed) {
                 // The reason is not propagated: it can contain a filesystem path.
+                DebugLog.failure("terminal sessions: launch failed", failed);
                 Log.w(TAG, "could not start a terminal process");
                 outFailure[0] = "launch_failed";
                 return null;
             }
             sessions.put(id, session);
+            // The id is not logged: it is a lookup key, and a pasted log is exactly the kind of thing
+            // that ends up in a chat window.
+            DebugLog.event("terminal sessions: session created; live=" + sessions.size()
+                    + "/" + MAX_SESSIONS);
             return session;
         }
     }

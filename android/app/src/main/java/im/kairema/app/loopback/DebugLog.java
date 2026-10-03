@@ -13,12 +13,12 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * Debug-only, phone-readable diagnostics for the loopback shell.
+ * Debug-only, phone-readable diagnostics for the loopback shell and the on-device terminal runtime.
  *
- * <p>The user has no PC, no adb and no logcat, so when the shell fails to load the loopback origin
- * the only way to find out why is to read the failure off the phone itself. Every event is appended
- * to an app-private file in {@code filesDir}, which the debug diagnostics screen can display and
- * copy to the clipboard.
+ * <p>The user has no PC, no adb and no logcat, so when the shell fails to load the loopback origin,
+ * or when a terminal session cannot start, the only way to find out why is to read the failure off
+ * the phone itself. Every event is appended to an app-private file in {@code filesDir}, which the
+ * debug diagnostics screen can display and copy to the clipboard.
  *
  * <p>Two properties matter more than convenience here:
  *
@@ -36,10 +36,19 @@ import java.util.regex.Pattern;
  */
 public final class DebugLog {
 
-    /** Bumped when a failure mode is added, so the two builds stay comparable. */
-    public static final int SCHEMA_VERSION = 1;
+    /**
+     * Bumped when a failure mode is added, so the two builds stay comparable.
+     *
+     * <p>Version 2 adds the on-device terminal runtime events: installation phases, session launch,
+     * and process exit. That is what a user sends back instead of a logcat excerpt, so the schema
+     * number tells a reader which build produced a pasted log.
+     */
+    public static final int SCHEMA_VERSION = 2;
 
     private static final String FILE_NAME = "kairema-loopback-debug.log";
+
+    /** What the screen shows when the log is initialised but holds nothing. */
+    public static final String EMPTY = "(diagnostics log is empty)";
 
     /** Hard cap on the on-device file. Oldest bytes are discarded first. */
     private static final long MAX_BYTES = 64 * 1024L;
@@ -58,6 +67,19 @@ public final class DebugLog {
     public static void init(Context context) {
         synchronized (LOCK) {
             file = new File(context.getFilesDir(), FILE_NAME);
+        }
+    }
+
+    /**
+     * Points the logger at an explicit file instead of {@code filesDir}.
+     *
+     * <p>Package-private and used only by {@link DebugLogTest}, which runs on a plain JVM where no
+     * {@link Context} exists. It is not a second way to redirect the log at runtime: nothing outside
+     * this package can reach it.
+     */
+    static void initForTest(File target) {
+        synchronized (LOCK) {
+            file = target;
         }
     }
 
@@ -144,6 +166,11 @@ public final class DebugLog {
         if (target == null) {
             return "(diagnostics not initialised)";
         }
+        // A missing file is the normal state right after clear(), not an error: an open on a
+        // deleted file would otherwise be reported to the user as a read failure.
+        if (!target.isFile()) {
+            return EMPTY;
+        }
         try {
             RandomAccessFile source = new RandomAccessFile(target, "r");
             try {
@@ -155,6 +182,35 @@ public final class DebugLog {
             }
         } catch (IOException e) {
             return "(could not read diagnostics: " + e.getClass().getSimpleName() + ")";
+        }
+    }
+
+    /**
+     * Empties the log.
+     *
+     * <p>Only this file is touched: no runtime state, no installed files, no settings. A user
+     * clearing the log is discarding diagnostics, not resetting the app, so nothing else may be
+     * involved. Best effort, like every other write here.
+     */
+    public static void clear() {
+        File target;
+        synchronized (LOCK) {
+            target = file;
+        }
+        if (target == null) {
+            return;
+        }
+        synchronized (LOCK) {
+            boolean cleared = !target.exists() || target.delete();
+            if (!cleared) {
+                // Truncating is the fallback: some filesystems refuse an unlink of a mapped file, and
+                // an empty log is still the state the user asked for.
+                try (FileOutputStream out = new FileOutputStream(target, false)) {
+                    out.flush();
+                } catch (IOException ignored) {
+                    // Nothing useful to do: the log stays as it was rather than breaking the screen.
+                }
+            }
         }
     }
 
