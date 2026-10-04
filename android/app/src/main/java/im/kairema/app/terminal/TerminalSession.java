@@ -97,7 +97,7 @@ public final class TerminalSession {
  * a command, a token or a credential.
  */
 private static void logLaunchPreconditions(TerminalRuntime runtime, File executable,
-            java.util.Map<String, String> environment) {
+            java.util.Map<String, String> environment, List<String> guestArgv) {
         File rootfs = runtime.getRootfsDir();
         File binDirectory = new File(rootfs, "bin");
         File sh = new File(binDirectory, "sh");
@@ -106,6 +106,9 @@ private static void logLaunchPreconditions(TerminalRuntime runtime, File executa
         DebugLog.event("terminal session launch preconditions"
                 + "; proot=" + executable.getAbsolutePath()
                 + "; prootCanExecute=" + executable.canExecute()
+                // What proot was actually asked to run, so the log identifies which guest command
+                // produced whatever comes next. Fixed paths only; no user input reaches this vector.
+                + "; guestArgv=" + guestArgv
                 + "; rootfs=" + rootfs.getAbsolutePath()
                 + "; rootfsIsDirectory=" + rootfs.isDirectory()
                 + "; binIsDirectory=" + binDirectory.isDirectory()
@@ -157,7 +160,19 @@ private static void logLaunchPreconditions(TerminalRuntime runtime, File executa
         command.add(TerminalRuntime.GUEST_HOME);
         command.add("-i");
         command.add("0:0");
-        command.add("/bin/sh");
+        // DIAGNOSTIC EXPERIMENT, NOT A FIX. The device reported execve("/bin/sh") = ENOENT while
+        // logging shIsSymlink=true, shLinkTarget=/bin/busybox, busyboxExists=true,
+        // busyboxCanExecute=true, loaderExists=true. That leaves one question this run answers:
+        // whether proot fails only on the symlink, or on the target it points at as well.
+        //
+        // "/bin/busybox" names a real file inside the guest, so it bypasses the symlink entirely.
+        // If the shell starts, the symlink was the problem; if this fails the same way, the problem
+        // is underneath the symlink and the experiment has located it. Do not read a success here
+        // as a design: it bypasses /bin/sh, and /bin/sh is what the product should run.
+        List<String> guestArgv = new ArrayList<>(2);
+        guestArgv.add("/bin/busybox");
+        guestArgv.add("sh");
+        command.addAll(guestArgv);
 
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.directory(executable.getParentFile());
@@ -181,10 +196,11 @@ private static void logLaunchPreconditions(TerminalRuntime runtime, File executa
             environment.put("LD_LIBRARY_PATH", libraryPath);
         }
 
-        logLaunchPreconditions(runtime, executable, environment);
+        logLaunchPreconditions(runtime, executable, environment, guestArgv);
 
-        // The argument vector and the environment are deliberately not logged: the command is a
-        // fixed argv and the environment holds absolute app-private paths.
+        // The proot options are not logged: they repeat the rootfs and library paths already recorded
+        // above. The guest argv is, because which guest command was tried is the one fact a reader
+        // cannot infer from the paths.
         try {
             Process started = builder.start();
             // The pid is not logged: java.lang.Process.pid() does not exist in android.jar, so
