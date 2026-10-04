@@ -42,8 +42,14 @@ public final class DebugLog {
      * <p>Version 2 adds the on-device terminal runtime events: installation phases, session launch,
      * and process exit. That is what a user sends back instead of a logcat excerpt, so the schema
      * number tells a reader which build produced a pasted log.
+     * <p>Version 3 adds the authentication startup timing events: a correlation id per proxied
+ * request, a phase name and an elapsed-millisecond count, so a multi-minute stall can be
+ * attributed to one leg (WebView to loopback, loopback to upstream connect, upstream response
+ * headers, response body, delivery back to the WebView) instead of being observed only as "the
+ * app took a long time to start". It also stamps the calendar date, so a delta between two lines
+ * from different launches can no longer be ambiguous across midnight.
      */
-    public static final int SCHEMA_VERSION = 2;
+    public static final int SCHEMA_VERSION = 3;
 
     private static final String FILE_NAME = "kairema-loopback-debug.log";
 
@@ -108,7 +114,9 @@ public final class DebugLog {
             return;
         }
 
-        String stamp = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(new Date());
+        // Calendar date as well as wall-clock time: a reader comparing two lines from different
+        // launches must be able to tell "45 seconds apart" from "45 minutes and one day apart".
+        String stamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date());
         StringBuilder line = new StringBuilder();
         line.append(stamp).append(' ').append(level).append(' ').append(sanitize(message));
         if (error != null) {

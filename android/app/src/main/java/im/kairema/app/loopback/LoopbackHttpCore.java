@@ -83,6 +83,27 @@ public final class LoopbackHttpCore implements LoopbackServer {
     private final java.util.concurrent.atomic.AtomicInteger acceptedSockets =
             new java.util.concurrent.atomic.AtomicInteger();
 
+    /**
+     * Monotonic counter behind the per-request correlation id.
+     *
+     * <p>Diagnostic only. The id is what lets a reader follow one WebView request across five
+     * log lines that are written from different phases, including an "upstream failed" line that is
+     * written by a different stack frame than the line that started the request. It is deliberately
+     * short and sequential: it carries no secret, it survives redaction unchanged, and its ordering
+     * is itself useful evidence of how many requests the WebView made.
+     */
+    private static final java.util.concurrent.atomic.AtomicLong REQUEST_SEQUENCE =
+            new java.util.concurrent.atomic.AtomicLong();
+
+    private static String newCorrelationId() {
+        return "d" + Long.toHexString(REQUEST_SEQUENCE.incrementAndGet());
+    }
+
+    /** Milliseconds since {@code startedAtNanos}, never negative and never a wall-clock reading. */
+    private static long elapsedMs(long startedAtNanos) {
+        return Math.max(0L, (System.nanoTime() - startedAtNanos) / 1_000_000L);
+    }
+
     public LoopbackHttpCore(LoopbackStaticSource staticSource, URL upstream) {
         this(staticSource, upstream, LoopbackLog.NO_OP, null);
     }
@@ -219,7 +240,10 @@ public final class LoopbackHttpCore implements LoopbackServer {
     private void handleQuietly(Socket socket) {
         try {
             socket.setTcpNoDelay(true);
-            handle(socket);
+            // Taken as close to the accept as the task start allows, so the time the WebView spent
+            // getting its request line and headers onto this socket is separable from everything
+            // that happens after.
+            handle(socket, System.nanoTime());
         } catch (IOException ignored) {
             // A dropped client must not take the listener down.
         } finally {
@@ -241,11 +265,13 @@ public final class LoopbackHttpCore implements LoopbackServer {
         String method = "";
         String path = "";
         String query;
+        /** Diagnostic correlation id, never part of the forwarded request. */
+        String correlationId = "";
         final Map<String, String> headers = new LinkedHashMap<>();
         byte[] body = new byte[0];
     }
 
-    private void handle(Socket socket) throws IOException {
+    private void handle(Socket socket, long acceptedAtNanos) throws IOException {
         InputStream in = socket.getInputStream();
         OutputStream out = socket.getOutputStream();
 
@@ -254,6 +280,12 @@ public final class LoopbackHttpCore implements LoopbackServer {
             writeSimple(out, 400, "malformed or disallowed request");
             return;
         }
+        // readMs is the WebView-to-loopback leg on its own. It is the one number that separates "the
+        // page never got its request out" from "the request arrived and the answer was slow".
+        log.info("diag request accepted; corr=" + request.correlationId + "; method=" + request.method
+                + "; route=" + routeLabelForDiagnostics(request)
+                + "; bodyBytes=" + request.body.length
+                + "; readMs=" + elapsedMs(acceptedAtNanos));
         if (localService != null && localService.handles(request.path)) {
             // Local routes run in this process and are never forwarded upstream. They are checked
             // against the same cookie as the proxy, so there is still exactly one credential: the
@@ -387,6 +419,7 @@ public final class LoopbackHttpCore implements LoopbackServer {
         }
 
         Request request = new Request();
+        request.correlationId = newCorrelationId();
         request.method = parts[0];
 
         // Only origin-form targets are accepted. Absolute-form ("GET http://host/x") and
@@ -525,23 +558,35 @@ public final class LoopbackHttpCore implements LoopbackServer {
     // ---------------------------------------------------------------- proxy
 
     private void proxy(Request request, OutputStream out) throws IOException {
-        // The upstream is fixed at construction; only path and query come from the request.
-        String base = upstream.toString();
-        StringBuilder target = new StringBuilder(base);
-        if (base.endsWith("/") && request.path.startsWith("/")) {
-            target.setLength(target.length() - 1);
-        }
-        target.append(request.path);
-        if (request.query != null) {
-            target.append('?').append(request.query);
-        }
-
-        HttpURLConnection connection = (HttpURLConnection) new URL(target.toString()).openConnection();
+        final String corr = request.correlationId;
+        final String route = safeRouteLabel(request.path);
+        final long startedAtNanos = System.nanoTime();
+        // Tracked so the failure line names the leg that actually broke, instead of only saying that
+        // something upstream of the response failed. This transport sets a connect timeout but no read
+        // timeout, so the value of this string is the whole point of the instrumentation: it is what
+        // distinguishes a hang before the upstream is reachable from a hang while waiting for its answer.
+        String phase = "build_target";
+        log.info("diag proxy started; corr=" + corr + "; route=" + route + "; method=" + request.method
+                + "; bodyBytes=" + request.body.length);
         try {
-            connection.setInstanceFollowRedirects(false);
-            connection.setRequestMethod(request.method);
-            connection.setConnectTimeout(15_000);
-            connection.setUseCaches(false);
+            // The upstream is fixed at construction; only path and query come from the request.
+            String base = upstream.toString();
+            StringBuilder target = new StringBuilder(base);
+            if (base.endsWith("/") && request.path.startsWith("/")) {
+                target.setLength(target.length() - 1);
+            }
+            target.append(request.path);
+            if (request.query != null) {
+                target.append('?').append(request.query);
+            }
+
+            HttpURLConnection connection = (HttpURLConnection) new URL(target.toString()).openConnection();
+            try {
+                phase = "upstream_connect";
+                connection.setInstanceFollowRedirects(false);
+                connection.setRequestMethod(request.method);
+                connection.setConnectTimeout(15_000);
+                connection.setUseCaches(false);
 
             // The backend derives cookie attributes from the protocol it believes it is serving. Over a
             // plaintext loopback hop req.protocol would be "http", making it emit SameSite=None without
@@ -556,18 +601,43 @@ public final class LoopbackHttpCore implements LoopbackServer {
                 }
             }
 
-            if (request.body.length > 0) {
-                connection.setDoOutput(true);
-                connection.setRequestProperty("Content-Length", String.valueOf(request.body.length));
-                try (OutputStream upstreamOut = connection.getOutputStream()) {
-                    upstreamOut.write(request.body);
+                long connectStartedAtNanos = System.nanoTime();
+                if (request.body.length > 0) {
+                    // A body forces the connection here: DNS, TCP and TLS all complete inside
+                    // getOutputStream(), so this branch can time connect separately from the answer.
+                    phase = "upstream_connect";
+                    log.info("diag upstream connect started; corr=" + corr + "; route=" + route);
+                    connection.setDoOutput(true);
+                    connection.setRequestProperty("Content-Length", String.valueOf(request.body.length));
+                    try (OutputStream upstreamOut = connection.getOutputStream()) {
+                        upstreamOut.write(request.body);
+                    }
+                    log.info("diag upstream connection established; corr=" + corr + "; route=" + route
+                            + "; connectMs=" + elapsedMs(connectStartedAtNanos));
+                } else {
+                    // No body, so there is nothing to force the connection early: getResponseCode()
+                    // performs connect and the wait for the status line in one indivisible call. The
+                    // reported figure is therefore connect plus response headers together, which
+                    // `note=merged` says rather than leaving the reader to assume a connect-only time.
+                    phase = "upstream_connect";
+                    log.info("diag upstream connect started; corr=" + corr + "; route=" + route
+                            + "; note=merged");
                 }
-            }
 
-            int status = connection.getResponseCode();
-            writeStatusLine(out, status, connection.getResponseMessage());
+                phase = "await_response_headers";
+                long headersStartedAtNanos = System.nanoTime();
+                int status = connection.getResponseCode();
+                if (request.body.length == 0) {
+                    log.info("diag upstream connection established; corr=" + corr + "; route=" + route
+                            + "; connectAndHeadersMs=" + elapsedMs(connectStartedAtNanos));
+                }
+                log.info("diag upstream response received; corr=" + corr + "; route=" + route
+                        + "; status=" + status
+                        + "; awaitingHeadersMs=" + elapsedMs(headersStartedAtNanos)
+                        + "; elapsedMs=" + elapsedMs(startedAtNanos));
+                writeStatusLine(out, status, connection.getResponseMessage());
 
-            // Counted, never read: the WebView has to accept these for the email sign-in to work,
+                // Counted, never read: the WebView has to accept these for the email sign-in to work,
             // and whether a session cookie was set is the difference between "the backend refused"
             // and "the cookie never reached the jar".
             int setCookieCount = 0;
@@ -597,42 +667,89 @@ public final class LoopbackHttpCore implements LoopbackServer {
             log.info("proxy response " + status + " setCookieCount=" + setCookieCount
                     + " responseContentType=" + valueOrAbsent(responseContentType)
                     + " forwardedBodyBytes=" + request.body.length
-                    + " for " + safeRouteLabel(request.path));
+                    + " for " + route);
             // No Content-Length for streamed bodies, so the client reads until close.
             writeHeader(out, "Connection", "close");
             out.write("\r\n".getBytes(StandardCharsets.ISO_8859_1));
 
-            InputStream source = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
-            if (source != null) {
-                pump(source, out);
+                phase = "read_response_body";
+                long bodyStartedAtNanos = System.nanoTime();
+                long delivered = 0L;
+                InputStream source = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+                if (source != null) {
+                    delivered = pump(source, out);
+                }
+                log.info("diag response body delivered; corr=" + corr + "; route=" + route
+                        + "; bodyBytes=" + delivered + "; bodyMs=" + elapsedMs(bodyStartedAtNanos)
+                        + "; elapsedMs=" + elapsedMs(startedAtNanos));
+                log.info("diag proxy completed; corr=" + corr + "; route=" + route
+                        + "; status=" + status + "; totalMs=" + elapsedMs(startedAtNanos));
+            } finally {
+                connection.disconnect();
             }
-        } finally {
-            connection.disconnect();
+        } catch (IOException failure) {
+            // Re-thrown unchanged: the caller still closes the socket exactly as before. This line only
+            // records which leg had not completed, so a multi-minute wait followed by a failure is
+            // attributable to connect, to headers or to the body.
+            log.warn("diag proxy failed; corr=" + corr + "; route=" + route + "; phase=" + phase
+                    + "; elapsedMs=" + elapsedMs(startedAtNanos), failure);
+            throw failure;
         }
     }
 
     /**
      * Copies upstream bytes to the client as they arrive, flushing per chunk. This is what keeps
      * {@code /api/chat/stream} a real stream rather than one buffered blob delivered at the end.
+     *
+     * <p>Returns the number of bytes written, which is what lets the caller separate "the answer
+     * arrived and was large" from "the answer arrived and was small" without reading any content.
      */
-    private void pump(InputStream source, OutputStream out) throws IOException {
+    private long pump(InputStream source, OutputStream out) throws IOException {
         byte[] buffer = new byte[8192];
+        long delivered = 0L;
         int read;
         while ((read = source.read(buffer)) != -1) {
             out.write(buffer, 0, read);
             out.flush();
+            delivered += read;
         }
+        return delivered;
+    }
+
+    /**
+     * The route label for the accept line: local prefix, proxied procedure or asset path.
+     *
+     * <p>Uses exactly the same labelling as the three branches above, so the accept line and the
+     * later phase lines of one request always carry the identical string.
+     */
+    private static String routeLabelForDiagnostics(Request request) {
+        if (safeLocalRouteLabel(request.path).equals("unlisted")) {
+            return LoopbackRoutes.isProxyable(request.path)
+                    ? safeRouteLabel(request.path)
+                    : "asset";
+        }
+        return safeLocalRouteLabel(request.path);
     }
 
     // ---------------------------------------------------------------- static files
 
     private void serveAsset(Request request, OutputStream out) throws IOException {
+        long startedAtNanos = System.nanoTime();
         String relative = request.path.startsWith("/") ? request.path.substring(1) : request.path;
         byte[] content = relative.isEmpty() ? null : readSafely(relative);
-        if (content == null) {
+        boolean usedIndexFallback = content == null;
+        if (usedIndexFallback) {
             // SPA fallback, matching server/_core/vite.ts serveStatic behaviour.
             content = readSafely("index.html");
         }
+        // The bundled page and its scripts are served through this same listener, so the first paint
+        // is a loopback leg too. Recording its size and duration is what keeps "the app was slow to
+        // open" separable from "the first API call was slow": a multi-megabyte asset read out of the
+        // APK on every launch is a plausible cause of the same symptom from a completely different place.
+        log.info("diag asset read; corr=" + request.correlationId
+                + "; servedIndexFallback=" + usedIndexFallback
+                + "; bytes=" + (content == null ? 0 : content.length)
+                + "; readMs=" + elapsedMs(startedAtNanos));
         if (content == null) {
             writeSimple(out, 404, "not found");
             return;

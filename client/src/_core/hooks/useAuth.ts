@@ -1,8 +1,9 @@
 import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { clearDirectKeys } from "@/lib/direct-key-store";
+import { reportAuthMe, nextDiagId } from "@/lib/diag";
 import { TRPCClientError } from "@trpc/client";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 type UseAuthOptions = {
   redirectOnUnauthenticated?: boolean;
@@ -96,6 +97,36 @@ export function useAuth(options?: UseAuthOptions) {
     meQuery.isLoading,
     state.user,
   ]);
+
+  // Diagnostic timing for the one request that gates the welcome screen. Observes the query and
+  // nothing else: retry, refetch and cache settings above are untouched, and no part of the session,
+  // the error or the response is recorded beyond a status code.
+  const authMeStartedAtMs = useRef<number | null>(null);
+  const authMeDiagId = useRef<string | null>(null);
+  useEffect(() => {
+    if (meQuery.isLoading) {
+      if (authMeStartedAtMs.current === null) {
+        authMeStartedAtMs.current = Date.now();
+        authMeDiagId.current = nextDiagId();
+      }
+      return;
+    }
+    const startedAtMs = authMeStartedAtMs.current;
+    if (startedAtMs === null) return;
+    authMeStartedAtMs.current = null;
+    const failed = meQuery.isError;
+    const status =
+      failed && meQuery.error instanceof TRPCClientError
+        ? (meQuery.error.data as { httpStatus?: number } | undefined)?.httpStatus
+        : undefined;
+    reportAuthMe(
+      authMeDiagId.current ?? nextDiagId(),
+      failed ? "error" : "ok",
+      status,
+      Date.now() - startedAtMs,
+    );
+    authMeDiagId.current = null;
+  }, [meQuery.isLoading, meQuery.isError, meQuery.dataUpdatedAt, meQuery.error]);
 
   return {
     ...state,

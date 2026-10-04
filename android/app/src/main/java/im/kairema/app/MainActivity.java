@@ -53,6 +53,19 @@ public class MainActivity extends BridgeActivity {
     private boolean diagnosticsEnabled;
     private TerminalSessions terminalSessions;
 
+    /**
+     * Correlation id for one process launch, stamped on every startup timing line below.
+     *
+     * <p>Diagnostic only. It exists because the symptom being chased is "the app sat on the welcome
+     * screen for minutes": the native startup lines and the per-request lines written later by the
+     * loopback listener are otherwise two unconnected streams, and this is what lets one pasted log
+     * be read as a single timeline. Carries no secret, so it survives redaction unchanged.
+     */
+    private String launchId = "u0";
+
+    /** {@link SystemClock#elapsedRealtime()} at process onCreate; the zero point of every totalMs. */
+    private long launchStartedAtMillis;
+
     /** Only ever armed in a debuggable build with diagnostics enabled. */
     private final DiagnosticsGesture diagnosticsGesture = new DiagnosticsGesture();
     private DiagnosticsScreen diagnosticsScreen;
@@ -60,10 +73,13 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        launchStartedAtMillis = SystemClock.elapsedRealtime();
         diagnosticsEnabled = LoopbackServerFactory.isDebugDiagnosticsEnabled(getAssets());
         if (diagnosticsEnabled) {
             DebugLog.init(this);
-            DebugLog.event("MainActivity onCreate, schema " + DebugLog.SCHEMA_VERSION);
+            launchId = "u" + Long.toHexString(launchStartedAtMillis & 0xFFFFL);
+            DebugLog.event("MainActivity onCreate, schema " + DebugLog.SCHEMA_VERSION
+                    + "; launch=" + launchId);
         }
 
         // Must run before super.onCreate: the Bridge loads its default asset origin inside its own
@@ -97,6 +113,9 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void startLoopbackServer() {
+        long startedAtMillis = SystemClock.elapsedRealtime();
+        DebugLog.event("diag loopback start entered; launch=" + launchId
+                + "; elapsedMs=" + sinceLaunch(startedAtMillis));
         DebugLog.event("about to create LoopbackServer");
         try {
             // The terminal runtime is installed lazily, off the startup path, so a slow first-run
@@ -109,12 +128,25 @@ public class MainActivity extends BridgeActivity {
             loopbackServer.start();
             DebugLog.event("start() returned; port=" + loopbackServer.getPort()
                     + "; acceptLoopAlive=" + loopbackServer.isAcceptLoopAlive());
+            // startMs separates "the listener took long to bind" from "the WebView was slow to get
+            // going"; without it both look like one stall in the log.
+            DebugLog.event("diag loopback listening; launch=" + launchId
+                    + "; startMs=" + (SystemClock.elapsedRealtime() - startedAtMillis)
+                    + "; elapsedMs=" + sinceLaunch(startedAtMillis));
         } catch (IOException failure) {
             // The upstream host is intentionally never logged.
             loopbackServer = null;
-            DebugLog.failure("LoopbackServer.create/start failed", failure);
+            DebugLog.failure("LoopbackServer.create/start failed; launch=" + launchId
+                            + "; startMs=" + (SystemClock.elapsedRealtime() - startedAtMillis)
+                            + "; elapsedMs=" + sinceLaunch(startedAtMillis),
+                    failure);
             LoopbackServerFactory.logStartupFailure(failure);
         }
+    }
+
+    /** Milliseconds since onCreate, the shared zero point of every {@code elapsedMs} in this class. */
+    private long sinceLaunch(long nowMillis) {
+        return Math.max(0L, nowMillis - launchStartedAtMillis);
     }
 
     /**
@@ -128,6 +160,9 @@ public class MainActivity extends BridgeActivity {
      * already carries it.
      */
     private void pointWebViewAtLoopback() {
+        long startedAtMillis = SystemClock.elapsedRealtime();
+        DebugLog.event("diag pointWebViewAtLoopback entered; launch=" + launchId
+                + "; elapsedMs=" + sinceLaunch(startedAtMillis));
         if (loopbackServer == null || bridge == null) {
             DebugLog.event("not pointing WebView: server or bridge missing (server="
                     + (loopbackServer != null) + ", bridge=" + (bridge != null) + ")");
@@ -145,6 +180,12 @@ public class MainActivity extends BridgeActivity {
                 // The origin is a 127.0.0.1 URL with an ephemeral port. It carries no credential:
                 // the access secret lives only in the cookie jar and in the Cookie header.
                 DebugLog.event("about to loadUrl " + origin);
+                // cookieMs is the wait for the jar to commit the per-launch access cookie. The whole
+                // startup depends on this callback firing, so a gap here is a stall that never reaches
+                // the loopback listener at all and so leaves no request line in the log.
+                DebugLog.event("diag loadUrl dispatched; launch=" + launchId
+                        + "; cookieMs=" + (SystemClock.elapsedRealtime() - startedAtMillis)
+                        + "; elapsedMs=" + sinceLaunch(SystemClock.elapsedRealtime()));
                 bridge.getWebView().loadUrl(origin + "/");
             }
         });
@@ -347,8 +388,13 @@ public class MainActivity extends BridgeActivity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                DebugLog.event("WebView onPageFinished; sessionCookiePresent="
-                        + hasSessionCookie());
+                // First-paint total: from process onCreate to the first document that finished
+                // loading. Read together with the loopback lines above it, it says whether the page
+                // itself was slow to arrive or whether it arrived quickly and the stall came later,
+                // inside the first API call the page makes.
+                DebugLog.event("diag onPageFinished; launch=" + launchId
+                        + "; sessionCookiePresent=" + hasSessionCookie()
+                        + "; totalMs=" + sinceLaunch(SystemClock.elapsedRealtime()));
                 super.onPageFinished(view, url);
             }
 

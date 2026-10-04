@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
 import { startLogin } from "./const";
+import { nextDiagId, startDiagFetch } from "./lib/diag";
 import { runtimeAuthHeaders } from "./lib/runtime-auth";
 import "./index.css";
 
@@ -38,6 +39,13 @@ queryClient.getMutationCache().subscribe(event => {
   }
 });
 
+/** The request path for the diagnostic line, resolved for either form `fetch` is given. */
+function diagPath(input: RequestInfo | URL): string {
+  if (typeof input === "string") return new URL(input, location.href).pathname;
+  if (input instanceof URL) return input.pathname;
+  return new URL(input.url, location.href).pathname;
+}
+
 const trpcClient = trpc.createClient({
   links: [
     httpBatchLink({
@@ -51,10 +59,29 @@ const trpcClient = trpc.createClient({
         return runtimeAuthHeaders();
       },
       fetch(input, init) {
-        return globalThis.fetch(input, {
+        // Diagnostic timing only: the promise, its arguments and every byte of it are passed through
+        // untouched. The wrapper records when the request left the page and when its promise settled,
+        // because that interval is the one leg of the startup path that is invisible to the native
+        // loopback log. No body, header or cookie is read here.
+        const done = startDiagFetch(
+          nextDiagId(),
+          init?.method ?? "GET",
+          diagPath(input),
+        );
+        const pending = globalThis.fetch(input, {
           ...(init ?? {}),
           credentials: "include",
         });
+        return pending.then(
+          response => {
+            done("ok", response.status);
+            return response;
+          },
+          failure => {
+            done("error");
+            throw failure;
+          },
+        );
       },
     }),
   ],

@@ -99,6 +99,13 @@ public class DebugLogTest {
                 DebugLog.sanitize("terminal session process exited; exitCode=127; ageMillis=12"));
         assertEquals("sessions.live=0/4; schema=2",
                 DebugLog.sanitize("sessions.live=0/4; schema=2"));
+        assertEquals("diag proxy completed; corr=d7; route=trpc; status=200; totalMs=812",
+                DebugLog.sanitize("diag proxy completed; corr=d7; route=trpc; status=200; totalMs=812"));
+        assertEquals("diag proxy failed; corr=d9; route=trpc; phase=await_response_headers; elapsedMs=240000",
+                DebugLog.sanitize("diag proxy failed; corr=d9; route=trpc; "
+                        + "phase=await_response_headers; elapsedMs=240000"));
+        assertEquals("main activity: diagnostics screen opened; launch=u1f4c",
+                DebugLog.sanitize("main activity: diagnostics screen opened; launch=u1f4c"));
     }
 
     @Test
@@ -159,7 +166,26 @@ public class DebugLogTest {
             "main activity: diagnostics retry requested",
             "diagnostics: log cleared by user",
             "diagnostics: retry requested by user",
-            "MainActivity onCreate, schema 2",
+            "MainActivity onCreate, schema 3",
+            "MainActivity onCreate, schema 3; launch=u1f4c",
+            "diag loopback start entered; launch=u1f4c; elapsedMs=0",
+            "diag loopback listening; launch=u1f4c; startMs=143; elapsedMs=151",
+            "LoopbackServer.create/start failed; launch=u1f4c; startMs=9; elapsedMs=12",
+            "diag pointWebViewAtLoopback entered; launch=u1f4c; elapsedMs=152",
+            "diag loadUrl dispatched; launch=u1f4c; cookieMs=4; elapsedMs=157",
+            "diag onPageFinished; launch=u1f4c; sessionCookiePresent=true; totalMs=612",
+            "diag request accepted; corr=d1; method=GET; route=trpc; bodyBytes=0; readMs=0",
+            "diag proxy started; corr=d1; route=trpc; method=GET; bodyBytes=0",
+            "diag upstream connect started; corr=d1; route=trpc",
+            "diag upstream connect started; corr=d1; route=trpc; note=merged",
+            "diag upstream connection established; corr=d1; route=trpc; connectMs=182",
+            "diag upstream connection established; corr=d1; route=trpc; connectAndHeadersMs=311",
+            "diag upstream response received; corr=d1; route=trpc; status=200; awaitingHeadersMs=129; elapsedMs=311",
+            "diag response body delivered; corr=d1; route=trpc; bodyBytes=240; bodyMs=3; elapsedMs=314",
+            "diag proxy completed; corr=d1; route=trpc; status=200; totalMs=315",
+            "diag proxy failed; corr=d2; route=trpc; phase=await_response_headers; elapsedMs=240113",
+            "diag asset read; corr=d3; servedIndexFallback=false; bytes=8421; readMs=2",
+            "proxy response 200 setCookieCount=1 responseContentType=application/json forwardedBodyBytes=0 for trpc",
         };
         for (String line : emitted) {
             assertEquals("redaction damaged a real log line: " + line, line, DebugLog.sanitize(line));
@@ -214,9 +240,17 @@ public class DebugLogTest {
     public void anEventIsTimestamped() {
         DebugLog.event("stamped");
         String written = DebugLog.readAll();
-        // HH:mm:ss.SSS at the start of the line.
+        // yyyy-MM-dd HH:mm:ss.SSS at the start of the line: the calendar date matters as much as the
+        // clock, because a delta between two lines from different launches is otherwise ambiguous.
         assertTrue("expected a timestamp, got: " + written,
-                written.matches("(?s)^\\d{2}:\\d{2}:\\d{2}\\.\\d{3} .*"));
+                written.matches("(?s)^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3} .*"));
+    }
+
+    @Test
+    public void theSchemaVersionAdvertisesTheAuthTimingFields() {
+        // A pasted log is read against the build that wrote it, so the number itself is asserted
+        // rather than left to drift silently.
+        assertEquals(3, DebugLog.SCHEMA_VERSION);
     }
 
     @Test
