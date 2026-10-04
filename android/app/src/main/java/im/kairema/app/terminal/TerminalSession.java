@@ -84,6 +84,55 @@ public final class TerminalSession {
         startReaper();
     }
 
+    /**
+     * Records what the guest is actually going to be handed, immediately before the exec.
+ *
+ * <p>proot reports a failure to start the shell as a single {@code execve("/bin/sh")} line, which
+ * does not say which part of the chain was wrong: the path proot was pointed at, a link that did not
+ * resolve, or the loader the binary asked for. Each of those produces the same line from proot, so
+ * the only way to tell them apart is to write down the chain while it is still observable here.
+ *
+ * <p>Everything recorded is a path, a permission or an environment variable this class just chose.
+ * The argv is a fixed vector and the environment is cleared and rebuilt above, so neither can carry
+ * a command, a token or a credential.
+ */
+private static void logLaunchPreconditions(TerminalRuntime runtime, File executable,
+            java.util.Map<String, String> environment) {
+        File rootfs = runtime.getRootfsDir();
+        File binDirectory = new File(rootfs, "bin");
+        File sh = new File(binDirectory, "sh");
+        File busybox = new File(binDirectory, "busybox");
+        File loader = new File(rootfs, "lib/ld-musl-aarch64.so.1");
+        DebugLog.event("terminal session launch preconditions"
+                + "; proot=" + executable.getAbsolutePath()
+                + "; prootCanExecute=" + executable.canExecute()
+                + "; rootfs=" + rootfs.getAbsolutePath()
+                + "; rootfsIsDirectory=" + rootfs.isDirectory()
+                + "; binIsDirectory=" + binDirectory.isDirectory()
+                + "; sh=" + sh.getAbsolutePath()
+                + "; shExists=" + sh.exists()
+                + "; shIsSymlink=" + java.nio.file.Files.isSymbolicLink(sh.toPath())
+                + "; shLinkTarget=" + linkTarget(sh)
+                + "; shLinkTargetResolvesOnHost=" + new File(binDirectory, "busybox").exists()
+                + "; busyboxExists=" + busybox.exists()
+                + "; busyboxCanExecute=" + busybox.canExecute()
+                + "; busyboxBytes=" + (busybox.isFile() ? busybox.length() : -1L)
+                + "; loaderExists=" + loader.isFile()
+                + "; loaderCanExecute=" + loader.canExecute()
+                + "; TMPDIR=" + environment.get("TMPDIR")
+                + "; PROOT_TMP_DIR=" + environment.get("PROOT_TMP_DIR")
+                + "; LD_LIBRARY_PATH=" + environment.get("LD_LIBRARY_PATH"));
+    }
+
+    /** The text a link points at, or a marker when the path is not a link or cannot be read. */
+    private static String linkTarget(File file) {
+        try {
+            return java.nio.file.Files.readSymbolicLink(file.toPath()).toString();
+        } catch (java.io.IOException | RuntimeException notALink) {
+            return "(not-a-symlink)";
+        }
+    }
+
     private static Process launch(TerminalRuntime runtime) throws IOException {
         DebugLog.event("terminal session launch started; runtimeReady=" + runtime.isReady());
         if (!runtime.isReady()) {
@@ -93,13 +142,21 @@ public final class TerminalSession {
         List<String> command = new ArrayList<>();
         File executable = runtime.getProotLaunchBinary();
         command.add(executable.getAbsolutePath());
-        // -r: the guest root. -w: the starting directory. -0: a new session, so a signal raised
-        // inside the shell cannot reach the app process.
+        // -r: the guest root. -w: the starting directory. -i 0:0: present the current user as root
+        // inside the guest, which the extracted rootfs needs because its files belong to uid 0.
+        //
+        // This used to be spelled "-0". That spelling is ambiguous in this proot build: it carries a
+        // --root-id long option, and it also carries the text "Alias: -0 -r *path* + a couple of
+        // recommended -b.", which describes an option that takes a path. Under that reading "-0
+        // /bin/sh" swallows the command as the guest root, which is exactly the shape of the failure
+        // this replaces. "-i 0:0" states the same thing the binary itself documents ("Note that the
+        // -0 option is the same as -i 0:0") and cannot be mistaken for the command.
         command.add("-r");
         command.add(runtime.getRootfsDir().getAbsolutePath());
         command.add("-w");
         command.add(TerminalRuntime.GUEST_HOME);
-        command.add("-0");
+        command.add("-i");
+        command.add("0:0");
         command.add("/bin/sh");
 
         ProcessBuilder builder = new ProcessBuilder(command);
@@ -114,12 +171,17 @@ public final class TerminalSession {
         environment.put("HOME", TerminalRuntime.GUEST_HOME);
         environment.put("TERM", "xterm-256color");
         environment.put("TMPDIR", "/tmp");
+        // Read by proot before the guest exists. The Termux build's compiled-in default does not
+        // exist in this app; see TerminalRuntime.getProotTempDir.
+        environment.put("PROOT_TMP_DIR", runtime.getProotTempDir().getAbsolutePath());
         String libraryPath = String.join(":", runtime.getLibraryPath());
         if (!libraryPath.isEmpty()) {
             // Needed because proot's own RUNPATH points at the Termux prefix, which does not exist
             // in this app, and because libtalloc.so.2 is staged in an app-private directory.
             environment.put("LD_LIBRARY_PATH", libraryPath);
         }
+
+        logLaunchPreconditions(runtime, executable, environment);
 
         // The argument vector and the environment are deliberately not logged: the command is a
         // fixed argv and the environment holds absolute app-private paths.

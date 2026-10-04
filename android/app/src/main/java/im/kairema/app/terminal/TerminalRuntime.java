@@ -117,6 +117,7 @@ public final class TerminalRuntime {
     private final File rootfsDir;
     private final File homeDir;
     private final File tmpDir;
+    private final File prootTmpDir;
     private final ExecutorService installer =
             Executors.newSingleThreadExecutor(r -> {
                 Thread t = new Thread(r, "kairema-terminal-install");
@@ -137,6 +138,7 @@ public final class TerminalRuntime {
         this.rootfsDir = new File(runtimeDir, "rootfs");
         this.homeDir = new File(rootfsDir, "home/kairema");
         this.tmpDir = new File(rootfsDir, "tmp");
+        this.prootTmpDir = new File(runtimeDir, "proot-tmp");
     }
 
     public static TerminalRuntime get(Context context) {
@@ -297,6 +299,22 @@ public final class TerminalRuntime {
             path.add(nativeDir);
         }
         return path.toArray(new String[0]);
+    }
+
+    /**
+     * Scratch space for proot itself, on the host side of the guest boundary.
+     *
+     * <p>The shipped proot is a Termux build, and the string {@code /data/data/com.termux/files/usr/tmp/}
+     * is compiled into it as the default of {@code PROOT_TMP_DIR}. That directory belongs to the
+     * Termux package and does not exist in this app, so proot cannot canonicalize it. Its own
+     * diagnostic names the fix: <em>"Please set PROOT_TMP_DIR env. variable to an alternate location
+     * (with write permission)."</em> This is what that location is.
+     *
+     * <p>It is deliberately not the guest's {@code /tmp}. proot reads this before the guest exists,
+     * and setting only the guest {@code TMPDIR} leaves proot still pointing at the Termux prefix.
+     */
+    File getProotTempDir() {
+        return prootTmpDir;
     }
 
     private String nativeLibraryDir() {
@@ -672,6 +690,11 @@ public final class TerminalRuntime {
         }
         if (!tmpDir.isDirectory() && !tmpDir.mkdirs()) {
             throw new IOException("could not create the guest temporary directory");
+        }
+        // proot's own scratch space. It is separate from the guest's /tmp because proot reads it
+        // before the guest exists, on the host side. See getProotTempDir for why it has to be set.
+        if (!prootTmpDir.isDirectory() && !prootTmpDir.mkdirs()) {
+            throw new IOException("could not create the proot temporary directory");
         }
         DebugLog.event("terminal runtime: installRootfs completed");
     }
