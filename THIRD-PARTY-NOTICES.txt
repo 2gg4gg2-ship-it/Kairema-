@@ -32,6 +32,34 @@ SHA-256:     98a5f86aad8d7f91e36ee039c64c8f5ac20738e545c883c559bf93e9b94e7bfa
 Deb SHA-256 (as published in the Termux index):
              0a1b3d0f6ef76436c5ed924cd8e8f5a6b7186e99e1650eb2d9bc734e218a74cb
 
+1b. proot loader
+-----------------
+Version:   Termux aarch64 build 5.1.107.96; the loader for the 5.1.107.95 proot above
+Origin:    Termux package repository
+           https://packages.termux.dev/apt/termux-main/
+           pool/main/p/proot/proot_5.1.107.96_aarch64.deb
+           installed by that package as libexec/proot/loader
+Packaged as: jniLibs/arm64-v8a/libprootloader.so
+SHA-256:     cbdef0e652c2b78af25d867e1719fdebbb0915e25aae2dd35b3b5c1835f6b551
+Deb SHA-256: 8199dca06dccb693ec09fb1759e3e1ad08b4863f0c11c612f89c20bd9ecdc1a0
+Upstream:    built from proot's src/execve/loader/ by the Termux build.
+Licence:     GPL-2.0-only, the same terms as the proot binary above.
+
+Why this file exists: proot does not exec the guest program. It replaces the execve target with a
+loader of its own, and reports any failure of that execve against the guest program it was asked for,
+so a loader that cannot be started is reported as execve("/bin/sh"): No such file or directory for a
+rootfs that is entirely correct. The proot above was built with an unbundled loader and therefore
+carries none; it falls back to the path compiled into it,
+/data/data/com.termux/files/usr/libexec/proot/loader, which lives in the Termux package's private
+directory and is untraversable from this app. The app points PROOT_LOADER at this copy instead.
+
+On the version: these bytes come from the 5.1.107.96 package because the 5.1.107.95 package is no
+longer published in the Termux pool. That is the same loader, not a substituted one. Between
+v5.1.107.95 and v5.1.107.96 the loader sources are identical and the loader build rules are identical
+(the only intervening commit, a179d3e, changes extension/fake_id0), and the blob carries no build
+path, timestamp or build id that could differ between builds of that source. It is an aarch64
+ET_EXEC with no PT_INTERP, statically linked and 16 KB page aligned.
+
 proot is a GPL-2.0 component. This is the licence with the strongest reciprocal obligations of the
 components listed here, and combining a GPL-2.0 binary into an APK is a distribution decision that
 requires review before shipping. It is flagged here as a distribution blocker rather than resolved.
@@ -114,4 +142,6 @@ Reproduce with:
 
   unzip -p android/app/build/outputs/apk/debug/app-debug.apk \
     assets/terminal/native/arm64-v8a/proot | sha256sum
+  unzip -p android/app/build/outputs/apk/debug/app-debug.apk \
+    lib/arm64-v8a/libprootloader.so | sha256sum
   node scripts/verify-terminal-apk.mjs

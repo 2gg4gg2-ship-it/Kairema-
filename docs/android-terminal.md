@@ -17,6 +17,7 @@ loopback origin inside this app.
 | --- | --- | --- |
 | `lib/arm64-v8a/` | `libandroid-shmem.so` | Its name ends in `.so`, so AGP packages it normally and the platform extracts it to `nativeLibraryDir`. |
 | `lib/arm64-v8a/` | `libproot.so` | proot is `exec()`ed, so it must be in the directory the platform extracts `lib/` to. See "Where proot is executed". |
+| `lib/arm64-v8a/` | `libprootloader.so` | proot `exec()`s its loader instead of the guest program, so the loader has the same placement requirement. See "The loader proot actually runs". |
 | `assets/terminal/native/arm64-v8a/` | `proot` | Identical bytes, kept as the pinned-digest copy. AGP drops the extensionless name from `lib/`, and the name in `lib/` has to end in `.so`. |
 | `assets/terminal/native/arm64-v8a/` | `libtalloc.so.2` | Versioned SONAME, so AGP drops it from `lib/`. |
 | `assets/terminal/rootfs/` | `alpine-minirootfs-3.21.8-aarch64.tar.gz` | See "The .tar.gz problem". |
@@ -94,6 +95,41 @@ The digest is pinned on the asset copy only. AGP may strip symbols from a `jniLi
 re-checking those exact bytes would reject a binary that runs correctly; the bytes inside the APK are
 covered by the APK signature instead.
 
+### The loader proot actually runs
+
+proot does not `exec()` the guest program. It rewrites the `execve` target to a loader of its own, lets
+the kernel run that, and the loader is what maps the guest binary. A missing loader therefore fails the
+session even when the rootfs is perfect.
+
+The shipped proot is a Termux build configured with an unbundled loader, so it does not carry one. Its
+selection is literally `getenv("PROOT_LOADER") ?: PROOT_UNBUNDLE_LOADER "/loader"`, with no existence
+check, and the compiled-in result is
+
+```
+/data/data/com.termux/files/usr/libexec/proot/loader
+```
+
+That path is inside the Termux package's private data directory. From this app's sandbox it is not
+merely absent, it is untraversable, so the `execve` fails with `ENOENT`. proot then reports that
+failure against the command it was originally asked for, because that is the name it still holds:
+
+```
+proot error: execve("/bin/sh"): No such file or directory
+```
+
+which reads as a broken rootfs and is not one. The suffix comes from `perror()`, so it describes the
+`errno` of the loader's `execve`, not of `/bin/sh`. Changing the guest command only changes the name in
+that line, which is why `/bin/busybox sh` failed identically.
+
+`TerminalSession` therefore sets `PROOT_LOADER` to the platform-extracted `libprootloader.so`, which is
+the same blob the Termux package installs. It has to live in `lib/` rather than in assets for the same
+reason proot does: it is `exec()`ed, and only the platform-extracted native directory may be executed
+from. Installation fails loudly if it is absent or does not match its pinned digest, because there is
+no fallback that can work — the compiled-in path is unreachable by construction, not by accident.
+
+`loader32` is not shipped. proot uses it only for a 32-bit guest ELF, and this build ships
+`arm64-v8a` only with an aarch64 rootfs, so it is never selected.
+
 ### Permissions inside the rootfs
 
 The rootfs is extracted by `TarArchive`, which reads the mode field from each header and restores the
@@ -106,7 +142,7 @@ exec the shell. Only the execute bit is applied, never setuid, setgid or sticky.
 
 * `arm64-v8a` only, via `ndk { abiFilters 'arm64-v8a' }`. The binaries are prebuilt aarch64, so there
   is nothing to build for another ABI.
-* All three ELF binaries have `p_align = 0x4000` (16384) on every `PT_LOAD` segment, which is the
+* All four ELF binaries have `p_align = 0x4000` (16384) on every `PT_LOAD` segment, which is the
   16 KB page-size requirement for devices running API 35+. `verifyTerminalApk` re-checks this from the
   packaged bytes rather than trusting the note.
 * `proot` is a PIE (`ET_DYN`), which is what Android's loader expects.

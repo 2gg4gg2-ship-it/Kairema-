@@ -73,6 +73,8 @@ public final class TerminalRuntime {
             "3c9b207c0a6ea2896b7523e03f55d9ab0d9e88baa115d4c32b84058ff4246fbb";
     static final String LIBANDROID_SHMEM_SHA256 =
             "84475798e07c8174dbbfaec70a827fdb02f19ffa69a589380c13e7507fd0e731";
+    static final String PROOT_LOADER_SHA256 =
+            "cbdef0e652c2b78af25d867e1719fdebbb0915e25aae2dd35b3b5c1835f6b551";
 
     /**
      * SHA-256 of the rootfs as this app consumes it.
@@ -284,6 +286,41 @@ public final class TerminalRuntime {
         return nativeDir == null ? null : new File(nativeDir, PLATFORM_PROOT_NAME);
     }
 
+    /** Name the platform extracts the proot loader under from {@code lib/}. */
+    static final String PLATFORM_LOADER_NAME = "libprootloader.so";
+
+    /**
+     * The loader proot will exec, or {@code null} when the platform did not extract it.
+     *
+     * <p>proot never exec()s the guest program. It rewrites the execve target to a loader of its own
+     * and lets that map the real binary, so a missing loader stops the session even when the rootfs is
+     * perfect.
+     *
+     * <p>This proot is a Termux build made with an unbundled loader, so it carries none. Its selection
+     * is {@code getenv("PROOT_LOADER") ?: PROOT_UNBUNDLE_LOADER "/loader"} with no existence check, and
+     * {@code PROOT_UNBUNDLE_LOADER} is compiled in as
+     * {@code /data/data/com.termux/files/usr/libexec/proot}. That is the Termux package's private
+     * directory: from this app's sandbox it is not merely absent but untraversable, so the execve
+     * failed with ENOENT and proot reported it against the guest program it had been asked for,
+     * printing {@code execve("/bin/sh"): No such file or directory} for a binary that is present and
+     * correct.
+     *
+     * <p>The replacement is the same blob the Termux package installs, so it must be exec()'d and
+     * therefore ships in {@code lib/} for the reason {@link #getProotLaunchBinary()} gives: only the
+     * platform-extracted native directory may be executed from.
+     *
+     * <p>{@code null} rather than a guessed path, because setting {@code PROOT_LOADER} to something
+     * absent would restore the identical ENOENT and hide which of the two paths is wrong.
+     */
+    File getProotLoaderBinary() {
+        String nativeDir = nativeLibraryDir();
+        if (nativeDir == null) {
+            return null;
+        }
+        File loader = new File(nativeDir, PLATFORM_LOADER_NAME);
+        return loader.isFile() ? loader : null;
+    }
+
     /**
      * Directories proot must search for its shared libraries, most specific first.
      *
@@ -324,18 +361,6 @@ public final class TerminalRuntime {
         } catch (RuntimeException unavailable) {
             return null;
         }
-    }
-
-    /**
-     * The directory the platform extracted {@code lib/} into, or {@code null}.
-     *
-     * <p>Exposed for the launch diagnosis only. proot's loader path is compiled into the binary and
-     * cannot be read back out of it at runtime, so the log records where an executable could have come
-     * from and whether that directory holds anything, which is the only host-side evidence available
-     * about it before the exec is attempted.
-     */
-    String nativeLibraryDirForDiagnostics() {
-        return nativeLibraryDir();
     }
 
     // ---------------------------------------------------------------- installation
@@ -540,6 +565,7 @@ public final class TerminalRuntime {
         return getProotBinary().isFile()
                 && getProotBinary().canExecute()
                 && getProotLaunchBinary().isFile()
+                && getProotLoaderBinary() != null
                 && new File(libDir, "libtalloc.so.2").isFile()
                 // The executable bit matters as much as the file: an Alpine rootfs extracted without
                 // it has a busybox that proot cannot run, and the failure looks like a broken proot.
@@ -590,6 +616,25 @@ public final class TerminalRuntime {
         }
         DebugLog.event("terminal runtime: execSource="
                 + (usesPlatformProot() ? "nativeLibDir" : "filesDir"));
+
+        // The loader, and unlike proot there is no fallback that can work. Without it proot exec()s a
+        // path inside another app's private directory, so a missing loader has to stop installation
+        // here rather than surface later as execve("/bin/sh"): No such file or directory.
+        DebugLog.event("terminal runtime: loader verification started");
+        File loader = getProotLoaderBinary();
+        if (loader == null) {
+            throw new IOException("the proot loader was not extracted by the platform");
+        }
+        // Pinned, unlike proot's own bytes which are trusted on the APK signature because AGP may strip
+        // them. This blob ships already stripped and carries no build path, so it should survive
+        // packaging byte for byte; if it ever does not, this fails here and the CI digest gate fails
+        // first, rather than an unexpected loader being exec'd on a device.
+        if (!PROOT_LOADER_SHA256.equalsIgnoreCase(sha256Of(loader))) {
+            throw new IOException("proot loader digest mismatch");
+        }
+        loader.setExecutable(true, true);
+        loader.setReadable(true, true);
+        DebugLog.event("terminal runtime: loader verification completed; bytes=" + loader.length());
         DebugLog.event("terminal runtime: installNatives completed");
     }
 

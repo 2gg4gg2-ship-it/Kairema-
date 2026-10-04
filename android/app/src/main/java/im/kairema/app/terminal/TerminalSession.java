@@ -46,11 +46,6 @@ public final class TerminalSession {
 
     private static final int READ_BUFFER = 4096;
 
-    /** Wall-clock budget for one diagnostic probe run, and the gap between polls while it reads. */
-    private static final long PROBE_BUDGET_MILLIS = 4_000L;
-    private static final long PROBE_POLL_MILLIS = 25L;
-    private static final int MAX_PROBE_CHARS = 4000;
-
     private final String id;
     private final BlockingQueue<String> frames = new ArrayBlockingQueue<>(MAX_BUFFERED_FRAMES);
     private final List<Thread> readers = new ArrayList<>();
@@ -129,84 +124,15 @@ private static void logLaunchPreconditions(TerminalRuntime runtime, File executa
                 + "; loaderCanExecute=" + loader.canExecute()
                 + "; TMPDIR=" + environment.get("TMPDIR")
                 + "; PROOT_TMP_DIR=" + environment.get("PROOT_TMP_DIR")
-                + "; PROOT_LOADER=" + environment.get("PROOT_LOADER")
-                + "; PROOT_VERBOSE=" + environment.get("PROOT_VERBOSE")
-                + "; LD_LIBRARY_PATH=" + environment.get("LD_LIBRARY_PATH")
-                + hostExecutionFacts(runtime));
-    }
-
-    /**
-     * What the host side of the guest boundary actually looks like for proot's two host-side needs:
-     * a loader to exec and a writable temporary directory.
-     *
-     * <p>These are recorded because proot reports a failure to start the guest as one
-     * {@code execve("/bin/sh")} line, and that line names the guest program rather than either of the
-     * host-side things it actually needs. Whether the compiled-in Termux loader path is reachable from
-     * this app, and whether proot's temporary directory can really be written, are the two facts that
-     * separate "the rootfs is wrong" from "proot could not run", and neither is visible in proot's own
-     * output.
-     *
-     * <p>{@code canExecute} on a path under another app's data directory is expected to be false:
-     * this app has no permission to traverse {@code /data/data/com.termux}. Recording it rather than
-     * asserting it is what turns that expectation into evidence.
-     */
-    private static String hostExecutionFacts(TerminalRuntime runtime) {
-        StringBuilder facts = new StringBuilder();
-        File prootTempDir = runtime.getProotTempDir();
-        facts.append("; prootTmpDir=").append(prootTempDir.getAbsolutePath())
-                .append("; prootTmpDirIsDirectory=").append(prootTempDir.isDirectory())
-                .append("; prootTmpDirCanWrite=").append(prootTempDir.canWrite())
-                .append("; prootTmpDirRealPath=").append(realPath(prootTempDir))
-                .append("; prootTempFileProbe=").append(probeTempFile(prootTempDir));
-
-        // The literal that is compiled into this proot build, and the Termux prefix it points at. proot
-        // does not check that either exists before exec()ing it, so what matters is reachability.
-        String nativeDir = runtime.nativeLibraryDirForDiagnostics();
-        facts.append("; nativeLibraryDir=").append(nativeDir);
-        for (String compiledIn : new String[] {
-                "/data/data/com.termux/files/usr/libexec/proot/loader",
-                "/data/data/com.termux/files/usr/libexec/proot/loader32",
-                "/data/data/com.termux/files/usr/tmp/",
-        }) {
-            File path = new File(compiledIn);
-            facts.append("; compiledIn[").append(compiledIn)
-                    .append("]exists=").append(path.exists())
-                    .append(",canRead=").append(path.canRead())
-                    .append(",canExecute=").append(path.canExecute())
-                    .append(",parentExists=").append(path.getParentFile() != null
-                            && path.getParentFile().exists());
-        }
-        return facts.toString();
-    }
-
-    /** The canonical path, or a marker when the path does not resolve. */
-    private static String realPath(File file) {
-        try {
-            return file.getCanonicalPath();
-        } catch (IOException | RuntimeException unresolved) {
-            return "(unresolved)";
-        }
-    }
-
-    /**
-     * Creates and deletes one file in @param directory, reporting what happened.
-     *
-     * <p>This is the question proot's own "Please set PROOT_TMP_DIR env. variable to an alternate
-     * location (with write permission)." diagnostic asks about, answered directly instead of inferred
-     * from whether proot complains. The file is removed immediately, so the directory is left as it
-     * was found.
-     */
-    private static String probeTempFile(File directory) {
-        File probe = new File(directory, "kairema-tmp-probe-" + System.nanoTime());
-        try {
-            if (!probe.createNewFile()) {
-                return "not-created(already-exists)";
-            }
-            return "created+bytes=" + probe.length() + ",deleted=" + probe.delete();
-        } catch (IOException | RuntimeException failed) {
-            probe.delete();
-            return "failed(" + failed.getClass().getSimpleName() + ")";
-        }
+                + "; LD_LIBRARY_PATH=" + environment.get("LD_LIBRARY_PATH"));
+        // proot exec()s this instead of the guest program, and reports any failure of that execve
+        // against the guest path, so a loader that goes missing reads as a broken rootfs. Recording the
+        // loader that was actually named, and whether it is still there, is what separates the two.
+        File prootLoader = runtime.getProotLoaderBinary();
+        DebugLog.event("terminal session launch loader: PROOT_LOADER="
+                + environment.get("PROOT_LOADER")
+                + "; loaderExists=" + (prootLoader != null)
+                + "; loaderCanExecute=" + (prootLoader != null && prootLoader.canExecute()));
     }
 
     /** The text a link points at, or a marker when the path is not a link or cannot be read. */
@@ -242,18 +168,11 @@ private static void logLaunchPreconditions(TerminalRuntime runtime, File executa
         command.add(TerminalRuntime.GUEST_HOME);
         command.add("-i");
         command.add("0:0");
-        // DIAGNOSTIC EXPERIMENT, NOT A FIX. The device reported execve("/bin/sh") = ENOENT while
-        // logging shIsSymlink=true, shLinkTarget=/bin/busybox, busyboxExists=true,
-        // busyboxCanExecute=true, loaderExists=true. That leaves one question this run answers:
-        // whether proot fails only on the symlink, or on the target it points at as well.
-        //
-        // "/bin/busybox" names a real file inside the guest, so it bypasses the symlink entirely.
-        // If the shell starts, the symlink was the problem; if this fails the same way, the problem
-        // is underneath the symlink and the experiment has located it. Do not read a success here
-        // as a design: it bypasses /bin/sh, and /bin/sh is what the product should run.
-        List<String> guestArgv = new ArrayList<>(2);
-        guestArgv.add("/bin/busybox");
-        guestArgv.add("sh");
+        // /bin/sh is a symlink to /bin/busybox inside this rootfs and proot resolves it. A diagnostic
+        // once ran "/bin/busybox sh" here to test whether the link was the problem; it was not, and the
+        // failure was in proot's loader, which is exec()ed before the guest is touched at all.
+        List<String> guestArgv = new ArrayList<>(1);
+        guestArgv.add("/bin/sh");
         command.addAll(guestArgv);
 
         ProcessBuilder builder = new ProcessBuilder(command);
@@ -271,6 +190,16 @@ private static void logLaunchPreconditions(TerminalRuntime runtime, File executa
         // Read by proot before the guest exists. The Termux build's compiled-in default does not
         // exist in this app; see TerminalRuntime.getProotTempDir.
         environment.put("PROOT_TMP_DIR", runtime.getProotTempDir().getAbsolutePath());
+        // proot exec()s its loader instead of the guest program. This build has none of its own and
+        // falls back to a path inside the Termux package, which this app cannot traverse, so without
+        // this the session cannot start no matter how correct the rootfs is. Left unset, proot reports
+        // that failure as execve("/bin/sh"). See TerminalRuntime.getProotLoaderBinary.
+        File prootLoader = runtime.getProotLoaderBinary();
+        if (prootLoader == null) {
+            throw new IOException("the proot loader is unavailable; PROOT_LOADER would fall back to "
+                    + "a path this app cannot reach");
+        }
+        environment.put("PROOT_LOADER", prootLoader.getAbsolutePath());
         String libraryPath = String.join(":", runtime.getLibraryPath());
         if (!libraryPath.isEmpty()) {
             // Needed because proot's own RUNPATH points at the Termux prefix, which does not exist
@@ -279,25 +208,6 @@ private static void logLaunchPreconditions(TerminalRuntime runtime, File executa
         }
 
         logLaunchPreconditions(runtime, executable, environment, guestArgv);
-
-        // DIAGNOSTIC, NOT A FIX. proot does not exec() the guest program: it replaces the execve target
-        // with a loader of its own, and reports any failure of that execve as execve("<guest program>").
-        // That is why a failure to run the loader is indistinguishable, in proot's output, from a
-        // missing /bin/busybox.
-        //
-        // PROOT_VERBOSE is raised so proot narrates its own decisions, and PROOT_LOADER is pointed at a
-        // path in this app's own sandbox for one extra run. Nothing about the rootfs, the guest argv or
-        // the architecture changes between the two runs; the only difference is which path proot is
-        // told to exec.
-        //
-        // What each outcome means:
-        //   probe[env-as-session] fails with ENOENT on /bin/busybox, and probe[loader-is-a-directory]
-        //   fails with EACCES on the same /bin/busybox line, then the execve that is failing is the one
-        //   using PROOT_LOADER, not the guest binary. That is the whole diagnosis.
-        //   If both probes report ENOENT, the loader path is not what fails and the guest ELF is.
-        runProotProbe("env-as-session", runtime, command, environment, null);
-        runProotProbe("loader-is-a-directory", runtime, command, environment,
-                loaderProbeTarget(runtime));
 
         // The proot options are not logged: they repeat the rootfs and library paths already recorded
         // above. The guest argv is, because which guest command was tried is the one fact a reader
@@ -319,94 +229,6 @@ private static void logLaunchPreconditions(TerminalRuntime runtime, File executa
             DebugLog.failure("terminal session PROOT_START_FAILED", failed);
             throw failed;
         }
-    }
-
-    /**
-     * A path proot can be told to exec that is guaranteed to fail with a different errno than "absent".
-     *
-     * <p>{@code execve} of a directory fails with {@code EACCES}, never {@code ENOENT}, so pointing
-     * {@code PROOT_LOADER} at one turns "which path failed" into a question the error text answers. It
-     * is deliberately not a file: a non-existent file would produce the same {@code ENOENT} as the
-     * real failure and prove nothing.
-     */
-    private static String loaderProbeTarget(TerminalRuntime runtime) {
-        File directory = new File(runtime.getRuntimeDir(), "loader-probe-directory");
-        if (!directory.isDirectory() && !directory.mkdirs()) {
-            DebugLog.event("terminal session loader probe directory could not be created");
-            return null;
-        }
-        return directory.getAbsolutePath();
-    }
-
-    /**
-     * Runs proot once with @param prootLoader added to the environment, records everything it printed,
-     * and kills it if it outlives the budget.
-     *
-     * <p>stdout and stderr are merged so the ordering proot chose is preserved in the log. stdin is
-     * closed immediately, which is what makes a shell that did start exit instead of waiting forever.
-     * Nothing is written to the guest and nothing is left behind: proot only reads the rootfs.
-     */
-    private static void runProotProbe(String label, TerminalRuntime runtime, List<String> command,
-            java.util.Map<String, String> sessionEnvironment, String prootLoader) {
-        Process probe = null;
-        try {
-            ProcessBuilder builder = new ProcessBuilder(command);
-            builder.directory(runtime.getProotLaunchBinary().getParentFile());
-            builder.redirectErrorStream(true);
-            java.util.Map<String, String> environment = builder.environment();
-            environment.clear();
-            environment.putAll(sessionEnvironment);
-            // 2 is the level at which proot narrates path decisions rather than only errors.
-            environment.put("PROOT_VERBOSE", "2");
-            if (prootLoader != null) {
-                environment.put("PROOT_LOADER", prootLoader);
-            }
-            probe = builder.start();
-            probe.getOutputStream().close();
-            DebugLog.event("terminal session probe " + label + " started; PROOT_LOADER=" + prootLoader
-                    + "; PROOT_VERBOSE=2; cwd=" + builder.directory().getAbsolutePath());
-            StringBuilder captured = new StringBuilder();
-            readForBudget(probe.getInputStream(), captured);
-            DebugLog.event("terminal session probe " + label + " output: " + collapse(captured));
-        } catch (IOException | RuntimeException probeFailed) {
-            DebugLog.failure("terminal session probe " + label + " failed", probeFailed);
-        } finally {
-            if (probe != null) {
-                probe.destroyForcibly();
-            }
-        }
-    }
-
-    /** Reads @param source until EOF or the budget is spent, so a hung probe cannot block a session. */
-    private static void readForBudget(InputStream source, StringBuilder sink) {
-        long deadline = System.currentTimeMillis() + PROBE_BUDGET_MILLIS;
-        byte[] buffer = new byte[READ_BUFFER];
-        try {
-            while (System.currentTimeMillis() < deadline && sink.length() < MAX_PROBE_CHARS) {
-                int available = source.available();
-                if (available <= 0) {
-                    // Nothing buffered: either the child is producing output or it is gone. Either way
-                    // a short pause is enough to tell, and keeps this bounded rather than blocking.
-                    Thread.sleep(PROBE_POLL_MILLIS);
-                    continue;
-                }
-                int read = source.read(buffer, 0, Math.min(buffer.length, available));
-                if (read == -1) {
-                    return;
-                }
-                sink.append(new String(buffer, 0, read, java.nio.charset.StandardCharsets.UTF_8));
-            }
-        } catch (IOException ended) {
-            // The pipe closed, which is how a failing proot ends. Nothing to add.
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-        }
-    }
-
-    /** One line per probe: newlines in proot's output would otherwise break the log's framing. */
-    private static String collapse(StringBuilder text) {
-        String flat = text.toString().replaceAll("\\s+", " ").trim();
-        return flat.isEmpty() ? "(no output)" : flat;
     }
 
     private void startReader(String name, InputStream source, String type) {

@@ -7,7 +7,7 @@
  * original blockers were invisible until `unzip -l` was run against the finished file.
  *
  *   1. only arm64-v8a is present
- *   2. proot, libtalloc.so.2 and libandroid-shmem.so are all in the APK
+ *   2. proot, its loader, libtalloc.so.2 and libandroid-shmem.so are all in the APK
  *   3. the Alpine rootfs asset is present under a name the runtime knows
  *   4. the native files' SHA-256 match the digests pinned in TerminalRuntime.java
  *   5. extractNativeLibs=true, without which proot cannot be exec()ed
@@ -34,6 +34,8 @@ const EXPECTED_DIGESTS = {
     "3c9b207c0a6ea2896b7523e03f55d9ab0d9e88baa115d4c32b84058ff4246fbb",
   "lib/arm64-v8a/libandroid-shmem.so":
     "84475798e07c8174dbbfaec70a827fdb02f19ffa69a589380c13e7507fd0e731",
+  "lib/arm64-v8a/libprootloader.so":
+    "cbdef0e652c2b78af25d867e1719fdebbb0915e25aae2dd35b3b5c1835f6b551",
 };
 
 /** The two forms the rootfs may take, with the digest of each. */
@@ -109,6 +111,9 @@ if (!foundProot) {
       "\"proot\" has no extension, so it must ship as an asset and be staged at runtime.",
   );
 }
+// The loader is pinned under lib/ above, not as an asset, and that placement is load-bearing rather
+// than incidental: proot exec()s it, and since API 29 an app may not exec a file from its own data
+// directory, so an asset copy staged at runtime could never be started. See TerminalRuntime.
 
 // ---------------------------------------------------------------- 3. rootfs
 
