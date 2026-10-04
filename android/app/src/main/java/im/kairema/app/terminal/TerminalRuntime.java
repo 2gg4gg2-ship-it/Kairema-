@@ -326,6 +326,18 @@ public final class TerminalRuntime {
         }
     }
 
+    /**
+     * The directory the platform extracted {@code lib/} into, or {@code null}.
+     *
+     * <p>Exposed for the launch diagnosis only. proot's loader path is compiled into the binary and
+     * cannot be read back out of it at runtime, so the log records where an executable could have come
+     * from and whether that directory holds anything, which is the only host-side evidence available
+     * about it before the exec is attempted.
+     */
+    String nativeLibraryDirForDiagnostics() {
+        return nativeLibraryDir();
+    }
+
     // ---------------------------------------------------------------- installation
 
     /**
