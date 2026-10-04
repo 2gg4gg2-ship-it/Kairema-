@@ -382,14 +382,66 @@ public final class TerminalRuntime {
         }
     }
 
+    /**
+     * Creates the runtime directory, turning the one failure mode that has no exception into a
+     * diagnosable one.
+ *
+ * <p>{@link File#mkdirs()} returns false instead of throwing when the platform refuses, which on
+ * Android means the SELinux policy or the mount state denied it rather than anything being wrong
+ * with the path. {@link SecurityException} is the one case it does raise, and it carries the reason,
+ * so it is logged with its type and message instead of being folded into the outer catch that
+ * cannot tell a refusal from a bad path.
+     *
+     * @return true when the directory exists afterwards
+     */
+    private boolean mkdirRuntimeDir() {
+        try {
+            runtimeDir.mkdirs();
+            return runtimeDir.isDirectory();
+        } catch (SecurityException denied) {
+            DebugLog.failure("terminal runtime: mkdir refused by the platform; runtimePath="
+                    + runtimeDir.getAbsolutePath(), denied);
+            return false;
+        }
+    }
+
     private void installBlocking() {
         DebugLog.event("terminal runtime: installBlocking started");
         try {
             // A partial installation is never reused. Removing the whole directory first means an
             // interrupted run cannot leave a half-extracted rootfs that a later run would accept.
             DebugLog.event("terminal runtime: install phase remove_previous");
-            deleteRecursively(runtimeDir);
-            if (!runtimeDir.mkdirs()) {
+            int removed = deleteRecursively(runtimeDir);
+            File runtimeParent = runtimeDir.getParentFile();
+            DebugLog.event("terminal runtime: remove_previous finished; deletedEntries=" + removed
+                    + "; runtimePath=" + runtimeDir.getAbsolutePath()
+                    + "; parentWritable="
+                    + (runtimeParent == null ? "no-parent" : String.valueOf(runtimeParent.canWrite()))
+                    + "; existsAfterDelete=" + runtimeDir.exists()
+                    + "; isDirectoryAfterDelete=" + runtimeDir.isDirectory());
+
+            // mkdirs() answers false both when it could not create the directory and when the
+            // directory is already there, so asking it first turned a leftover tree into a
+            // "cannot create" report. The two cases are separated here: a directory that is still
+            // present is reused, and only a genuine refusal to create is a failure.
+            boolean existed = runtimeDir.exists();
+            boolean isDirectory = runtimeDir.isDirectory();
+            if (existed && !isDirectory) {
+                DebugLog.event("terminal runtime: mkdir refused; runtimePath="
+                        + runtimeDir.getAbsolutePath() + "; existsBefore=true"
+                        + "; isDirectoryBefore=false; reason=path_exists_but_is_a_file");
+                fail("install_root", "mkdir_runtime_dir", null);
+                return;
+            }
+            if (!isDirectory && !mkdirRuntimeDir()) {
+                DebugLog.event("terminal runtime: mkdir refused; runtimePath="
+                        + runtimeDir.getAbsolutePath() + "; existsBefore=" + existed
+                        + "; isDirectoryBefore=" + isDirectory
+                        + "; existsAfter=" + runtimeDir.exists()
+                        + "; isDirectoryAfter=" + runtimeDir.isDirectory()
+                        + "; parentWritable="
+                        + (runtimeParent == null ? "no-parent" : String.valueOf(runtimeParent.canWrite()))
+                        + "; reason=mkdirs_returned_false");
                 fail("install_root", "mkdir_runtime_dir", null);
                 return;
             }
@@ -673,20 +725,50 @@ public final class TerminalRuntime {
         return java.nio.file.Files.isSymbolicLink(file.toPath());
     }
 
-    private static void deleteRecursively(File file) {
-        if (file == null || !file.exists()) {
-            return;
+    /**
+     * Whether a directory entry exists, <em>without</em> following a symbolic link.
+     *
+     * <p>{@link File#exists()} is the wrong question here. It stats the target, so a symlink whose
+     * target is missing reports false. The Alpine rootfs is 335 symlinks, and the great majority are
+     * absolute inside the guest, pointing at paths such as {@code /bin/busybox} that do not exist on
+     * the Android host. Asked with {@code exists()}, every one of them looks absent, so they were
+     * never deleted, so the directories holding them were never empty, so the runtime directory could
+     * never be removed.
+     *
+     * @see #deleteRecursively(File)
+     */
+    private static boolean entryExists(File file) {
+        return java.nio.file.Files.exists(file.toPath(),
+                java.nio.file.LinkOption.NOFOLLOW_LINKS);
+    }
+
+    /**
+     * Deletes a tree and reports how much of it went away.
+     *
+     * <p>Existence is tested with {@link #entryExists(File)}, which does not follow symlinks. That is
+     * the whole point: a dangling link is still a directory entry that has to be unlinked, and
+     * {@link File#delete()} removes the link itself without touching its target.
+     *
+     * <p>A failure is counted, not thrown. The caller uses the count to notice a tree it could not
+     * clear instead of discovering it later as an unrelated mkdir failure.
+     *
+     * @return the number of entries deleted
+     */
+    private static int deleteRecursively(File file) {
+        if (file == null || !entryExists(file)) {
+            return 0;
         }
+        int deleted = 0;
         if (file.isDirectory() && !isSymbolicLink(file)) {
             File[] children = file.listFiles();
             if (children != null) {
                 for (File child : Arrays.asList(children)) {
-                    deleteRecursively(child);
+                    deleted += deleteRecursively(child);
                 }
             }
         }
-        // Best effort: a failure here is caught by the missing-file check that follows.
-        file.delete();
+        // delete() unlinks a symlink itself rather than its target, which is exactly what is wanted.
+        return file.delete() ? deleted + 1 : deleted;
     }
 
     /**
