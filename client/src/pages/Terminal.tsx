@@ -21,6 +21,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
  *
  * <p>Each line is stored as an array of spans rather than one growing string, so a long-running
  * session does not re-render the entire output on every frame.
+ *
+ * <h2>Why the command field is a textarea</h2>
+ * The field is multi-line on purpose, and that is a correctness constraint rather than a convenience.
+ * A single-line `<input>` applies a value sanitization algorithm that strips CR and LF, so pasting two
+ * commands does not send two lines: it sends one, with the lines silently concatenated.
+ * `echo 'echo "HELLO"' > hello.sh` and `sh hello.sh` arrived as a single malformed command that wrote
+ * a file called `hello.shsh`. Sending them one at a time worked, which is why the defect looked like
+ * the shell or the rootfs rather than the control.
+ *
+ * <p>The client splits nothing. Whatever is in the field goes to the shell as one stdin write, so `;`,
+ * `&&`, `|`, redirection and heredocs are the shell's business, not this screen's.
  */
 
 type Span = { stream: "stdout" | "stderr" | "meta"; text: string };
@@ -223,13 +234,24 @@ export default function Terminal() {
           void send();
         }}
       >
-        <input
+        <textarea
           value={input}
           onChange={(event) => setInput(event.target.value)}
-          placeholder={sessionId ? "Type a command" : "Start a session first"}
+          onKeyDown={(event) => {
+            // Enter submits, which is what a terminal does and what a single command has always done
+            // here. Shift+Enter is left alone, so a block can be typed by hand as well as pasted.
+            //
+            // isComposing is the IME guard: a soft keyboard uses Enter to accept the word being
+            // composed, and submitting there would drop the character the user was still typing.
+            if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            void send();
+          }}
+          placeholder={sessionId ? "Type a command, or paste several lines" : "Start a session first"}
           disabled={!sessionId}
           aria-label="Terminal input"
           data-testid="terminal-input"
+          rows={1}
           autoComplete="off"
           autoCapitalize="none"
           autoCorrect="off"
@@ -242,8 +264,9 @@ export default function Terminal() {
       </form>
 
       <p className="kairema-terminal-hint">
-        The session runs inside this app&rsquo;s private storage. Commands cannot reach other apps or
-        shared files on the device.
+        Enter runs the command; Shift+Enter adds a line. Pasted text keeps its line breaks. The session
+        runs inside this app&rsquo;s private storage — commands cannot reach other apps or shared files
+        on the device.
       </p>
     </div>
   );

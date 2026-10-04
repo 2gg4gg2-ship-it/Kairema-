@@ -190,6 +190,57 @@ describe("terminal routes", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  describe("multiline stdin", () => {
+    const originalFetch = globalThis.fetch;
+    const SESSION = "0123456789abcdef0123456789abcdef";
+
+    /** The decoded `data` field of the one stdin write that was sent. */
+    async function capture(data: string): Promise<string> {
+      let captured: string | null = null;
+      let calls = 0;
+      globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        calls++;
+        captured = JSON.parse(init!.body as string).data;
+        return new Response(JSON.stringify({ written: String(data.length) }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as typeof fetch;
+      try {
+        await sendTerminalInput(SESSION, data);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+      // One write, always: a block of commands must not become one request per line.
+      expect(calls).toBe(1);
+      return captured as unknown as string;
+    }
+
+    it("transmits newlines verbatim instead of collapsing the block into one line", async () => {
+      const block = 'echo \'echo "HELLO"\' > hello.sh\nsh hello.sh\n';
+      expect(await capture(block)).toBe(block);
+    });
+
+    it("keeps blank lines, which are meaningful to the shell", async () => {
+      const block = "cd /tmp\n\nls -la\n";
+      expect(await capture(block)).toBe(block);
+    });
+
+    it("does not interpret shell operators, quoting or redirection", async () => {
+      // The client is a transport. `;`, `&&`, `|`, heredocs and quoting are the shell's to read, so a
+      // future refactor that splits or rewrites here would break commands it cannot see.
+      const block = "printf 'a\\nb' | tr -d '\\n' && echo done > out.txt\nfor i in 1 2; do echo $i; done\n";
+      expect(await capture(block)).toBe(block);
+    });
+
+    it("measures the size in UTF-8 bytes, so a multi-byte block is not truncated", async () => {
+      const block = "echo 'привет'\necho 'мир'\n";
+      // Two Cyrillic lines: longer in bytes than in characters, which is what the limit must count.
+      expect(new TextEncoder().encode(block).length).toBeGreaterThan(block.length);
+      expect(await capture(block)).toBe(block);
+    });
+  });
 });
 
 async function sendTerminalSessionTooLarge(): Promise<void> {
