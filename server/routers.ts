@@ -129,6 +129,10 @@ const stytchCredentialsSchema = z.object({
 });
 const stytchEmailSchema = z.object({ email: z.string().trim().email().max(320) });
 
+// Backs the `l<n>` correlation id that `auth.stytch.login` writes around its two provider calls.
+// Module-scoped and diagnostic only, in the same shape as `context.ts`'s `r<n>` counter.
+let loginTimingSequence = 0;
+
 function stytchErrorToTrpc(error: unknown) {
   const safe = toSafeStytchError(error);
   if (safe.safeCode === "UNAVAILABLE") {
@@ -364,24 +368,48 @@ export const appRouter = router({
         console.error(`[login] input emailPresent=${input.email.length > 0}`
           + ` passwordPresent=${input.password.length > 0}`
           + ` inputBytes=${Buffer.byteLength(JSON.stringify(input), "utf8")}`);
+        // Timing diagnostic. The `stage` label below only ever reaches the log from the catch, so a
+        // provider call that never returns or never rejects produces no output at all: on a device
+        // that waited minutes with no response, nothing here could say which of the two calls
+        // stalled. These brackets are emitted on the success path as well, which is what makes a
+        // stall attributable: a `*_start` with no matching `*_done` names the await that hung.
+        //
+        // `corr` is per-request and local to this procedure, allocated exactly as
+        // `resolveRequestUser` does. It carries no secret and is not threaded through any existing
+        // signature. Only the id, a phase name, elapsed time and the pre-existing shape booleans are
+        // recorded — never an email, a password, a code, a cookie or a token.
+        const corr = `l${(loginTimingSequence += 1).toString(16)}`;
+        const timingStartedAtMs = Date.now();
+        const timing = (phase: string) => {
+          console.error(`[login-timing] corr=${corr} phase=${phase}`
+            + ` elapsedMs=${Math.max(0, Date.now() - timingStartedAtMs)}`);
+        };
         try {
+          timing("passwords.authenticate_start");
           const result = await getStytchClient().passwords.authenticate({
             email: input.email,
             password: input.password,
             session_duration_minutes: STYTCH_SESSION_DURATION_MINUTES,
           });
+          timing("passwords.authenticate_done");
           stage = "otps.email.send";
+          timing("otps.email.send_start");
           const otpResult = await getStytchClient().otps.email.send({
             email: input.email,
             expiration_minutes: 10,
             session_token: result.session_token,
           });
+          timing("otps.email.send_done");
           setStytchOtpEmailIdCookie(ctx.res, ctx.req, otpResult.email_id);
           setStytchPasswordSessionCookie(ctx.res, ctx.req, result.session_token);
           console.error(`[login] otp_sent emailIdPrefix=${otpResult.email_id?.slice(0,8) ?? "none"} sessionPrefix=${result.session_token?.slice(0,8) ?? "none"}`);
+          timing("login_done");
           return { state: "OTP_REQUIRED" as const };
         } catch (error) {
-          logSafeStytchDiagnostic(error, `login.${stage}`);
+          // `stage` is unchanged and still authoritative for the safe diagnostic; elapsedMs is added
+          // so a rejection is attributable to a step and a duration, not just a step. No message,
+          // no token and no request data is added.
+          logSafeStytchDiagnostic(error, `login.${stage} elapsedMs=${Math.max(0, Date.now() - timingStartedAtMs)}`);
           throw stytchErrorToTrpc(error);
         }
       }),
