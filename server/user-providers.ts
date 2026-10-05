@@ -1,5 +1,5 @@
 import { beginCapacityGeneration, settleCapacityReservation, type CapacityActor, type CapacityGenerationLease } from "./capacity-controller";
-import { KAIREMA_SYSTEM_PROMPT, createReasoningStreamFilter, dataFromSseBlock, openRouterStreamDelta, sanitizeAssistantContent, userPreferenceRules, type ChatMessage, type ChatSettings, type ModelStatus, type Provider, type StatusCategory } from "./providers";
+import { KAIREMA_SYSTEM_PROMPT, createReasoningStreamFilter, dataFromSseBlock, openRouterStreamDelta, sanitizeAssistantContent, toApiChatMessage, userPreferenceRules, type ChatMessage, type ChatSettings, type ModelStatus, type Provider, type StatusCategory } from "./providers";
 import { createRequestBudget } from "./providers";
 import { keyFingerprint, parseRetryAfter, retryUpstream } from "./upstream-retry";
 import { classifyProviderFailure, type ProviderFailure } from "@shared/provider-failures";
@@ -466,7 +466,7 @@ export async function listUserProviderModels(selector: UserProviderSelector, api
   return models;
 }
 
-type ApiChatMessage = { role: "system" | "user" | "assistant"; content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> };
+type ApiChatMessage = ReturnType<typeof toApiChatMessage>;
 
 /**
  * The same Kairema system prompt the platform roles use, with the user's own model named in
@@ -480,7 +480,9 @@ type ApiChatMessage = { role: "system" | "user" | "assistant"; content: string |
  */
 function buildUserProviderMessages(modelLabel: string, history: ChatMessage[], settings?: ChatSettings): ApiChatMessage[] {
   const system = `${KAIREMA_SYSTEM_PROMPT.replace("{модель}", modelLabel)} ${userPreferenceRules(settings)}`.trim();
-  return [{ role: "system", content: system }, ...history.map((message) => ({ role: message.role, content: message.content }))];
+  // The same projection the platform path uses, so a message carrying a tool round-trip cannot reach
+  // the user's own provider in a different shape than it reached ours.
+  return [{ role: "system", content: system }, ...history.map(toApiChatMessage)];
 }
 
 /**

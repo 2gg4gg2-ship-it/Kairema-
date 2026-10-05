@@ -70,6 +70,16 @@ export type ProviderCapability = {
    * established", which the direct adapter treats as a refusal.
    */
   chatEndpoint?: string;
+  /**
+   * Whether the provider is known to accept OpenAI-shaped `tools` and to answer with `tool_calls`.
+   *
+   * <p>Distinct from `openaiCompatible`, which only claims the *request* format is OpenAI-shaped.
+   * Many such providers reject the `tools` key outright, and a rejection there is an HTTP 400 that
+   * an ordinary fallback loop would misread as a broken endpoint and answer by burning candidates.
+   * So this defaults to false everywhere and is enabled only for a provider whose tool contract has
+   * actually been checked. Absent means "do not send tools".
+   */
+  supportsTools?: boolean;
   /** Why this row says what it says, and what would change it. */
   notes: string;
 };
@@ -100,6 +110,7 @@ export const PROVIDER_CAPABILITIES: readonly ProviderCapability[] = [
     auth: "bearer",
     cors: "allowed",
     chatEndpoint: "https://openrouter.ai/api/v1/chat/completions",
+    supportsTools: true,
     notes:
       "Served server-side today, and stays the default there. OpenAI-shaped chat completions with " +
       "SSE streaming, bearer auth, and a CORS policy that permits browser calls, so it is the one " +
@@ -491,6 +502,16 @@ export function isOfferableUserProvider(id: string): boolean {
 export function isBrowserDirectCapable(id: string): boolean {
   const entry = BY_ID.get(id);
   return Boolean(entry && entry.kind === "llm" && entry.cors === "allowed" && entry.execution !== "none");
+}
+
+/**
+ * Whether `tools` may be sent to this provider.
+ *
+ * <p>A refusal is the safe answer: an unlisted provider simply does not get the key, so enabling a
+ * tool somewhere new is a deliberate data change rather than a consequence of adding a provider row.
+ */
+export function supportsToolCalling(id: string): boolean {
+  return providerCapability(id)?.supportsTools === true;
 }
 
 /**

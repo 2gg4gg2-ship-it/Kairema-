@@ -10,7 +10,9 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { startLogin } from "@/const";
 import { memorySearchMatches } from "@/lib/memory-search";
 import { runtimeAuthHeaders } from "@/lib/runtime-auth";
-import { consumeChatStream, type StreamLiveValue } from "@/lib/chat-stream";
+import { consumeChatStream, type StreamLiveValue, type StreamToolCall } from "@/lib/chat-stream";
+import { runServerRequestedCommand, toResultPayload } from "@/lib/ai-terminal-continuation";
+import { AI_TERMINAL_LIMITS, AiTerminalSession, isAiTerminalAvailable, type TerminalToolResult } from "@/lib/ai-terminal-tool";
 import TerminalSurface from "@/components/TerminalSurface";
 import ModeCarousel, { type ModeDescriptor } from "@/components/ModeCarousel";
 import { useHorizontalSwipe } from "@/lib/horizontal-swipe";
@@ -816,9 +818,46 @@ export default function Home() {
         try { await persistDirectTurn({ sessionId, content, modelId: result.model, clientMessageId: turnId, answer: result.content }); await utils.chats.historyPage.fetch({ sessionId, limit: 60 }); setOptimisticMessages([]); } catch { /* keep the streamed answer visible */ }
         return true;
       }
-      const response = await fetch("/api/chat/stream", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...runtimeAuthHeaders() }, signal: controller.signal, body: JSON.stringify({ sessionId, modelId: selectedId, content, ...(chatMode === "myApi" ? { myApi: true } : {}), settings: { style: settings.responseStyle, responseLength: settings.responseLength, effort: settings.effort, thinking: Boolean(settings.thinking) }, attachmentIds: options?.attachmentIds, clientMessageId: turnId }) });
-      if (!response.ok || !response.body) throw new Error(await streamStartErrorMessage(response, language === "ru" ? "Не удалось начать потоковый ответ." : "Could not start the stream."));
-      await consumeChatStream(response, { onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)), onDone: (data) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: typeof data.content === "string" ? data.content : message.content, model: typeof data.modelUsed === "string" ? data.modelUsed : message.model, providerLabel: typeof data.label === "string" ? data.label : message.providerLabel, modelLabel: typeof data.label === "string" ? data.label : message.modelLabel, searchStatus: safeSearchStatus(data.searchStatus), sources: safeSourceEvidence(data.sources), webGrounding: safeWebGrounding(data.webGrounding) } : message)) });
+      // Whether this build can run the server-requested terminal. Declared, never assumed: a browser
+      // sends nothing, so the server never offers the tool and web behaves exactly as before.
+      const localTerminal = chatMode === "myApi" ? false : isAiTerminalAvailable();
+      // One shell for the whole turn, so `cd` in one command is still the directory for the next. The
+      // executor owns every limit and the confirmation policy; this only keeps the session alive for
+      // the duration of the round loop.
+      const terminalSession = localTerminal ? new AiTerminalSession() : null;
+      const postRound = async (body: Record<string, unknown>) => {
+        const response = await fetch("/api/chat/stream", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...runtimeAuthHeaders() }, signal: controller.signal, body: JSON.stringify({ sessionId, modelId: selectedId, ...(chatMode === "myApi" ? { myApi: true } : {}), settings: { style: settings.responseStyle, responseLength: settings.responseLength, effort: settings.effort, thinking: Boolean(settings.thinking) }, attachmentIds: options?.attachmentIds, clientMessageId: turnId, ...(localTerminal ? { localTerminal: true } : {}), ...body }) });
+        if (!response.ok || !response.body) throw new Error(await streamStartErrorMessage(response, language === "ru" ? "Не удалось начать потоковый ответ." : "Could not start the stream."));
+        return response;
+      };
+      const applyDone = (data: { content?: string; modelUsed?: string; label?: string; searchStatus?: unknown; sources?: unknown; webGrounding?: unknown }) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: typeof data.content === "string" ? data.content : message.content, model: typeof data.modelUsed === "string" ? data.modelUsed : message.model, providerLabel: typeof data.label === "string" ? data.label : message.providerLabel, modelLabel: typeof data.label === "string" ? data.label : message.modelLabel, searchStatus: safeSearchStatus(data.searchStatus as never), sources: safeSourceEvidence(data.sources as never), webGrounding: safeWebGrounding(data.webGrounding as never) } : message));
+      const recordStep = (command: string, result: TerminalToolResult) => setTerminalSteps((items) => {
+        const status = result.confirmationRequired ? "confirmation" : result.ok ? "success" : "error";
+        const preview = (result.stdout || result.stderr).trim().split("\n").find((line) => line.trim().length > 0)?.slice(0, 120) ?? "";
+        const step = { id: `${turnId}:${items.length}`, command, status, preview, exitCode: result.exitCode, timedOut: result.timedOut } as const;
+        return [...items, step];
+      });
+      try {
+        // Each round is one independent request carrying the previous round's signed continuation.
+        // Nothing about the pending call is remembered here beyond the loop variable: if this page
+        // reloads mid-turn the tool call is simply lost, which is recoverable, whereas state kept
+        // only on the server would strand the turn on a different instance.
+        let continuation: { continuation: string; result: Record<string, unknown> } | null = null;
+        for (let round = 0; round < AI_TERMINAL_LIMITS.maxRounds; round += 1) {
+          const pending: StreamToolCall[] = [];
+          await consumeChatStream(await postRound(continuation ? { toolResult: continuation } : { content }), { onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)), onDone: applyDone, onToolCall: (call) => pending.push(call) });
+          if (pending.length === 0 || !terminalSession) break;
+          const call = pending[0]!;
+          const outcome = await runServerRequestedCommand(call, terminalSession);
+          // Refused means nothing ran and nothing can be reported, so the turn ends here rather than
+          // sending a result the server would reject anyway.
+          if (outcome.kind === "refused" || !call.continuation) break;
+          recordStep(outcome.command, outcome.result);
+          continuation = { continuation: call.continuation, result: toResultPayload(outcome.result) };
+        }
+      } finally {
+        await terminalSession?.close();
+      }
       try {
         await utils.chats.historyPage.fetch({ sessionId, limit: 60 });
         setOptimisticMessages([]);

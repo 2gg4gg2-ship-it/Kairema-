@@ -27,6 +27,7 @@
  */
 
 import { Capacitor } from "@capacitor/core";
+import { MAX_TOOL_ROUNDS, TERMINAL_TOOL } from "@shared/terminal-tool";
 import {
   createTerminalSession,
   killTerminalSession,
@@ -51,8 +52,14 @@ export const AI_TERMINAL_LIMITS = {
   maxOutputChars: 8_000,
   /** Terminal calls allowed across one AI task, confirmation refusals included. */
   maxCallsPerTask: 12,
-  /** Rounds of model↔tool before the loop stops and answers with what it has. */
-  maxRounds: 8,
+  /**
+   * Rounds of model↔tool before the loop stops and answers with what it has.
+   *
+   * <p>The ceiling lives in the shared contract because the server now bounds the same loop from the
+   * other side and refuses to mint a continuation past it. Two constants for one loop would let them
+   * disagree about when a turn is over.
+   */
+  maxRounds: MAX_TOOL_ROUNDS,
 } as const;
 
 /**
@@ -367,29 +374,13 @@ function cap(value: string, max: number): string {
   return value.length <= max ? value : value.slice(0, max);
 }
 
-/** The single tool definition handed to a model. */
-export const AI_TERMINAL_TOOL = {
-  type: "function" as const,
-  function: {
-    name: "terminal",
-    description:
-      "Run one command in the Linux Terminal built into this Android app (Alpine, running on the " +
-      "user's device, not on any server). Use it for shell work: inspecting or editing files, " +
-      "running scripts, installing and building. " +
-      "The working directory persists between calls, so `cd` in one call applies to the next. " +
-      "Returns stdout, stderr and the exit code; a non-zero exit is normal and is not an error to " +
-      "retry blindly. Output is truncated at a fixed size, so read what you need rather than " +
-      "dumping a large file. Commands that destroy the system or install packages require the " +
-      "user's confirmation and return confirmation_required instead of running.",
-    parameters: {
-      type: "object",
-      properties: {
-        command: {
-          type: "string",
-          description: "The command line to run in the app's Linux Terminal.",
-        },
-      },
-      required: ["command"],
-    },
-  },
-};
+/**
+ * The single tool definition handed to a model.
+ *
+ * <p>Aliased from the shared contract rather than declared here, because the server now offers this
+ * same tool to ordinary Kairema models. Two copies of a schema drift, and the drift shows up as a
+ * model error instead of a deployment mistake. The name is re-exported so every existing import
+ * keeps working unchanged.
+ */
+export const AI_TERMINAL_TOOL = TERMINAL_TOOL;
+export { TERMINAL_TOOL_NAME } from "@shared/terminal-tool";
