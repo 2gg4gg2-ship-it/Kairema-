@@ -21,6 +21,22 @@ export const TERMINAL_TOOL_NAME = "terminal";
  */
 export const MAX_TOOL_ROUNDS = 8;
 
+/**
+ * The instruction that accompanies the tool in the system prompt.
+ *
+ * <p>It is added only to the turns that actually advertise the tool, so a turn that cannot run
+ * commands is never told about them. The tool description carries the argument contract; this block
+ * carries the behavioural rules a description states poorly, and repeats the wording the page-side
+ * terminal agent uses so both execution paths tell the model the same thing.
+ */
+export const TERMINAL_SYSTEM_PROMPT =
+  "<ТЕРМИНАЛ>\n" +
+  "Ты работаешь в приложении Kairema на Android. У тебя есть инструмент terminal — встроенный в приложение Linux-терминал, который выполняется на устройстве пользователя. Используй его для работы с файлами, запуска скриптов, установки и сборки.\n" +
+  "Текущая рабочая директория сохраняется между вызовами, поэтому cd в одной команде влияет на следующую.\n" +
+  "Инструмент возвращает stdout, stderr и exit code. Ненулевой exit code — это результат, а не ошибка: прочитай stderr и реши сам, что делать дальше.\n" +
+  "Работай короткими командами и проверяй результат. Не повторяй одну и ту же команду без изменений.\n" +
+  "</ТЕРМИНАЛ>";
+
 /** The tool as the model sees it. Forwarded to the provider unchanged. */
 export const TERMINAL_TOOL = {
   type: "function" as const,

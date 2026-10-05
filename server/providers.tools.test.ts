@@ -22,7 +22,7 @@ vi.mock("./db", () => ({
   listProviderControlFlags: vi.fn().mockResolvedValue([]),
 }));
 
-import { TERMINAL_TOOL, TERMINAL_TOOL_NAME } from "@shared/terminal-tool";
+import { TERMINAL_SYSTEM_PROMPT, TERMINAL_TOOL, TERMINAL_TOOL_NAME } from "@shared/terminal-tool";
 import { supportsToolCalling } from "@shared/provider-capabilities";
 import {
   __resetProviderHealthForTests,
@@ -32,6 +32,7 @@ import {
   isToolsUnsupportedRejection,
   providerToolCalls,
   toApiChatMessage,
+  type ChatSettings,
   type ToolCall,
 } from "./providers";
 
@@ -183,6 +184,30 @@ describe("projecting a conversation for the wire", () => {
     expect(messages[0]!.role).toBe("system");
     expect(messages[2]).toMatchObject({ role: "assistant", tool_calls: [call] });
     expect(messages[3]).toMatchObject({ role: "tool", tool_call_id: "c1", name: TERMINAL_TOOL_NAME });
+  });
+});
+
+describe("telling the model about the terminal", () => {
+  async function systemPromptFor(settings?: ChatSettings): Promise<string> {
+    stubChainKeys({ openrouter: "test-openrouter-key" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(textResponse("ок"));
+    await chatWithRole("fast", [{ role: "user", content: "покажи файлы" }], settings);
+    const messages = sentBodies(fetchSpy)[0]!.messages as Array<Record<string, unknown>>;
+    return String(messages[0]!.content);
+  }
+
+  it("adds the instruction on a turn that advertises the tool", async () => {
+    expect(await systemPromptFor({ terminalTool: true })).toContain(TERMINAL_SYSTEM_PROMPT);
+  });
+
+  it("leaves an ordinary turn without any mention of a terminal", async () => {
+    expect(await systemPromptFor()).not.toContain("ТЕРМИНАЛ");
+  });
+
+  it("does not confuse the account switch with this turn advertising the tool", async () => {
+    // `toolAccess` is the user's own preference and is true for most accounts whether or not the
+    // tool can run, so it must not leak the instruction into turns that cannot execute anything.
+    expect(await systemPromptFor({ toolAccess: true })).not.toContain("ТЕРМИНАЛ");
   });
 });
 
