@@ -17,6 +17,8 @@ import { useHorizontalSwipe } from "@/lib/horizontal-swipe";
 import { ProviderUnavailableNotice } from "@/components/ProviderUnavailableNotice";
 import { clearDirectKey } from "@/lib/direct-key-store";
 import { buildCandidateChain, ProviderUnavailableError, runMyApiTurn, type TurnCandidate } from "@/lib/my-api-turn";
+import { runTerminalToolLoop, terminalToolReady, aiTerminalSystemPrompt, type TerminalExecutionStep } from "@/lib/ai-terminal-agent";
+import AiTerminalCard from "@/components/AiTerminalCard";
 import { resolveExecution } from "@shared/provider-capabilities";
 import { trpc } from "@/lib/trpc";
 import { Archive, Bot, Check, ChevronDown, CircleDot, Clock3, Copy, FileImage, Gauge, Globe2, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Repeat, Search, Settings2, SlidersHorizontal, Sparkles, SquareTerminal, Trash2, TriangleAlert, UserIcon, X } from "lucide-react";
@@ -337,7 +339,7 @@ export default function Home() {
   useEffect(() => { setProfilePersonalPreferences(serverPersonalPreferences); }, [serverPersonalPreferences]);
   const [, navigate] = useLocation();
   const { theme, toggleTheme, setHighContrast } = useTheme();
-  const [activeId, setActiveId] = useState(""); const [newConversation, setNewConversation] = useState(false); const [modelId, setModelId] = useState<ModelId>("fast"); const chatMode: "chat" | "myApi" = mode === "myApi" ? "myApi" : "chat"; const [search, setSearch] = useState(""); const [uploadStatus, setUploadStatus] = useState<{ sessionId: string; message: string } | null>(null);   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === "undefined" ? true : window.innerWidth >= SIDEBAR_DESKTOP_BREAKPOINT); const [settingsOpen, setSettingsOpen] = useState(false); const [profileOpen, setProfileOpen] = useState(false); const [memoryOpen, setMemoryOpen] = useState(false); const [exportHistoryOpen, setExportHistoryOpen] = useState(false); const [templatesOpen, setTemplatesOpen] = useState(false); const [pendingChatDeletionId, setPendingChatDeletionId] = useState<string | null>(null); const [isChatDeletionConfirming, setIsChatDeletionConfirming] = useState(false); const [pendingHistoryClear, setPendingHistoryClear] = useState(false); const [isHistoryClearConfirming, setIsHistoryClearConfirming] = useState(false); const [composerDraft, setComposerDraft] = useState(""); const [draftHydratedSessionId, setDraftHydratedSessionId] = useState(""); const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]); const [sentAttachmentFallbacks, setSentAttachmentFallbacks] = useState<ChatAttachment[]>([]); const [isStreaming, setIsStreaming] = useState(false); const [isExporting, setIsExporting] = useState<"markdown" | "pdf" | null>(null); const [notice, setNotice] = useState(""); const [settingsOverride, setSettingsOverride] = useState<Record<string, unknown>>({});
+  const [activeId, setActiveId] = useState(""); const [newConversation, setNewConversation] = useState(false); const [modelId, setModelId] = useState<ModelId>("fast"); const chatMode: "chat" | "myApi" = mode === "myApi" ? "myApi" : "chat"; const [search, setSearch] = useState(""); const [uploadStatus, setUploadStatus] = useState<{ sessionId: string; message: string } | null>(null);   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === "undefined" ? true : window.innerWidth >= SIDEBAR_DESKTOP_BREAKPOINT); const [settingsOpen, setSettingsOpen] = useState(false); const [profileOpen, setProfileOpen] = useState(false); const [memoryOpen, setMemoryOpen] = useState(false); const [exportHistoryOpen, setExportHistoryOpen] = useState(false); const [templatesOpen, setTemplatesOpen] = useState(false); const [pendingChatDeletionId, setPendingChatDeletionId] = useState<string | null>(null); const [isChatDeletionConfirming, setIsChatDeletionConfirming] = useState(false); const [pendingHistoryClear, setPendingHistoryClear] = useState(false); const [isHistoryClearConfirming, setIsHistoryClearConfirming] = useState(false); const [composerDraft, setComposerDraft] = useState(""); const [draftHydratedSessionId, setDraftHydratedSessionId] = useState(""); const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]); const [sentAttachmentFallbacks, setSentAttachmentFallbacks] = useState<ChatAttachment[]>([]); const [isStreaming, setIsStreaming] = useState(false); const [isExporting, setIsExporting] = useState<"markdown" | "pdf" | null>(null); const [notice, setNotice] = useState(""); const [settingsOverride, setSettingsOverride] = useState<Record<string, unknown>>({}); const [terminalSteps, setTerminalSteps] = useState<TerminalExecutionStep[]>([]);
   const streamAbortRef = useRef<AbortController | null>(null); const failedTurnTimersRef = useRef(new Map<string, FailedTurnTimer>()); const activeSessionRef = useRef(""); const pagedHistorySessionRef = useRef(""); const deleteConfirmationInFlightRef = useRef(false); const historyClearInFlightRef = useRef(false); const defaultRoleApplied = useRef(false); const themeApplied = useRef(false); const persistedDraftRef = useRef(""); const activeChatHydrated = useRef(false);
   // Why sending is blocked, or null when it is not. Set only when every connected provider has
   // been spent for a turn, and cleared by any action that could make a provider usable again.
@@ -757,6 +759,9 @@ export default function Home() {
     // failed turn be deleted later without touching any other message: an id, not a position.
     const turnId = options?.clientMessageId ?? crypto.randomUUID();
     setOptimisticMessages([{ id: userId, role: "user", content, attachments: options?.attachments }, { id: assistantId, role: "assistant", content: "" }]);
+    // The execution card belongs to this turn only: a previous turn's commands are already in the
+    // transcript, and leaving them on screen would imply they ran again.
+    setTerminalSteps([]);
     setIsStreaming(true);
     const controller = new AbortController();
     streamAbortRef.current = controller;
@@ -769,6 +774,29 @@ export default function Home() {
       myApiCandidateRef.current = myApiCandidates[0] ?? null;
       const directFirst = chatMode === "myApi" && myApiCandidates.length > 0 && resolveExecution(myApiCandidates[0].provider, { preferDirect: true }).mode === "direct";
       if (directFirst) {
+        // On Android with a direct-capable provider, the model may drive the on-device terminal.
+        // The registry decides whether that is possible at all; this only decides whether to take
+        // the loop path instead of a plain completion, and it is checked here so a web build or a
+        // server-executed provider is never offered the tool.
+        if (terminalToolReady(myApiCandidates[0].provider)) {
+          const result = await runTerminalToolLoop({
+            providerId: myApiCandidates[0].provider,
+            model: myApiCandidates[0].model,
+            content,
+            systemPrompt: aiTerminalSystemPrompt(myApiCandidates[0].displayName),
+            signal: controller.signal,
+            onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)),
+            onExecution: (step) => setTerminalSteps((items) => {
+              const index = items.findIndex((entry) => entry.id === step.id);
+              if (index < 0) return [...items, step];
+              return items.map((entry, at) => (at === index ? step : entry));
+            }),
+          });
+          setProviderBlocked(null);
+          setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: result.content, model: result.model, providerLabel: result.label, modelLabel: result.label } : message));
+          try { await persistDirectTurn({ sessionId, content, modelId: result.model, clientMessageId: turnId, answer: result.content }); await utils.chats.historyPage.fetch({ sessionId, limit: 60 }); setOptimisticMessages([]); } catch { /* keep the streamed answer visible */ }
+          return true;
+        }
         const result = await runMyApiTurn({
           sessionId, content, modelId: selectedId,
           clientMessageId: turnId,
@@ -937,7 +965,7 @@ export default function Home() {
           </div>
         ) : (
         <div className="kairema-surface-pane">
-        <AIChatBox aboveMessages={<>{modeCarousel}{chatMode === "myApi" && <span className="kairema-mode-hint" role="status">{myApiActiveConfig ? (<>
+        <AIChatBox aboveMessages={<>{modeCarousel}{terminalSteps.length > 0 ? <AiTerminalCard steps={terminalSteps} /> : null}{chatMode === "myApi" && <span className="kairema-mode-hint" role="status">{myApiActiveConfig ? (<>
         <MyApiProviderMenu value={myApiCatalogProvider ?? myApiActiveConfig.provider} providers={myApiProviderOptions} disabled={setActiveProviderMutation.isPending || !myApiProviderOptions.length} ariaLabel={t.myApiProviderPicker} labels={{ connected: t.myApiProviderConnected, empty: t.myApiProviderEmpty }} onSelect={(provider) => void selectMyApiProvider(provider)} />
         {myApiCatalogMutation.isPending ? <span className="kairema-mode-hint-state"> · {t.myApiLoadingModels}…</span> : null}
         {myApiCatalogMutation.isError ? <span className="kairema-mode-hint-state"> · {myApiCatalogMutation.error?.message ?? t.myApiNoModels} <button type="button" className="kairema-mode-hint-link" onClick={() => void loadMyApiCatalog({ force: true })}>{t.myApiModelsRetry}</button></span> : null}

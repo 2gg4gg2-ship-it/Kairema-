@@ -1061,6 +1061,25 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-terminal-input > button { align-self:flex-start; }
 .kairema-terminal-hint { margin:0; padding:0 13px 12px; color:var(--k-muted); background:var(--k-panel); font-size:11px; line-height:1.45; }
 
+/* The AI execution card. Compact on purpose: one row per command, folded by default, so a model
+   running several commands does not push the conversation itself off the screen. */
+.kairema-ai-terminal { display:flex; flex-direction:column; gap:2px; margin:6px 0 8px; padding:8px 9px; border:1px solid var(--k-line); border-radius:12px; background:var(--k-panel); font-family:var(--k-font-sans); }
+.kairema-ai-terminal-head { display:flex; align-items:center; gap:7px; padding-bottom:4px; }
+.kairema-ai-terminal-icon { width:14px; height:14px; flex:0 0 auto; color:var(--k-muted); }
+.kairema-ai-terminal-title { flex:1; color:var(--k-muted); font-size:11px; font-weight:600; letter-spacing:.03em; }
+.kairema-ai-terminal-count { color:var(--k-muted); font-size:11px; font-variant-numeric:tabular-nums; }
+.kairema-ai-terminal-step { display:flex; flex-direction:column; gap:3px; padding:4px 0; border-top:1px solid var(--k-line); }
+.kairema-ai-terminal-row { display:flex; align-items:flex-start; gap:7px; min-width:0; }
+.kairema-ai-terminal-toggle, .kairema-ai-terminal-toggle-spacer { flex:0 0 auto; width:16px; height:16px; margin-top:1px; padding:0; display:inline-flex; align-items:center; justify-content:center; border:0; background:transparent; color:var(--k-muted); cursor:pointer; }
+.kairema-ai-terminal-toggle svg { width:13px; height:13px; }
+.kairema-ai-terminal-command { flex:1; min-width:0; overflow:hidden; color:var(--k-text); font-family:var(--k-font-mono); font-size:12px; line-height:1.5; text-overflow:ellipsis; white-space:nowrap; }
+.kairema-ai-terminal-status { flex:0 0 auto; margin-top:1px; color:var(--k-muted); font-size:10.5px; white-space:nowrap; }
+/* A non-zero exit and a timeout are the two outcomes worth noticing at a glance, so they tint the
+   status text rather than relying on the word alone. */
+.kairema-ai-terminal-status[data-status="error"] { color:var(--k-danger-text); }
+.kairema-ai-terminal-status[data-status="confirmation"] { color:var(--k-warn-text); }
+.kairema-ai-terminal-output { margin:0; padding:6px 8px; border-radius:8px; color:var(--k-text); background:var(--k-panel-2); font-family:var(--k-font-mono); font-size:11.5px; line-height:1.5; overflow-wrap:anywhere; white-space:pre-wrap; }
+
 /* Chat <-> Terminal surface switch (Android only; the segment is not rendered elsewhere).
    The mode option base rule sets min-width:100px for the two existing chat modes. A third
    segment at that width would overflow a phone, so the surface segment drops the floor and

@@ -66,7 +66,16 @@ export function assertBrowserDirectAllowed(providerId: string): void {
   }
 }
 
-function chatEndpoint(providerId: string): string {
+/**
+ * The established direct endpoint for a provider, resolved through the same gate as a direct turn.
+ *
+ * <p>Exposed so a caller that needs a different request shape — the tool loop, which cannot use the
+ * streaming path because tool calls arrive in a non-streamed body — reaches the endpoint by the
+ * capability registry instead of re-deriving it. Going around {@link assertBrowserDirectAllowed}
+ * here would be the bug this prevents.
+ */
+export function directChatEndpoint(providerId: string): string {
+  assertBrowserDirectAllowed(providerId);
   const capability = providerCapability(providerId);
   if (!capability) throw new DirectProviderError(classifyProviderFailure({ http: null, body: "unknown provider" }));
   // Endpoints live on the capability row only where a real one is established. Today the direct
@@ -129,7 +138,7 @@ export async function runDirectChat(request: DirectRequest): Promise<DirectResul
     throw new DirectProviderError(classifyProviderFailure({ http: 401, body: "no direct key in memory" }));
   }
   const doFetch = request.fetchImpl ?? fetch;
-  const endpoint = chatEndpoint(request.providerId);
+  const endpoint = directChatEndpoint(request.providerId);
   const reasoning = createReasoningFilter();
   const parts: string[] = [];
 
