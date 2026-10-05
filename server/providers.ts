@@ -1,5 +1,6 @@
 import { getProviderAvailability, getProviderDailySuccess, getPublicProviderAvailabilityHistory, incrementProviderDailySuccess, listProviderControlFlags, listProviderHealth, listRoleRuntimeStatus, recordFlashTtftMetric, recordTechnicalEvent, upsertProviderHealth, upsertRoleRuntimeStatus } from "./db";
 import { beginCapacityGeneration, CapacityAdmissionError, settleCapacityReservation, type CapacityActor, type CapacityGenerationLease } from "./capacity-controller";
+import { supportsToolCalling } from "@shared/provider-capabilities";
 import { LIVE_VALUE_UNCONFIRMED_PROMPT, type LiveValueKind } from "./web-search-value";
 
 export const ROLE_IDS = ["fast", "smart", "context", "flagship"] as const;
@@ -11,7 +12,35 @@ export type ModelKey = RoleId;
 export type Provider = "openrouter" | "orcarouter" | "zenmux" | "dots" | "google" | "groq" | "sambanova" | "mistral" | "cerebras" | "deepseek";
 export type StatusCategory = "AUTH" | "QUOTA" | "RATE_LIMIT" | "PROVIDER_UNAVAILABLE" | "ENDPOINT" | "MODEL" | "NETWORK" | "TIMEOUT" | "PARSE" | "CONFIG" | "UNKNOWN";
 export type ModelStatus = { state: "ready" | "fallback" | "loading" | "error" | "unavailable" | "not_configured"; badge: string; category: StatusCategory | null; http: number | null; checkedAt: string; confirmed: string };
-export type ChatMessage = { role: "user" | "assistant"; content: string };
+/**
+ * One tool call a model asked for, in the OpenAI wire shape.
+ *
+ * <p>`arguments` stays a string because that is what the wire format uses; parsing it is the caller's
+ * decision, so a provider that sends malformed JSON produces an error the caller can report rather
+ * than one thrown from inside the transport.
+ */
+export type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string } };
+/** A tool offered to the model. Mirrors the wire shape so it can be forwarded unchanged. */
+export type ToolDefinition = { type: "function"; function: { name: string; description?: string; parameters?: Record<string, unknown> } };
+/**
+ * One message in a provider conversation.
+ *
+ * <p>Extended past the original user/assistant pair with the three fields a tool round-trip needs:
+ * an assistant turn can carry `tool_calls`, and a tool result arrives as `role: "tool"` carrying
+ * `tool_call_id` and `name`. All three are optional so every existing call site — including the
+ * transcript projection in chat-stream, which keeps only role and content — still type-checks and
+ * behaves identically for a conversation that never calls a tool.
+ */
+export type ChatMessage = {
+  role: "user" | "assistant" | "tool";
+  content: string;
+  /** On an assistant turn that requested tool calls instead of (or before) answering. */
+  tool_calls?: ToolCall[];
+  /** On a tool result, the id of the call this result answers. */
+  tool_call_id?: string;
+  /** On a tool result, the name of the tool that was called. */
+  name?: string;
+};
 export type WebSource = { title: string; url: string; domain?: string; sourceId?: string; retrievedAt?: string; publishedAt?: string | null };
 /** Server-side linkage for one retrieved factual fragment; this is never fabricated by an LLM. */
 export type WebEvidence = {
@@ -70,7 +99,14 @@ export type ChatSettings = {
   /** Transient server-only continuation context after an upstream stream interruption. */
   continuationPrefix?: string;
 };
-export type ChatResult = { content: string; modelUsed: string; provider: Provider; fallbackUsed: boolean; label: string; status: ModelStatus; sources?: WebSource[]; evidence?: WebEvidence[]; ragSources?: RagSource[]; searchStatus?: SafeSearchStatus; webGrounding?: WebGrounding };
+/**
+ * The outcome of one model turn.
+ *
+ * <p>`toolCalls` is present only when the model asked for tools instead of answering. It coexists
+ * with an empty `content`: a turn that stops to call a tool has not failed, and a caller that only
+ * reads `content` sees exactly what it saw before this field existed.
+ */
+export type ChatResult = { content: string; modelUsed: string; provider: Provider; fallbackUsed: boolean; label: string; status: ModelStatus; sources?: WebSource[]; evidence?: WebEvidence[]; ragSources?: RagSource[]; searchStatus?: SafeSearchStatus; webGrounding?: WebGrounding; toolCalls?: ToolCall[] };
 type FlashTtftMetric = { event: "flash.ttft"; provider: Provider; fallbackUsed: boolean; durationMs: number };
 
 type Candidate = { provider: Provider; modelId: string; displayName: string; vision?: boolean; requiresWebResearch?: boolean };
@@ -324,14 +360,43 @@ function prompt(role: ModelConfig, settings?: ChatSettings) {
   return `${KAIREMA_SYSTEM_PROMPT.replace("{модель}", role.label)} ${quality} ${capability} ${flash} ${style} ${length} ${effort} ${thinking}${clarifying}${memory}${documents}${web}${continuation}${freshnessWarning}${rag}`.trim();
 }
 
-type ApiChatMessage = { role: "system" | "user" | "assistant"; content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> };
+export type ApiChatMessage = {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
+  name?: string;
+};
+
+/**
+ * Projects one conversation message into the wire shape.
+ *
+ * <p>A tool round-trip has to arrive at the provider exactly as it left it: the assistant turn that
+ * asked for the call, then the tool result carrying the id it answers. Built field by field rather
+ * than spread, so an ordinary user/assistant message keeps the byte-identical shape it had before
+ * and never grows an empty `tool_calls` key.
+ */
+export function toApiChatMessage(message: ChatMessage): ApiChatMessage {
+  if (message.role === "tool") {
+    return {
+      role: "tool",
+      content: message.content,
+      ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
+      ...(message.name ? { name: message.name } : {}),
+    };
+  }
+  if (message.role === "assistant" && message.tool_calls?.length) {
+    return { role: "assistant", content: message.content, tool_calls: message.tool_calls };
+  }
+  return { role: message.role, content: message.content };
+}
 export function buildOpenRouterMessages(role: ModelConfig, history: ChatMessage[], settings?: ChatSettings): ApiChatMessage[] {
   const lastUserIndex = history.map((message) => message.role).lastIndexOf("user");
   return [{ role: "system", content: prompt(role, settings) }, ...history.map((message, index) => {
     if (index === lastUserIndex && message.role === "user" && settings?.imageUrls?.length) {
       return { role: "user" as const, content: [{ type: "text" as const, text: message.content }, ...settings.imageUrls.map((url) => ({ type: "image_url" as const, image_url: { url } }))] };
     }
-    return message;
+    return toApiChatMessage(message);
   })];
 }
 function timeoutSignal(signal: AbortSignal | undefined, ms: number) { return signal ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms); }
@@ -446,12 +511,51 @@ function consumeRequestBudget(budget: RequestBudget) {
   return budget.used;
 }
 
-async function invoke(candidate: Candidate, role: ModelConfig, history: ChatMessage[], settings: ChatSettings | undefined, stream: boolean, signal?: AbortSignal, budget?: RequestBudget) {
+/**
+ * Providers observed to reject the `tools` key in this process.
+ *
+ * <p>Runtime discovery, not configuration: a row in the capability registry is a claim made before
+ * the call, and this is the fact learned from it. Keeping it means a long-lived process pays the
+ * discovery 400 once rather than on every turn, and it is cleared with the other provider process
+ * state on restart. Nothing user-visible depends on it — losing it only costs one extra 400.
+ */
+const toolsUnsupportedProviders = new Set<Provider>();
+
+/**
+ * Whether the `tools` key is the reason for this rejection.
+ *
+ * <p>Deliberately narrow: an HTTP 400 from a provider is normally an endpoint or model problem, and
+ * treating every one of them as "tools are unsupported" would silently downgrade a broken chain into
+ * a plain chat and hide the real error. Only a 400 whose body names tools counts, which is what a
+ * provider rejecting the key itself actually says.
+ */
+export function isToolsUnsupportedRejection(http: number | null, body: unknown): boolean {
+  if (http !== 400) return false;
+  return /\btools?\b|tool_choice|tool_use|function.?call/i.test(JSON.stringify(body ?? ""));
+}
+
+/**
+ * Drops tools for a provider whose registry row does not claim tool support.
+ *
+ * <p>Returning the same array for an unsupported provider and an empty request means the caller's
+ * code path is identical either way — the gate lives in exactly one place.
+ */
+function toolsForCandidate(candidate: Candidate, tools: readonly ToolDefinition[] | undefined): ToolDefinition[] {
+  if (!tools?.length) return [];
+  if (toolsUnsupportedProviders.has(candidate.provider)) return [];
+  // The registry gate is what makes enabling a provider a deliberate data change, and the
+  // `openrouter` gate is what keeps it to the one provider whose tool contract has been checked
+  // end to end — every other chain candidate keeps answering plain chat, exactly as before.
+  return supportsToolCalling(candidate.provider) && candidate.provider === "openrouter" ? [...tools] : [];
+}
+
+async function invoke(candidate: Candidate, role: ModelConfig, history: ChatMessage[], settings: ChatSettings | undefined, stream: boolean, signal?: AbortSignal, budget?: RequestBudget, tools?: readonly ToolDefinition[]) {
   const key = secretFor(candidate.provider);
   if (!key) throw new OpenRouterError(unconfigured());
   const headers: Record<string, string> = { Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
   if (stream) headers.Accept = "text/event-stream";
   if (candidate.provider === "openrouter") { headers["HTTP-Referer"] = "https://kairema.manus.space"; headers["X-Title"] = "Kairema"; }
+  const offeredTools = toolsForCandidate(candidate, tools);
   let response: Response;
   let reservation: Awaited<ReturnType<CapacityGenerationLease["reserveAttempt"]>> | null = null;
   const invokeStartedAt = Date.now();
@@ -479,11 +583,17 @@ async function invoke(candidate: Candidate, role: ModelConfig, history: ChatMess
       model: candidate.modelId,
       role: role.key,
       stream,
+      toolsOffered: offeredTools.length,
     }));
     response = await fetch(ENDPOINTS[candidate.provider], {
       method: "POST",
       headers,
-      body: JSON.stringify({ model: candidate.modelId, messages: buildOpenRouterMessages(role, history, settings), stream }),
+      body: JSON.stringify({
+        model: candidate.modelId,
+        messages: buildOpenRouterMessages(role, history, settings),
+        stream,
+        ...(offeredTools.length ? { tools: offeredTools } : {}),
+      }),
       signal: timeoutSignal(signal, ATTEMPT_TIMEOUT_MS),
     });
     console.info("[Kairema LLM]", JSON.stringify({
@@ -517,6 +627,31 @@ async function invoke(candidate: Candidate, role: ModelConfig, history: ChatMess
     if (!response.ok) {
       let body: unknown = null;
       try { body = await response.json(); } catch { body = { message: await response.text().catch(() => "") }; }
+      // A provider that rejects the `tools` key is a capability discovery, not an outage. Without
+      // this, the 400 would be filed as an endpoint failure, burn fallback candidates and answer the
+      // user with an error for a chat that would have worked without tools. The retry is bounded to
+      // one, spends no attempt budget (a 400 is not charged upstream and this is the same logical
+      // attempt), records no provider issue, and remembers the answer so no later round re-asks.
+      if (offeredTools.length && isToolsUnsupportedRejection(response.status, body)) {
+        toolsUnsupportedProviders.add(candidate.provider);
+        console.info("[Kairema LLM]", JSON.stringify({
+          event: "llm.tools_unsupported",
+          requestId: budget?.requestId ?? "no-budget",
+          provider: candidate.provider,
+          model: candidate.modelId,
+          role: role.key,
+          httpStatus: response.status,
+          toolsOffered: offeredTools.length,
+        }));
+        response = await fetch(ENDPOINTS[candidate.provider], {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ model: candidate.modelId, messages: buildOpenRouterMessages(role, history, settings), stream }),
+          signal: timeoutSignal(signal, ATTEMPT_TIMEOUT_MS),
+        });
+        if (response.ok) return response;
+        try { body = await response.json(); } catch { body = { message: await response.text().catch(() => "") }; }
+      }
       const status = failure(response.status, body);
       await recordProviderIssue(candidate.provider, status, status.category === "RATE_LIMIT" ? retryAfterMs(response, body) : undefined);
       console.info("[Kairema LLM]", JSON.stringify({
@@ -595,6 +730,24 @@ export function createSourceSafeStreamFilter() {
     }).filter(Boolean).join("\n");
   };
 }
+/**
+ * Reads one completed non-streamed turn, allowing for a turn that only asked for tools.
+ *
+ * <p>The original rule here was "no visible text means the upstream answered nothing useful", which
+ * is a fair rule for a chat turn and a wrong one for a tool turn: a model that stops to call a tool
+ * returns no text by design. Treating that as a PARSE failure silently discarded the tool call, and
+ * because the fallback loop treats PARSE as retryable it also burned the remaining candidates and
+ * let a different provider answer instead. So the two are distinguished here, and only a turn with
+ * neither text nor a tool call is still a failure.
+ */
+function toolAwareContentFrom(data: unknown): { content: string; toolCalls: ToolCall[] } {
+  const toolCalls = providerToolCalls(data);
+  const raw = (data as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content;
+  const content = sanitizeAssistantContent(typeof raw === "string" ? raw : "");
+  if (!content && toolCalls.length === 0) throw new OpenRouterError({ state: "error", badge: "Недоступно", category: "PARSE", http: 200, checkedAt: now(), confirmed: "После удаления reasoning-блоков не осталось финального ответа." });
+  return { content, toolCalls };
+}
+
 function contentFrom(data: unknown) {
   const raw = (data as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content;
   const content = sanitizeAssistantContent(typeof raw === "string" ? raw : "");
@@ -717,6 +870,9 @@ export function __resetProviderHealthForTests() {
   providerHealthHydration = null;
   providerHealthRefresh = null;
   zenmuxHeartbeatSuccesses = 0;
+  // Learned tool support is per-process, so it has to be cleared with the rest of it. Left behind, it
+  // would silently disable tools for the next test that happens to use the same provider.
+  toolsUnsupportedProviders.clear();
 }
 
 export function getZenmuxHeartbeatTrackingForTests() {
@@ -765,6 +921,104 @@ export function openRouterStreamDelta(payload: unknown) {
   return "";
 }
 
+/**
+ * Reads completed tool calls out of a non-streamed response body.
+ *
+ * <p>Looks where OpenAI-shaped providers put them — `choices[].message.tool_calls` — and accepts the
+ * gateway variants that reuse the same key at the top level or under `delta`, because the streaming
+ * parser already tolerates those shapes for text and a tool call arriving in the wrong place is the
+ * same class of tolerance worth having.
+ *
+ * <p>An entry without a function name is dropped rather than passed on: a call with no name cannot
+ * be dispatched, and forwarding it would make the caller decide what an unnamed tool is.
+ */
+export function providerToolCalls(payload: unknown): ToolCall[] {
+  if (!payload || typeof payload !== "object") return [];
+  const frame = payload as Record<string, unknown>;
+  const sources: unknown[] = [];
+  if (Array.isArray(frame.choices)) {
+    for (const choice of frame.choices as Record<string, unknown>[]) {
+      if (!choice || typeof choice !== "object") continue;
+      const message = choice.message as Record<string, unknown> | undefined;
+      const delta = choice.delta as Record<string, unknown> | undefined;
+      if (Array.isArray(message?.tool_calls)) sources.push(message.tool_calls);
+      if (Array.isArray(delta?.tool_calls)) sources.push(delta.tool_calls);
+    }
+  }
+  if (Array.isArray(frame.tool_calls)) sources.push(frame.tool_calls);
+  const calls: ToolCall[] = [];
+  for (const source of sources) {
+    for (const entry of source as unknown[]) {
+      const record = (entry ?? {}) as { id?: unknown; type?: unknown; function?: { name?: unknown; arguments?: unknown } };
+      const name = record.function?.name;
+      if (typeof name !== "string" || !name) continue;
+      calls.push({
+        id: typeof record.id === "string" && record.id ? record.id : `call_${calls.length + 1}`,
+        type: "function",
+        function: {
+          name,
+          // A provider that omits arguments entirely means "no arguments", which is an empty JSON
+          // object rather than an empty string that would fail to parse at the call site.
+          arguments: typeof record.function?.arguments === "string" ? record.function.arguments : "{}",
+        },
+      });
+    }
+  }
+  return calls;
+}
+
+/**
+ * Reassembles tool calls from streamed fragments.
+ *
+ * <p>A streamed tool call arrives in pieces across many SSE frames: the id and name usually in the
+ * first, the JSON arguments split arbitrarily across the rest, one entry per call with an `index`
+ * saying which call it belongs to. Concatenating without the index would interleave two parallel
+ * calls into unparseable JSON, so fragments are keyed by index and the argument strings are
+ * concatenated in arrival order.
+ */
+export function createToolCallAssembler() {
+  const byIndex = new Map<number, { id: string; name: string; args: string }>();
+  return {
+    /** Feeds one frame. Returns nothing: the result is read once the stream ends. */
+    push(payload: unknown): void {
+      if (!payload || typeof payload !== "object") return;
+      const frame = payload as Record<string, unknown>;
+      if (!Array.isArray(frame.choices)) return;
+      for (const choice of frame.choices as Record<string, unknown>[]) {
+        const delta = choice?.delta as Record<string, unknown> | undefined;
+        const list = delta?.tool_calls;
+        if (!Array.isArray(list)) continue;
+        for (let position = 0; position < list.length; position += 1) {
+          const fragment = (list[position] ?? {}) as { index?: unknown; id?: unknown; function?: { name?: unknown; arguments?: unknown } };
+          // `index` is the identity of the call. A frame that omits it is still addressable by its
+          // position, which is what single-call streams do.
+          const key = typeof fragment.index === "number" ? fragment.index : position;
+          const existing = byIndex.get(key) ?? { id: "", name: "", args: "" };
+          if (typeof fragment.id === "string" && fragment.id) existing.id = fragment.id;
+          if (typeof fragment.function?.name === "string" && fragment.function.name) existing.name = fragment.function.name;
+          if (typeof fragment.function?.arguments === "string") existing.args += fragment.function.arguments;
+          byIndex.set(key, existing);
+        }
+      }
+    },
+    /** The whole calls, in index order, with unnamed fragments dropped. */
+    finish(): ToolCall[] {
+      // `Array.from` rather than a spread: the configured target predates downlevelIteration, and a
+      // Map iterator is not spreadable there.
+      return Array.from(byIndex.entries())
+        .sort((a, b) => a[0] - b[0])
+        .flatMap(([index, entry]) => {
+          if (!entry.name) return [];
+          return [{
+            id: entry.id || `call_${index + 1}`,
+            type: "function" as const,
+            function: { name: entry.name, arguments: entry.args || "{}" },
+          }];
+        });
+    },
+  };
+}
+
 /** Normalizes a `content` value — a string, or the array of content parts gateways emit. */
 function providerAnswerText(value: unknown): string {
   if (typeof value === "string") return value;
@@ -795,7 +1049,7 @@ export function createReasoningStreamFilter() {
 }
 export function statusFromChatPayload(payload: unknown): ModelStatus { const raw = (payload as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content; return sanitizeAssistantContent(typeof raw === "string" ? raw : "") ? ready() : failure(200, { message: "empty response" }); }
 
-export async function chatWithRole(roleId: string, history: ChatMessage[], settings?: ChatSettings, actor?: CapacityActor): Promise<ChatResult> {
+export async function chatWithRole(roleId: string, history: ChatMessage[], settings?: ChatSettings, actor?: CapacityActor, tools?: readonly ToolDefinition[]): Promise<ChatResult> {
   assertAllowedModelId(roleId);
   await hydrateProviderHealth();
   const role = roleById(roleId)!;
@@ -815,8 +1069,9 @@ export async function chatWithRole(roleId: string, history: ChatMessage[], setti
     if (!providerAvailable(candidate.provider)) { attempts.push(attempt(candidate, "skipped")); continue; }
     if (budget.remaining <= 0) break;
     try {
-      const response = await invoke(candidate, role, history, settings, false, undefined, budget);
-      const content = contentFrom(await response.json());
+      const response = await invoke(candidate, role, history, settings, false, undefined, budget, tools);
+      const body = await response.json();
+      const { content, toolCalls } = toolAwareContentFrom(body);
       console.info("[Kairema LLM]", JSON.stringify({
         event: "chat.role_succeeded",
         role: role.key,
@@ -825,13 +1080,14 @@ export async function chatWithRole(roleId: string, history: ChatMessage[], setti
         model: candidate.modelId,
         displayName: candidate.displayName,
         fallbackUsed: originalIndex > 0,
+        toolCalls: toolCalls.length,
       }));
       attempts.push(attempt(candidate, "ready"));
       const fallbackUsed = originalIndex > 0;
       if (candidate.provider === "orcarouter") await incrementProviderDailySuccess("orcarouter");
       await saveRoleRuntime(role.key, fallbackUsed ? "backup" : "ready", candidate.provider, candidate.displayName);
       if (fallbackUsed) void recordTechnicalEvent({ kind: "fallback", title: "Резервный кандидат использован", code: candidate.provider, roleId: role.key }).catch(() => undefined);
-      return { content, modelUsed: candidate.displayName, provider: candidate.provider, fallbackUsed, label: role.label, status: fallbackUsed ? backup(`Ответил резерв ${candidate.displayName}.`) : ready(), ...(settings?.webSources?.length ? { sources: settings.webSources } : {}), ...(settings?.webEvidence?.length ? { evidence: settings.webEvidence } : {}), ...(settings?.ragSources?.length ? { ragSources: settings.ragSources } : {}), ...(settings?.searchStatus ? { searchStatus: settings.searchStatus } : {}), ...(settings?.webGrounding ? { webGrounding: settings.webGrounding } : {}) };
+      return { content, modelUsed: candidate.displayName, provider: candidate.provider, fallbackUsed, label: role.label, status: fallbackUsed ? backup(`Ответил резерв ${candidate.displayName}.`) : ready(), ...(toolCalls.length ? { toolCalls } : {}), ...(settings?.webSources?.length ? { sources: settings.webSources } : {}), ...(settings?.webEvidence?.length ? { evidence: settings.webEvidence } : {}), ...(settings?.ragSources?.length ? { ragSources: settings.ragSources } : {}), ...(settings?.searchStatus ? { searchStatus: settings.searchStatus } : {}), ...(settings?.webGrounding ? { webGrounding: settings.webGrounding } : {}) };
     } catch (error) {
       if (error instanceof CapacityAdmissionError) {
         if (error.scope === "provider") { attempts.push(attempt(candidate, "skipped")); continue; }
@@ -860,7 +1116,7 @@ export async function chatWithRole(roleId: string, history: ChatMessage[], setti
   }
 }
 
-export async function chatWithRoleStream(roleId: string, history: ChatMessage[], settings: ChatSettings | undefined, onDelta: (delta: string) => void, signal?: AbortSignal, actor?: CapacityActor): Promise<ChatResult> {
+export async function chatWithRoleStream(roleId: string, history: ChatMessage[], settings: ChatSettings | undefined, onDelta: (delta: string) => void, signal?: AbortSignal, actor?: CapacityActor, tools?: readonly ToolDefinition[]): Promise<ChatResult> {
   assertAllowedModelId(roleId);
   await hydrateProviderHealth();
   const role = roleById(roleId)!;
@@ -921,19 +1177,28 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
       : signal;
     try {
       const attemptSettings = emittedParts.length ? { ...settings, continuationPrefix: emittedParts.join("").slice(-12_000) } : settings;
-      const response = await invoke(candidate, role, history, attemptSettings, true, attemptSignal, budget);
+      const response = await invoke(candidate, role, history, attemptSettings, true, attemptSignal, budget, tools);
       const reader = response.body?.getReader();
       if (!reader) throw new OpenRouterError({ state: "error", badge: "Недоступно", category: "PARSE", http: 200, checkedAt: now(), confirmed: "Провайдер не открыл поток ответа." });
       const decoder = new TextDecoder(); const filter = createReasoningStreamFilter(); const sourceFilter = createSourceSafeStreamFilter(); const attemptParts: string[] = []; let buffer = "";
+      // Reassembled per attempt, not per request: a tool call belongs to the candidate that asked
+      // for it, and a fallback candidate's fragments must never be merged into it.
+      const toolCalls = createToolCallAssembler();
       const emit = (raw: string, final = false) => { const filtered = filter(raw, final); if (filtered) providerDeltaReceived = true; const visible = sourceFilter(filtered, final); if (visible) { if (!visibleDeltaDelivered && role.key === "fast") { if (flashDeadlineTimer) clearTimeout(flashDeadlineTimer); recordFlashTtft({ event: "flash.ttft", provider: candidate.provider, fallbackUsed: originalIndex > 0, durationMs: Math.max(0, Date.now() - attemptStartedAt) }); } visibleDeltaDelivered = true; attemptParts.push(visible); emittedParts.push(visible); onDelta(visible); } };
-      const consume = (block: string) => { const raw = dataFromSseBlock(block); if (!raw || raw === "[DONE]") return; try { emit(openRouterStreamDelta(JSON.parse(raw))); } catch { /* upstream comments are ignorable */ } };
+      // Tool fragments are read from the raw frame, never from the visible-text pipeline: they must
+      // not be run through the reasoning filter, the source filter or the answer sanitizer, none of
+      // which know that a JSON argument string is not prose and would mangle it.
+      const consume = (block: string) => { const raw = dataFromSseBlock(block); if (!raw || raw === "[DONE]") return; let parsed: unknown; try { parsed = JSON.parse(raw); } catch { return; } toolCalls.push(parsed); emit(openRouterStreamDelta(parsed)); };
       try {
         while (true) { const { done, value } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true }); const blocks = buffer.split(/\r?\n\r?\n/); buffer = blocks.pop() ?? ""; blocks.forEach(consume); }
         buffer += decoder.decode(); if (buffer.trim()) consume(buffer);
         emit("", true);
       } finally { emit("", true); reader.releaseLock(); }
       const content = sanitizeAssistantContent(emittedParts.join(""));
-      if (!content) throw new OpenRouterError({ state: "error", badge: "Недоступно", category: "PARSE", http: 200, checkedAt: now(), confirmed: "После удаления reasoning-блоков не осталось финального ответа." });
+      const requestedTools = toolCalls.finish();
+      // Same rule as the non-streamed path: a turn that stops to call a tool carries no text, and
+      // that is a valid intermediate turn rather than a provider that answered nothing.
+      if (!content && requestedTools.length === 0) throw new OpenRouterError({ state: "error", badge: "Недоступно", category: "PARSE", http: 200, checkedAt: now(), confirmed: "После удаления reasoning-блоков не осталось финального ответа." });
       console.info("[Kairema LLM]", JSON.stringify({
         event: "chat.role_stream_succeeded",
         role: role.key,
@@ -942,6 +1207,7 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
         model: candidate.modelId,
         displayName: candidate.displayName,
         fallbackUsed: originalIndex > 0,
+        toolCalls: requestedTools.length,
         latencyMs: Date.now() - attemptStartedAt,
       }));
       attempts.push(attempt(candidate, "ready"));
@@ -949,7 +1215,7 @@ export async function chatWithRoleStream(roleId: string, history: ChatMessage[],
       if (candidate.provider === "orcarouter") await incrementProviderDailySuccess("orcarouter");
       await saveRoleRuntime(role.key, fallbackUsed ? "backup" : "ready", candidate.provider, candidate.displayName);
       if (fallbackUsed) void recordTechnicalEvent({ kind: "fallback", title: "Резервный кандидат использован", code: candidate.provider, roleId: role.key }).catch(() => undefined);
-      return { content, modelUsed: candidate.displayName, provider: candidate.provider, fallbackUsed, label: role.label, status: fallbackUsed ? backup(`Ответил резерв ${candidate.displayName}.`) : ready(), ...(settings?.webSources?.length ? { sources: settings.webSources } : {}), ...(settings?.webEvidence?.length ? { evidence: settings.webEvidence } : {}), ...(settings?.ragSources?.length ? { ragSources: settings.ragSources } : {}), ...(settings?.searchStatus ? { searchStatus: settings.searchStatus } : {}), ...(settings?.webGrounding ? { webGrounding: settings.webGrounding } : {}) };
+      return { content, modelUsed: candidate.displayName, provider: candidate.provider, fallbackUsed, label: role.label, status: fallbackUsed ? backup(`Ответил резерв ${candidate.displayName}.`) : ready(), ...(requestedTools.length ? { toolCalls: requestedTools } : {}), ...(settings?.webSources?.length ? { sources: settings.webSources } : {}), ...(settings?.webEvidence?.length ? { evidence: settings.webEvidence } : {}), ...(settings?.ragSources?.length ? { ragSources: settings.ragSources } : {}), ...(settings?.searchStatus ? { searchStatus: settings.searchStatus } : {}), ...(settings?.webGrounding ? { webGrounding: settings.webGrounding } : {}) };
     } catch (error) {
       if (error instanceof CapacityAdmissionError) {
         if (error.scope === "provider") { attempts.push(attempt(candidate, "skipped")); continue; }
