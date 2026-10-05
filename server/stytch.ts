@@ -227,17 +227,62 @@ export function getStytchLinkIntent(req: Request) {
   return reference && reference.length <= 128 ? reference : null;
 }
 
+let stytchAuthSequence = 0;
+
+/**
+ * Timing correlation id for one `sessions.authenticate` call.
+ *
+ * Diagnostic only, and deliberately independent of the `r<n>` id that `context.ts`
+ * allocates: this function has no parameter through which that id could be threaded
+ * without changing a signature that two source-text tests assert on. So the two ids
+ * cannot be joined automatically, and a reader matches them by proximity in the log
+ * instead: the `[stytch-authenticate]` pair immediately preceding a
+ * `[auth-resolve] phase=stytch_authenticate_returned` belongs to that request.
+ * Carries no secret.
+ */
+function newStytchTimingId(): string {
+  stytchAuthSequence += 1;
+  return `s${stytchAuthSequence.toString(16)}`;
+}
+
 export async function authenticateStytchRequest(req: Request) {
   const sessionToken = getStytchSessionToken(req);
+  // Not a diagnostic phase: an absent cookie skips the provider call entirely, so this
+  // line records that the remote round-trip was avoided rather than that it was fast.
   if (!sessionToken) return null;
 
+  const timingId = newStytchTimingId();
+  const startedAtMs = Date.now();
+  const diag = (phase: string, fields: Record<string, string | number | boolean> = {}) => {
+    const parts = [`[stytch-authenticate]`, `timingId=${timingId}`, `phase=${phase}`,
+      `elapsedMs=${Math.max(0, Date.now() - startedAtMs)}`];
+    for (const [key, value] of Object.entries(fields)) parts.push(`${key}=${String(value)}`);
+    console.log(parts.join("; "));
+  };
+
+  // This await is the only call on the `auth.me` path with no timeout of any kind,
+  // which is why it is bracketed: if a log pair shows `started` with no `done`, the
+  // provider never answered and the client is holding a socket open on our account.
+  // The session token itself is never logged, only the presence of a session.
+  diag("stytch_authenticate_start", { sessionPresent: true });
   try {
     // A provider-issued opaque token is remote-verified by Stytch for every
     // server request. Kairema never mints or parses a local session token.
     const response = await getStytchClient().sessions.authenticate({ session_token: sessionToken });
+    diag("stytch_authenticate_done", {
+      verifiedEmailPresent: getVerifiedStytchEmail(response.user) !== null,
+    });
     return { user: response.user, sessionToken };
   } catch (error) {
-    throw toSafeStytchError(error);
+    const safe = toSafeStytchError(error);
+    // `error_type` and `status_code` only. `error.message` is excluded because a provider
+    // message can quote the submitted token, and `safeCode` is already carried by the
+    // thrown error below, so nothing observable is lost by leaving the message out.
+    diag("stytch_authenticate_failed", {
+      safeCode: safe.safeCode,
+      ...(error instanceof StytchError ? { errorType: error.error_type, statusCode: error.status_code } : {}),
+    });
+    throw safe;
   }
 }
 
