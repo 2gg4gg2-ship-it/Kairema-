@@ -395,13 +395,28 @@ export const appRouter = router({
         if (!passwordSessionToken) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Сессия пароля истекла. Войдите снова." });
         }
+        // A refused code is a recoverable outcome, not a dead session: the code is still live
+        // at the provider and the user is expected to type it again. This branch therefore
+        // must NOT retire the intermediate cookies, because they are the only thing that lets a
+        // second attempt reach `otps.authenticate` at all — clearing them here made every
+        // correct code after one typo fail as BAD_REQUEST with "Запросите код подтверждения."
+        let result: Awaited<ReturnType<ReturnType<typeof getStytchClient>["otps"]["authenticate"]>>;
         try {
-          const result = await getStytchClient().otps.authenticate({
+          result = await getStytchClient().otps.authenticate({
             method_id: emailId,
             code: input.code,
             session_token: passwordSessionToken,
             session_duration_minutes: STYTCH_SESSION_DURATION_MINUTES,
           });
+        } catch (error) {
+          if (error instanceof StytchError) {
+            console.error(`[OTP Verify StytchError] status_code=${error.status_code} error_type=${error.error_type} request_id=${error.request_id} safe_message="Stytch authentication failed"`);
+          }
+          throw stytchErrorToTrpc(error);
+        }
+        // From here on the provider has already consumed the code and issued its own session
+        // token, so the intermediate cookies are spent and every failure below must retire them.
+        try {
           console.error(`[verifyOtp] stytch_ok user_id=${result.user.user_id}`);
           const verifiedEmail = getVerifiedStytchEmail(result.user);
           if (!verifiedEmail) {

@@ -213,6 +213,39 @@ describe("auth.stytch.verifyOtp contract", () => {
     expect(setCookie).toEqual([]);
   });
 
+  it("keeps the OTP session after a refused code so the correct code can still be submitted", async () => {
+    // The exact Android sequence: a typo burns the code, the user retypes it correctly.
+    // Retiring the intermediate cookies on the first refusal made every later submit fail
+    // BAD_REQUEST before reaching the provider, so the button looked dead for good.
+    // The default `beforeEach` already resolves `otps.authenticate` with a verified user, so only
+    // the first attempt needs to be overridden to refuse the code.
+    stytchClient.otps.authenticate.mockRejectedValueOnce(stytchError(401, "unable_to_auth_magic_link"));
+    const { ctx, setCookie, clearedCookies } = createHarness(intermediateCookies);
+
+    await expect(appRouter.createCaller(ctx).auth.stytch.verifyOtp({ code: "000000" }))
+      .rejects.toMatchObject({ code: "UNAUTHORIZED" });
+
+    // A refused code is recoverable, so neither intermediate cookie may be retired.
+    const clearedAfterRefusal = clearedCookies.map((call) => call.name);
+    expect(clearedAfterRefusal).not.toContain(STYTCH_OTP_EMAIL_ID_COOKIE);
+    expect(clearedAfterRefusal).not.toContain(STYTCH_PASSWORD_SESSION_COOKIE);
+    expect(setCookie).toEqual([]);
+
+    const result = await appRouter.createCaller(ctx).auth.stytch.verifyOtp({ code: CODE });
+
+    expect(result).toEqual({ state: "SIGNED_IN" });
+    expect(stytchClient.otps.authenticate).toHaveBeenCalledTimes(2);
+    expect(stytchClient.otps.authenticate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ code: CODE, method_id: "email-id-test" }),
+    );
+    // The session is issued only on the successful attempt, and the spent intermediates are
+    // retired only then.
+    expect(setCookie.map((call) => call.name)).toEqual([STYTCH_SESSION_COOKIE]);
+    expect(clearedCookies.map((call) => call.name)).toEqual(
+      expect.arrayContaining([COOKIE_NAME, STYTCH_OTP_EMAIL_ID_COOKIE, STYTCH_PASSWORD_SESSION_COOKIE]),
+    );
+  });
+
   it("never issues a session for an address that is not verified", async () => {
     stytchClient.otps.authenticate.mockResolvedValue({
       session_token: "final-session-test",
