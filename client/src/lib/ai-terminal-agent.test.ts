@@ -158,7 +158,7 @@ describe("runTerminalToolLoop", () => {
 
   it("runs a command and hands the result back to the model, then returns the answer", async () => {
     const provider = stubProvider([
-      { toolCalls: [{ name: "run_shell_command", args: { command: "ls" } }] },
+      { toolCalls: [{ name: "terminal", args: { command: "ls" } }] },
       { content: "There is one file." },
     ]);
     const loopback = stubLoopback();
@@ -188,8 +188,8 @@ describe("runTerminalToolLoop", () => {
 
   it("lets the model continue after a failing command instead of failing the turn", async () => {
     const provider = stubProvider([
-      { toolCalls: [{ name: "run_shell_command", args: { command: "false" } }] },
-      { toolCalls: [{ name: "run_shell_command", args: { command: "true" } }] },
+      { toolCalls: [{ name: "terminal", args: { command: "false" } }] },
+      { toolCalls: [{ name: "terminal", args: { command: "true" } }] },
       { content: "Recovered." },
     ]);
     const loopback = stubLoopback({ false: 1, true: 0 });
@@ -212,7 +212,7 @@ describe("runTerminalToolLoop", () => {
 
   it("does not run a command that requires confirmation, and cleans up", async () => {
     const provider = stubProvider([
-      { toolCalls: [{ name: "run_shell_command", args: { command: "rm -rf /home/kairema" } }] },
+      { toolCalls: [{ name: "terminal", args: { command: "rm -rf /home/kairema" } }] },
       { content: "I need your approval for that." },
     ]);
     const loopback = stubLoopback();
@@ -255,8 +255,8 @@ describe("runTerminalToolLoop", () => {
 
   it("reuses one session across rounds so the working directory survives", async () => {
     const provider = stubProvider([
-      { toolCalls: [{ name: "run_shell_command", args: { command: "cd /home/kairema/test" } }] },
-      { toolCalls: [{ name: "run_shell_command", args: { command: "ls" } }] },
+      { toolCalls: [{ name: "terminal", args: { command: "cd /home/kairema/test" } }] },
+      { toolCalls: [{ name: "terminal", args: { command: "ls" } }] },
       { content: "Done." },
     ]);
     const loopback = stubLoopback();

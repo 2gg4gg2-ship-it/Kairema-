@@ -155,6 +155,16 @@ function exitMarker(): string {
 const EXIT_PATTERN = (marker: string) => new RegExp(`\\n?${marker}:(\\d+)\\n?`);
 
 /**
+ * How much raw stdout the exit marker is searched in.
+ *
+ * <p>The marker is written after the command finishes, so it is always at the tail. Keeping a
+ * rolling window of raw output to search is what lets a command whose output exceeds
+ * {@link AI_TERMINAL_LIMITS.maxOutputChars} still finish on its marker instead of waiting out the
+ * deadline: the kept output is capped, but the search is not, and the two are separate buffers.
+ */
+const MARKER_SCAN_TAIL_CHARS = 512;
+
+/**
  * One AI-owned shell, reused for every command in the task.
  *
  * <p>Created lazily so a task that only needed to read something does not pay for a session, and
@@ -238,6 +248,7 @@ export class AiTerminalSession {
     return new Promise<TerminalToolResult>((resolve) => {
       let stdout = "";
       let stderr = "";
+      let scanTail = "";
       let truncated = false;
       let settled = false;
       let handle: { close: () => void } | null = null;
@@ -247,7 +258,12 @@ export class AiTerminalSession {
         settled = true;
         clearTimeout(timer);
         handle?.close();
-        resolve({ ...result, ...(truncated ? { truncated: true } : {}) });
+        resolve({
+          ...result,
+          stdout: cap(result.stdout, limits.maxOutputChars),
+          stderr: cap(result.stderr, limits.maxOutputChars),
+          ...(truncated ? { truncated: true } : {}),
+        });
       };
 
       const timer = setTimeout(() => {
@@ -263,11 +279,16 @@ export class AiTerminalSession {
 
       const append = (target: "stdout" | "stderr", data: string) => {
         if (target === "stdout") {
+          // The scan window keeps receiving data after the kept output is full, so the marker is
+          // still found; only what is handed to the model stops growing.
+          scanTail = (scanTail + data).slice(-MARKER_SCAN_TAIL_CHARS);
           if (stdout.length >= limits.maxOutputChars) { truncated = true; return; }
           stdout += data;
+          if (stdout.length > limits.maxOutputChars) truncated = true;
         } else {
           if (stderr.length >= limits.maxOutputChars) { truncated = true; return; }
           stderr += data;
+          if (stderr.length > limits.maxOutputChars) truncated = true;
         }
       };
 
@@ -275,12 +296,14 @@ export class AiTerminalSession {
         onFrame: (frame) => {
           if (frame.type === "stdout") {
             append("stdout", frame.data);
-            const match = EXIT_PATTERN(marker).exec(stdout);
+            // Searched in the scan window rather than in the kept output, because the marker can
+            // arrive after the kept output has been cut off at the ceiling.
+            const match = EXIT_PATTERN(marker).exec(scanTail);
             if (!match) return;
             // The marker line is bookkeeping, not output: leaving it in would let a model mistake
-            // it for something the command printed. Only the marker and one adjacent newline are
-            // removed, so real output keeps its own trailing newline.
-            const cleaned = stdout.replace(match[0], "");
+            // it for something the command printed. It is stripped only where it is actually
+            // present, so a cut-off output keeps its own trailing bytes untouched.
+            const cleaned = stdout.includes(marker) ? stdout.replace(EXIT_PATTERN(marker), "") : stdout;
             finish({
               ok: true, command, stdout: cleaned, stderr,
               exitCode: Number(match[1]), timedOut: false, confirmationRequired: false,
@@ -348,17 +371,23 @@ function cap(value: string, max: number): string {
 export const AI_TERMINAL_TOOL = {
   type: "function" as const,
   function: {
-    name: "run_shell_command",
+    name: "terminal",
     description:
-      "Run one shell command inside the app's own Linux sandbox (Alpine, on the user's device). " +
+      "Run one command in the Linux Terminal built into this Android app (Alpine, running on the " +
+      "user's device, not on any server). Use it for shell work: inspecting or editing files, " +
+      "running scripts, installing and building. " +
       "The working directory persists between calls, so `cd` in one call applies to the next. " +
       "Returns stdout, stderr and the exit code; a non-zero exit is normal and is not an error to " +
-      "retry blindly. Commands that destroy the system or install packages require the user's " +
-      "confirmation and return confirmation_required instead of running.",
+      "retry blindly. Output is truncated at a fixed size, so read what you need rather than " +
+      "dumping a large file. Commands that destroy the system or install packages require the " +
+      "user's confirmation and return confirmation_required instead of running.",
     parameters: {
       type: "object",
       properties: {
-        command: { type: "string", description: "The command line to run in the sandbox." },
+        command: {
+          type: "string",
+          description: "The command line to run in the app's Linux Terminal.",
+        },
       },
       required: ["command"],
     },

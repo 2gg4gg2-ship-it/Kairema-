@@ -132,7 +132,7 @@ describe("terminal tool availability", () => {
   });
 
   it("declares a single tool with a required command argument", () => {
-    expect(AI_TERMINAL_TOOL.function.name).toBe("run_shell_command");
+    expect(AI_TERMINAL_TOOL.function.name).toBe("terminal");
     expect(AI_TERMINAL_TOOL.function.parameters.required).toEqual(["command"]);
   });
 });
@@ -201,6 +201,27 @@ describe("AiTerminalSession", () => {
       expect(result.exitCode).toBe(0);
       expect(result.stderr).toBe("");
       expect(result.stdout).not.toContain("__kairema_ai_exit_");
+      await session.close();
+    } finally {
+      loopback.restore();
+    }
+  });
+
+  it("caps the output it hands to the model, and still finishes on its marker", async () => {
+    const loopback = stubLoopback();
+    try {
+      // A ceiling small enough that the stubbed output overruns it, and a deadline short enough
+      // that a regression here fails fast instead of sitting out the real one.
+      const session = new AiTerminalSession({
+        ...AI_TERMINAL_LIMITS, maxOutputChars: 20, commandTimeoutMs: 500,
+      });
+      const result = await session.run("echo " + "x".repeat(60));
+      // The point of the scan window: overflowing the ceiling must not cost the exit code.
+      expect(result.ok).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.timedOut).toBe(false);
+      expect(result.stdout.length).toBeLessThanOrEqual(20);
+      expect(result.truncated).toBe(true);
       await session.close();
     } finally {
       loopback.restore();
