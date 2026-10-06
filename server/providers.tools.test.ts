@@ -200,6 +200,14 @@ describe("telling the model about the terminal", () => {
     expect(await systemPromptFor({ terminalTool: true })).toContain(TERMINAL_SYSTEM_PROMPT);
   });
 
+  it("bids the model to call the function rather than write commands as text", async () => {
+    const prompt = await systemPromptFor({ terminalTool: true });
+    // The prompt must bind the model to the function-calling format: it must not merely announce the
+    // terminal and allow the model to "demonstrate" a command as a ```bash block in visible text.
+    expect(prompt).toContain("ЛЮБУЮ команду ты выполняешь ТОЛЬКО вызовом функции terminal");
+    expect(prompt).toContain("Никогда не пиши команды в виде обычного текста");
+  });
+
   it("leaves an ordinary turn without any mention of a terminal", async () => {
     expect(await systemPromptFor()).not.toContain("ТЕРМИНАЛ");
   });
@@ -281,6 +289,23 @@ describe("a provider that rejects the tools key", () => {
     expect(bodies).toHaveLength(2);
     expect(bodies[0]!.tools).toEqual([TERMINAL_TOOL]);
     expect("tools" in bodies[1]!).toBe(false);
+  });
+
+  it("drops the terminal instruction when it retries without tools", async () => {
+    stubChainKeys({ openrouter: "test-openrouter-key" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(toolsRejected())
+      .mockResolvedValueOnce(textResponse("Ответ без tools"));
+
+    // `terminalTool: true` means the first attempt's system prompt mentions the terminal. A 400 that
+    // rejects `tools` retries as a plain chat, so the second attempt must NOT be told about a terminal
+    // it cannot call — otherwise the model describes commands as text instead of staying a normal turn.
+    await chatWithRole("fast", [{ role: "user", content: "hi" }], { terminalTool: true }, undefined, [TERMINAL_TOOL]);
+
+    const bodies = sentBodies(fetchSpy);
+    const secondMessages = bodies[1]!.messages as Array<Record<string, unknown>>;
+    const secondSystem = String(secondMessages[0]!.content ?? "");
+    expect(secondSystem).not.toContain("ТЕРМИНАЛ");
   });
 
   it("retries at most once, so a provider refusing tools twice cannot loop", async () => {
