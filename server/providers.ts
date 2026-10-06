@@ -649,14 +649,10 @@ async function invoke(candidate: Candidate, role: ModelConfig, history: ChatMess
           httpStatus: response.status,
           toolsOffered: offeredTools.length,
         }));
-        // The tool was offered on this attempt and rejected, so the retry is a plain chat and must
-        // not keep the terminal instruction either: telling the model it has a terminal it cannot
-        // call makes it describe commands as text instead of staying a normal turn.
-        const retrySettings = settings ? { ...settings, terminalTool: false } : undefined;
         response = await fetch(ENDPOINTS[candidate.provider], {
           method: "POST",
           headers,
-          body: JSON.stringify({ model: candidate.modelId, messages: buildOpenRouterMessages(role, history, retrySettings), stream }),
+          body: JSON.stringify({ model: candidate.modelId, messages: buildOpenRouterMessages(role, history, settings), stream }),
           signal: timeoutSignal(signal, ATTEMPT_TIMEOUT_MS),
         });
         if (response.ok) return response;
