@@ -1,11 +1,7 @@
 import { getProviderAvailability, getProviderDailySuccess, getPublicProviderAvailabilityHistory, incrementProviderDailySuccess, listProviderControlFlags, listProviderHealth, listRoleRuntimeStatus, recordFlashTtftMetric, recordTechnicalEvent, upsertProviderHealth, upsertRoleRuntimeStatus } from "./db";
 import { beginCapacityGeneration, CapacityAdmissionError, settleCapacityReservation, type CapacityActor, type CapacityGenerationLease } from "./capacity-controller";
 import { supportsToolCalling } from "@shared/provider-capabilities";
-<<<<<<< HEAD
-import { TERMINAL_SYSTEM_PROMPT } from "@shared/terminal-tool";
-=======
 import { TERMINAL_SYSTEM_PROMPT, TERMINAL_TOOL_NAME } from "@shared/terminal-tool";
->>>>>>> aaa6664 (feat(server): enable server-side tool calling for multiple providers)
 import { LIVE_VALUE_UNCONFIRMED_PROMPT, type LiveValueKind } from "./web-search-value";
 
 export const ROLE_IDS = ["fast", "smart", "context", "flagship"] as const;
@@ -103,8 +99,6 @@ export type ChatSettings = {
   toolAccess?: boolean;
   /** Transient server-only continuation context after an upstream stream interruption. */
   continuationPrefix?: string;
-  /** Transient server-only flag: this turn advertises the terminal tool, so the prompt may mention it. */
-  terminalTool?: boolean;
 };
 /**
  * The outcome of one model turn.
@@ -652,18 +646,10 @@ async function invoke(candidate: Candidate, role: ModelConfig, history: ChatMess
           httpStatus: response.status,
           toolsOffered: offeredTools.length,
         }));
-        // The tool was offered on this attempt and rejected, so the retry is a plain chat and must
-        // not keep the terminal instruction either: telling the model it has a terminal it cannot
-        // call makes it describe commands as text instead of staying a normal turn.
-        const retrySettings = settings ? { ...settings, terminalTool: false } : undefined;
         response = await fetch(ENDPOINTS[candidate.provider], {
           method: "POST",
           headers,
-<<<<<<< HEAD
-          body: JSON.stringify({ model: candidate.modelId, messages: buildOpenRouterMessages(role, history, retrySettings), stream }),
-=======
           body: JSON.stringify({ model: candidate.modelId, messages: buildOpenRouterMessages(role, history, settings, undefined), stream }),
->>>>>>> aaa6664 (feat(server): enable server-side tool calling for multiple providers)
           signal: timeoutSignal(signal, ATTEMPT_TIMEOUT_MS),
         });
         if (response.ok) return response;
