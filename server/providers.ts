@@ -1,7 +1,11 @@
 import { getProviderAvailability, getProviderDailySuccess, getPublicProviderAvailabilityHistory, incrementProviderDailySuccess, listProviderControlFlags, listProviderHealth, listRoleRuntimeStatus, recordFlashTtftMetric, recordTechnicalEvent, upsertProviderHealth, upsertRoleRuntimeStatus } from "./db";
 import { beginCapacityGeneration, CapacityAdmissionError, settleCapacityReservation, type CapacityActor, type CapacityGenerationLease } from "./capacity-controller";
 import { supportsToolCalling } from "@shared/provider-capabilities";
+<<<<<<< HEAD
 import { TERMINAL_SYSTEM_PROMPT } from "@shared/terminal-tool";
+=======
+import { TERMINAL_SYSTEM_PROMPT, TERMINAL_TOOL_NAME } from "@shared/terminal-tool";
+>>>>>>> aaa6664 (feat(server): enable server-side tool calling for multiple providers)
 import { LIVE_VALUE_UNCONFIRMED_PROMPT, type LiveValueKind } from "./web-search-value";
 
 export const ROLE_IDS = ["fast", "smart", "context", "flagship"] as const;
@@ -396,9 +400,10 @@ export function toApiChatMessage(message: ChatMessage): ApiChatMessage {
   }
   return { role: message.role, content: message.content };
 }
-export function buildOpenRouterMessages(role: ModelConfig, history: ChatMessage[], settings?: ChatSettings): ApiChatMessage[] {
+export function buildOpenRouterMessages(role: ModelConfig, history: ChatMessage[], settings?: ChatSettings, terminalPrompt?: string): ApiChatMessage[] {
   const lastUserIndex = history.map((message) => message.role).lastIndexOf("user");
-  return [{ role: "system", content: prompt(role, settings) }, ...history.map((message, index) => {
+  const systemContent = [prompt(role, settings), terminalPrompt].filter(Boolean).join("\n\n").trim();
+  return [{ role: "system", content: systemContent }, ...history.map((message, index) => {
     if (index === lastUserIndex && message.role === "user" && settings?.imageUrls?.length) {
       return { role: "user" as const, content: [{ type: "text" as const, text: message.content }, ...settings.imageUrls.map((url) => ({ type: "image_url" as const, image_url: { url } }))] };
     }
@@ -549,10 +554,7 @@ export function isToolsUnsupportedRejection(http: number | null, body: unknown):
 function toolsForCandidate(candidate: Candidate, tools: readonly ToolDefinition[] | undefined): ToolDefinition[] {
   if (!tools?.length) return [];
   if (toolsUnsupportedProviders.has(candidate.provider)) return [];
-  // The registry gate is what makes enabling a provider a deliberate data change, and the
-  // `openrouter` gate is what keeps it to the one provider whose tool contract has been checked
-  // end to end — every other chain candidate keeps answering plain chat, exactly as before.
-  return supportsToolCalling(candidate.provider) && candidate.provider === "openrouter" ? [...tools] : [];
+  return supportsToolCalling(candidate.provider) ? [...tools] : [];
 }
 
 async function invoke(candidate: Candidate, role: ModelConfig, history: ChatMessage[], settings: ChatSettings | undefined, stream: boolean, signal?: AbortSignal, budget?: RequestBudget, tools?: readonly ToolDefinition[]) {
@@ -562,6 +564,7 @@ async function invoke(candidate: Candidate, role: ModelConfig, history: ChatMess
   if (stream) headers.Accept = "text/event-stream";
   if (candidate.provider === "openrouter") { headers["HTTP-Referer"] = "https://kairema.manus.space"; headers["X-Title"] = "Kairema"; }
   const offeredTools = toolsForCandidate(candidate, tools);
+  const terminalPrompt = offeredTools.some((t) => t.function.name === TERMINAL_TOOL_NAME) ? TERMINAL_SYSTEM_PROMPT : undefined;
   let response: Response;
   let reservation: Awaited<ReturnType<CapacityGenerationLease["reserveAttempt"]>> | null = null;
   const invokeStartedAt = Date.now();
@@ -596,7 +599,7 @@ async function invoke(candidate: Candidate, role: ModelConfig, history: ChatMess
       headers,
       body: JSON.stringify({
         model: candidate.modelId,
-        messages: buildOpenRouterMessages(role, history, settings),
+        messages: buildOpenRouterMessages(role, history, settings, terminalPrompt),
         stream,
         ...(offeredTools.length ? { tools: offeredTools } : {}),
       }),
@@ -656,7 +659,11 @@ async function invoke(candidate: Candidate, role: ModelConfig, history: ChatMess
         response = await fetch(ENDPOINTS[candidate.provider], {
           method: "POST",
           headers,
+<<<<<<< HEAD
           body: JSON.stringify({ model: candidate.modelId, messages: buildOpenRouterMessages(role, history, retrySettings), stream }),
+=======
+          body: JSON.stringify({ model: candidate.modelId, messages: buildOpenRouterMessages(role, history, settings, undefined), stream }),
+>>>>>>> aaa6664 (feat(server): enable server-side tool calling for multiple providers)
           signal: timeoutSignal(signal, ATTEMPT_TIMEOUT_MS),
         });
         if (response.ok) return response;

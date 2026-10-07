@@ -220,6 +220,7 @@ export const PROVIDER_CAPABILITIES: readonly ProviderCapability[] = [
     streaming: null,
     auth: "bearer",
     cors: "unknown",
+    supportsTools: true,
     notes:
       "Appears on the platform provider list, which is a routing concern, not proof that the " +
       "first-party API contract is compatible. Left unknown until the endpoint is verified.",
@@ -233,6 +234,7 @@ export const PROVIDER_CAPABILITIES: readonly ProviderCapability[] = [
     streaming: null,
     auth: "bearer",
     cors: "unknown",
+    supportsTools: true,
     notes: "Also on the platform list. First-party contract not verified for this build.",
   }),
   llm({
@@ -244,6 +246,7 @@ export const PROVIDER_CAPABILITIES: readonly ProviderCapability[] = [
     streaming: null,
     auth: "bearer",
     cors: "unknown",
+    supportsTools: true,
     notes: "Also on the platform list. First-party contract not verified for this build.",
   }),
   llm({
@@ -255,6 +258,7 @@ export const PROVIDER_CAPABILITIES: readonly ProviderCapability[] = [
     streaming: null,
     auth: "bearer",
     cors: "unknown",
+    supportsTools: true,
     notes: "Also on the platform list. First-party contract not verified for this build.",
   }),
   llm({
@@ -294,6 +298,7 @@ export const PROVIDER_CAPABILITIES: readonly ProviderCapability[] = [
     streaming: null,
     auth: "bearer",
     cors: "unknown",
+    supportsTools: true,
     notes: "On the platform provider list. First-party contract not verified for this build.",
   }),
   llm({
@@ -305,6 +310,7 @@ export const PROVIDER_CAPABILITIES: readonly ProviderCapability[] = [
     streaming: null,
     auth: "bearer",
     cors: "unknown",
+    supportsTools: true,
     notes: "On the platform provider list. First-party contract not verified for this build.",
   }),
   llm({
@@ -383,6 +389,28 @@ export const PROVIDER_CAPABILITIES: readonly ProviderCapability[] = [
     auth: "bearer",
     cors: "unknown",
     notes: "No verified contract established for this build.",
+  }),
+  llm({
+    id: "dots",
+    displayName: "Dots Studio",
+    status: "unknown",
+    execution: "server",
+    openaiCompatible: null,
+    streaming: null,
+    auth: "bearer",
+    cors: "unknown",
+    notes: "On the platform provider list. First-party contract not verified for this build.",
+  }),
+  llm({
+    id: "deepseek",
+    displayName: "DeepSeek",
+    status: "unknown",
+    execution: "server",
+    openaiCompatible: null,
+    streaming: null,
+    auth: "bearer",
+    cors: "unknown",
+    notes: "On the platform provider list. First-party contract not verified for this build.",
   }),
 
   // ── Search and tool services: real keys, not chat providers ─────────────────────────────────
