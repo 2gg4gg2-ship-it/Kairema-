@@ -22,7 +22,7 @@ vi.mock("./db", () => ({
   listProviderControlFlags: vi.fn().mockResolvedValue([]),
 }));
 
-import { TERMINAL_TOOL, TERMINAL_TOOL_NAME } from "@shared/terminal-tool";
+import { TERMINAL_SYSTEM_PROMPT, TERMINAL_TOOL, TERMINAL_TOOL_NAME } from "@shared/terminal-tool";
 import { supportsToolCalling } from "@shared/provider-capabilities";
 import {
   __resetProviderHealthForTests,
@@ -66,12 +66,12 @@ const toolOnlyBody = (id = "call_1") => ({ choices: [{ message: { content: null,
 
 const deltaFrame = (toolCalls: unknown[]) => ({ choices: [{ delta: { tool_calls: toolCalls } }] });
 
-/** Stubs the two providers the fast role chain tries first, leaving the rest unconfigured. */
-function stubChainKeys(options: { openrouter?: string; orcarouter?: string } = {}) {
+/** Stubs the providers the fast role chain tries first, leaving the rest unconfigured. */
+function stubChainKeys(options: { openrouter?: string; orcarouter?: string; groq?: string; gemini?: string } = {}) {
   vi.stubEnv("OPENROUTER_API_KEY", options.openrouter ?? "");
   vi.stubEnv("ORCAROUTER_API_KEY", options.orcarouter ?? "");
-  vi.stubEnv("GROQ_API_KEY", "");
-  vi.stubEnv("GEMINI_API_KEY", "");
+  vi.stubEnv("GROQ_API_KEY", options.groq ?? "");
+  vi.stubEnv("GEMINI_API_KEY", options.gemini ?? "");
 }
 
 afterEach(() => {
@@ -196,6 +196,16 @@ describe("which providers are offered tools", () => {
     expect(sentBodies(fetchSpy)[0]!.tools).toEqual([TERMINAL_TOOL]);
   });
 
+  it("sends the tool definition to OrcaRouter because it supports tools", async () => {
+    stubChainKeys({ orcarouter: "test-orcarouter-key" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(textResponse("ок")));
+
+    const result = await chatWithRole("fast", [{ role: "user", content: "hi" }], undefined, undefined, [TERMINAL_TOOL]);
+
+    expect(result.provider).toBe("orcarouter");
+    expect(sentBodies(fetchSpy)[0]!.tools).toEqual([TERMINAL_TOOL]);
+  });
+
   it("sends no tools when the caller offered none", async () => {
     stubChainKeys({ openrouter: "test-openrouter-key" });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(textResponse("ок")));
@@ -206,24 +216,52 @@ describe("which providers are offered tools", () => {
   });
 
   it("sends no tools to a chain candidate without supportsTools", async () => {
-    stubChainKeys({ orcarouter: "test-orcarouter-key" });
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(textResponse("ок")));
+    stubChainKeys({ openrouter: "test-openrouter-key", gemini: "test-gemini-key" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockImplementationOnce(() => Promise.reject(new Error("upstream down")))
+      .mockImplementation(() => Promise.resolve(textResponse("ок")));
 
     const result = await chatWithRole("fast", [{ role: "user", content: "hi" }], undefined, undefined, [TERMINAL_TOOL]);
 
-    expect(result.provider).toBe("orcarouter");
-    expect("tools" in sentBodies(fetchSpy)[0]!).toBe(false);
+    expect(result.provider).toBe("google");
+    const bodies = sentBodies(fetchSpy);
+    expect("tools" in bodies.at(-1)!).toBe(false);
+    const systemMsg = (bodies.at(-1)!.messages as Array<Record<string, unknown>>).find((m) => m.role === "system");
+    expect((systemMsg?.content as string) ?? "").not.toContain(TERMINAL_SYSTEM_PROMPT);
   });
 
   it("claims tool support only for the provider whose contract was checked", () => {
     expect(supportsToolCalling("openrouter")).toBe(true);
-    for (const provider of ["orcarouter", "zenmux", "dots", "google", "groq", "sambanova", "mistral", "cerebras", "deepseek"]) {
+    for (const provider of ["orcarouter", "zenmux", "groq", "sambanova", "mistral", "cerebras"]) {
+      expect(supportsToolCalling(provider)).toBe(true);
+    }
+    for (const provider of ["dots", "deepseek", "google"]) {
       expect(supportsToolCalling(provider)).toBe(false);
     }
   });
 
   it("refuses tools for a provider that is not in the registry at all", () => {
     expect(supportsToolCalling("a-provider-that-does-not-exist")).toBe(false);
+  });
+
+  it("includes the terminal prompt in the system message only when the tool is offered", async () => {
+    stubChainKeys({ openrouter: "test-openrouter-key" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(textResponse("ок")));
+
+    await chatWithRole("fast", [{ role: "user", content: "hi" }], undefined, undefined, [TERMINAL_TOOL]);
+
+    const systemMsg = (sentBodies(fetchSpy)[0]!.messages as Array<Record<string, unknown>>).find((m) => m.role === "system");
+    expect((systemMsg?.content as string) ?? "").toContain(TERMINAL_SYSTEM_PROMPT);
+  });
+
+  it("omits the terminal prompt from the system message when no tool is offered", async () => {
+    stubChainKeys({ openrouter: "test-openrouter-key" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(textResponse("ок")));
+
+    await chatWithRole("fast", [{ role: "user", content: "hi" }]);
+
+    const systemMsg = (sentBodies(fetchSpy)[0]!.messages as Array<Record<string, unknown>>).find((m) => m.role === "system");
+    expect((systemMsg?.content as string) ?? "").not.toContain(TERMINAL_SYSTEM_PROMPT);
   });
 });
 
@@ -243,7 +281,7 @@ describe("a provider that rejects the tools key", () => {
     expect(isToolsUnsupportedRejection(500, { message: "the tools pipeline failed" })).toBe(false);
   });
 
-  it("retries once without tools and returns that answer", async () => {
+  it("retries once without tools and the terminal prompt and returns that answer", async () => {
     stubChainKeys({ openrouter: "test-openrouter-key" });
     const fetchSpy = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(toolsRejected())
@@ -256,6 +294,8 @@ describe("a provider that rejects the tools key", () => {
     expect(bodies).toHaveLength(2);
     expect(bodies[0]!.tools).toEqual([TERMINAL_TOOL]);
     expect("tools" in bodies[1]!).toBe(false);
+    const retrySystem = (bodies[1]!.messages as Array<Record<string, unknown>>).find((m) => m.role === "system");
+    expect((retrySystem?.content as string) ?? "").not.toContain(TERMINAL_SYSTEM_PROMPT);
   });
 
   it("retries at most once, so a provider refusing tools twice cannot loop", async () => {
@@ -389,8 +429,6 @@ describe("reassembling streamed tool calls", () => {
 describe("the existing fallback behaviour is untouched", () => {
   it("still moves to the next candidate when the first provider fails outright", async () => {
     stubChainKeys({ openrouter: "test-openrouter-key", orcarouter: "test-orcarouter-key" });
-    // A thrown transport error is classified NETWORK, which the chain treats as retryable; an HTTP
-    // 500 with an unrecognised body is not, so the reserve would never be reached.
     const fetchSpy = vi.spyOn(globalThis, "fetch")
       .mockImplementationOnce(() => Promise.reject(new Error("upstream down")))
       .mockImplementationOnce(() => Promise.resolve(textResponse("Ответ резервного кандидата")));
@@ -400,8 +438,23 @@ describe("the existing fallback behaviour is untouched", () => {
     expect(result.provider).toBe("orcarouter");
     expect(result.fallbackUsed).toBe(true);
     expect(result.content).toBe("Ответ резервного кандидата");
-    // The reserve answers without tools, and is never asked to run one.
-    expect("tools" in sentBodies(fetchSpy)[1]!).toBe(false);
+    expect(sentBodies(fetchSpy)[1]!.tools).toEqual([TERMINAL_TOOL]);
+  });
+
+  it("does not send tools or the terminal prompt to a fallback that does not support tools", async () => {
+    stubChainKeys({ openrouter: "test-openrouter-key", gemini: "test-gemini-key" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockImplementationOnce(() => Promise.reject(new Error("upstream down")))
+      .mockImplementationOnce(() => Promise.resolve(textResponse("Ответ без tools")));
+
+    const result = await chatWithRole("fast", [{ role: "user", content: "hi" }], undefined, undefined, [TERMINAL_TOOL]);
+
+    expect(result.provider).toBe("google");
+    expect(result.fallbackUsed).toBe(true);
+    const bodies = sentBodies(fetchSpy);
+    expect("tools" in bodies.at(-1)!).toBe(false);
+    const systemMsg = (bodies.at(-1)!.messages as Array<Record<string, unknown>>).find((m) => m.role === "system");
+    expect((systemMsg?.content as string) ?? "").not.toContain(TERMINAL_SYSTEM_PROMPT);
   });
 
   it("reports a totally failed chain rather than inventing an answer", async () => {
