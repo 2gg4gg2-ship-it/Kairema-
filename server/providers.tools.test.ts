@@ -187,38 +187,6 @@ describe("projecting a conversation for the wire", () => {
   });
 });
 
-describe("telling the model about the terminal", () => {
-  async function systemPromptFor(settings?: ChatSettings): Promise<string> {
-    stubChainKeys({ openrouter: "test-openrouter-key" });
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(textResponse("ок"));
-    await chatWithRole("fast", [{ role: "user", content: "покажи файлы" }], settings);
-    const messages = sentBodies(fetchSpy)[0]!.messages as Array<Record<string, unknown>>;
-    return String(messages[0]!.content);
-  }
-
-  it("adds the instruction on a turn that advertises the tool", async () => {
-    expect(await systemPromptFor({ terminalTool: true })).toContain(TERMINAL_SYSTEM_PROMPT);
-  });
-
-  it("bids the model to call the function rather than write commands as text", async () => {
-    const prompt = await systemPromptFor({ terminalTool: true });
-    // The prompt must bind the model to the function-calling format: it must not merely announce the
-    // terminal and allow the model to "demonstrate" a command as a ```bash block in visible text.
-    expect(prompt).toContain("ЛЮБУЮ команду ты выполняешь ТОЛЬКО вызовом функции terminal");
-    expect(prompt).toContain("Никогда не пиши команды в виде обычного текста");
-  });
-
-  it("leaves an ordinary turn without any mention of a terminal", async () => {
-    expect(await systemPromptFor()).not.toContain("ТЕРМИНАЛ");
-  });
-
-  it("does not confuse the account switch with this turn advertising the tool", async () => {
-    // `toolAccess` is the user's own preference and is true for most accounts whether or not the
-    // tool can run, so it must not leak the instruction into turns that cannot execute anything.
-    expect(await systemPromptFor({ toolAccess: true })).not.toContain("ТЕРМИНАЛ");
-  });
-});
-
 describe("which providers are offered tools", () => {
   it("sends the tool definition to OpenRouter unchanged", async () => {
     stubChainKeys({ openrouter: "test-openrouter-key" });

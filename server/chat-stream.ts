@@ -733,7 +733,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
           : await dependencies.chatWithRoleStream(
             input.modelId,
             history,
-            { ...effectiveSettings, ...(terminalOffered ? { terminalTool: true } : {}) },
+            effectiveSettings,
             onDelta,
             controller.signal,
             actor,
