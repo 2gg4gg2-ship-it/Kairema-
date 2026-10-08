@@ -1278,6 +1278,12 @@ export async function consumeChatStreamRequestQuota(userId: number, roleId: stri
   const db = requireDatabase(await getDb());
   const now = new Date();
   const cutoff = new Date(now.getTime() - windowMs);
+
+  // Temporary diagnostics: read existing row before upsert to understand state when deciding
+  const existing = await db.select().from(chatStreamRateWindows).where(and(eq(chatStreamRateWindows.userId, userId), eq(chatStreamRateWindows.roleId, roleId))).limit(1).then((rows) => rows[0] ?? null);
+
+  const willReset = existing ? existing.windowStarted.getTime() <= cutoff.getTime() : true;
+
   await db.insert(chatStreamRateWindows).values({ userId, roleId, windowStarted: now, requestCount: 1 }).onDuplicateKeyUpdate({ set: {
     requestCount: sql`if(${chatStreamRateWindows.windowStarted} <= ${cutoff}, 1, ${chatStreamRateWindows.requestCount} + 1)`,
     windowStarted: sql`if(${chatStreamRateWindows.windowStarted} <= ${cutoff}, ${now}, ${chatStreamRateWindows.windowStarted})`,
@@ -1286,7 +1292,22 @@ export async function consumeChatStreamRequestQuota(userId: number, roleId: stri
   const current = rows[0];
   if (!current) throw new Error("Не удалось проверить лимит chat stream.");
   const elapsed = Math.max(0, now.getTime() - current.windowStarted.getTime());
-  return { allowed: current.requestCount <= limit, retryAfterSeconds: Math.max(1, Math.ceil((windowMs - elapsed) / 1_000)) };
+  const allowedResult = current.requestCount <= limit;
+  const retryAfter = Math.max(1, Math.ceil((windowMs - elapsed) / 1_000));
+
+  try {
+    const maskedId = userId.toString();
+    // mask: show last 4 digits if long enough, else full
+    const mid = maskedId.length > 4 ? `***${maskedId.slice(-4)}` : `***${maskedId}`;
+    console.warn(
+      `[RATELIMIT_DIAG] userId=${mid} roleId=${roleId} now=${now.toISOString()} cutoff=${cutoff.toISOString()} ` +
+      `existingWindowStarted=${existing ? existing.windowStarted.toISOString() : 'none'} existingCount=${existing?.requestCount ?? 'none'} ` +
+      `willReset=${willReset} afterWindowStarted=${current.windowStarted.toISOString()} afterCount=${current.requestCount} ` +
+      `allowed=${allowedResult} retryAfter=${retryAfter} limit=${limit} windowMs=${windowMs}`
+    );
+  } catch { /* ignore */ }
+
+  return { allowed: allowedResult, retryAfterSeconds: retryAfter };
 }
 
 /**
