@@ -1278,9 +1278,10 @@ export async function consumeChatStreamRequestQuota(userId: number, roleId: stri
   const db = requireDatabase(await getDb());
   const now = new Date();
   const cutoff = new Date(now.getTime() - windowMs);
+  const cutoffSec = Math.floor(cutoff.getTime() / 1000);
   await db.insert(chatStreamRateWindows).values({ userId, roleId, windowStarted: now, requestCount: 1 }).onDuplicateKeyUpdate({ set: {
-    requestCount: sql`if(${chatStreamRateWindows.windowStarted} <= ${cutoff}, 1, ${chatStreamRateWindows.requestCount} + 1)`,
-    windowStarted: sql`if(${chatStreamRateWindows.windowStarted} <= ${cutoff}, ${now}, ${chatStreamRateWindows.windowStarted})`,
+    requestCount: sql`if(UNIX_TIMESTAMP(${chatStreamRateWindows.windowStarted}) <= ${cutoffSec}, 1, ${chatStreamRateWindows.requestCount} + 1)`,
+    windowStarted: sql`if(UNIX_TIMESTAMP(${chatStreamRateWindows.windowStarted}) <= ${cutoffSec}, ${now}, ${chatStreamRateWindows.windowStarted})`,
   } });
   const rows = await db.select().from(chatStreamRateWindows).where(and(eq(chatStreamRateWindows.userId, userId), eq(chatStreamRateWindows.roleId, roleId))).limit(1);
   const current = rows[0];
