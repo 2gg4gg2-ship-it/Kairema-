@@ -21,24 +21,6 @@ export const TERMINAL_TOOL_NAME = "terminal";
  */
 export const MAX_TOOL_ROUNDS = 8;
 
-/**
- * The instruction that accompanies the tool in the system prompt.
- *
- * <p>It is added only to the turns that actually advertise the tool, so a turn that cannot run
- * commands is never told about them. The tool description carries the argument contract; this block
- * carries the behavioural rules a description states poorly, and repeats the wording the page-side
- * terminal agent uses so both execution paths tell the model the same thing.
- */
-export const TERMINAL_SYSTEM_PROMPT =
-  "У тебя есть доступ к функциональному Linux Terminal, встроенному в это Android-приложение (Alpine, выполняется " +
-  "на устройстве пользователя, не на сервере). Используй tool_call с именем `terminal`, когда нужно выполнить " +
-  "shell-команду: inspect/edit файлов, запустить скрипты, установить или собрать что-то. Рабочая директория " +
-  "сохраняется между вызовами, поэтому `cd` в одном вызове применяется к следующему. Возвращаются stdout, " +
-  "stderr и exit code; ненулевой exit — это нормально, не нужно ретраить вслепую. Вывод обрезается до " +
-  "фиксированного размера, поэтому читай только нужное, а не дампи большие файлы. Команды, которые " +
-  "разрушают систему или устанавливают пакеты, требуют подтверждения пользователя и возвращают " +
-  "confirmation_required вместо выполнения.";
-
 /** The tool as the model sees it. Forwarded to the provider unchanged. */
 export const TERMINAL_TOOL = {
   type: "function" as const,

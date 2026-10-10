@@ -62,11 +62,9 @@ function scriptedHandler(options: {
 }) {
   const histories: ChatMessage[][] = [];
   const toolsSeen: unknown[] = [];
-  const settingsSeen: Array<Record<string, unknown>> = [];
   const appendChatMessage = vi.fn(async (_userId: number, _sessionId: string, role: string, content: string) => ({ id: role === "user" ? 1 : 2, created: true, role, content }));
-  const chatWithRoleStream = vi.fn(async (_modelId: string, history: ChatMessage[], settings: unknown, _onDelta: unknown, _signal: unknown, _actor: unknown, tools: unknown) => {
+  const chatWithRoleStream = vi.fn(async (_modelId: string, history: ChatMessage[], _settings: unknown, _onDelta: unknown, _signal: unknown, _actor: unknown, tools: unknown) => {
     histories.push(history);
-    settingsSeen.push((settings ?? {}) as Record<string, unknown>);
     toolsSeen.push(tools);
     const turn = options.turns[Math.min(histories.length - 1, options.turns.length - 1)]!;
     return {
@@ -92,7 +90,7 @@ function scriptedHandler(options: {
     chatWithRoleStream,
     auditChatStream: vi.fn(),
   });
-  return { handler, histories, toolsSeen, settingsSeen, appendChatMessage };
+  return { handler, histories, toolsSeen, appendChatMessage };
 }
 
 const firstRequest = (extra: Record<string, unknown> = {}) => ({
@@ -158,37 +156,6 @@ describe("the server hands a requested command to the device", () => {
     const { res } = streamResponse();
     await handler(firstRequest(), res, vi.fn());
     expect(toolsSeen[0]).toEqual([expect.objectContaining({ function: expect.objectContaining({ name: TERMINAL_TOOL_NAME }) })]);
-  });
-
-  it("tells the model about the terminal on a turn that offers it", async () => {
-    const { handler, settingsSeen } = scriptedHandler({ turns: [{ content: "Ответ" }], toolAccess: true });
-    const { res } = streamResponse();
-    await handler(firstRequest(), res, vi.fn());
-    expect(settingsSeen[0]).toMatchObject({ terminalTool: true });
-  });
-
-  it("says nothing about a terminal when the client declared none", async () => {
-    const { handler, settingsSeen } = scriptedHandler({ turns: [{ content: "Ответ" }] });
-    const { res } = streamResponse();
-    await handler(firstRequest({ localTerminal: undefined }), res, vi.fn());
-    expect(settingsSeen[0]!.terminalTool).toBeUndefined();
-  });
-
-  it("says nothing about a terminal on a myApi turn", async () => {
-    // A myApi turn runs against the caller's own provider through a different function, so it never
-    // reaches the prompt that would mention the terminal. Asserting the prompt builder was not asked
-    // to build one is stronger than asserting the text is absent from a turn that never had it.
-    const { handler, settingsSeen } = scriptedHandler({ turns: [{ content: "Ответ" }] });
-    const { res } = streamResponse();
-    await handler(firstRequest({ myApi: true }), res, vi.fn());
-    expect(settingsSeen).toEqual([]);
-  });
-
-  it("says nothing about a terminal when the account switched tools off", async () => {
-    const { handler, settingsSeen } = scriptedHandler({ turns: [{ content: "Ответ" }], toolAccess: false });
-    const { res } = streamResponse();
-    await handler(firstRequest(), res, vi.fn());
-    expect(settingsSeen[0]!.terminalTool).toBeUndefined();
   });
 
   it("reports an invented tool as unsupported instead of pretending it can run", async () => {
