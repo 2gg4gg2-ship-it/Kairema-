@@ -217,7 +217,10 @@ describe("which providers are offered tools", () => {
 
   it("claims tool support only for the provider whose contract was checked", () => {
     expect(supportsToolCalling("openrouter")).toBe(true);
-    for (const provider of ["orcarouter", "zenmux", "dots", "google", "groq", "sambanova", "mistral", "cerebras", "deepseek"]) {
+    for (const provider of ["orcarouter", "zenmux", "groq", "sambanova", "mistral", "cerebras"]) {
+      expect(supportsToolCalling(provider)).toBe(true);
+    }
+    for (const provider of ["dots", "deepseek", "google"]) {
       expect(supportsToolCalling(provider)).toBe(false);
     }
   });
