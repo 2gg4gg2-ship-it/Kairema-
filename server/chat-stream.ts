@@ -2,17 +2,42 @@ import type { Express, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import { appendChatMessage, consumeChatStreamRequestQuota, consumeMyApiRequestQuota, deleteOwnedSessionUserMessage, listUserProviderConfigs, enqueueMemoryExtractionJob, getActiveUserProviderBinding, getOwnedChatSession, getOwnedSessionMessage, getStoredAssistantForClientMessage, listSessionTranscriptWindow, updateChatTitle } from "./db";
 import { resolveRequestUser } from "./_core/context";
-import { MODEL_IDS, chatWithRoleStream, publicChatError, type ChatMessage, type ChatSettings, type Provider, type RoleId } from "./providers";
+import { MODEL_IDS, MODEL_ROLES, chatWithRoleStream, publicChatError, type ChatMessage, type ChatSettings, type Provider, type RoleId } from "./providers";
 import { buildChatContext, processMemoryExtractionJob } from "./chat-context";
 import { getOrCreateGuestUser } from "./_core/guest-session";
 import type { CapacityActor } from "./capacity-controller";
 import { chatWithUserProviderStream, customUserProviderTarget, isSupportedUserProvider, publicUserProviderError, UserProviderGuestNotAllowedError, UserProviderNotConfiguredError, UserProviderSkipRequestedError } from "./user-providers";
 import { decryptUserProviderSecret } from "./user-provider-secrets";
+import { MAX_TOOL_ROUNDS, TERMINAL_TOOL, TERMINAL_TOOL_NAME } from "@shared/terminal-tool";
+import { MAX_CONTINUATION_TOKEN_CHARS, newToolCallId, parseToolResultPayload, signToolContinuation, toolResultContent, verifyToolContinuation, type ToolResultPayload } from "./terminal-tool-continuation";
+import { ENV } from "./_core/env";
 
-export const CHAT_STREAM_RATE_LIMIT = 60;
+/**
+ * Per-role allowance for ordinary Kairema Chat, counted per (user, role) in
+ * `chat_stream_rate_windows`. Each of the four public roles carries its own budget, so a user who
+ * spends their Flash minute still has an untouched Think, Context and Apex minute. The counter is
+ * keyed by the stable role slug, so re-pointing a role at a different LLM keeps the same bucket.
+ *
+ * This is a per-role throttle, not a cap on the four roles combined: 15 × 4 roles is the maximum a
+ * user can send inside one window. It is separate from the My API budget below, which is charged
+ * only for BYOK turns.
+ */
+export const CHAT_STREAM_RATE_LIMIT = 15;
 export const CHAT_STREAM_MAX_ACTIVE_PER_INSTANCE = 12;
 export const CHAT_STREAM_MAX_ACTIVE_PER_USER = 2;
 const CHAT_STREAM_RATE_WINDOW_MS = 60_000;
+/** The owner dashboard reports the live quota window, so it is published rather than kept private. */
+export const CHAT_STREAM_RATE_WINDOW_SECONDS = CHAT_STREAM_RATE_WINDOW_MS / 1_000;
+
+/**
+ * The sentence a user sees once their allowance for *this* role is spent. It names the role so the
+ * limit is not mistaken for a whole-account block, and it says plainly that the other roles are
+ * untouched. No internal detail (table names, counters, user ids) is disclosed.
+ */
+export function chatStreamRateLimitMessage(roleId: string): string {
+  const label = MODEL_ROLES.find((role) => role.key === roleId)?.label ?? "Kairema";
+  return `Лимит роли «${label}»: ${CHAT_STREAM_RATE_LIMIT} запросов в минуту. Другие роли Kairema не затронуты. Подождите немного и попробуйте снова.`;
+}
 
 /**
  * My API (BYOK) turns are capped much lower than ordinary chat: each one spends the user's own
@@ -272,7 +297,10 @@ function recordChatStreamAudit(record: ChatStreamAuditRecord) {
 const streamInputSchema = z.object({
   sessionId: z.string().uuid(),
   modelId: z.enum(MODEL_IDS),
-  content: z.string().trim().min(1).max(16_000),
+  // Absent only for a tool continuation, which submits a tool result rather than a new question. The
+  // refinement below refuses a request that has neither, so this cannot become a way to send an
+  // empty turn.
+  content: z.string().trim().min(1).max(16_000).optional(),
   clientMessageId: z.string().uuid().optional(),
   regenerateMessageId: z.number().int().positive().optional(),
   settings: z.object({
@@ -294,10 +322,37 @@ const streamInputSchema = z.object({
    * accepted, and they only ever remove candidates — they can never add one.
    */
   skipProviders: z.array(z.string().min(1).max(64)).max(16).optional(),
+  /**
+   * Declares that this client can run the Android-local terminal.
+   *
+   * <p>The server cannot detect the platform, and offering a tool the client cannot execute would
+   * strand the turn: the model asks for a command, no one runs it, and the user sees a stream that
+   * stops without an answer. A browser simply never sets this, which is what keeps web unchanged.
+   */
+  localTerminal: z.boolean().optional(),
+  /**
+   * One tool result, submitting a continuation of the turn that paused for it.
+   *
+   * <p>`continuation` is the opaque signed token the server issued with the call. It carries the tool
+   * name and arguments back in authentic form, so the server needs no record of the call and can
+   * serve the continuation from any instance. `result` is the device's own output and is the only
+   * part that is not authenticatable — it is data for the model, never an instruction to this server.
+   */
+  toolResult: z.object({ continuation: z.string().min(1).max(MAX_CONTINUATION_TOKEN_CHARS), result: z.unknown() }).optional(),
+}).superRefine((value, ctx) => {
+  if (value.content === undefined && value.toolResult === undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["content"], message: "Пустое сообщение." });
 });
 
 export function writeEvent(res: Response, event: string, payload: unknown) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+}
+
+/** The messages one completed tool round adds to a conversation, in provider shape. */
+function toToolMessages(round: { callId: string; name: string; arguments: string; result?: ToolResultPayload }): ChatMessage[] {
+  return [
+    { role: "assistant", content: "", tool_calls: [{ id: round.callId, type: "function", function: { name: round.name, arguments: round.arguments } }] },
+    ...(round.result ? [{ role: "tool" as const, content: toolResultContent(round.result), tool_call_id: round.callId, name: round.name }] : []),
+  ];
 }
 
 function historyError(error: unknown) {
@@ -481,7 +536,10 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
     try {
       const session = await dependencies.getOwnedChatSession(user.id, input.sessionId);
       if (!session) throw new Error("Чат не найден или недоступен.");
-      const idempotencyKey = !input.regenerateMessageId && input.clientMessageId ? replayKey(user.id, input.sessionId, input.clientMessageId) : undefined;
+      // A continuation deliberately reuses the original turn's clientMessageId, so it must not be
+      // routed into that turn's replay cache: the replay would answer with the pre-tool result and
+      // the tool round would be silently discarded.
+      const idempotencyKey = !input.regenerateMessageId && !input.toolResult && input.clientMessageId ? replayKey(user.id, input.sessionId, input.clientMessageId) : undefined;
       activeIdempotencyKey = idempotencyKey;
       const completedReplay = idempotencyKey ? getCompletedReplay(idempotencyKey) : undefined;
       const pendingReplayAtStart = idempotencyKey ? pendingChatStreamReplays.get(idempotencyKey) : undefined;
@@ -516,7 +574,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
       // therefore limited by exactly one counter, and neither can spend the other's.
       let rateLimit: { allowed: boolean; retryAfterSeconds: number } = { allowed: true, retryAfterSeconds: 0 };
       try {
-        if (!input.myApi) rateLimit = await dependencies.consumeChatStreamRequestQuota(user.id, CHAT_STREAM_RATE_LIMIT, CHAT_STREAM_RATE_WINDOW_MS);
+        if (!input.myApi) rateLimit = await dependencies.consumeChatStreamRequestQuota(user.id, input.modelId, CHAT_STREAM_RATE_LIMIT, CHAT_STREAM_RATE_WINDOW_MS);
       } catch {
         chatStreamRuntimeGauges.quotaUnavailable += 1;
         res.status(503).json({ error: "Проверка лимита временно недоступна. Повторите попытку позже." });
@@ -525,7 +583,7 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
       if (!rateLimit.allowed) {
         chatStreamRuntimeGauges.rateLimited += 1;
         void Promise.resolve(dependencies.auditChatStream({ event: "chat_stream.rate_limited", userId: user.id, timestamp: new Date().toISOString(), retryAfterSeconds: rateLimit.retryAfterSeconds })).catch(() => undefined);
-        res.set("Retry-After", String(rateLimit.retryAfterSeconds)).status(429).json({ error: "Слишком много запросов. Подождите минуту." });
+        res.set("Retry-After", String(rateLimit.retryAfterSeconds)).status(429).json({ error: chatStreamRateLimitMessage(input.modelId) });
         return;
       }
       // My API turns spend the caller's own provider key, so they carry their own budget. This runs
@@ -560,12 +618,21 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
       releaseActiveStream = activeStream.release;
       chatStreamRuntimeGauges.accepted += 1;
       let transcript: Awaited<ReturnType<typeof dependencies.listSessionTranscriptWindow>> | undefined;
-      if (input.regenerateMessageId) {
+      if (input.toolResult) {
+        // The question is already stored from the request that started the turn. This one adds no new
+        // message: it resumes the same turn, so writing another would duplicate it in the history.
+        transcript = await dependencies.listSessionTranscriptWindow(user.id, input.sessionId, input.modelId);
+        if (!transcript.messages.some((message) => message.role === "user")) throw new Error("Исходный вопрос для продолжения не найден.");
+      } else if (input.regenerateMessageId) {
         const target = await dependencies.getOwnedSessionMessage(user.id, input.sessionId, input.regenerateMessageId);
         if (!target || target.role !== "assistant") throw new Error("Исходный запрос для регенерации не найден.");
         transcript = await dependencies.listSessionTranscriptWindow(user.id, input.sessionId, input.modelId, { beforeMessageId: target.id });
         if (!transcript.messages.some((message) => message.role === "user")) throw new Error("Исходный запрос для регенерации не найден.");
       } else {
+        // The schema already refuses a request with neither a question nor a tool result; this is the
+        // same rule enforced where the value is consumed, so the two cannot drift and this branch can
+        // rely on having a question to store.
+        if (input.content === undefined) throw new Error("Пустое сообщение.");
         if (idempotencyKey) pendingReplay = createPendingReplay(idempotencyKey);
         const attachmentIds = Array.from(new Set(input.attachmentIds ?? [])).filter((attachmentId) => typeof attachmentId === "string" && attachmentId.length > 0);
         const userMetadata = attachmentIds.length > 0 ? JSON.stringify({ attachmentIds }) : undefined;
@@ -591,13 +658,32 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
         transcript = await dependencies.listSessionTranscriptWindow(user.id, input.sessionId, input.modelId, { throughMessageId: append.id });
       }
 
+      // A continuation re-derives context from the original question, not from an empty string: the
+      // memory and retrieval steps key off the query, and re-running them against nothing would drop
+      // the grounding the first half of this very turn was answered with.
+      const continuationQuery = input.toolResult ? [...(transcript?.messages ?? [])].reverse().find((message) => message.role === "user")?.content ?? "" : input.content;
       const storedSettings = await dependencies.buildChatContext(user.id, input.sessionId, {
         attachmentIds: input.attachmentIds,
-        query: input.content,
+        query: continuationQuery,
         role: input.modelId,
         capacityActor: { userId: user.id, requestKey: `stream:${user.id}:${input.clientMessageId ?? savedUserMessageId ?? input.regenerateMessageId ?? "generation"}` },
       });
       const effectiveSettings = { ...storedSettings, ...input.settings };
+
+      // A continuation is refused unless its token verifies for this user and this session. Every
+      // failure mode — tampered, expired, another conversation, an unknown tool name, a malformed
+      // call id, a round past the ceiling — lands here as null and the request is answered with a 400.
+      // Nothing from the client is used as-is.
+      const verifiedContinuation = input.toolResult ? verifyToolContinuation(ENV.cookieSecret, input.toolResult.continuation, { userId: user.id, sessionId: input.sessionId }) : null;
+      if (input.toolResult && !verifiedContinuation) { res.status(400).json({ error: "Продолжение команды недействительно или истекло. Повторите вопрос." }); return; }
+      if (input.toolResult && effectiveSettings.toolAccess === false) {
+        // The account switch was turned off between the call and its result. Refuse rather than feed
+        // a tool result into a turn that is no longer allowed to use tools.
+        res.status(400).json({ error: "Инструменты отключены для этой учётной записи." });
+        return;
+      }
+      const toolResultPayload = input.toolResult ? parseToolResultPayload(input.toolResult.result) : null;
+      if (input.toolResult && !toolResultPayload) { res.status(400).json({ error: "Результат команды имеет неверный формат." }); return; }
 
       res.status(200);
       res.set({
@@ -621,8 +707,23 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
       streamStartedAt = performance.now();
       addGaugeSample(chatStreamRuntimeGauges.startLatencyMs, streamStartedAt - handlerStartedAt);
 
+      // The tool is offered only when all three hold, and each answers a different question:
+      // `toolAccess` is the account's own switch, `localTerminal` says this build can run it, and
+      // `myApi` is excluded because that turn runs in the page against the caller's own key, where
+      // the existing client-side terminal loop already owns execution. Offering it there too would
+      // give one request two execution paths.
+      const terminalOffered = !input.myApi && input.localTerminal === true && effectiveSettings.toolAccess !== false && (!input.toolResult || (verifiedContinuation?.round ?? 0) < MAX_TOOL_ROUNDS);
+      const tools = terminalOffered ? [TERMINAL_TOOL] : undefined;
+
       try {
-        const history = (transcript?.messages ?? []).map((message) => ({ role: message.role, content: message.content }));
+        const baseHistory: ChatMessage[] = (transcript?.messages ?? []).map((message) => ({ role: message.role, content: message.content }));
+        // Every round of this turn so far, oldest first, each an assistant call followed by the
+        // result that answered it. Only the last pair arrived on this request; the earlier ones rode
+        // along inside the signed token. A message row has nowhere to put any of it, which is why
+        // the round-trip state is rebuilt from the call rather than read back from storage — and why
+        // it has to travel at all: the provider remembers nothing, so without round one the model
+        // would not know the working directory it is being asked about.
+        const history: ChatMessage[] = verifiedContinuation && toolResultPayload ? [...baseHistory, ...verifiedContinuation.priorRounds.flatMap(toToolMessages), ...toToolMessages({ callId: verifiedContinuation.callId, name: verifiedContinuation.name, arguments: verifiedContinuation.arguments, result: toolResultPayload })] : baseHistory;
         const onDelta = (delta: string) => { if (!closed) writeEvent(res, "delta", { content: delta }); };
         const actor = { userId: user.id, requestKey: `stream:${user.id}:${input.clientMessageId ?? savedUserMessageId ?? input.regenerateMessageId ?? "generation"}` };
         // The two modes differ only here: myApi runs the caller's own provider, the default
@@ -636,7 +737,53 @@ export function createChatStreamHandler(overrides: Partial<StreamDependencies> =
             onDelta,
             controller.signal,
             actor,
+            tools,
           );
+        // A model that stopped to call a tool has not answered, so there is nothing to persist, no
+        // `done` to send, and the stream ends here. The device runs the command and comes back with a
+        // continuation, which resumes the turn. Emitting `done` first would tell the client the turn
+        // was finished while the answer has not been produced yet.
+        if (!closed && result.toolCalls?.length) {
+          const round = (verifiedContinuation?.round ?? 0) + 1;
+          if (tools && round <= MAX_TOOL_ROUNDS) {
+            // Exactly one call is handed over, even when the model asked for several in one turn.
+            // Each command is its own round-trip, and telling the device about calls the turn will
+            // not answer would leave commands it never learns the result of. The model simply asks
+            // for the next one after it sees this result, which is one extra round and no ambiguity.
+            const [call] = result.toolCalls.slice(0, 1);
+            if (call) {
+              // Only the one tool this feature knows. A model that invents another is answered with a
+              // refusal the model can read, rather than being allowed to name something server-side.
+              if (call.function.name !== TERMINAL_TOOL_NAME) {
+                writeEvent(res, "tool_call", { callId: call.id, name: call.function.name, arguments: call.function.arguments, unsupported: true, continuation: null });
+              } else {
+                // The id is minted here rather than taken from the provider. We rebuild the assistant
+                // message ourselves in the continuation, so we choose both halves of the pair and it is
+                // guaranteed to match — a provider-supplied id could be any shape, including one the
+                // continuation check would refuse, which would strand the turn after we already told
+                // the client to run the command.
+                const callId = newToolCallId();
+                writeEvent(res, "tool_call", {
+                  callId,
+                  name: TERMINAL_TOOL_NAME,
+                  arguments: call.function.arguments,
+                  unsupported: false,
+                  continuation: signToolContinuation(ENV.cookieSecret, {
+                    userId: user.id,
+                    sessionId: input.sessionId,
+                    call: { callId, name: TERMINAL_TOOL_NAME, arguments: call.function.arguments, round },
+                    // The round that just finished becomes part of the turn's carried state, so the
+                    // next request can show the model both commands rather than only the second one.
+                    completedRounds: verifiedContinuation && toolResultPayload ? [...verifiedContinuation.priorRounds, { callId: verifiedContinuation.callId, name: verifiedContinuation.name, arguments: verifiedContinuation.arguments, result: toolResultPayload }] : [],
+                  }),
+                });
+              }
+            }
+            finished = true;
+            res.end();
+            return;
+          }
+        }
         if (!closed) {
           const allSources = [...(result.sources ?? []), ...(result.ragSources ?? [])];
           const sourceDates = allSources.map((source) => normalizedDate(source.publishedAt) ?? ("retrievedAt" in source ? normalizedDate(source.retrievedAt) : null)).filter((value): value is string => Boolean(value)).sort();
