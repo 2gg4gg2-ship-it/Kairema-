@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Kairema</string>
+    <string name="title_activity_main">Kairema</string>
+    <string name="package_name">im.kairema.app</string>
+    <string name="custom_url_scheme">im.kairema.app</string>
+</resources>

@@ -1,0 +1,313 @@
+name: Android debug APK
+
+# Builds the Phase 1 Capacitor shell and publishes the debug APK as a workflow artifact so it can be
+# downloaded straight onto a phone. This workflow is intentionally limited to the debug shell: no
+# signing material, no release variant, and no Phase 2+ functionality.
+#
+# The upstream backend is NOT hardcoded anywhere. It is read from the repository variable
+# KAIREMA_API_BASE_URL (Settings -> Secrets and variables -> Actions -> Variables). That variable is
+# not treated as a secret: it is a public service URL. It must be set or this workflow stops before
+# building, because a shell without an upstream would ship with no API at all.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/android-capacitor-shell
+
+concurrency:
+  group: android-debug-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "24"
+  JAVA_VERSION: "21"
+  ANDROID_COMPILE_SDK: "36"
+
+jobs:
+  build-debug-apk:
+    name: Build debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Reads the *repository variable* through the `vars` context on purpose. This must never
+      # become `secrets.KAIREMA_API_BASE_URL`: the upstream is a public service URL, not a
+      # credential, and a repository variable is the correct scope for it.
+      #
+      # `${FROM_REPO:-}` matters: `set -u` would otherwise abort with an "unbound variable"
+      # failure whenever the vars context resolves to nothing, which hides the real diagnosis.
+      # VISIBLE_VAR_NAMES lists variable NAMES only (never values) so a failed run immediately
+      # shows whether this repository exposes any Actions variables at all.
+      - name: Resolve KAIREMA_API_BASE_URL
+        id: api_base_url
+        env:
+          FROM_REPO: ${{ vars.KAIREMA_API_BASE_URL }}
+          VISIBLE_VAR_NAMES: ${{ join(vars.*, ', ') }}
+        run: |
+          set -euo pipefail
+          value="${FROM_REPO:-}"
+          value="$(printf '%s' "$value" | tr -d '[:space:]')"
+          if [ -z "$value" ]; then
+            echo "::error::Repository variable KAIREMA_API_BASE_URL resolved to an empty value."
+            echo "::error::repository=${{ github.repository }}"
+            echo "::error::ref=${{ github.ref }}"
+            echo "::error::actions variables visible to this run: '${VISIBLE_VAR_NAMES:-<none>}'"
+            echo "::error::If that list is empty, the variable is not defined on this repository,"
+            echo "::error::or it is scoped to an Environment, which a job must declare to see."
+            echo "::error::If the list is not empty, the variable name must match exactly."
+            exit 1
+          fi
+          case "$value" in
+            https://*) ;;
+            *)
+              echo "::error::KAIREMA_API_BASE_URL must start with https://"
+              exit 1
+              ;;
+          esac
+          echo "Resolved an https:// upstream from the repository variable."
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+
+      # No `with: version` here on purpose. package.json already pins the package manager via
+      # "packageManager": "pnpm@10.4.1+...", and pnpm/action-setup reads it. Passing `version` as
+      # well makes the action reject the run with "Multiple versions of pnpm specified".
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      # The action's default `packages` input is "tools platform-tools". The obsolete `tools`
+      # package no longer exists in the current sdkmanager repository, so leaving the default in
+      # place fails this step with `Failed to find package 'tools'`. Overriding `packages`
+      # replaces the default entirely; cmdline-tools, which provides sdkmanager itself, is
+      # installed by the action regardless of this value.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android SDK packages
+        run: |
+          set -euo pipefail
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-${ANDROID_COMPILE_SDK}" \
+            "build-tools;36.0.0"
+
+      - name: Cache Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The debug signing key, supplied as secrets so no private key is ever committed and the
+      # user's personal key is never reused. Without it AGP falls back to a throwaway
+      # ~/.android/debug.keystore generated per runner, so every run produced a different signer
+      # and Android refused the update with INSTALL_FAILED_UPDATE_INCOMPATIBLE.
+      #
+      # Required repository secrets (Settings -> Secrets and variables -> Actions -> Secrets):
+      #   KAIREMA_ANDROID_DEBUG_KEYSTORE_BASE64  base64 of a PKCS12 keystore, CI use only
+      #   KAIREMA_ANDROID_DEBUG_KEYSTORE_PASSWORD keystore password
+      #   KAIREMA_ANDROID_DEBUG_KEY_ALIAS        key alias inside the keystore
+      #   KAIREMA_ANDROID_DEBUG_KEY_PASSWORD     key password
+      # Generate the keystore with keytool; never commit it. This is still a *debug* key: nothing
+      # here is a release-signing path.
+      #
+      # The keystore is written to a path outside the checkout so it cannot be captured by a stray
+      # `git add`, and the file is removed at the end of the job.
+      - name: Materialise the CI debug keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${KEYSTORE_B64:-}" ] || missing+=(KAIREMA_ANDROID_DEBUG_KEYSTORE_BASE64)
+          [ -n "${STORE_PASSWORD:-}" ] || missing+=(KAIREMA_ANDROID_DEBUG_KEYSTORE_PASSWORD)
+          [ -n "${KEY_ALIAS:-}" ] || missing+=(KAIREMA_ANDROID_DEBUG_KEY_ALIAS)
+          [ -n "${KEY_PASSWORD:-}" ] || missing+=(KAIREMA_ANDROID_DEBUG_KEY_PASSWORD)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing required secret(s): ${missing[*]}"
+            echo "::error::These supply the CI debug signing key. Without them every run signs with a"
+            echo "::error::fresh throwaway key and no APK can replace the previously installed one."
+            exit 1
+          fi
+
+          mkdir -p "$RUNNER_TEMP/kairema-signing"
+          keyfile="$RUNNER_TEMP/kairema-signing/ci-debug.p12"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$keyfile"
+          if [ ! -s "$keyfile" ]; then
+            echo "::error::KAIREMA_ANDROID_DEBUG_KEYSTORE_BASE64 decoded to an empty file."
+            exit 1
+          fi
+          chmod 600 "$keyfile"
+          echo "::add-mask::$(printf '%s' "$KEYSTORE_B64")"
+          echo "CI debug keystore materialised outside the checkout."
+
+      # versionCode must strictly increase for every published APK, otherwise Android treats each
+      # one as the same version and refuses to install it over the last. GITHUB_RUN_NUMBER is
+      # monotonic per repository and already used in the artifact name, so 100 + run_number yields
+      # 101, 102, ... The 100 offset keeps it above the hardcoded versionCode 1 that every
+      # previously published APK carried, so these APKs supersede them.
+      - name: Resolve the version identity
+        id: version
+        run: |
+          set -euo pipefail
+          code=$((100 + GITHUB_RUN_NUMBER))
+          if [ "$code" -gt 2100000000 ]; then
+            echo "::error::Computed versionCode $code exceeds the Android maximum 2100000000."
+            exit 1
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "name=1.0.0-ci.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "versionCode=$code versionName=1.0.0-ci.${GITHUB_RUN_NUMBER}"
+
+      # The OAuth portal values are build-time Vite variables baked into the bundle. Without them the
+      # bundle contains `new URL("undefined/app-auth")`, which throws the moment "Continue with
+      # Google" is tapped, so sign-in silently does nothing. They are passed through rather than
+      # hardcoded, and their absence is reported loudly instead of failing the build: the APK is
+      # still worth producing because email sign-in and the loopback diagnostics do not need them.
+      - name: Build the debug APK
+        env:
+          KAIREMA_API_BASE_URL: ${{ steps.api_base_url.outputs.value }}
+          KAIREMA_ANDROID_DEBUG: "1"
+          VITE_OAUTH_PORTAL_URL: ${{ vars.VITE_OAUTH_PORTAL_URL }}
+          VITE_APP_ID: ${{ vars.VITE_APP_ID }}
+          KAIREMA_ANDROID_DEBUG_KEYSTORE: ${{ runner.temp }}/kairema-signing/ci-debug.p12
+          KAIREMA_ANDROID_DEBUG_KEYSTORE_PASSWORD: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEYSTORE_PASSWORD }}
+          KAIREMA_ANDROID_DEBUG_KEY_ALIAS: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEY_ALIAS }}
+          KAIREMA_ANDROID_DEBUG_KEY_PASSWORD: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEY_PASSWORD }}
+          KAIREMA_ANDROID_VERSION_CODE: ${{ steps.version.outputs.code }}
+          KAIREMA_ANDROID_VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: pnpm android:build
+
+      - name: Warn about missing OAuth build variables
+        env:
+          VITE_OAUTH_PORTAL_URL: ${{ vars.VITE_OAUTH_PORTAL_URL }}
+          VITE_APP_ID: ${{ vars.VITE_APP_ID }}
+        run: |
+          if [ -z "$VITE_OAUTH_PORTAL_URL" ] || [ -z "$VITE_APP_ID" ]; then
+            echo "::warning::VITE_OAUTH_PORTAL_URL and/or VITE_APP_ID are not set as repository"
+            echo "::warning::variables, so 'Continue with Google' is broken in this APK: the bundle"
+            echo "::warning::will contain new URL(\"undefined/app-auth\"). Set both under"
+            echo "::warning::Settings -> Secrets and variables -> Actions -> Variables."
+          fi
+
+      - name: Verify generated Capacitor config
+        env:
+          KAIREMA_API_BASE_URL: ${{ steps.api_base_url.outputs.value }}
+        run: |
+          set -euo pipefail
+          config="android/app/src/main/assets/capacitor.config.json"
+          test -f "$config" || { echo "::error::missing $config"; exit 1; }
+
+          value="$(node -e "const c=require('./'+process.argv[1]);const p=(c.plugins&&c.plugins.KairemaLoopback)||{};process.stdout.write(String(p.apiBaseUrl||''));" "$config")"
+          if [ -z "$value" ]; then
+            echo "::error::apiBaseUrl is empty in $config; the shell would have no API."
+            exit 1
+          fi
+          if [ "$value" != "$KAIREMA_API_BASE_URL" ]; then
+            echo "::error::apiBaseUrl in $config does not match the configured upstream."
+            exit 1
+          fi
+          if node -e "const c=require('./'+process.argv[1]);process.exit(c.server&&c.server.url?0:1);" "$config"; then
+            echo "::error::$config sets server.url; the shell must bundle the web app locally."
+            exit 1
+          fi
+          echo "Capacitor config verified: non-empty apiBaseUrl, no server.url."
+
+      - name: Verify APK exists
+        run: |
+          set -euo pipefail
+          apk="android/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$apk" || { echo "::error::missing $apk"; exit 1; }
+          echo "Found $apk ($(stat -c%s "$apk") bytes)"
+
+      # The on-device terminal: native binaries, rootfs, digests, extractNativeLibs, permissions.
+      - name: Verify terminal assets in the APK
+        run: pnpm android:verify-terminal
+
+      # applicationId, versionCode, versionName and the signing certificate. The expected
+      # fingerprint is a repository *variable*, not a secret: a certificate fingerprint is public,
+      # and comparing it is what makes a rotated or mis-picked keystore fail loudly here instead of
+      # surfacing on a phone as an update that silently refuses to install.
+      - name: Verify APK identity and signing certificate
+        env:
+          EXPECT_CERT_SHA256: ${{ vars.KAIREMA_ANDROID_DEBUG_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          apk="android/app/build/outputs/apk/debug/app-debug.apk"
+          if [ -z "${EXPECT_CERT_SHA256:-}" ]; then
+            echo "::warning::KAIREMA_ANDROID_DEBUG_CERT_SHA256 is not set as a repository variable,"
+            echo "::warning::so the certificate is reported but not pinned. Set it to the SHA-256"
+            echo "::warning::fingerprint of the CI keystore to catch signing drift automatically."
+            node scripts/verify-apk-identity.mjs "$apk"
+          else
+            node scripts/verify-apk-identity.mjs "$apk" --expect-cert "$EXPECT_CERT_SHA256"
+          fi
+
+      # Proves the two facts Android needs for an in-place update, across two independent Gradle
+      # invocations that each had to re-materialise the key from the secret: the same applicationId
+      # and the same certificate, with a strictly greater versionCode. A real install is not possible
+      # on a hosted runner, so this is cryptographic proof of the update path rather than a
+      # demonstration of Android actually performing it.
+      - name: Verify the in-place update path against a second build
+        env:
+          CURRENT_VERSION_CODE: ${{ steps.version.outputs.code }}
+          KAIREMA_ANDROID_DEBUG_KEYSTORE: ${{ runner.temp }}/kairema-signing/ci-debug.p12
+          KAIREMA_ANDROID_DEBUG_KEYSTORE_PASSWORD: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEYSTORE_PASSWORD }}
+          KAIREMA_ANDROID_DEBUG_KEY_ALIAS: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEY_ALIAS }}
+          KAIREMA_ANDROID_DEBUG_KEY_PASSWORD: ${{ secrets.KAIREMA_ANDROID_DEBUG_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          apk="android/app/build/outputs/apk/debug/app-debug.apk"
+          cp "$apk" "$RUNNER_TEMP/previous.apk"
+
+          # This second APK stands in for the update that would reach the phone: it must be the one with the
+          # strictly greater versionCode, since it is what verify-apk-identity compares as current
+          # against previous.apk. It is therefore derived from the resolved code as CURRENT + 1
+          # rather than from GITHUB_RUN_NUMBER again, which put it one below the APK under test and
+          # made the comparison unsatisfiable.
+          # The two overrides are exported inside a subshell rather than used as an assignment
+          # prefix. Bash cannot parse `VAR=value (command)`: `(` is only a command starter at the
+          # start of a command, never after an assignment prefix, so that form was a syntax error.
+          (
+            export KAIREMA_ANDROID_VERSION_CODE=$((CURRENT_VERSION_CODE + 1))
+            export KAIREMA_ANDROID_VERSION_NAME=1.0.0-ci.next
+            cd android
+            ./gradlew assembleDebug --quiet
+          )
+
+          cp android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/next.apk"
+          cp "$RUNNER_TEMP/previous.apk" "$apk"
+          node scripts/verify-apk-identity.mjs "$RUNNER_TEMP/next.apk" --compare "$RUNNER_TEMP/previous.apk"
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairema-debug-apk-${{ github.run_number }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      # Cleanup runs last, and only here. Both the debug APK build and the in-place update
+      # verification sign with this keystore, so it has to outlive them; `if: always()` keeps the
+      # removal running when an earlier step has already failed the job.
+      - name: Delete the keystore
+        if: always()
+        run: rm -rf "${{ runner.temp }}/kairema-signing"
