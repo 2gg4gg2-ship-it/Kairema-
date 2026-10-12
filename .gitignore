@@ -112,3 +112,7 @@ temp/
 # Manus version file (auto-generated, not part of source)
 client/public/__manus__/version.json
 .project-config.json
+
+# Local transport-spike scratch (loopback proof harness + a downloaded JDK).
+# The shipped transport lives in android/app/src/main/java/im/kairema/app/loopback/.
+.spike/

@@ -1,0 +1,117 @@
+THIRD-PARTY NOTICES
+==================
+
+This file records the third-party components redistributed inside the Kairema Android APK by the
+on-device terminal, where each one came from, and the licence each upstream project states.
+
+SCOPE AND LIMITATION
+--------------------
+The texts below are provenance and licence identification, reproduced or referenced from the upstream
+projects. They are not a legal review and not a legal opinion. Whether these notices are sufficient
+for a particular distribution of the APK is a decision for whoever owns that distribution. No licence
+text is paraphrased or invented here; each entry points at the authoritative source, and where the
+full text is bundled in this repository it is reproduced verbatim from the package.
+
+The debs this project was built from are not redistributed in this repository; only the extracted
+binaries under android/app/src/main/ are. The upstream packages and their licence files remain
+available at the URLs given.
+
+
+1. proot
+--------
+Version:   5.1.107.95 (Termux aarch64 build)
+Origin:    Termux package repository
+           https://packages.termux.dev/apt/termux-main/
+           pool/main/p/proot/proot_5.1.107.95_aarch64.deb
+Upstream:  https://proot-me.github.io/
+Licence:   GPL-2.0-only, as declared by the upstream proot project and the Termux package.
+           https://github.com/proot-me/proot/blob/master/COPYING
+
+Packaged as: assets/terminal/native/arm64-v8a/proot
+SHA-256:     98a5f86aad8d7f91e36ee039c64c8f5ac20738e545c883c559bf93e9b94e7bfa
+Deb SHA-256 (as published in the Termux index):
+             0a1b3d0f6ef76436c5ed924cd8e8f5a6b7186e99e1650eb2d9bc734e218a74cb
+
+proot is a GPL-2.0 component. This is the licence with the strongest reciprocal obligations of the
+components listed here, and combining a GPL-2.0 binary into an APK is a distribution decision that
+requires review before shipping. It is flagged here as a distribution blocker rather than resolved.
+
+
+2. talloc
+---------
+Version:   2.4.3 (Termux aarch64 build)
+Origin:    Termux package repository
+           https://packages.termux.dev/apt/termux-main/
+           pool/main/libt/libtalloc/libtalloc_2.4.3_aarch64.deb
+Upstream:  https://talloc.samba.net/
+Licence:   LGPL-3.0-or-later, as declared upstream.
+           https://www.samba.org/pipermail/samba-devel/2005-August/033340.html
+
+Packaged as: assets/terminal/native/arm64-v8a/libtalloc.so.2
+SHA-256:     3c9b207c0a6ea2896b7523e03f55d9ab0d9e88baa115d4c32b84058ff4246fbb
+Deb SHA-256 (as published in the Termux index):
+             ac81ad623d74c209718b9f3acb2dd702cc8a88c431e820d212229910b4db29da
+
+Note on the file name: the upstream package ships libtalloc.so.2 as a symlink to
+libtalloc.so.2.4.3, and the real ELF file declares SONAME "libtalloc.so.2". The bytes of
+libtalloc.so.2.4.3 are shipped here under the name libtalloc.so.2, which is what proot's DT_NEEDED
+entry requires and what the dynamic linker searches for. No code was modified.
+
+
+3. libandroid-shmem
+-------------------
+Version:   0.7 (Termux aarch64 build)
+Origin:    Termux package repository
+           https://packages.termux.dev/apt/termux-main/
+           pool/main/liba/libandroid-shmem/libandroid-shmem_0.7_aarch64.deb
+Upstream:  https://github.com/termux/libandroid-shmem
+Licence:   MIT, as declared upstream.
+           https://github.com/termux/libandroid-shmem/blob/master/LICENSE
+
+Packaged as: lib/arm64-v8a/libandroid-shmem.so
+SHA-256:     84475798e07c8174dbbfaec70a827fdb02f19ffa69a589380c13e7507fd0e731
+Deb SHA-256 (as published in the Termux index):
+             0da3a24d558b93c92bcf8d611e0826a99ff96e396b148e6cdf33b47c47c57ff6
+
+This library links against liblog.so, which is part of the Android platform and is provided by the
+operating system.
+
+
+4. Alpine Linux minirootfs
+--------------------------
+Version:   3.21.8 (aarch64)
+Origin:    https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/aarch64/
+            alpine-minirootfs-3.21.8-aarch64.tar.gz
+Upstream:  https://alpinelinux.org/
+Licence:   MIT for the base system. Individual bundled packages carry their own licences; the
+           per-package records are inside the shipped rootfs at
+           /usr/share/licenses/ and the apk database at /lib/apk/db/installed.
+           https://alpinelinux.org/about/license/
+
+SHA-256 of the upstream archive (.tar.gz):
+           f25a96d2846a4bc439093107c1b48a8b0c93dcb411e2cb9cfded6f790b2bc001
+SHA-256 of the archive as packaged in the APK, after the Android asset pipeline
+transparently decompresses it (.tar):
+           f2e4118020b2e713aaf37a48e1d6ac65b9c79f4e370e366495025df8f98df944
+
+Both digests are pinned and verified at runtime and by scripts/verify-terminal-apk.mjs.
+
+IMPORTANT: the shipped rootfs is the upstream archive, byte for byte in one case and transparently
+gunzipped by the Android build in the other. It is not modified. The full set of per-package licence
+texts inside the rootfs is therefore already present in the APK and can be read from the running
+device, but the aggregate of those licences has not been enumerated here. Enumerating it, and
+deciding what must accompany a distribution of it, is a distribution blocker left open.
+
+
+VERIFICATION
+------------
+Every SHA-256 above is the real digest of the file that ships. The three debs were checked against the
+SHA-256 values published in the Termux package index, and the rootfs was checked against the
+.sha256 file published by Alpine. scripts/verify-terminal-apk.mjs recomputes the digests of the
+extracted binaries and the rootfs directly from the built APK and fails the build on any mismatch.
+
+Reproduce with:
+
+  unzip -p android/app/build/outputs/apk/debug/app-debug.apk \
+    assets/terminal/native/arm64-v8a/proot | sha256sum
+  node scripts/verify-terminal-apk.mjs
