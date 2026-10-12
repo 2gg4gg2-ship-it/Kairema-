@@ -18,6 +18,7 @@ import { ProviderUnavailableNotice } from "@/components/ProviderUnavailableNotic
 import { clearDirectKey } from "@/lib/direct-key-store";
 import { buildCandidateChain, ProviderUnavailableError, runMyApiTurn, type TurnCandidate } from "@/lib/my-api-turn";
 import { resolveExecution } from "@shared/provider-capabilities";
+import { backoffMs, parseRetryAfter } from "@shared/upstream-retry";
 import { trpc } from "@/lib/trpc";
 import { Archive, Bot, Check, ChevronDown, CircleDot, Clock3, Copy, FileImage, Gauge, Globe2, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Repeat, Search, Settings2, SlidersHorizontal, Sparkles, SquareTerminal, Trash2, TriangleAlert, UserIcon, X } from "lucide-react";
 import { Capacitor } from "@capacitor/core";
@@ -788,9 +789,38 @@ export default function Home() {
         try { await persistDirectTurn({ sessionId, content, modelId: result.model, clientMessageId: turnId, answer: result.content }); await utils.chats.historyPage.fetch({ sessionId, limit: 60 }); setOptimisticMessages([]); } catch { /* keep the streamed answer visible */ }
         return true;
       }
-      const response = await fetch("/api/chat/stream", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...runtimeAuthHeaders() }, signal: controller.signal, body: JSON.stringify({ sessionId, modelId: selectedId, content, ...(chatMode === "myApi" ? { myApi: true } : {}), settings: { style: settings.responseStyle, responseLength: settings.responseLength, effort: settings.effort, thinking: Boolean(settings.thinking) }, attachmentIds: options?.attachmentIds, clientMessageId: turnId }) });
-      if (!response.ok || !response.body) throw new Error(await streamStartErrorMessage(response, language === "ru" ? "Не удалось начать потоковый ответ." : "Could not start the stream."));
-      await consumeChatStream(response, { onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)), onDone: (data) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: typeof data.content === "string" ? data.content : message.content, model: typeof data.modelUsed === "string" ? data.modelUsed : message.model, providerLabel: typeof data.label === "string" ? data.label : message.providerLabel, modelLabel: typeof data.label === "string" ? data.label : message.modelLabel, searchStatus: safeSearchStatus(data.searchStatus), sources: safeSourceEvidence(data.sources), webGrounding: safeWebGrounding(data.webGrounding) } : message)) });
+      let streamSucceeded = false;
+      let retryDelayMs = 0;
+      for (let attempt = 1; attempt <= 3 && !streamSucceeded; attempt++) {
+        if (attempt > 1 && controller.signal.aborted) break;
+        if (attempt > 1) {
+          const wait = retryDelayMs > 0 ? Math.min(retryDelayMs, 60000) : backoffMs(attempt - 2);
+          await new Promise((r) => setTimeout(r, wait));
+          if (controller.signal.aborted) break;
+        }
+        try {
+          const response = await fetch("/api/chat/stream", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...runtimeAuthHeaders() }, signal: controller.signal, body: JSON.stringify({ sessionId, modelId: selectedId, content, ...(chatMode === "myApi" ? { myApi: true } : {}), settings: { style: settings.responseStyle, responseLength: settings.responseLength, effort: settings.effort, thinking: Boolean(settings.thinking) }, attachmentIds: options?.attachmentIds, clientMessageId: turnId }) });
+          if (!response.ok || !response.body) {
+            const errMsg = await streamStartErrorMessage(response, language === "ru" ? "Не удалось начать потоковый ответ." : "Could not start the stream.");
+            const status = response.status;
+            const ra = parseRetryAfter(response.headers?.get?.("retry-after"));
+            retryDelayMs = ra && ra > 0 ? Math.min(ra, 60000) : 0;
+            const isRetryable = status === 429 || (status >= 500 && status <= 599);
+            if (attempt >= 3 || !isRetryable) throw new Error(errMsg);
+            continue;
+          }
+          await consumeChatStream(response, { onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)), onDone: (data) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: typeof data.content === "string" ? data.content : message.content, model: typeof data.modelUsed === "string" ? data.modelUsed : message.model, providerLabel: typeof data.label === "string" ? data.label : message.providerLabel, modelLabel: typeof data.label === "string" ? data.label : message.modelLabel, searchStatus: safeSearchStatus(data.searchStatus), sources: safeSourceEvidence(data.sources), webGrounding: safeWebGrounding(data.webGrounding) } : message)) });
+          streamSucceeded = true;
+        } catch (e) {
+          if (e instanceof DOMException && e.name === "AbortError") throw e;
+          retryDelayMs = 0;
+          const msg = e instanceof Error ? e.message : String(e);
+          // Retry on network/stream issues or specific statuses mentioned; don't broad-match all errors
+          const isRetryable = /network|fetch|stream|connection|aborted|timeout|503|502|504|429/i.test(msg);
+          if (attempt >= 3 || !isRetryable) throw e;
+        }
+      }
+      if (!streamSucceeded) throw new Error(language === "ru" ? "Потоковый ответ не удался после нескольких попыток." : "Stream failed after retries.");
       try {
         await utils.chats.historyPage.fetch({ sessionId, limit: 60 });
         setOptimisticMessages([]);
