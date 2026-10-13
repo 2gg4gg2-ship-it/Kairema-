@@ -11,35 +11,17 @@ import { startLogin } from "@/const";
 import { memorySearchMatches } from "@/lib/memory-search";
 import { runtimeAuthHeaders } from "@/lib/runtime-auth";
 import { consumeChatStream, type StreamLiveValue } from "@/lib/chat-stream";
-import TerminalSurface from "@/components/TerminalSurface";
-import ModeCarousel, { type ModeDescriptor } from "@/components/ModeCarousel";
-import { useHorizontalSwipe } from "@/lib/horizontal-swipe";
 import { ProviderUnavailableNotice } from "@/components/ProviderUnavailableNotice";
 import { clearDirectKey } from "@/lib/direct-key-store";
 import { buildCandidateChain, ProviderUnavailableError, runMyApiTurn, type TurnCandidate } from "@/lib/my-api-turn";
 import { resolveExecution } from "@shared/provider-capabilities";
-import { backoffMs, parseRetryAfter } from "@shared/upstream-retry";
 import { trpc } from "@/lib/trpc";
-import { Archive, Bot, Check, ChevronDown, CircleDot, Clock3, Copy, FileImage, Gauge, Globe2, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Repeat, Search, Settings2, SlidersHorizontal, Sparkles, SquareTerminal, Trash2, TriangleAlert, UserIcon, X } from "lucide-react";
-import { Capacitor } from "@capacitor/core";
+import { Archive, Bot, Check, ChevronDown, CircleDot, Clock3, Copy, FileImage, Gauge, Globe2, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Repeat, Search, Settings2, SlidersHorizontal, Sparkles, Trash2, TriangleAlert, UserIcon, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { createPortal } from "react-dom";
 
 type ModelId = "fast" | "smart" | "context" | "flagship";
-
-/**
- * The modes of the page, in carousel order.
- *
- * <p>Declared once so the order, the labels and the icons cannot drift between the carousel and
- * anything that switches by name. "terminal" is filtered out on the web at the point of use.
- */
-type AppMode = "chat" | "terminal" | "myApi";
-const MODES: readonly { id: AppMode; labelKey: "modeChat" | "modeTerminal" | "modeMyApi"; Icon: typeof MessageSquare }[] = [
-  { id: "chat", labelKey: "modeChat", Icon: MessageSquare },
-  { id: "terminal", labelKey: "modeTerminal", Icon: SquareTerminal },
-  { id: "myApi", labelKey: "modeMyApi", Icon: Repeat },
-];
 type Language = "ru" | "en";
 type ResponseStyle = "default" | "professional" | "friendly" | "concise" | "steps";
 type StaticModel = { key: string; modelId: ModelId; label: Record<Language, string>; role: Record<Language, string> };
@@ -222,8 +204,8 @@ const MODELS: readonly StaticModel[] = [
 ];
 
 const copy = {
-  ru: { newChat: "Новый чат", models: "Роли", modelLimits: "Модели и лимиты", healthRefresh: "Обновление здоровья", history: "История", search: "Поиск", memory: "Память", settings: "Настройки", noHistory: "История пока пуста.", loginHistory: "Войти для истории", newConversation: "Новый разговор", loginChat: "Войдите, чтобы начать чат с Kairema", start: "Начните разговор с", secure: "Модели и ключи — только на сервере", light: "Светлая тема", dark: "Тёмная тема", language: "Язык", theme: "Тема", profile: "Профиль памяти", facts: "Факты памяти", addFact: "Добавить факт", clear: "Очистить память", autoMemory: "Автоматически извлекать новые факты", memoryEnabled: "Использовать память в ответах", response: "Ответ", style: "Стиль", length: "Длина", effort: "Усилия", thinking: "Дополнительное рассуждение", defaultRole: "Роль по умолчанию", web: "Web-поиск", webStatus: "Статус web-поиска", searchResults: "Результаты поиска", chats: "Чаты", messages: "Сообщения", save: "Изменения сохраняются автоматически", openSettings: "Открыть настройки", modeChat: "Чат", modeMyApi: "Мой API", modeSwitch: "Режим", modeTerminal: "Терминал", modeSurface: "Чат / Терминал", modePrevious: "Предыдущий режим", modeNext: "Следующий режим", modePosition: (i, n) => `Режим ${i + 1} из ${n}`, activeUserBinding: "Активная связка «Мой API»", myApiNotConfigured: "Мой API не настроен", myApiModelPicker: "Модель «Мой API»", configureProvider: "Настроить провайдера →", myApiLoadingModels: "загружаем модели", myApiModelsRetry: "Повторить", myApiNoModels: "провайдер не вернул список моделей", myApiSwitchFailed: "Не удалось сменить модель", myApiSwitchProviderFailed: "Не удалось сменить провайдера", myApiProviderPicker: "Провайдер «Мой API»", myApiProviderEmpty: "Настройте провайдера в разделе «AI-провайдеры»", myApiProviderConnected: "подключён", myApiModelSearch: "Поиск моделей", myApiModelFreeGroup: "Free", myApiModelPaidGroup: "Paid", myApiModelNoResults: "Ничего не найдено", myApiModelFreeBadge: "Free", delete: "Удалить", unsupportedSearch: "Поиск недоступен", uploadFailed: "Не удалось загрузить вложение.", noSearch: "Ничего не найдено.", profileTitle: "Профиль", openProfile: "Открыть профиль", fullName: "Полное имя", nameFieldLabel: "Как нам следует тебя называть?", preferredNamePlaceholder: "Как к вам обращаться", personalPreferencesPlaceholder: "Например: кратко, без жаргона, на английском", personalPreferencesField: "Ваши предпочтения", namePlaceholder: "Имя", updateProfile: "Обновить профиль", profileUpdated: "Профиль обновлён", personalPreferences: "Персональные предпочтения", preferencesPrompt: "Какие личные предпочтения Kairema должен учитывать в ответах?", preferencesScope: "Ваши предпочтения применяются ко всем разговорам.", askClarifying: "Задавать уточняющие вопросы перед развёрнутым ответом", savePreferences: "Сохранить предпочтения", preferencesSaved: "Предпочтения сохранены" },
-  en: { newChat: "New chat", models: "Roles", modelLimits: "Models & limits", healthRefresh: "Health refresh", history: "History", search: "Search", memory: "Memory", settings: "Settings", noHistory: "No chat history yet.", loginHistory: "Sign in for history", newConversation: "New conversation", loginChat: "Sign in to start chatting with Kairema", start: "Start a conversation with", secure: "Models and keys stay on the server", light: "Light theme", dark: "Dark theme", language: "Language", theme: "Theme", profile: "Memory profile", facts: "Memory facts", addFact: "Add a fact", clear: "Clear memory", autoMemory: "Automatically extract new facts", memoryEnabled: "Use memory in replies", response: "Response", style: "Style", length: "Length", effort: "Effort", thinking: "Extra reasoning", defaultRole: "Default role", web: "Web search", webStatus: "Web search status", searchResults: "Search results", chats: "Chats", messages: "Messages", save: "Changes save automatically", openSettings: "Open settings", modeChat: "Chat", modeMyApi: "My API", modeSwitch: "Mode", modeTerminal: "Terminal", modeSurface: "Chat / Terminal", modePrevious: "Previous mode", modeNext: "Next mode", modePosition: (i, n) => `Mode ${i + 1} of ${n}`, activeUserBinding: "Active My API binding", myApiNotConfigured: "My API is not configured", myApiModelPicker: "My API model", configureProvider: "Set up a provider →", myApiLoadingModels: "loading models", myApiModelsRetry: "Retry", myApiNoModels: "the provider returned no models", myApiSwitchFailed: "Could not switch the model", myApiSwitchProviderFailed: "Could not switch the provider", myApiProviderPicker: "My API provider", myApiProviderEmpty: "Set a provider up in AI providers", myApiProviderConnected: "connected", myApiModelSearch: "Search models", myApiModelFreeGroup: "Free", myApiModelPaidGroup: "Paid", myApiModelNoResults: "No models found", myApiModelFreeBadge: "Free", delete: "Delete", unsupportedSearch: "Search unavailable", uploadFailed: "Could not upload the attachment.", noSearch: "No results found.", profileTitle: "Profile", openProfile: "Open profile", fullName: "Full name", nameFieldLabel: "How should we call you?", preferredNamePlaceholder: "What should we call you", personalPreferencesPlaceholder: "For example: keep it short, no jargon, reply in English", personalPreferencesField: "Your preferences", namePlaceholder: "Name", updateProfile: "Update Profile", profileUpdated: "Profile updated", personalPreferences: "Personal preferences", preferencesPrompt: "What personal preferences should Kairema consider in responses?", preferencesScope: "Your preferences will apply to all conversations.", askClarifying: "Ask clarifying questions before giving detailed answers", savePreferences: "Save Preferences", preferencesSaved: "Preferences saved" },
+  ru: { newChat: "Новый чат", models: "Роли", modelLimits: "Модели и лимиты", healthRefresh: "Обновление здоровья", history: "История", search: "Поиск", memory: "Память", settings: "Настройки", noHistory: "История пока пуста.", loginHistory: "Войти для истории", newConversation: "Новый разговор", loginChat: "Войдите, чтобы начать чат с Kairema", start: "Начните разговор с", secure: "Модели и ключи — только на сервере", light: "Светлая тема", dark: "Тёмная тема", language: "Язык", theme: "Тема", profile: "Профиль памяти", facts: "Факты памяти", addFact: "Добавить факт", clear: "Очистить память", autoMemory: "Автоматически извлекать новые факты", memoryEnabled: "Использовать память в ответах", response: "Ответ", style: "Стиль", length: "Длина", effort: "Усилия", thinking: "Дополнительное рассуждение", defaultRole: "Роль по умолчанию", web: "Web-поиск", webStatus: "Статус web-поиска", searchResults: "Результаты поиска", chats: "Чаты", messages: "Сообщения", save: "Изменения сохраняются автоматически", openSettings: "Открыть настройки", modeChat: "Чат", modeMyApi: "Мой API", modeSwitch: "Режим чата", activeUserBinding: "Активная связка «Мой API»", myApiNotConfigured: "Мой API не настроен", myApiModelPicker: "Модель «Мой API»", configureProvider: "Настроить провайдера →", myApiLoadingModels: "загружаем модели", myApiModelsRetry: "Повторить", myApiNoModels: "провайдер не вернул список моделей", myApiSwitchFailed: "Не удалось сменить модель", myApiSwitchProviderFailed: "Не удалось сменить провайдера", myApiProviderPicker: "Провайдер «Мой API»", myApiProviderEmpty: "Настройте провайдера в разделе «AI-провайдеры»", myApiProviderConnected: "подключён", myApiModelSearch: "Поиск моделей", myApiModelFreeGroup: "Free", myApiModelPaidGroup: "Paid", myApiModelNoResults: "Ничего не найдено", myApiModelFreeBadge: "Free", delete: "Удалить", unsupportedSearch: "Поиск недоступен", uploadFailed: "Не удалось загрузить вложение.", noSearch: "Ничего не найдено.", profileTitle: "Профиль", openProfile: "Открыть профиль", fullName: "Полное имя", nameFieldLabel: "Как к вам обращаться?", namePlaceholder: "Имя", updateProfile: "Обновить профиль", profileUpdated: "Профиль обновлён", personalPreferences: "Персональные предпочтения", preferencesPrompt: "Какие личные предпочтения Kairema должен учитывать в ответах?", preferencesScope: "Ваши предпочтения применяются ко всем разговорам.", askClarifying: "Задавать уточняющие вопросы перед развёрнутым ответом", savePreferences: "Сохранить предпочтения", preferencesSaved: "Предпочтения сохранены" },
+  en: { newChat: "New chat", models: "Roles", modelLimits: "Models & limits", healthRefresh: "Health refresh", history: "History", search: "Search", memory: "Memory", settings: "Settings", noHistory: "No chat history yet.", loginHistory: "Sign in for history", newConversation: "New conversation", loginChat: "Sign in to start chatting with Kairema", start: "Start a conversation with", secure: "Models and keys stay on the server", light: "Light theme", dark: "Dark theme", language: "Language", theme: "Theme", profile: "Memory profile", facts: "Memory facts", addFact: "Add a fact", clear: "Clear memory", autoMemory: "Automatically extract new facts", memoryEnabled: "Use memory in replies", response: "Response", style: "Style", length: "Length", effort: "Effort", thinking: "Extra reasoning", defaultRole: "Default role", web: "Web search", webStatus: "Web search status", searchResults: "Search results", chats: "Chats", messages: "Messages", save: "Changes save automatically", openSettings: "Open settings", modeChat: "Chat", modeMyApi: "My API", modeSwitch: "Chat mode", activeUserBinding: "Active My API binding", myApiNotConfigured: "My API is not configured", myApiModelPicker: "My API model", configureProvider: "Set up a provider →", myApiLoadingModels: "loading models", myApiModelsRetry: "Retry", myApiNoModels: "the provider returned no models", myApiSwitchFailed: "Could not switch the model", myApiSwitchProviderFailed: "Could not switch the provider", myApiProviderPicker: "My API provider", myApiProviderEmpty: "Set a provider up in AI providers", myApiProviderConnected: "connected", myApiModelSearch: "Search models", myApiModelFreeGroup: "Free", myApiModelPaidGroup: "Paid", myApiModelNoResults: "No models found", myApiModelFreeBadge: "Free", delete: "Delete", unsupportedSearch: "Search unavailable", uploadFailed: "Could not upload the attachment.", noSearch: "No results found.", profileTitle: "Profile", openProfile: "Open profile", fullName: "Full name", nameFieldLabel: "What should we call you?", namePlaceholder: "Name", updateProfile: "Update Profile", profileUpdated: "Profile updated", personalPreferences: "Personal preferences", preferencesPrompt: "What personal preferences should Kairema consider in responses?", preferencesScope: "Your preferences will apply to all conversations.", askClarifying: "Ask clarifying questions before giving detailed answers", savePreferences: "Save Preferences", preferencesSaved: "Preferences saved" },
 } as const;
 
 const styles: Record<ResponseStyle, Record<Language, string>> = { default: { ru: "По умолчанию", en: "Default" }, professional: { ru: "Профессиональный", en: "Professional" }, friendly: { ru: "Дружелюбный", en: "Friendly" }, concise: { ru: "Кратко", en: "Concise" }, steps: { ru: "По шагам", en: "Step by step" } };
@@ -310,15 +292,6 @@ async function streamStartErrorMessage(response: Response, fallback: string): Pr
 
 export default function Home() {
   const { isAuthenticated, loading: authLoading, user, logout } = useAuth();
-  // The Terminal is an on-device feature: it only exists inside the Android shell, where the native
-  // loopback serves it. On the web there is nothing behind /api/local/terminal, so the entry is not
-  // rendered at all rather than shown and failing. Capacitor reports platform "web" everywhere else.
-  const isNativeAndroid = Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
-  // The single mode of the whole page: Чат, Терминал or Мой API. One state drives both the carousel
-  // and the content, so there is exactly one switcher and it cannot disagree with what is on screen.
-  // The terminal only exists inside the Android shell, where the native loopback serves it; on the web
-  // it is absent from the carousel entirely rather than shown and failing.
-  const [mode, setMode] = useState<AppMode>("chat");
   // The address always comes from the authenticated server context, never from
   // localStorage or anything the visitor typed.
   const accountEmail = typeof user?.email === "string" ? user.email.trim() : "";
@@ -327,30 +300,18 @@ export default function Home() {
   // Display name is profile data only; it is never sent to the model prompt.
   const serverName = typeof user?.name === "string" ? user.name : "";
   const [profileName, setProfileName] = useState(serverName);
-  // The form of address and the personal preferences are separate columns from the full name,
-  // so each gets its own state and is re-seeded from the row whenever the session refetches.
-  const serverPreferredName = typeof user?.preferredName === "string" ? user.preferredName : "";
-  const serverPersonalPreferences = typeof user?.personalPreferences === "string" ? user.personalPreferences : "";
-  const [profilePreferredName, setProfilePreferredName] = useState(serverPreferredName);
-  const [profilePersonalPreferences, setProfilePersonalPreferences] = useState(serverPersonalPreferences);
   useEffect(() => { setProfileName(serverName); }, [serverName]);
-  useEffect(() => { setProfilePreferredName(serverPreferredName); }, [serverPreferredName]);
-  useEffect(() => { setProfilePersonalPreferences(serverPersonalPreferences); }, [serverPersonalPreferences]);
   const [, navigate] = useLocation();
   const { theme, toggleTheme, setHighContrast } = useTheme();
-  const [activeId, setActiveId] = useState(""); const [newConversation, setNewConversation] = useState(false); const [modelId, setModelId] = useState<ModelId>("fast"); const chatMode: "chat" | "myApi" = mode === "myApi" ? "myApi" : "chat"; const [search, setSearch] = useState(""); const [uploadStatus, setUploadStatus] = useState<{ sessionId: string; message: string } | null>(null);   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === "undefined" ? true : window.innerWidth >= SIDEBAR_DESKTOP_BREAKPOINT); const [settingsOpen, setSettingsOpen] = useState(false); const [profileOpen, setProfileOpen] = useState(false); const [memoryOpen, setMemoryOpen] = useState(false); const [exportHistoryOpen, setExportHistoryOpen] = useState(false); const [templatesOpen, setTemplatesOpen] = useState(false); const [pendingChatDeletionId, setPendingChatDeletionId] = useState<string | null>(null); const [isChatDeletionConfirming, setIsChatDeletionConfirming] = useState(false); const [pendingHistoryClear, setPendingHistoryClear] = useState(false); const [isHistoryClearConfirming, setIsHistoryClearConfirming] = useState(false); const [composerDraft, setComposerDraft] = useState(""); const [draftHydratedSessionId, setDraftHydratedSessionId] = useState(""); const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]); const [sentAttachmentFallbacks, setSentAttachmentFallbacks] = useState<ChatAttachment[]>([]); const [isStreaming, setIsStreaming] = useState(false); const [isExporting, setIsExporting] = useState<"markdown" | "pdf" | null>(null); const [notice, setNotice] = useState(""); const [settingsOverride, setSettingsOverride] = useState<Record<string, unknown>>({});
+  const [activeId, setActiveId] = useState(""); const [newConversation, setNewConversation] = useState(false); const [modelId, setModelId] = useState<ModelId>("fast"); const [chatMode, setChatMode] = useState<"chat" | "myApi">("chat"); const [search, setSearch] = useState(""); const [uploadStatus, setUploadStatus] = useState<{ sessionId: string; message: string } | null>(null);   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === "undefined" ? true : window.innerWidth >= SIDEBAR_DESKTOP_BREAKPOINT); const [settingsOpen, setSettingsOpen] = useState(false); const [profileOpen, setProfileOpen] = useState(false); const [memoryOpen, setMemoryOpen] = useState(false); const [exportHistoryOpen, setExportHistoryOpen] = useState(false); const [templatesOpen, setTemplatesOpen] = useState(false); const [pendingChatDeletionId, setPendingChatDeletionId] = useState<string | null>(null); const [isChatDeletionConfirming, setIsChatDeletionConfirming] = useState(false); const [pendingHistoryClear, setPendingHistoryClear] = useState(false); const [isHistoryClearConfirming, setIsHistoryClearConfirming] = useState(false); const [composerDraft, setComposerDraft] = useState(""); const [draftHydratedSessionId, setDraftHydratedSessionId] = useState(""); const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]); const [sentAttachmentFallbacks, setSentAttachmentFallbacks] = useState<ChatAttachment[]>([]); const [isStreaming, setIsStreaming] = useState(false); const [isExporting, setIsExporting] = useState<"markdown" | "pdf" | null>(null); const [notice, setNotice] = useState(""); const [settingsOverride, setSettingsOverride] = useState<Record<string, unknown>>({});
   const streamAbortRef = useRef<AbortController | null>(null); const failedTurnTimersRef = useRef(new Map<string, FailedTurnTimer>()); const activeSessionRef = useRef(""); const pagedHistorySessionRef = useRef(""); const deleteConfirmationInFlightRef = useRef(false); const historyClearInFlightRef = useRef(false); const defaultRoleApplied = useRef(false); const themeApplied = useRef(false); const persistedDraftRef = useRef(""); const activeChatHydrated = useRef(false);
   // Why sending is blocked, or null when it is not. Set only when every connected provider has
   // been spent for a turn, and cleared by any action that could make a provider usable again.
   // It is separate from `notice`, which reports things that already happened to a sent turn.
-  const [providerBlocked, setProviderBlocked] = useState<{ reason: string; switching: boolean; provider: string | null; model: string | null } | null>(null);
-  // The My API candidate the current turn is on. `ProviderFailure` carries a reason but not which
-  // provider produced it, so the attribution is tracked here as the orchestrator moves along the
-  // candidate chain. The orchestrator itself is left alone.
-  const myApiCandidateRef = useRef<TurnCandidate | null>(null);
+  const [providerBlocked, setProviderBlocked] = useState<{ reason: string; switching: boolean } | null>(null);
   const [olderHistoryMessages, setOlderHistoryMessages] = useState<any[]>([]); const [olderHistoryCursor, setOlderHistoryCursor] = useState<string | null | undefined>(undefined); const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
   const modelsQuery = trpc.models.list.useQuery(undefined, { refetchInterval: 60_000, refetchOnWindowFocus: true }); const settingsQuery = trpc.settings.get.useQuery(undefined, { enabled: isAuthenticated }); const healthRefreshSeconds = Number(settingsQuery.data?.healthRefreshSeconds ?? 30); const memoryQuery = trpc.memory.get.useQuery(undefined, { enabled: isAuthenticated }); const webStatusQuery = trpc.webSearch.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const knowledgeStatusQuery = trpc.knowledge.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const providerDashboardQuery = trpc.providers.dashboard.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: healthRefreshSeconds > 0 ? healthRefreshSeconds * 1_000 : false, refetchOnWindowFocus: true }); const knowledgeAuditQuery = trpc.knowledge.audit.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 120_000 }); const sessionsQuery = trpc.chats.list.useQuery(undefined, { enabled: isAuthenticated, refetchOnWindowFocus: true }); const messagesQuery = trpc.chats.historyPage.useQuery({ sessionId: activeId, limit: 60 }, { enabled: isAuthenticated && Boolean(activeId) }); const attachmentsQuery = trpc.attachments.list.useQuery({ sessionId: activeId }, { enabled: isAuthenticated && Boolean(activeId) }); const draftQuery = trpc.chats.draft.useQuery({ sessionId: activeId }, { enabled: isAuthenticated && Boolean(activeId), refetchOnWindowFocus: false }); const exportsQuery = trpc.exports.list.useQuery(undefined, { enabled: isAuthenticated && exportHistoryOpen }); const searchQuery = trpc.search.query.useQuery({ query: search }, { enabled: isAuthenticated && search.trim().length >= 2 }); const ownerQuery = trpc.owner.isOwner.useQuery(undefined, { enabled: isAuthenticated, staleTime: 300_000 });
-  const createMutation = trpc.chats.create.useMutation(); const deleteChatMutation = trpc.chats.delete.useMutation(); const clearHistoryMutation = trpc.chats.clearAll.useMutation(); const draftSaveMutation = trpc.chats.saveDraft.useMutation(); const draftClearMutation = trpc.chats.clearDraft.useMutation(); const discardFailedTurn = trpc.chats.discardFailedTurn.useMutation(); const settingMutation = trpc.settings.update.useMutation(); const updateNameMutation = trpc.auth.updateName.useMutation(); const updateProfileDetailsMutation = trpc.auth.updateProfileDetails.useMutation(); const memoryUpdateMutation = trpc.memory.update.useMutation(); const memoryAddMutation = trpc.memory.addFact.useMutation(); const memoryDeleteMutation = trpc.memory.deleteEntry.useMutation(); const memoryClearMutation = trpc.memory.clear.useMutation(); const attachmentDeleteMutation = trpc.attachments.delete.useMutation(); const exportCreateMutation = trpc.exports.create.useMutation(); const exportDeleteMutation = trpc.exports.delete.useMutation(); const knowledgeRefreshMutation = trpc.knowledge.refresh.useMutation(); const utils = trpc.useUtils();
+  const createMutation = trpc.chats.create.useMutation(); const deleteChatMutation = trpc.chats.delete.useMutation(); const clearHistoryMutation = trpc.chats.clearAll.useMutation(); const draftSaveMutation = trpc.chats.saveDraft.useMutation(); const draftClearMutation = trpc.chats.clearDraft.useMutation(); const discardFailedTurn = trpc.chats.discardFailedTurn.useMutation(); const settingMutation = trpc.settings.update.useMutation(); const updateNameMutation = trpc.auth.updateName.useMutation(); const memoryUpdateMutation = trpc.memory.update.useMutation(); const memoryAddMutation = trpc.memory.addFact.useMutation(); const memoryDeleteMutation = trpc.memory.deleteEntry.useMutation(); const memoryClearMutation = trpc.memory.clear.useMutation(); const attachmentDeleteMutation = trpc.attachments.delete.useMutation(); const exportCreateMutation = trpc.exports.create.useMutation(); const exportDeleteMutation = trpc.exports.delete.useMutation(); const knowledgeRefreshMutation = trpc.knowledge.refresh.useMutation(); const utils = trpc.useUtils();
   const setActiveModelMutation = trpc.userProviders.setActiveModel.useMutation();
   // The provider menu binds the credential; the model menu binds the model. Two independent moves.
   const setActiveProviderMutation = trpc.userProviders.setActive.useMutation();
@@ -424,19 +385,6 @@ export default function Home() {
     }
   };
   const myApiActiveConfig = (userProvidersQuery.data?.activeProvider ? userProvidersQuery.data.configs.find((config) => config.provider === userProvidersQuery.data.activeProvider) : null) ?? null;
-
-  // An unavailable provider is a fact about *that* provider, not a fact about the application.
-  // This is what stops a single rejected API key from becoming a permanent lock on the whole chat:
-  // the stored reason is only allowed to gate the composer while My API mode is still pointed at
-  // the very provider that failed. Leaving My API for a Kairema system model, or moving to another
-  // connected provider, makes the state stale, and a stale state must not keep blocking anything.
-  //
-  // `switching` is deliberately exempt: while the orchestrator is handing the turn to the next
-  // connected provider the message is informational, and it is cleared by the success path anyway.
-  const blockedMyApiProvider = Boolean(providerBlocked)
-    && chatMode === "myApi"
-    && Boolean(myApiCatalogProvider)
-    && providerBlocked?.provider === myApiCatalogProvider;
   const myApiModelAdoptedFor = useRef<string | null>(null);
   useEffect(() => {
     const config = myApiActiveConfig;
@@ -450,59 +398,6 @@ export default function Home() {
   }, [chatMode, myApiCatalogProvider, myApiModels, myApiActiveConfig, myApiCatalogMutation.isPending]);
   const settings = { ...(settingsQuery.data ?? { language: "ru" as Language, theme: "dark" as const, responseStyle: "default" as ResponseStyle, responseLength: "balanced" as const, effort: "standard" as const, thinking: 0, defaultRole: "fast" as ModelId, webSearch: 0, healthRefreshSeconds: 30, highContrast: 0, askClarifyingQuestions: 0 }), ...settingsOverride } as { language: Language; theme: "dark" | "light"; responseStyle: ResponseStyle; responseLength: "balanced" | "brief" | "detailed"; effort: "low" | "standard" | "high"; thinking: boolean | number; defaultRole: ModelId; webSearch: boolean | number; healthRefreshSeconds: 0 | 15 | 30 | 60; highContrast: boolean | number; askClarifyingQuestions: boolean | number };
   const language = settings.language as Language; const t = copy[language]; const sessions = sessionsQuery.data ?? []; const selectedModel = MODELS.find((item) => item.modelId === modelId) ?? MODELS[0]; const activeSession = sessions.find((session) => session.id === activeId); const attachments = attachmentsQuery.data ?? [];
-  const modes: readonly ModeDescriptor[] = useMemo(
-    () => MODES.filter((entry) => entry.id !== "terminal" || isNativeAndroid).map((entry) => ({ id: entry.id, label: t[entry.labelKey], icon: <entry.Icon className="size-4" aria-hidden="true" /> })),
-    [isNativeAndroid, t],
-  );
-  // The terminal is a switch inside this page, not a separate screen: moving between modes never
-  // reloads the app, and leaving it is what ends the shell session.
-  const showTerminal = mode === "terminal" && isNativeAndroid;
-  const modeIndex = Math.max(0, modes.findIndex((entry) => entry.id === mode));
-  const goToMode = (next: AppMode) => {
-    setMode(next);
-    // Switching away from My API clears the blocked-provider notice, matching what the previous
-    // per-mode buttons did, so a stale My API banner cannot survive into the chat.
-    if (next !== "myApi") setProviderBlocked(null);
-  };
-  // One carousel, rendered by whichever surface is active. Because the surfaces are mutually
-  // exclusive, exactly one instance exists at a time: there is never a second switcher on screen.
-  const modeCarousel = (
-    <ModeCarousel
-      modes={modes}
-      value={mode}
-      onChange={(next) => goToMode(next as AppMode)}
-      labels={{
-        group: t.modeSwitch,
-        previous: t.modePrevious,
-        next: t.modeNext,
-        position: t.modePosition,
-      }}
-    />
-  );
-  // The swipe lives on the surface, so a horizontal drag anywhere over the chat or the terminal pages
-  // the modes, while the vertical axis stays with the chat's own scroller.
-  const surfaceRef = useRef<HTMLDivElement | null>(null);
-  const setModeIndex = (next: number) => {
-    const target = modes[next];
-    if (target) goToMode(target.id as AppMode);
-  };
-  const swipe = useHorizontalSwipe({
-    onNext: () => setModeIndex(Math.min(modes.length - 1, modeIndex + 1)),
-    onPrevious: () => setModeIndex(Math.max(0, modeIndex - 1)),
-    // The offset is written straight to a CSS variable on the surface: the handlers sit around the
-    // chat, so routing every pointer move through React state would re-render the page per frame.
-    onDrag: (offset) => {
-      const node = surfaceRef.current;
-      if (!node) return;
-      if (offset === 0) {
-        node.style.removeProperty("--kairema-mode-drag");
-        node.removeAttribute("data-dragging");
-        return;
-      }
-      node.style.setProperty("--kairema-mode-drag", `${offset}px`);
-      node.setAttribute("data-dragging", "true");
-    },
-  });
   const modelViews = useMemo<PublicModel[]>(() => { const byId = new Map((modelsQuery.data as PublicModel[] | undefined)?.map((model) => [model.modelId, model]) ?? []); return MODELS.map((model) => ({ ...model, status: byId.get(model.modelId)?.status, runtime: byId.get(model.modelId)?.runtime ?? null, limits: byId.get(model.modelId)?.limits })); }, [modelsQuery.data]); const modelById = useMemo(() => new Map(modelViews.map((model) => [model.modelId, model])), [modelViews]);
   const attachmentsById = new Map([...sentAttachmentFallbacks, ...attachments.map((attachment) => ({ id: attachment.id, fileName: attachment.fileName, mimeType: attachment.contentType, sizeBytes: attachment.byteSize, kind: attachment.kind, previewUrl: attachment.previewUrl } satisfies ChatAttachment))].map((attachment) => [attachment.id, attachment]));
   const historyRows = [...olderHistoryMessages, ...(messagesQuery.data?.messages ?? [])]; const uniqueHistoryRows = [...new Map(historyRows.map((message) => [String(message.id), message])).values()].sort((left: any, right: any) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime() || String(left.id).localeCompare(String(right.id)));
@@ -675,7 +570,7 @@ export default function Home() {
       copy.append(title, description);
       const badge = document.createElement("span"); badge.className = `kairema-status ${statusClass(model.status)}`; badge.textContent = model.status?.badge ?? "…";
       item.append(copy, badge);
-      item.addEventListener("click", () => { setModelId(model.modelId); setProviderBlocked(null); close(); });
+      item.addEventListener("click", () => { setModelId(model.modelId); close(); });
       menu.append(item);
     }
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
@@ -744,9 +639,7 @@ export default function Home() {
     if (!isAuthenticated) { startLogin(); return false; }
     // A blocked turn creates no message, issues no request and starts no failed-turn timer: there
     // is nothing to clean up because nothing was sent. The typed text stays in the composer.
-    // The gate is scoped to My API: a Kairema system model is served by a different path that this
-    // state knows nothing about, so it must never be blocked by a user provider's bad key.
-    if (blockedMyApiProvider) { setProviderBlocked((current) => (current ? { ...current } : current)); return false; }
+    if (providerBlocked) { setProviderBlocked((current) => (current ? { ...current } : current)); return false; }
     const sessionId = activeId || await createChat();
     if (!sessionId) return false;
     setComposerDraft(""); persistedDraftRef.current = `${sessionId}\u0000`;
@@ -767,7 +660,6 @@ export default function Home() {
       // id compared here, so a provider whose CORS is only conditionally allowed can never be
       // routed into a browser call by accident.
       const myApiCandidates = myApiTurnCandidates();
-      myApiCandidateRef.current = myApiCandidates[0] ?? null;
       const directFirst = chatMode === "myApi" && myApiCandidates.length > 0 && resolveExecution(myApiCandidates[0].provider, { preferDirect: true }).mode === "direct";
       if (directFirst) {
         const result = await runMyApiTurn({
@@ -780,7 +672,7 @@ export default function Home() {
           preferDirect: true,
           signal: controller.signal,
           onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)),
-          onProviderSwitch: ({ from, to }) => { myApiCandidateRef.current = to; setProviderBlocked({ reason: `${from.displayName} недоступен, переключаемся на ${to.displayName}.`, switching: true, provider: from.provider, model: from.model }); },
+          onProviderSwitch: ({ from, to }) => setProviderBlocked({ reason: `${from.displayName} недоступен, переключаемся на ${to.displayName}.`, switching: true }),
         });
         // A direct answer is not stored by the server, so the pair is persisted here before the
         // optimistic copy is dropped; without it the turn would vanish on the next history load.
@@ -789,38 +681,9 @@ export default function Home() {
         try { await persistDirectTurn({ sessionId, content, modelId: result.model, clientMessageId: turnId, answer: result.content }); await utils.chats.historyPage.fetch({ sessionId, limit: 60 }); setOptimisticMessages([]); } catch { /* keep the streamed answer visible */ }
         return true;
       }
-      let streamSucceeded = false;
-      let retryDelayMs = 0;
-      for (let attempt = 1; attempt <= 3 && !streamSucceeded; attempt++) {
-        if (attempt > 1 && controller.signal.aborted) break;
-        if (attempt > 1) {
-          const wait = retryDelayMs > 0 ? Math.min(retryDelayMs, 60000) : backoffMs(attempt - 2);
-          await new Promise((r) => setTimeout(r, wait));
-          if (controller.signal.aborted) break;
-        }
-        try {
-          const response = await fetch("/api/chat/stream", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...runtimeAuthHeaders() }, signal: controller.signal, body: JSON.stringify({ sessionId, modelId: selectedId, content, ...(chatMode === "myApi" ? { myApi: true } : {}), settings: { style: settings.responseStyle, responseLength: settings.responseLength, effort: settings.effort, thinking: Boolean(settings.thinking) }, attachmentIds: options?.attachmentIds, clientMessageId: turnId }) });
-          if (!response.ok || !response.body) {
-            const errMsg = await streamStartErrorMessage(response, language === "ru" ? "Не удалось начать потоковый ответ." : "Could not start the stream.");
-            const status = response.status;
-            const ra = parseRetryAfter(response.headers?.get?.("retry-after"));
-            retryDelayMs = ra && ra > 0 ? Math.min(ra, 60000) : 0;
-            const isRetryable = status === 429 || (status >= 500 && status <= 599);
-            if (attempt >= 3 || !isRetryable) throw new Error(errMsg);
-            continue;
-          }
-          await consumeChatStream(response, { onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)), onDone: (data) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: typeof data.content === "string" ? data.content : message.content, model: typeof data.modelUsed === "string" ? data.modelUsed : message.model, providerLabel: typeof data.label === "string" ? data.label : message.providerLabel, modelLabel: typeof data.label === "string" ? data.label : message.modelLabel, searchStatus: safeSearchStatus(data.searchStatus), sources: safeSourceEvidence(data.sources), webGrounding: safeWebGrounding(data.webGrounding) } : message)) });
-          streamSucceeded = true;
-        } catch (e) {
-          if (e instanceof DOMException && e.name === "AbortError") throw e;
-          retryDelayMs = 0;
-          const msg = e instanceof Error ? e.message : String(e);
-          // Retry on network/stream issues or specific statuses mentioned; don't broad-match all errors
-          const isRetryable = /network|fetch|stream|connection|aborted|timeout|503|502|504|429/i.test(msg);
-          if (attempt >= 3 || !isRetryable) throw e;
-        }
-      }
-      if (!streamSucceeded) throw new Error(language === "ru" ? "Потоковый ответ не удался после нескольких попыток." : "Stream failed after retries.");
+      const response = await fetch("/api/chat/stream", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...runtimeAuthHeaders() }, signal: controller.signal, body: JSON.stringify({ sessionId, modelId: selectedId, content, ...(chatMode === "myApi" ? { myApi: true } : {}), settings: { style: settings.responseStyle, responseLength: settings.responseLength, effort: settings.effort, thinking: Boolean(settings.thinking) }, attachmentIds: options?.attachmentIds, clientMessageId: turnId }) });
+      if (!response.ok || !response.body) throw new Error(await streamStartErrorMessage(response, language === "ru" ? "Не удалось начать потоковый ответ." : "Could not start the stream."));
+      await consumeChatStream(response, { onDelta: (delta) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: message.content + delta } : message)), onDone: (data) => setOptimisticMessages((items) => items.map((message) => message.id === assistantId ? { ...message, content: typeof data.content === "string" ? data.content : message.content, model: typeof data.modelUsed === "string" ? data.modelUsed : message.model, providerLabel: typeof data.label === "string" ? data.label : message.providerLabel, modelLabel: typeof data.label === "string" ? data.label : message.modelLabel, searchStatus: safeSearchStatus(data.searchStatus), sources: safeSourceEvidence(data.sources), webGrounding: safeWebGrounding(data.webGrounding) } : message)) });
       try {
         await utils.chats.historyPage.fetch({ sessionId, limit: 60 });
         setOptimisticMessages([]);
@@ -839,11 +702,7 @@ export default function Home() {
       // delete and no reason to leave a question in the conversation that will never be answered.
       if (error instanceof ProviderUnavailableError) {
         setOptimisticMessages([]);
-        // Attributed to the candidate the turn actually died on, so a later switch to another
-        // provider — or to a Kairema model — is recognised as clearing the cause.
-        const failed = myApiCandidateRef.current;
-        setProviderBlocked({ reason: error.failure.message, switching: false, provider: failed?.provider ?? null, model: failed?.model ?? null });
-        myApiCandidateRef.current = null;
+        setProviderBlocked({ reason: error.failure.message, switching: false });
         try { await discardFailedTurn.mutateAsync({ sessionId, clientMessageId: turnId }); } catch { setNotice(language === "ru" ? "Не удалось удалить вопрос из истории. Обновите историю вручную." : "Could not remove the question from history. Refresh it manually."); }
         await Promise.all([utils.chats.historyPage.invalidate({ sessionId, limit: 60 }), utils.attachments.list.invalidate({ sessionId })]);
         return false;
@@ -925,16 +784,16 @@ export default function Home() {
   }, [isAuthenticated, language, providerDashboardQuery.data, knowledgeAuditQuery.data, webStatusQuery.data]);
 
   return (
-    <main className="kairema-shell">
-      <aside className={`kairema-sidebar ${sidebarOpen ? "kairema-sidebar-open" : "kairema-sidebar-collapsed"}`} aria-label={language === "ru" ? "Боковая навигация" : "Sidebar navigation"} inert={!sidebarOpen}>
-        <div className="kairema-brand-row"><span className="kairema-logo"><Sparkles className="size-4" /></span><span>Kairema</span><button className="kairema-icon-btn md:hidden" onClick={() => setSidebarOpen(false)} aria-label="Close"><X className="size-4" /></button></div>
-        <button onClick={() => void createChat()} className="kairema-new-chat" disabled={authLoading || createMutation.isPending}><MessageSquarePlus className="size-4" />{t.newChat}</button>
+    <main className="kairema-shell app">
+      <aside className={`kairema-sidebar ${sidebarOpen ? "kairema-sidebar-open" : "kairema-sidebar-collapsed"} sidebar`} aria-label={language === "ru" ? "Боковая навигация" : "Sidebar navigation"} inert={!sidebarOpen}>
+        <div className="kairema-brand-row brand"><span className="kairema-logo mark"><Sparkles className="size-4" /></span><span>Kairema</span><button className="kairema-icon-btn md:hidden" onClick={() => setSidebarOpen(false)} aria-label="Close"><X className="size-4" /></button></div>
+        <button onClick={() => void createChat()} className="kairema-new-chat new" disabled={authLoading || createMutation.isPending}><MessageSquarePlus className="size-4" />{t.newChat}</button>
         {/* The four Kairema roles belong to the platform path. In My API the turn runs on the
             caller's own provider, so offering them here would suggest a choice that has no
             effect on where the answer comes from. */}
         {chatMode === "chat" ? (<>
         <div className="kairema-sidebar-label"><CircleDot className="size-3" />{t.models}</div>
-        <div className="kairema-providers">{modelViews.map((model) => <button key={model.modelId} onClick={() => { setModelId(model.modelId); setProviderBlocked(null); setSidebarOpen(false); }} title={model.role[language]} className={`kairema-provider ${modelId === model.modelId ? "kairema-provider-selected" : ""}`}><span className="kairema-provider-icon"><Bot className="size-4" /></span><span className="kairema-provider-copy"><span className="kairema-provider-title">{model.label[language]}</span><span className="kairema-provider-role">{model.role[language]}</span><StatusIndicator status={model.status} /><RuntimeMeta runtime={model.runtime} language={language} /></span></button>)}</div>
+        <div className="kairema-providers">{modelViews.map((model) => <button key={model.modelId} onClick={() => { setModelId(model.modelId); setSidebarOpen(false); }} title={model.role[language]} className={`kairema-provider ${modelId === model.modelId ? "kairema-provider-selected" : ""}`}><span className="kairema-provider-icon"><Bot className="size-4" /></span><span className="kairema-provider-copy"><span className="kairema-provider-title">{model.label[language]}</span><span className="kairema-provider-role">{model.role[language]}</span><StatusIndicator status={model.status} /><RuntimeMeta runtime={model.runtime} language={language} /></span></button>)}</div>
         </>) : (<>
         <div className="kairema-sidebar-label"><CircleDot className="size-3" />{t.modeMyApi}</div>
         {myApiActiveConfig ? (
@@ -945,41 +804,27 @@ export default function Home() {
         </>)}
         <div className="kairema-history-head"><span>{t.history}</span><div className="flex items-center gap-1"><button type="button" onClick={() => setPendingHistoryClear(true)} className="kairema-icon-btn" aria-label={language === "ru" ? "Очистить всю историю" : "Clear all history"} title={language === "ru" ? "Очистить всю историю" : "Clear all history"} disabled={!isAuthenticated || !sessions.length || clearHistoryMutation.isPending}><Trash2 className="size-3.5" /></button><button onClick={() => void createChat()} className="kairema-icon-btn" aria-label={t.newChat}><MessageSquarePlus className="size-4" /></button></div></div>
         <label className="kairema-search"><Search className="size-4" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t.search} aria-label={t.search} /></label>
-        <div className="kairema-history-list">{!isAuthenticated && <button className="kairema-history-item text-left" onClick={startLogin}><LogIn className="mr-2 inline size-3" />{t.loginHistory}</button>}{search.trim().length >= 2 ? <SearchResults results={results} labels={t} onSelect={(item) => item.sessionId && selectSession(item.sessionId)} /> : sessionMatches.map((session) => <div key={session.id} className={`kairema-history-row ${session.id === activeId ? "kairema-history-active" : ""}`}><button onClick={() => selectSession(session.id, session.modelId)} className="kairema-history-item">{session.title}</button><button type="button" onClick={() => setPendingChatDeletionId(session.id)} className="kairema-history-delete" title={t.delete} aria-label={`${t.delete}: ${session.title}`} disabled={deleteChatMutation.isPending}><Trash2 className="size-3.5" /></button></div>)}{isAuthenticated && !sessionsQuery.isLoading && !search.trim() && !sessions.length && <p className="kairema-empty">{t.noHistory}</p>}</div>
-        <div className="kairema-sidebar-footer"><button className="kairema-footer-link" onClick={() => setMemoryOpen(true)}><Sparkles className="size-4" />{t.memory}</button><button className="kairema-footer-link" onClick={() => setExportHistoryOpen(true)} disabled={!isAuthenticated}><Archive className="size-4" />{language === "ru" ? "Экспорты" : "Exports"}</button>{isNativeAndroid && <button className="kairema-footer-link" onClick={() => navigate("/terminal")} data-testid="terminal-nav"><SquareTerminal className="size-4" />{language === "ru" ? "Терминал" : "Terminal"}</button>}<button className="kairema-footer-link" onClick={() => setSettingsOpen(true)}><SlidersHorizontal className="size-4" />{t.settings}</button>{ownerQuery.data && <button className="kairema-footer-link" onClick={() => navigate("/owner-analytics")}><Gauge className="size-4" />{language === "ru" ? "Аналитика владельца" : "Owner analytics"}</button>}<p>{t.secure}</p></div>
+        <div className="kairema-history-list history">{!isAuthenticated && <button className="kairema-history-item text-left" onClick={startLogin}><LogIn className="mr-2 inline size-3" />{t.loginHistory}</button>}{search.trim().length >= 2 ? <SearchResults results={results} labels={t} onSelect={(item) => item.sessionId && selectSession(item.sessionId)} /> : sessionMatches.map((session) => <div key={session.id} className={`kairema-history-row history-row ${session.id === activeId ? "kairema-history-active history-row active" : ""}`}><button onClick={() => selectSession(session.id, session.modelId)} className="kairema-history-item title">{session.title}</button><button type="button" onClick={() => setPendingChatDeletionId(session.id)} className="kairema-history-delete del" title={t.delete} aria-label={`${t.delete}: ${session.title}`} disabled={deleteChatMutation.isPending}><Trash2 className="size-3.5" /></button></div>)}{isAuthenticated && !sessionsQuery.isLoading && !search.trim() && !sessions.length && <p className="kairema-empty">{t.noHistory}</p>}</div>
+        <div className="kairema-sidebar-footer sidebottom"><button className="kairema-footer-link side-link" onClick={() => setMemoryOpen(true)}><Sparkles className="size-4" />{t.memory}</button><button className="kairema-footer-link side-link" onClick={() => setExportHistoryOpen(true)} disabled={!isAuthenticated}><Archive className="size-4" />{language === "ru" ? "Экспорты" : "Exports"}</button><button className="kairema-footer-link side-link" onClick={() => setSettingsOpen(true)}><SlidersHorizontal className="size-4" />{t.settings}</button>{ownerQuery.data && <button className="kairema-footer-link side-link" onClick={() => navigate("/owner-analytics")}><Gauge className="size-4" />{language === "ru" ? "Аналитика владельца" : "Owner analytics"}</button>}<p>{t.secure}</p></div>
       </aside>
       {sidebarOpen && <button className="kairema-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Close" />}
-      <section className="kairema-main">
-        <header className="kairema-topbar">
-          <div className="kairema-topbar-left"><button className="kairema-icon-btn md:hidden" onClick={() => setSidebarOpen(true)} aria-label="Menu"><Menu className="size-5" /></button><span className="kairema-topbar-title sr-only">{activeSession?.title ?? t.newConversation}</span>{chatMode === "chat" ? (<div className="kairema-model-pill"><Sparkles className="kairema-model-sparkle" aria-hidden="true" /><div className="kairema-select-wrap" data-kairema-role-select="true"><select value={modelId} onChange={(event) => { setModelId(event.target.value as ModelId); setProviderBlocked(null); }} aria-label={t.models}>{modelViews.map((model) => <option key={model.modelId} value={model.modelId}>{model.label[language]}</option>)}</select></div><ChevronDown className="kairema-model-chevron" aria-hidden="true" /></div>) : (<div className="kairema-model-pill" role="group" aria-label={t.activeUserBinding}><Sparkles className="kairema-model-sparkle" aria-hidden="true" />{myApiActiveConfig ? <ModelMenu value={myApiActiveConfig.activeModel} models={myApiModels} disabled={myApiCatalogMutation.isPending || setActiveModelMutation.isPending || !myApiModels.length} ariaLabel={t.myApiModelPicker} labels={MODEL_MENU_LABELS[language]} onSelect={(modelId) => void selectMyApiModel(modelId)} /> : <span className="kairema-binding-name">{t.myApiNotConfigured}</span>}</div>)}{!isAuthenticated && <button type="button" className="kairema-guest-login" onClick={() => startLogin()}><LogIn className="size-4" /><span>{t.loginHistory}</span></button>}</div>
-          <div className="kairema-topbar-controls"><span className="kairema-topbar-chip"><button type="button" className="kairema-header-button" onClick={() => setSettingsOpen(true)} title={t.openSettings} aria-label={t.openSettings}><Settings2 className="size-3.5" /><span>{t.settings}</span></button></span>{!isGuestUser && <span className="kairema-topbar-chip"><button type="button" className="kairema-header-button" onClick={() => setProfileOpen(true)} title={t.openProfile} aria-label={t.openProfile}><UserIcon className="size-3.5" /><span>{t.profileTitle}</span></button></span>}</div>
+      <section className="kairema-main main">
+        <header className="kairema-topbar topbar">
+          <div className="kairema-topbar-left top-left"><button className="kairema-icon-btn md:hidden mobilemenu" onClick={() => setSidebarOpen(true)} aria-label="Menu"><Menu className="size-5" /></button><span className="kairema-topbar-title sr-only">{activeSession?.title ?? t.newConversation}</span>{chatMode === "chat" ? (<div className="kairema-model-pill model-picker-wrap"><Sparkles className="kairema-model-sparkle" aria-hidden="true" /><div className="kairema-select-wrap model-picker" data-kairema-role-select="true"><select value={modelId} onChange={(event) => setModelId(event.target.value as ModelId)} aria-label={t.models}>{modelViews.map((model) => <option key={model.modelId} value={model.modelId}>{model.label[language]}</option>)}</select></div><ChevronDown className="kairema-model-chevron" aria-hidden="true" /></div>) : (<div className="kairema-model-pill" role="group" aria-label={t.activeUserBinding}><Sparkles className="kairema-model-sparkle" aria-hidden="true" />{myApiActiveConfig ? <ModelMenu value={myApiActiveConfig.activeModel} models={myApiModels} disabled={myApiCatalogMutation.isPending || setActiveModelMutation.isPending || !myApiModels.length} ariaLabel={t.myApiModelPicker} labels={MODEL_MENU_LABELS[language]} onSelect={(modelId) => void selectMyApiModel(modelId)} /> : <span className="kairema-binding-name">{t.myApiNotConfigured}</span>}</div>)}{!isAuthenticated && <button type="button" className="kairema-guest-login" onClick={() => startLogin()}><LogIn className="size-4" /><span>{t.loginHistory}</span></button>}</div>
+          <div className="kairema-topbar-controls topactions"><span className="kairema-topbar-chip"><button type="button" className="kairema-header-button topact" onClick={() => setSettingsOpen(true)} title={t.openSettings} aria-label={t.openSettings}><Settings2 className="size-3.5" /><span className="txt">{t.settings}</span></button></span>{!isGuestUser && <span className="kairema-topbar-chip"><button type="button" className="kairema-header-button topact" onClick={() => setProfileOpen(true)} title={t.openProfile} aria-label={t.openProfile}><UserIcon className="size-3.5" /><span className="txt">{t.profileTitle}</span></button></span>}</div>
         </header>
         {/* Non-blocking: the page stays usable while a fallback runs or after the turn has stopped. */}
-        {blockedMyApiProvider && <ProviderUnavailableNotice switching={providerBlocked!.switching} reason={providerBlocked!.reason} />}
-        {/* One surface at a time, both of them inside this page, so switching modes re-renders a
-            region and never reloads the app. Only the active surface is mounted: leaving the terminal
-            therefore ends its shell session, exactly as leaving the /terminal route always did, so
-            no proot process is left running behind a chat the user has moved on from. */}
-        <div className="kairema-surface" ref={surfaceRef} {...swipe}>
-        {showTerminal ? (
-          <div className="kairema-surface-pane">
-            <TerminalSurface modeRow={modeCarousel} />
-          </div>
-        ) : (
-        <div className="kairema-surface-pane">
-        <AIChatBox aboveMessages={<>{modeCarousel}{chatMode === "myApi" && <span className="kairema-mode-hint" role="status">{myApiActiveConfig ? (<>
+        {providerBlocked && <ProviderUnavailableNotice switching={providerBlocked.switching} reason={providerBlocked.reason} />}
+        <AIChatBox aboveMessages={<div className="kairema-mode-switch" role="group" aria-label={t.modeSwitch}><button type="button" className="kairema-mode-option" aria-pressed={chatMode === "chat"} onClick={() => setChatMode("chat")}><MessageSquare className="size-4" /><span>{t.modeChat}</span></button><button type="button" className="kairema-mode-option" aria-pressed={chatMode === "myApi"} onClick={() => setChatMode("myApi")}><Repeat className="size-4" /><span>{t.modeMyApi}</span></button>{chatMode === "myApi" && <span className="kairema-mode-hint" role="status">{myApiActiveConfig ? (<>
         <MyApiProviderMenu value={myApiCatalogProvider ?? myApiActiveConfig.provider} providers={myApiProviderOptions} disabled={setActiveProviderMutation.isPending || !myApiProviderOptions.length} ariaLabel={t.myApiProviderPicker} labels={{ connected: t.myApiProviderConnected, empty: t.myApiProviderEmpty }} onSelect={(provider) => void selectMyApiProvider(provider)} />
         {myApiCatalogMutation.isPending ? <span className="kairema-mode-hint-state"> · {t.myApiLoadingModels}…</span> : null}
         {myApiCatalogMutation.isError ? <span className="kairema-mode-hint-state"> · {myApiCatalogMutation.error?.message ?? t.myApiNoModels} <button type="button" className="kairema-mode-hint-link" onClick={() => void loadMyApiCatalog({ force: true })}>{t.myApiModelsRetry}</button></span> : null}
         {myApiCatalogMutation.isSuccess && !myApiModels.length ? <span className="kairema-mode-hint-state"> · {t.myApiNoModels}</span> : null}
         {myApiSwitchError ? <span className="kairema-mode-hint-state"> · {myApiSwitchError}</span> : null}
-      </>) : (<>{t.myApiNotConfigured}{" "}<Link href="/settings/providers" className="kairema-mode-hint-link">{t.configureProvider}</Link></>)}</span>}</>} messages={visibleMessages} onSendMessage={send} onUploadFiles={uploadFiles} onRemoveAttachment={removeTemporaryAttachment} isLoading={isStreaming} onExportMarkdown={() => void exportCurrentChat("markdown")} onExportPdf={() => void exportCurrentChat("pdf")} canExport={Boolean(activeSession && dbMessages.length)} exportBusy={isExporting} exportError={notice} onCopyAssistant={(message) => void copyMessage(message)} onCopyUser={(message) => void copyMessage(message)} onCancelStream={cancelStream} composerValue={composerDraft} onComposerValueChange={setComposerDraft} onOpenTemplates={() => setTemplatesOpen(true)} composerSessionId={activeId || "new-composer"} uploadStatus={uploadStatus?.sessionId === activeId ? uploadStatus.message : ""} language={language} emptyStateMessage={isAuthenticated ? (chatMode === "myApi" ? (myApiActiveConfig ? `${t.start} ${myApiActiveConfig.displayName || myApiActiveConfig.provider} · ${myApiActiveConfig.activeModel}` : t.myApiNotConfigured) : `${t.start} ${selectedModel.label[language]}`) : t.loginChat} guestLoginAction={!isAuthenticated ? { label: t.loginHistory, onClick: () => startLogin() } : undefined} hasOlderHistory={Boolean(olderHistoryCursor === undefined ? messagesQuery.data?.nextCursor : olderHistoryCursor)} isLoadingOlderHistory={isLoadingOlderHistory} onLoadOlderHistory={() => void loadOlderHistory()} navigationCloseSignal={navigationCloseSignal} sendDisabled={blockedMyApiProvider && !isStreaming} onBlockedSendAttempt={() => setProviderBlocked((current) => (current ? { ...current } : current))} />
-        </div>
-        )}
-        </div>
+      </>) : (<>{t.myApiNotConfigured}{" "}<Link href="/settings/providers" className="kairema-mode-hint-link">{t.configureProvider}</Link></>)}</span>}</div>} messages={visibleMessages} onSendMessage={send} onUploadFiles={uploadFiles} onRemoveAttachment={removeTemporaryAttachment} isLoading={isStreaming} onExportMarkdown={() => void exportCurrentChat("markdown")} onExportPdf={() => void exportCurrentChat("pdf")} canExport={Boolean(activeSession && dbMessages.length)} exportBusy={isExporting} exportError={notice} onCopyAssistant={(message) => void copyMessage(message)} onCopyUser={(message) => void copyMessage(message)} onCancelStream={cancelStream} composerValue={composerDraft} onComposerValueChange={setComposerDraft} onOpenTemplates={() => setTemplatesOpen(true)} composerSessionId={activeId || "new-composer"} uploadStatus={uploadStatus?.sessionId === activeId ? uploadStatus.message : ""} language={language} emptyStateMessage={isAuthenticated ? (chatMode === "myApi" ? (myApiActiveConfig ? `${t.start} ${myApiActiveConfig.displayName || myApiActiveConfig.provider} · ${myApiActiveConfig.activeModel}` : t.myApiNotConfigured) : `${t.start} ${selectedModel.label[language]}`) : t.loginChat} guestLoginAction={!isAuthenticated ? { label: t.loginHistory, onClick: () => startLogin() } : undefined} hasOlderHistory={Boolean(olderHistoryCursor === undefined ? messagesQuery.data?.nextCursor : olderHistoryCursor)} isLoadingOlderHistory={isLoadingOlderHistory} onLoadOlderHistory={() => void loadOlderHistory()} navigationCloseSignal={navigationCloseSignal} sendDisabled={Boolean(providerBlocked) && !isStreaming} onBlockedSendAttempt={() => setProviderBlocked((current) => (current ? { ...current } : current))} />
       </section>
       <CleanSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} models={modelViews} settings={settings} language={language} labels={t} onUpdate={persistSettings} accountEmail={accountEmail} onLogout={logout} theme={theme} onToggleTheme={() => toggleTheme?.()} onOpenAiProviders={() => { setSettingsOpen(false); navigate("/settings/providers"); }} />
-      <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} language={language} labels={t} name={profileName} preferredName={profilePreferredName} personalPreferences={profilePersonalPreferences} onProfileChange={(field, value) => { if (field === "name") setProfileName(value); else if (field === "preferredName") setProfilePreferredName(value); else setProfilePersonalPreferences(value); }} onSaveProfile={() => { void updateNameMutation.mutateAsync({ name: profileName.trim() }).then(() => updateProfileDetailsMutation.mutateAsync({ preferredName: profilePreferredName.trim(), personalPreferences: profilePersonalPreferences.trim() })).then(() => utils.auth.me.invalidate()).catch((error) => setNotice(publicErrorMessage(error, language === "ru" ? "Не удалось обновить профиль." : "Could not update the profile."))); }} profilePending={updateNameMutation.isPending || updateProfileDetailsMutation.isPending} askClarifyingQuestions={Boolean(settings.askClarifyingQuestions)} onAskClarifyingChange={(value) => void persistSettings({ askClarifyingQuestions: value })} preferencesPending={settingMutation.isPending} onSavePreferences={() => void persistSettings({ askClarifyingQuestions: Boolean(settings.askClarifyingQuestions) })} onToast={setNotice} />
+      <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} language={language} labels={t} name={profileName} onNameChange={setProfileName} onSaveName={() => { void updateNameMutation.mutateAsync({ name: profileName.trim() }).then(() => utils.auth.me.invalidate()).catch((error) => setNotice(publicErrorMessage(error, language === "ru" ? "Не удалось обновить профиль." : "Could not update the profile."))); }} namePending={updateNameMutation.isPending} askClarifyingQuestions={Boolean(settings.askClarifyingQuestions)} onAskClarifyingChange={(value) => void persistSettings({ askClarifyingQuestions: value })} preferencesPending={settingMutation.isPending} onSavePreferences={() => void persistSettings({ askClarifyingQuestions: Boolean(settings.askClarifyingQuestions) })} onToast={setNotice} />
       <UnifiedMemoryDialog open={memoryOpen} onOpenChange={setMemoryOpen} data={memoryQuery.data} language={language} labels={t} onToast={setNotice} onUpdate={async (input) => { await memoryUpdateMutation.mutateAsync(input); await utils.memory.get.invalidate(); }} onAdd={async (fact) => { await memoryAddMutation.mutateAsync({ fact }); await utils.memory.get.invalidate(); }} onDelete={async (entryId) => { await memoryDeleteMutation.mutateAsync({ entryId }); await utils.memory.get.invalidate(); }} onClear={async () => { await memoryClearMutation.mutateAsync(); await utils.memory.get.invalidate(); }} />
       <ExportHistoryDialog open={exportHistoryOpen} onOpenChange={setExportHistoryOpen} records={exportsQuery.data ?? []} loading={exportsQuery.isLoading} language={language} busyId={exportDeleteMutation.isPending ? exportDeleteMutation.variables?.exportId : undefined} onDownload={(record) => { void downloadPersistentExport(record.id, record.fileName).catch((error) => setNotice(publicErrorMessage(error, language === "ru" ? "Не удалось открыть экспорт." : "Could not open export."))); }} onDelete={(exportId) => { void deletePersistentExport(exportId); }} />
       <PromptTemplatesDialog open={templatesOpen} onOpenChange={setTemplatesOpen} onInsert={(template) => { setComposerDraft(template.text); setTemplatesOpen(false); setNotice(language === "ru" ? `Шаблон «${template.title}» добавлен в запрос.` : `Template “${template.title}” was added to the prompt.`); }} onCopy={(template) => { void navigator.clipboard.writeText(template.text).then(() => setNotice(language === "ru" ? `Шаблон «${template.title}» скопирован.` : `Template “${template.title}” copied.`)).catch(() => setNotice(language === "ru" ? "Не удалось скопировать шаблон." : "Could not copy the template.")); }} />
@@ -1091,22 +936,19 @@ function CleanSettingsDialog({ open, onOpenChange, models, settings, language, l
 export function SettingSwitch({ label, help, checked, disabled, onChange }: { label: string; help?: string; checked: boolean; disabled?: boolean; onChange: (value: boolean) => void }) { return <div className="kairema-switch-row"><span className="kairema-switch-copy"><b>{label}</b>{help && <small>{help}</small>}</span><Switch className="kairema-switch-control" aria-label={label} checked={checked} disabled={disabled} onCheckedChange={onChange} /></div>; }
 
 /** Profile is a separate dialog from Settings: display name plus personal preferences. */
-function ProfileDialog({ open, onOpenChange, language, labels, name, preferredName, personalPreferences, onProfileChange, onSaveProfile, profilePending, askClarifyingQuestions, onAskClarifyingChange, preferencesPending, onSavePreferences, onToast }: { open: boolean; onOpenChange: (open: boolean) => void; language: Language; labels: typeof copy.ru | typeof copy.en; name: string; preferredName: string; personalPreferences: string; onProfileChange: (field: "name" | "preferredName" | "personalPreferences", value: string) => void; onSaveProfile: () => void; profilePending: boolean; askClarifyingQuestions: boolean; onAskClarifyingChange: (value: boolean) => void; preferencesPending: boolean; onSavePreferences: () => void; onToast: (message: string) => void }) {
+function ProfileDialog({ open, onOpenChange, language, labels, name, onNameChange, onSaveName, namePending, askClarifyingQuestions, onAskClarifyingChange, preferencesPending, onSavePreferences, onToast }: { open: boolean; onOpenChange: (open: boolean) => void; language: Language; labels: typeof copy.ru | typeof copy.en; name: string; onNameChange: (value: string) => void; onSaveName: () => void; namePending: boolean; askClarifyingQuestions: boolean; onAskClarifyingChange: (value: boolean) => void; preferencesPending: boolean; onSavePreferences: () => void; onToast: (message: string) => void }) {
   const [nameNotice, setNameNotice] = useState("");
   const [preferencesNotice, setPreferencesNotice] = useState("");
-  const [profileDirty, setProfileDirty] = useState(false);
-  // Reset only when the dialog opens; keying this on a field value would clear the dirty
-  // flag on every keystroke and keep the save button permanently disabled.
-  useEffect(() => { if (open) { setNameNotice(""); setPreferencesNotice(""); setProfileDirty(false); } }, [open]);
-  const saveProfile = () => { if (profilePending) return; onSaveProfile(); setNameNotice(labels.profileUpdated); onToast(labels.profileUpdated); };
-  const edit = (field: "name" | "preferredName" | "personalPreferences", value: string) => { onProfileChange(field, value); setProfileDirty(true); setNameNotice(""); };
+  const [nameDirty, setNameDirty] = useState(false);
+  // Reset only when the dialog opens; keying this on `name` would clear the dirty
+  // flag on every keystroke and keep "Update Profile" permanently disabled.
+  useEffect(() => { if (open) { setNameNotice(""); setPreferencesNotice(""); setNameDirty(false); } }, [open]);
+  const saveName = () => { if (namePending) return; onSaveName(); setNameNotice(labels.profileUpdated); onToast(labels.profileUpdated); };
   const savePreferences = () => { if (preferencesPending) return; onSavePreferences(); setPreferencesNotice(labels.preferencesSaved); onToast(labels.preferencesSaved); };
   return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="kairema-dialog kairema-dialog-narrow"><DialogHeader><DialogTitle>{labels.profileTitle}</DialogTitle></DialogHeader>
     <div className="kairema-profile-grid">
-    <section><label className="kairema-field-label"><span>{labels.fullName}</span><input value={name} maxLength={120} autoComplete="name" aria-label={labels.fullName} placeholder={labels.namePlaceholder} onChange={(event) => edit("name", event.target.value)} /></label></section>
-    <section><label className="kairema-field-label"><span>{labels.nameFieldLabel}</span><input value={preferredName} maxLength={120} autoComplete="nickname" aria-label={labels.nameFieldLabel} placeholder={labels.preferredNamePlaceholder} onChange={(event) => edit("preferredName", event.target.value)} /></label></section>
-    <section><h3>{labels.personalPreferences}</h3><p className="kairema-dialog-note">{labels.preferencesPrompt}</p><p className="kairema-dialog-note">{labels.preferencesScope}</p><label className="kairema-field-label"><span>{labels.personalPreferencesField}</span><textarea value={personalPreferences} maxLength={4000} rows={4} aria-label={labels.personalPreferencesField} placeholder={labels.personalPreferencesPlaceholder} onChange={(event) => edit("personalPreferences", event.target.value)} /></label><button type="button" className="kairema-dialog-action" disabled={profilePending || !profileDirty} onClick={saveProfile}>{profilePending ? <LoaderCircle className="size-3.5 animate-spin" /> : <UserIcon className="size-3.5" />}{labels.updateProfile}</button>{nameNotice ? <p className="kairema-setting-help" role="status">{nameNotice}</p> : null}</section>
-    <section><SettingSwitch label={labels.askClarifying} checked={askClarifyingQuestions} onChange={onAskClarifyingChange} /><button type="button" className="kairema-dialog-action" disabled={preferencesPending} onClick={savePreferences}>{preferencesPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}{labels.savePreferences}</button>{preferencesNotice ? <p className="kairema-setting-help" role="status">{preferencesNotice}</p> : null}</section>
+    <section><h3>{labels.fullName}</h3><label className="kairema-field-label"><span>{labels.nameFieldLabel}</span><input value={name} maxLength={120} autoComplete="name" aria-label={labels.nameFieldLabel} placeholder={labels.namePlaceholder} onChange={(event) => { onNameChange(event.target.value); setNameDirty(true); setNameNotice(""); }} /></label><button type="button" className="kairema-dialog-action" disabled={namePending || !nameDirty} onClick={saveName}>{namePending ? <LoaderCircle className="size-3.5 animate-spin" /> : <UserIcon className="size-3.5" />}{labels.updateProfile}</button>{nameNotice ? <p className="kairema-setting-help" role="status">{nameNotice}</p> : null}</section>
+    <section><h3>{labels.personalPreferences}</h3><p className="kairema-dialog-note">{labels.preferencesPrompt}</p><p className="kairema-dialog-note">{labels.preferencesScope}</p><SettingSwitch label={labels.askClarifying} checked={askClarifyingQuestions} onChange={onAskClarifyingChange} /><button type="button" className="kairema-dialog-action" disabled={preferencesPending} onClick={savePreferences}>{preferencesPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}{labels.savePreferences}</button>{preferencesNotice ? <p className="kairema-setting-help" role="status">{preferencesNotice}</p> : null}</section>
     </div>
   </DialogContent></Dialog>;
 }
