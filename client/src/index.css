@@ -959,3 +959,23 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
    the handler and can re-state the reason. It must still read as unavailable, which is what the
    reserved muted tone is for. */
 .kairema-send[aria-disabled="true"] { cursor:not-allowed; opacity:.45; }
+
+/* Visual-only styling for mockup-like classes added to Home/AIChatBox */
+.scroll { min-height:0; flex:1 1 auto; overflow-y:auto; overscroll-behavior:contain; }
+.composer-dock { display:flex; align-self:center; align-items:end; gap:9px; width:min(100%,896px); padding:14px 16px 8px; }
+.composer { display:grid; flex:1; min-width:0; gap:6px; }
+.composerrow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.attach-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.attach-wrap { position:relative; }
+.attach-btn { display:inline-flex; align-items:center; gap:6px; padding:0 8px; height:34px; border:1px solid var(--k-line); border-radius:8px; color:var(--k-muted); background:var(--k-panel); }
+.attach-btn:hover:not(:disabled) { border-color:var(--k-text); color:var(--k-text); background:var(--k-panel-2); }
+.attach-menu { position:absolute; bottom:calc(100% + 6px); left:0; display:grid; gap:2px; padding:6px; min-width:180px; border:1px solid var(--k-line); border-radius:10px; background:var(--k-panel); box-shadow:0 16px 42px rgba(0,0,0,.35); }
+.attach-menu button { padding:6px 8px; border-radius:6px; border:0; background:transparent; color:var(--k-text); text-align:left; }
+.attach-menu button:hover { background:var(--k-panel-2); }
+.prompt-launch { display:inline-flex; align-items:center; gap:6px; height:34px; padding:0 8px; border:1px solid var(--k-line); border-radius:8px; color:var(--k-muted); background:var(--k-panel); }
+.prompt-launch:hover { border-color:var(--k-text); color:var(--k-text); background:var(--k-panel-2); }
+.hint { color:var(--k-muted); font-size:11px; }
+.row { display:flex; align-items:center; gap:8px; }
+.topact .txt { display:inline; }
+.mobilemenu { display:grid; place-items:center; }
+@media(max-width:767px){ .topact .txt { display:none; } .composer-dock { width:100%; padding:11px 12px 7px; } .composerrow { gap:6px; } }
