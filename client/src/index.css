@@ -979,3 +979,10 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .topact .txt { display:inline; }
 .mobilemenu { display:grid; place-items:center; }
 @media(max-width:767px){ .topact .txt { display:none; } .composer-dock { width:100%; padding:11px 12px 7px; } .composerrow { gap:6px; } }
+
+/* Align structure with reference */
+.kairema-shell.app {
+  display: grid !important;
+  grid-template-columns: 250px minmax(0,1fr) !important;
+  height: 100dvh !important;
+}
