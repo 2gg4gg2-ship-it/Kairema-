@@ -1014,3 +1014,17 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
   .kairema-sidebar{position:fixed;top:0;bottom:0;left:0;transform:translateX(-105%);width:min(82vw,290px);z-index:20}
   .kairema-sidebar-open{transform:translateX(0)}
 }
+
+/* Full redesign alignment */
+.kairema-shell { display: grid !important; grid-template-columns: 250px minmax(0,1fr) !important; height: 100dvh !important; background: #101114 !important; }
+.kairema-main { display: flex !important; flex-direction: column !important; min-width: 0 !important; height: 100dvh !important; }
+.kairema-chat-scroll { flex: 1 !important; min-height: 0 !important; overflow: auto !important; overscroll-behavior: contain !important; scroll-behavior: smooth !important; }
+.kairema-chat { min-height: 100% !important; display: flex !important; flex-direction: column !important; }
+.kairema-chat > div:last-of-type { width: min(100%, 960px) !important; margin: auto !important; padding: 28px 32px 26px !important; }
+.kairema-composer-dock { width: min(100%, 960px) !important; margin: 0 auto !important; padding: 8px 32px calc(12px + env(safe-area-inset-bottom)) !important; }
+.kairema-message { display: flex !important; gap: 0 !important; width: 100% !important; }
+.kairema-message-ai .kairema-message-content { width: 100% !important; }
+.kairema-message-ai .kairema-markdown { background: transparent !important; border: 0 !important; padding: 0 !important; }
+.kairema-message-user { justify-content: flex-end !important; }
+.kairema-message-user .kairema-markdown,
+.kairema-message-user > div > div { background: #25272e !important; border: 1px solid #3a3c46 !important; border-radius: 16px 5px 16px 16px !important; padding: 11px 14px !important; max-width: min(88%, 760px) !important; }
