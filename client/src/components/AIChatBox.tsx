@@ -421,6 +421,7 @@ export function AIChatBox({
   }, [composerSessionId]);
 
   const submit = async (event?: React.FormEvent) => {
+    console.log("submit called in AIChatBox");
     event?.preventDefault();
     const value = currentInput.trim();
     // Checked before anything is read or cleared, so a blocked send leaves the typed text exactly
@@ -540,6 +541,7 @@ export function AIChatBox({
             {onOpenTemplates && <button type="button" onClick={onOpenTemplates} disabled={isLoading} className="kairema-composer-tool" title={language === "ru" ? "Шаблоны промптов" : "Prompt templates"} aria-label={language === "ru" ? "Шаблоны промптов" : "Prompt templates"}><Sparkles className="size-4" /></button>}
             <details className="kairema-attachment-menu" ref={attachmentMenuRef} open={attachmentMenuOpen} onToggle={(event) => setAttachmentMenuOpen(event.currentTarget.open)}><summary className="kairema-composer-tool" title={t.attach} aria-label={t.attach}>{isUploading || isPreparingAttachments ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}</summary><div className="kairema-attachment-menu-popover"><button type="button" onClick={() => photoInputRef.current?.click()} disabled={!onUploadFiles || isLoading || isUploading || isPreparingAttachments}>{t.attachPhoto}</button><button type="button" onClick={() => fileInputRef.current?.click()} disabled={!onUploadFiles || isLoading || isUploading || isPreparingAttachments}>{t.attachFile}</button></div></details>
             <Textarea ref={textareaRef} value={currentInput} onChange={(event) => setComposerInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} onKeyDownCapture={(event) => { if (sendDisabled && event.key === "Enter" && !event.shiftKey) event.preventDefault(); }} placeholder={effectivePlaceholder} className="kairema-textarea" rows={1} />
+            console.log("onKeyDown called in AIChatBox:", event.key, event.shiftKey);
           </div>
         </div>
         {isLoading ? <Button type="button" size="icon" onClick={onCancelStream} className="kairema-cancel" aria-label={t.stop}><Square className="size-3.5 fill-current" /></Button> : <Button type="submit" size="icon" aria-disabled={sendDisabled || undefined} disabled={!sendDisabled && (!currentInput.trim() || isUploading || pendingLocalAttachments.length > 0)} className="kairema-send" aria-label={t.send}>{isUploading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}</Button>}

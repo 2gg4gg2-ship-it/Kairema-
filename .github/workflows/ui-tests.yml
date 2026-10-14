@@ -1,0 +1,41 @@
+name: UI Tests
+
+on:
+  push:
+    branches: [ kilo/prime-condor-off ]
+  pull_request:
+    branches: [ kilo/prime-condor-off ]
+
+jobs:
+  playwright:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+      - name: Start dev server and run UI tests
+        env:
+          # Avoid using real secrets; leave OAuth empty or set a dummy.
+          OAUTH_SERVER_URL: ''   # optional, but we set empty to avoid error logs
+        run: |
+          # Start the dev server in background
+          npm run dev &
+          SERVER_PID=$!
+          # Wait for the server to be ready (max 30s)
+          for i in {1..30}; do
+            if curl -s http://localhost:3000/ > /dev/null; then break; fi
+            sleep 1
+          done
+          # Run Playwright tests
+          npx playwright test
+          EXIT_CODE=$?
+          # Stop the dev server
+          kill $SERVER_PID || true
+          exit $EXIT_CODE

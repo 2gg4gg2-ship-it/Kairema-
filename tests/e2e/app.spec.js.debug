@@ -1,0 +1,150 @@
+import { test, expect } from '@playwright/test';
+import superjson from 'superjson';
+
+test('functional verification of UI redesign', async ({ page }) => {
+  const consoleLogs = [];
+  page.on("console", msg => consoleLogs.push(msg.text()));
+  try {
+    // Mock the auth.me endpoint to return a user
+    await page.route('**/api/trpc/auth.me**', async (route) => {
+      const request = route.request();
+      const user = {
+        id: 1,
+        openId: 'test-openid-123',
+        name: 'Test User',
+        email: 'test@example.com',
+        loginMethod: 'stytch-password',
+        role: 'user',
+        isGuest: 0,
+        expiresAt: null,
+        lastActivityAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        lastSignedIn: new Date(),
+      };
+      const serializedUser = superjson.serialize(user);
+      const batchResponse = [{ result: { data: serializedUser } }];
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(batchResponse),
+      });
+    });
+
+    await page.goto('http://localhost:3000/');
+
+    // Wait for app to load
+    const modelPicker = page.locator('#modelPicker');
+    await expect(modelPicker).toBeVisible({ timeout: 15000 });
+
+    // Helper to wait for API calls to settle
+    const waitForIdle = async () => {
+      await page.waitForTimeout(500);
+    };
+
+    // 1. Model picker switching
+    await expect(modelPicker).toContainText('Kairema Flash');
+    await modelPicker.click();
+    await page.locator('.model-option[data-model="think"]').click();
+    await waitForIdle();
+    await expect(modelPicker).toContainText('Kairema Think');
+    await modelPicker.click();
+    await page.locator('.model-option[data-model="context"]').click();
+    await waitForIdle();
+    await expect(modelPicker).toContainText('Kairema Context');
+    await modelPicker.click();
+    await page.locator('.model-option[data-model="apex"]').click();
+    await waitForIdle();
+    await expect(modelPicker).toContainText('Kairema Apex');
+
+    // 2. Send a chat message (check that user message appears)
+    const textarea = page.locator('.kairema-textarea');
+    await textarea.click();
+    await textarea.fill('Hello world');
+    await page.keyboard.press('Enter');
+    await waitForIdle();
+    // Wait for the user message to appear in the chat
+    const lastMessage = page.locator('.message:last-child');
+    await expect(lastMessage).toContainText('Hello world');
+    await expect(lastMessage).toHaveClass(/message-user/);
+
+    // 3. Export a chat
+    const exportButton = page.locator('#exportBtn');
+    await exportButton.click();
+    const exportMenu = page.locator('#exportMenu');
+    await expect(exportMenu).toBeVisible();
+    await exportMenu.getByRole('menuitem', { name: /Markdown/i }).click();
+    await waitForIdle();
+    // Close export menu by clicking away
+    await page.click('body');
+    await expect(exportMenu).toBeHidden();
+
+    // 4. Open and close dialogs via sidebar
+    const sidebarLinks = page.locator('.side-link');
+    // Provider
+    await sidebarLinks.filter({ hasText: /API Chat/i }).click();
+    await waitForIdle();
+    const providerPage = page.locator('text=Provider not implemented yet');
+    await expect(providerPage).toBeVisible();
+    // Go back to chat
+    await sidebarLinks.filter({ hasText: /Chat/i }).click();
+    await waitForIdle();
+
+    // Settings
+    await sidebarLinks.filter({ hasText: /Settings/i }).click();
+    await waitForIdle();
+    const settingsDialog = page.locator('.modalback.open');
+    await expect(settingsDialog).toBeVisible();
+    // Close settings by clicking the backdrop
+    await page.click('.modalback.open', { position: { x: 10, y: 10 } });
+    await waitForIdle();
+    await expect(settingsDialog).toBeHidden();
+
+    // Memory
+    await sidebarLinks.filter({ hasText: /Memory/i }).click();
+    await waitForIdle();
+    const memoryDialog = page.locator('.modalback.open');
+    await expect(memoryDialog).toBeVisible();
+    await page.click('.modalback.open', { position: { x: 10, y: 10 } });
+    await waitForIdle();
+    await expect(memoryDialog).toBeHidden();
+
+    // Profile
+    await sidebarLinks.filter({ hasText: /Profile/i }).click();
+    await waitForIdle();
+    const profileDialog = page.locator('.modalback.open');
+    await expect(profileDialog).toBeVisible();
+    await page.click('.modalback.open', { position: { x: 10, y: 10 } });
+    await waitForIdle();
+    await expect(profileDialog).toBeHidden();
+
+    // 5. Mobile sidebar and bottom navigation
+    await page.setViewportSize({ width: 320, height: 568 });
+    const mobileMenu = page.locator('#mobileMenu');
+    await expect(mobileMenu).toBeVisible();
+    await mobileMenu.click();
+    const sidebar = page.locator('#sidebar');
+    await expect(sidebar).toHaveClass(/open/);
+    const scrim = page.locator('#scrim');
+    await expect(scrim).toBeVisible();
+    await scrim.click();
+    await expect(sidebar).not.toHaveClass(/open/);
+    // Restore desktop size for bottom nav
+    await page.setViewportSize({ width: 1024, height: 768 });
+    const bottomNav = page.locator('#bottomnav');
+    await expect(bottomNav).toBeVisible();
+    // Click each bottom nav item to ensure they change active page
+    await bottomNav.getByRole('button', { name: /Chat/i }).click();
+    await waitForIdle();
+    await expect(page.locator('#sidebar .side-link.active')).toHaveText(/Chat/i);
+    await bottomNav.getByRole('button', { name: /Settings/i }).click();
+    await waitForIdle();
+    await expect(page.locator('#sidebar .side-link.active')).toHaveText(/Settings/i);
+    await bottomNav.getByRole('button', { name: /Chat/i }).click();
+    await waitForIdle();
+    await expect(page.locator('#sidebar .side-link.active')).toHaveText(/Chat/i);
+  } finally {
+    // Print console logs for debugging
+    console.log("Browser console logs:", consoleLogs);
+  }
+});

@@ -58,6 +58,10 @@ export function useAuth(options?: UseAuthOptions) {
   }, [logoutMutation, utils]);
 
   const state = useMemo(() => {
+    console.log('[useAuth] meQuery.data:', meQuery.data);
+    console.log('[useAuth] meQuery.error:', meQuery.error);
+    console.log('[useAuth] meQuery.isError:', meQuery.isError);
+    console.log('[useAuth] meQuery.isLoading:', meQuery.isLoading);
     localStorage.setItem(
       "manus-runtime-user-info",
       JSON.stringify(meQuery.data)
