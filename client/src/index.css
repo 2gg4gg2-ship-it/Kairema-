@@ -1008,9 +1008,27 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-send:hover { background: #e9eaee !important; }
 .kairema-message-ai { background: #17181d !important; border: 1px solid #30323a !important; color: #f0f1f4 !important; }
 .kairema-message-user { background: #25272e !important; border: 1px solid #3a3c46 !important; color: #f0f1f4 !important; border-radius: 18px 18px 5px 18px !important; }
-.kairema-welcome { background: radial-gradient(circle at 18% 15%, rgba(80,90,255,0.15), transparent 31rem), radial-gradient(circle at 84% 88%, rgba(109,93,252,0.12), transparent 29rem), #101114 !important; }
+.kairema-welcome { background: radial-gradient(circle at 18% 15%, color-mix(in srgb, var(--k-text) 12%, transparent), transparent 31rem), radial-gradient(circle at 84% 88%, color-mix(in srgb, var(--k-muted) 12%, transparent), transparent 29rem), var(--k-bg) !important; }
 .kairema-welcome-card { background: rgba(23,24,29,0.95) !important; border: 1px solid #30323a !important; }
 @media(max-width:767px){
   .kairema-sidebar{position:fixed;top:0;bottom:0;left:0;transform:translateX(-105%);width:min(82vw,290px);z-index:20}
   .kairema-sidebar-open{transform:translateX(0)}
 }
+
+/* ---- kairema_v23 restyle: model picker (top-bar pill + chevron) ----
+   New kairema-model-* classes shadow the legacy ones. Legacy rules above stay so other
+   components keep working; these only target the picker markup. */
+.kairema-model-wrap{display:inline-flex;flex:0 1 auto;min-width:0;align-items:center;justify-content:center;gap:10px}
+.kairema-model-pill.kairema-model-wrap{height:42px;box-sizing:border-box;padding:8px 16px;border-radius:14px;background:var(--k-panel);border:1px solid var(--k-line);color:var(--k-text);transition:background .2s,border-color .2s,box-shadow .2s}
+.kairema-model-pill.kairema-model-wrap:hover{background:var(--k-panel-2);border-color:var(--k-strong)}
+.kairema-model-sparkle{flex:0 0 auto;width:18px;height:18px;color:var(--k-strong)}
+.kairema-model-trigger{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--k-line);border-radius:11px;background:var(--k-panel-2);color:var(--k-text);transition:background .2s,border-color .2s,box-shadow .2s}
+.kairema-model-trigger:hover{background:var(--k-panel);border-color:var(--k-strong)}
+.kairema-model-select{appearance:none;border:0;outline:0;background:transparent;color:var(--k-text);font-size:13px;font-weight:700;letter-spacing:-.01em;padding:0;cursor:pointer}
+.kairema-model-select option{background:var(--k-panel);color:var(--k-text)}
+.kairema-model-chevron{flex:0 0 auto;width:15px;height:15px;color:var(--k-muted);stroke-width:2.25;transition:transform .16s ease}
+.kairema-model-popover-indicator{position:relative}
+.kairema-binding-name{color:var(--k-text)}
+@media(max-width:900px){.kairema-model-pill.kairema-model-wrap{height:38px;padding:6px 12px}.kairema-model-sparkle{width:16px;height:16px}.kairema-model-chevron{width:14px;height:14px}.kairema-model-trigger{padding:5px 9px}}
+@media(max-width:680px){.kairema-model-pill.kairema-model-wrap{height:36px;padding:6px 10px;gap:6px}.kairema-model-sparkle{width:16px;height:16px}.kairema-model-chevron{width:14px;height:14px}.kairema-model-trigger{padding:4px 7px}.kairema-model-select{font-size:12px}}
+body.light .kairema-model-pill.kairema-model-wrap{background:#fff;border-color:#dfe1e6;color:#202127}body.light .kairema-model-pill.kairema-model-wrap:hover{background:#f4f5f7}body.light .kairema-model-sparkle{color:#202127}body.light .kairema-model-trigger{background:#fff;border-color:#dfe1e6;color:#202127}body.light .kairema-model-trigger:hover{background:#f4f5f7}body.light .kairema-model-select{color:#202127}body.light .kairema-model-select option{background:#fff;color:#202127}body.light .kairema-model-chevron{color:#737783}body.light .kairema-binding-name{color:#202127}
