@@ -186,6 +186,9 @@ export default function Terminal() {
             New session
           </Button>
         )}
+        <Button size="sm" variant="outline" disabled title="not connected yet" data-testid="terminal-clear">
+          Clear
+        </Button>
       </header>
 
       {notice ? (
