@@ -238,7 +238,7 @@ export function redactLegacyAssistantReferences(value: string) {
  * with measured coordinates, and it closes on Escape or an outside click like every other menu.
  * The action itself is unchanged: it calls the same `exportCurrentChat` the page already had.
  */
-function ExportControl({ language, label, markdownLabel, pdfLabel, preparingLabel, canExport, exportBusy, onExportMarkdown, onExportPdf }: { language: Language; label: string; markdownLabel: string; pdfLabel: string; preparingLabel: string; canExport: boolean; exportBusy: string | null; onExportMarkdown?: () => void; onExportPdf?: () => void }) {
+export function ExportControl({ language, label, markdownLabel, pdfLabel, preparingLabel, canExport, exportBusy, onExportMarkdown, onExportPdf }: { language: Language; label: string; markdownLabel: string; pdfLabel: string; preparingLabel: string; canExport: boolean; exportBusy: string | null; onExportMarkdown?: () => void; onExportPdf?: () => void }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
