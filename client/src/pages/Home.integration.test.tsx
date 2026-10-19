@@ -770,11 +770,22 @@ describe("Home integration flows", () => {
     const user = userEvent.setup();
     const { container } = render(<Home />);
 
-    await waitFor(() => expect(container.querySelector(".kairema-role-menu-trigger")).not.toBeNull());
-    await user.click(container.querySelector(".kairema-role-menu-trigger") as HTMLElement);
+    // The Kairema role selector is a toggle trigger labeled "Роли".
+    const trigger = (await screen.findByLabelText("Роли")) as HTMLElement;
+    // The grid is hidden before the first click.
+    expect(container.querySelector(".kairema-model-grid")).toBeNull();
+    await user.click(trigger);
 
-    await waitFor(() => expect(document.querySelector(".kairema-role-menu")).not.toBeNull());
-    expect(document.querySelectorAll(".kairema-role-menu-item").length).toBe(4);
+    // Clicking the trigger reveals the 2x2 grid of the four Kairema roles.
+    await waitFor(() => expect(container.querySelector(".kairema-model-grid")).not.toBeNull());
+    const cards = container.querySelectorAll(".kairema-model-grid-card");
+    expect(cards).toHaveLength(4);
+    expect(Array.from(cards).map((card) => card.querySelector(".kairema-model-grid-card-name")?.textContent)).toEqual([
+      "Kairema Flash",
+      "Kairema Think",
+      "Kairema Context",
+      "Kairema Apex",
+    ]);
   });
 
   it("hides Profile entirely for a guest account", () => {
@@ -1212,8 +1223,10 @@ describe("Home integration flows", () => {
   it("keeps the role selector to one interactive trigger without an external chevron icon", async () => {
     const { container } = render(<Home />);
 
-    await waitFor(() => expect(container.querySelectorAll(".kairema-role-menu-trigger")).toHaveLength(1));
-    expect(container.querySelectorAll(".kairema-select-wrap svg")).toHaveLength(0);
+    expect(container.querySelectorAll(".kairema-model-trigger")).toHaveLength(1);
+    // The rotating chevron is nested inside the trigger button, not floating as a sibling.
+    expect(container.querySelector(".kairema-model-trigger .kairema-model-chevron")).not.toBeNull();
+    expect(container.querySelector(".kairema-select-wrap")).toBeNull();
   });
 
   it("opens public provider and RAG audit panels without exposing server-only reserves or routing chains", async () => {
@@ -1274,11 +1287,24 @@ describe("My API mode hides the Kairema role selector", () => {
   });
 
   it("BUG-1: the four Kairema roles still work in ordinary Chat mode", async () => {
+    const user = userEvent.setup();
     const { container } = render(<Home />);
-    const select = (await screen.findByLabelText("Роли")) as HTMLSelectElement;
-    const options = Array.from(select.options).map((option) => option.textContent);
-    expect(options).toEqual(["Kairema Flash", "Kairema Think", "Kairema Context", "Kairema Apex"]);
-    expect(container.querySelector(".kairema-model-pill select")).not.toBeNull();
+    const trigger = (await screen.findByLabelText("Роли")) as HTMLElement;
+    const label = () => trigger.querySelector(".kairema-model-trigger-label")?.textContent;
+    // The default role ("fast" → Flash) is reflected in the trigger label.
+    await waitFor(() => expect(label()).toBe("Kairema Flash"));
+
+    await user.click(trigger);
+    const grid = await waitFor(() => container.querySelector(".kairema-model-grid"));
+    const cards = grid!.querySelectorAll(".kairema-model-grid-card");
+    expect(cards).toHaveLength(4);
+    const names = Array.from(cards).map((card) => card.querySelector(".kairema-model-grid-card-name")?.textContent);
+    expect(names).toEqual(["Kairema Flash", "Kairema Think", "Kairema Context", "Kairema Apex"]);
+
+    // Picking a card switches the active role and closes the grid.
+    await user.click(cards[1]); // "Kairema Think"
+    await waitFor(() => expect(label()).toBe("Kairema Think"));
+    expect(container.querySelector(".kairema-model-grid")).toBeNull();
   });
 
   it("BUG-2: never names a Kairema role in the My API empty state", async () => {
