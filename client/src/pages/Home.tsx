@@ -16,7 +16,7 @@ import { clearDirectKey } from "@/lib/direct-key-store";
 import { buildCandidateChain, ProviderUnavailableError, runMyApiTurn, type TurnCandidate } from "@/lib/my-api-turn";
 import { resolveExecution } from "@shared/provider-capabilities";
 import { trpc } from "@/lib/trpc";
-import { Archive, Bot, Check, ChevronDown, CircleDot, Clock3, Copy, FileImage, Gauge, Globe2, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Repeat, Search, Settings2, SlidersHorizontal, Sparkles, Trash2, TriangleAlert, UserIcon, X } from "lucide-react";
+import { Archive, Bot, Check, ChevronDown, CircleDot, Clock3, Copy, FileImage, Gauge, Globe2, Lightbulb, LoaderCircle, LogIn, Menu, MessageSquare, MessageSquarePlus, Repeat, Search, Settings2, SlidersHorizontal, Sparkles, Terminal, Trash2, TriangleAlert, UserIcon, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { createPortal } from "react-dom";
@@ -303,7 +303,7 @@ export default function Home() {
   useEffect(() => { setProfileName(serverName); }, [serverName]);
   const [, navigate] = useLocation();
   const { theme, toggleTheme, setHighContrast } = useTheme();
-  const [modelGridOpen, setModelGridOpen] = useState(false); const [activeId, setActiveId] = useState(""); const [newConversation, setNewConversation] = useState(false); const [modelId, setModelId] = useState<ModelId>("fast"); const [chatMode, setChatMode] = useState<"chat" | "myApi">("chat"); const [search, setSearch] = useState(""); const [uploadStatus, setUploadStatus] = useState<{ sessionId: string; message: string } | null>(null);   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === "undefined" ? true : window.innerWidth >= SIDEBAR_DESKTOP_BREAKPOINT); const [settingsOpen, setSettingsOpen] = useState(false); const [profileOpen, setProfileOpen] = useState(false); const [memoryOpen, setMemoryOpen] = useState(false); const [exportHistoryOpen, setExportHistoryOpen] = useState(false); const [templatesOpen, setTemplatesOpen] = useState(false); const [pendingChatDeletionId, setPendingChatDeletionId] = useState<string | null>(null); const [isChatDeletionConfirming, setIsChatDeletionConfirming] = useState(false); const [pendingHistoryClear, setPendingHistoryClear] = useState(false); const [isHistoryClearConfirming, setIsHistoryClearConfirming] = useState(false); const [composerDraft, setComposerDraft] = useState(""); const [draftHydratedSessionId, setDraftHydratedSessionId] = useState(""); const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]); const [sentAttachmentFallbacks, setSentAttachmentFallbacks] = useState<ChatAttachment[]>([]); const [isStreaming, setIsStreaming] = useState(false); const [isExporting, setIsExporting] = useState<"markdown" | "pdf" | null>(null); const [notice, setNotice] = useState(""); const [settingsOverride, setSettingsOverride] = useState<Record<string, unknown>>({});
+  const [modelGridOpen, setModelGridOpen] = useState(false); const [activeId, setActiveId] = useState(""); const [newConversation, setNewConversation] = useState(false); const [modelId, setModelId] = useState<ModelId>("fast"); const [chatMode, setChatMode] = useState<"chat" | "myApi">("chat"); const [search, setSearch] = useState(""); const [uploadStatus, setUploadStatus] = useState<{ sessionId: string; message: string } | null>(null);   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === "undefined" ? true : window.innerWidth >= SIDEBAR_DESKTOP_BREAKPOINT); const [isMobile, setIsMobile] = useState(() => typeof window === "undefined" ? false : window.innerWidth < SIDEBAR_DESKTOP_BREAKPOINT); const [settingsOpen, setSettingsOpen] = useState(false); const [profileOpen, setProfileOpen] = useState(false); const [memoryOpen, setMemoryOpen] = useState(false); const [exportHistoryOpen, setExportHistoryOpen] = useState(false); const [templatesOpen, setTemplatesOpen] = useState(false); const [pendingChatDeletionId, setPendingChatDeletionId] = useState<string | null>(null); const [isChatDeletionConfirming, setIsChatDeletionConfirming] = useState(false); const [pendingHistoryClear, setPendingHistoryClear] = useState(false); const [isHistoryClearConfirming, setIsHistoryClearConfirming] = useState(false); const [composerDraft, setComposerDraft] = useState(""); const [draftHydratedSessionId, setDraftHydratedSessionId] = useState(""); const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]); const [sentAttachmentFallbacks, setSentAttachmentFallbacks] = useState<ChatAttachment[]>([]); const [isStreaming, setIsStreaming] = useState(false); const [isExporting, setIsExporting] = useState<"markdown" | "pdf" | null>(null); const [notice, setNotice] = useState(""); const [settingsOverride, setSettingsOverride] = useState<Record<string, unknown>>({});
   const streamAbortRef = useRef<AbortController | null>(null); const failedTurnTimersRef = useRef(new Map<string, FailedTurnTimer>()); const activeSessionRef = useRef(""); const pagedHistorySessionRef = useRef(""); const deleteConfirmationInFlightRef = useRef(false); const historyClearInFlightRef = useRef(false); const defaultRoleApplied = useRef(false); const themeApplied = useRef(false); const persistedDraftRef = useRef(""); const activeChatHydrated = useRef(false);
   // Why sending is blocked, or null when it is not. Set only when every connected provider has
   // been spent for a turn, and cleared by any action that could make a provider usable again.
@@ -484,6 +484,13 @@ export default function Home() {
     };
     window.addEventListener("resize", sync);
     return () => window.removeEventListener("resize", sync);
+  }, []);
+  useEffect(() => {
+    const syncMobile = () => setIsMobile(window.innerWidth < SIDEBAR_DESKTOP_BREAKPOINT);
+    const initial = () => setIsMobile(window.innerWidth < SIDEBAR_DESKTOP_BREAKPOINT);
+    initial();
+    window.addEventListener("resize", syncMobile);
+    return () => window.removeEventListener("resize", syncMobile);
   }, []);
   useEffect(() => {
     if (!activeId || !isAuthenticated || draftQuery.isLoading || draftHydratedSessionId === activeId) return;
@@ -864,6 +871,14 @@ export default function Home() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {isMobile && (
+      <nav className="kairema-bottom-nav" aria-label={language === "ru" ? "Основная навигация" : "Main navigation"}>
+        <button type="button" data-page="chat" className={`kairema-bottom-nav-item ${chatMode === "chat" ? "kairema-bottom-nav-item-active" : ""}`} aria-pressed={chatMode === "chat"} aria-label={t.modeChat} onClick={() => setChatMode("chat")}><MessageSquare className="kairema-bottom-nav-icon" aria-hidden="true" /><span className="kairema-bottom-nav-label">{t.modeChat}</span></button>
+        <button type="button" data-page="provider" className={`kairema-bottom-nav-item ${chatMode === "myApi" ? "kairema-bottom-nav-item-active" : ""}`} aria-pressed={chatMode === "myApi"} aria-label={t.modeMyApi} onClick={() => setChatMode("myApi")}><Repeat className="kairema-bottom-nav-icon" aria-hidden="true" /><span className="kairema-bottom-nav-label">{t.modeMyApi}</span></button>
+        <button type="button" data-page="terminal" className="kairema-bottom-nav-item" aria-label={language === "ru" ? "Терминал" : "Terminal"} onClick={() => navigate("/terminal")}><Terminal className="kairema-bottom-nav-icon" aria-hidden="true" /><span className="kairema-bottom-nav-label">{language === "ru" ? "Терминал" : "Terminal"}</span></button>
+        <button type="button" data-page="settings" className={`kairema-bottom-nav-item ${settingsOpen ? "kairema-bottom-nav-item-active" : ""}`} aria-pressed={settingsOpen} aria-label={t.openSettings} onClick={() => setSettingsOpen(true)}><SlidersHorizontal className="kairema-bottom-nav-icon" aria-hidden="true" /><span className="kairema-bottom-nav-label">{t.settings}</span></button>
+      </nav>
+      )}
     </main>
   );
 }
