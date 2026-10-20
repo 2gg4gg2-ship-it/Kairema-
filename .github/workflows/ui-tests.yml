@@ -2,9 +2,9 @@ name: UI Tests
 
 on:
   push:
-    branches: [ kilo/prime-condor-off ]
+    branches: [ kilo/prime-condor-off, kilo/bottom-nav-onto-staging ]
   pull_request:
-    branches: [ kilo/prime-condor-off ]
+    branches: [ kilo/prime-condor-off, staging ]
 
 jobs:
   playwright:
