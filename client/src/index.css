@@ -660,6 +660,19 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
 .kairema-model-pill { display:inline-flex; flex:0 1 auto; min-width:0; align-items:center; justify-content:center; gap:10px; height:42px; box-sizing:border-box; padding:8px 16px; border:none; border-radius:999px; background:#242529; }
 .kairema-model-pill:hover { background:#2D2E33; }
 .kairema-model-sparkle { flex:0 0 auto; width:18px; height:18px; color:#FFFFFF; }
+/* Model selector grid: replaces the native <select> with a compact 2x2 grid of the four
+   Kairema models. The trigger pill shows the currently selected model label; the grid
+   opens inline below it and closes on model pick, Escape, or outside click. */
+.kairema-model-wrap { position:relative; display:inline-flex; flex:0 1 auto; min-width:0; align-items:center; }
+.kairema-model-trigger { display:inline-flex; align-items:center; justify-content:space-between; gap:6px; min-width:0; max-width:100%; height:100%; padding:0 8px 0 10px; border:0; border-radius:999px; color:#FFFFFF; background:transparent; font-size:13px; font-weight:700; line-height:1.2; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.kairema-model-trigger:hover { background:rgba(255,255,255,.08); }
+.kairema-model-trigger:focus-visible { outline:2px solid var(--k-text); outline-offset:1px; }
+.kairema-model-grid { position:absolute; top:calc(100% + 6px); left:0; z-index:30; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; width:max-content; min-width:220px; padding:6px; border:1px solid var(--k-line); border-radius:12px; background:var(--k-panel); box-shadow:0 16px 42px rgba(0,0,0,.35); }
+.kairema-model-grid-card { display:flex; flex-direction:column; align-items:flex-start; gap:2px; min-width:0; width:164px; padding:9px 11px; border:1px solid var(--k-line); border-radius:10px; color:var(--k-text); background:var(--k-panel-2); font-size:11px; line-height:1.3; text-align:left; cursor:pointer; transition:border-color .16s ease, background .16s ease; }
+.kairema-model-grid-card:hover { border-color:var(--k-text); background:var(--k-panel); }
+.kairema-model-grid-card-active { border-color:var(--k-text); background:var(--k-panel); }
+.kairema-model-grid-card-name { font-weight:700; color:var(--k-text); }
+.kairema-model-grid-card-role { color:var(--k-muted); }
 .kairema-mode-hint-link { color:#a096ff; text-decoration:underline; text-underline-offset:2px; }
 .kairema-mode-hint-link:hover { color:#c7bfff; }
 /* My API header: the saved user binding shown in place of the Kairema role selector. */
@@ -748,6 +761,8 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
   .kairema-model-sparkle { width:16px; height:16px; }
   .kairema-model-chevron { width:14px; height:14px; }
   .kairema-topbar .kairema-role-menu-trigger { max-width:min(34vw,180px); font-size:14px; }
+  .kairema-model-grid { left:auto; right:0; }
+  .kairema-model-grid-card { width:140px; }
 }
 /* Below this width the labels stop fitting next to each other, so the outline buttons
    keep their icon and their accessible name and drop the visible word. */
@@ -775,7 +790,7 @@ button.kairema-header-button:hover:not(:disabled),summary.kairema-header-button:
    maintains, which means Escape and picking a model both restore the closed arrow for
    free, and no second arrow or second state is introduced. */
 .kairema-model-chevron { transition:transform .16s ease; }
-.kairema-select-wrap:has(.kairema-role-menu-trigger[aria-expanded="true"]) + .kairema-model-chevron { transform:rotate(180deg); }
+.kairema-model-trigger[aria-expanded="true"] .kairema-model-chevron { transform:rotate(180deg); }
 @media (prefers-reduced-motion:reduce) { .kairema-model-chevron { transition:none; } }
 
 /* v7-G: the controls collapse to the toggle alone, inside the same row. The height of the
