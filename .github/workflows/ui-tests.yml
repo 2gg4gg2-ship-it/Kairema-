@@ -15,9 +15,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: 'pnpm'
+      - name: Setup pnpm
+        run: corepack enable && corepack prepare pnpm@10.4.1 --activate
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
       - name: Start dev server and run UI tests
@@ -26,7 +28,7 @@ jobs:
           OAUTH_SERVER_URL: ''   # optional, but we set empty to avoid error logs
         run: |
           # Start the dev server in background
-          npm run dev &
+          pnpm run dev &
           SERVER_PID=$!
           # Wait for the server to be ready (max 30s)
           for i in {1..30}; do
