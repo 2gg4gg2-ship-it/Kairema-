@@ -19,6 +19,7 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: '10.4.1'
+          packageManagerField: false
           cache: true
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
